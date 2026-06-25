@@ -304,6 +304,31 @@ def parse_tcx(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0
             'cleaning_log': cleaning_log,
         }
 
+    # Пересчёт накопленной дистанции по чистым трекпоинтам (Rebuild cumulative distance from cleaned trackpoints)
+    # После удаления ошибочных точек их phantom-дистанция всё ещё "сидит" в последующих точках.
+    # Сохраняем оригинальные дистанции, идём по парам, считаем темп; если темп быстрее max_credible_pace → дельта не учитывается.
+    orig_dists = [tp['dist'] for tp in trackpoints]
+    cumulative = 0.0
+    for i, tp in enumerate(trackpoints):
+        if orig_dists[i] is None:
+            continue
+        if i == 0:
+            cumulative = orig_dists[i]
+            tp['dist'] = cumulative
+            continue
+        prev_orig = orig_dists[i-1]
+        if prev_orig is not None and tp['time'] is not None and trackpoints[i-1]['time'] is not None:
+            raw_delta = orig_dists[i] - prev_orig
+            t_delta = (tp['time'] - trackpoints[i-1]['time']).total_seconds() / 60
+            if raw_delta > 0 and t_delta > 0:
+                pace = t_delta / (raw_delta / 1000)
+                if pace >= max_credible_pace:
+                    cumulative += raw_delta
+                # else: pace слишком быстрый — дистанция phantom, не прибавляем (pace too fast — phantom distance, skip)
+            elif raw_delta > 0:
+                cumulative += raw_delta  # без времени считаем дистанцию как есть (no time info — trust the delta)
+        tp['dist'] = cumulative
+
     # Сбор значений пульса и дистанции (Collect HR and distance values)
     hr_values = [tp['hr'] for tp in trackpoints if tp['hr'] is not None]
     distances = [tp['dist'] for tp in trackpoints if tp['dist'] is not None]
