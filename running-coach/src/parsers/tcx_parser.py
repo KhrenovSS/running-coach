@@ -1,14 +1,18 @@
+# Импорт библиотек: XML, дата/время, часовые пояса, HTTP-запросы (Library imports)
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from timezonefinder import TimezoneFinder
 import requests
 
+# Пространство имён Garmin TCX (Garmin TCX XML namespace)
 NS = {'tcx': 'http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2'}
 
+# Глобальные переменные: поиск часового пояса и кэш погоды (Globals: timezone finder and weather cache)
 _tf = TimezoneFinder()
 _weather_cache = {}
 
+# Иконки погоды по WMO кодам (Weather icons mapped to WMO codes)
 WMO_ICONS = {
     0: "☀️", 1: "🌤️", 2: "⛅", 3: "☁️",
     45: "🌫️", 48: "🌫️",
@@ -20,9 +24,11 @@ WMO_ICONS = {
     95: "⛈️", 96: "⛈️", 99: "⛈️",
 }
 
+# Получение иконки погоды по WMO коду (Get weather icon by WMO code)
 def weather_icon(code):
     return WMO_ICONS.get(code, "❓")
 
+# Определение пульсовой зоны по ЧСС (Determine heart rate zone)
 def get_zone(hr, max_hr):
     pct = hr / max_hr * 100
     if pct <= 70:
@@ -36,10 +42,12 @@ def get_zone(hr, max_hr):
     else:
         return 5
 
+# Получение текстовой метки зоны (easy/moderate/hard) (Get zone label text)
 def get_band(hr, max_hr):
     zone = get_zone(hr, max_hr)
     return 'easy' if zone <= 2 else 'moderate' if zone == 3 else 'hard'
 
+# Форматирование темпа в мм:сс (Format pace as mm:ss)
 def format_pace(min_per_km):
     if min_per_km is None or min_per_km <= 0:
         return None
@@ -47,6 +55,7 @@ def format_pace(min_per_km):
     s = int((min_per_km - m) * 60)
     return f"{m}:{s:02d}"
 
+# Форматирование длительности в мм:сс (Format duration as mm:ss)
 def format_duration(duration_min):
     if duration_min is None or duration_min <= 0:
         return None
@@ -54,6 +63,7 @@ def format_duration(duration_min):
     s = int((duration_min - m) * 60)
     return f"{m}:{s:02d}"
 
+# Расчёт набора и спуска высоты по массиву высот (Calculate elevation gain and loss)
 def calc_elevation(altitudes):
     gain = 0.0
     loss = 0.0
@@ -66,6 +76,7 @@ def calc_elevation(altitudes):
                 loss += abs(diff)
     return round(gain), round(loss)
 
+# Определение часового пояса по GPS-координатам (Find timezone from GPS coordinates)
 def find_timezone(positions):
     for lat, lon in positions:
         if lat is not None and lon is not None:
@@ -74,6 +85,7 @@ def find_timezone(positions):
                 return tz
     return None
 
+# Запрос погоды через Open-Meteo Archive API (Fetch weather from Open-Meteo Archive API)
 def fetch_weather(lat, lon, date):
     key = (round(lat, 2), round(lon, 2), date)
     if key in _weather_cache:
@@ -101,6 +113,7 @@ def fetch_weather(lat, lon, date):
         pass
     return None
 
+# Получение WMO кода погоды на ближайший час (Get WMO weather code for nearest hour)
 def get_weather_code_at_time(weather, dt_local):
     if not weather:
         return None
@@ -117,6 +130,7 @@ def get_weather_code_at_time(weather, dt_local):
             best = int(code)
     return best
 
+# Получение температуры на ближайший час (Get temperature for nearest hour)
 def get_temp_at_time(weather, dt_local):
     if not weather:
         return None
@@ -133,13 +147,17 @@ def get_temp_at_time(weather, dt_local):
             best = round(temp)
     return best
 
+# Основная функция парсинга TCX-файла (Main TCX file parsing function)
 def parse_tcx(file_path, max_hr=177):
+    # Парсинг XML и получение корневого элемента (Parse XML and get root element)
     tree = ET.parse(file_path)
     root = tree.getroot()
 
+    # Извлечение времени старта из TCX (Extract start time from TCX)
     start_time_str = root.findtext('.//tcx:StartTime', namespaces=NS) or root.findtext('.//tcx:Id', namespaces=NS)
     start_time_utc = datetime.fromisoformat(start_time_str.replace('Z', '+00:00')) if start_time_str else datetime.utcnow()
 
+    # Парсинг всех trackpoint (Parse all trackpoints)
     trackpoints = []
     for tp in root.findall('.//tcx:Trackpoint', NS):
         time_str = tp.findtext('tcx:Time', namespaces=NS)
@@ -156,18 +174,22 @@ def parse_tcx(file_path, max_hr=177):
         lon = float(lon_str) if lon_str else None
         trackpoints.append({'time': t, 'hr': hr, 'dist': dist, 'alt': alt, 'lat': lat, 'lon': lon})
 
+    # Минимум 2 trackpoint для анализа (Minimum 2 trackpoints required)
     if len(trackpoints) < 2:
         return None
 
+    # Сбор значений пульса и дистанции (Collect HR and distance values)
     hr_values = [tp['hr'] for tp in trackpoints if tp['hr'] is not None]
     distances = [tp['dist'] for tp in trackpoints if tp['dist'] is not None]
     if not distances or not hr_values:
         return None
 
+    # Общая дистанция, средний и максимальный пульс (Total distance, avg and max HR)
     total_dist_km = distances[-1] / 1000
     avg_hr = round(sum(hr_values) / len(hr_values))
     max_hr_val = max(hr_values)
 
+    # Временные ряды: секунды, пульс, дистанция (Time series: seconds, HR, distance)
     start_ts = trackpoints[0]['time']
     times = []
     hrs = []
@@ -180,6 +202,7 @@ def parse_tcx(file_path, max_hr=177):
                 hrs.append(tp['hr'])
                 dists.append(tp['dist'])
 
+    # Расчёт времени в пульсовых зонах (Calculate time spent in each HR zone)
     time_in_zone = {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0}
     z4_plus_segments = []
     in_z4 = False
@@ -199,6 +222,7 @@ def parse_tcx(file_path, max_hr=177):
             zone = get_zone(prev['hr'], max_hr)
             time_in_zone[zone] += delta
 
+            # Определение отрезков в Z4+ (Identify Z4+ segments)
             if zone >= 4:
                 if not in_z4:
                     in_z4 = True
@@ -216,16 +240,19 @@ def parse_tcx(file_path, max_hr=177):
 
         prev = tp
 
+    # Обработка последнего отрезка Z4+, если он не закрыт (Handle trailing Z4+ segment)
     if in_z4 and trackpoints[-1]['time']:
         seg_dur_z4 = sum(d for _, d in z4_seg_hrs)
         seg_avg_z4 = round(sum(h * d for h, d in z4_seg_hrs) / seg_dur_z4) if seg_dur_z4 else 0
         if seg_dur_z4 >= 0.5:
             z4_plus_segments.append({'duration': seg_dur_z4, 'avg_hr': seg_avg_z4})
 
+    # Сегментация по километрам (Kilometer-based segmentation)
     segments = []
     var_count = 0
 
     if total_dist_km >= 0.1:
+        # Разбивка trackpoint по километровым блокам (Split trackpoints into km blocks)
         num_kms = int(total_dist_km)
         km_chunks = [[] for _ in range(num_kms + 1)]
         for tp in trackpoints:
@@ -235,11 +262,13 @@ def parse_tcx(file_path, max_hr=177):
                 if idx < len(km_chunks):
                     km_chunks[idx].append(tp)
 
+        # Анализ каждого километрового блока (Analyze each km block)
         km_stats = []
         for chunk in km_chunks:
             if len(chunk) < 2:
                 continue
 
+            # Вычисление темпа на каждом интервале внутри км (Calculate pace per interval within km)
             intervals = []
             prev_tp = chunk[0]
             for idx, tp in enumerate(chunk[1:], 1):
@@ -257,6 +286,7 @@ def parse_tcx(file_path, max_hr=177):
                         })
                 prev_tp = tp
 
+            # Разбивка на 200м бины для сглаживания GPS-шума (200m bins for GPS noise smoothing)
             chunk_start_dist = chunk[0]['dist'] or 0
             internal_range = 0
             split_at = None
@@ -276,6 +306,7 @@ def parse_tcx(file_path, max_hr=177):
                     bd = bins[bk]['dist']
                     if bd >= 100:
                         bin_paces.append(bins[bk]['dur'] / (bd / 1000))
+                # Если разница темпа между бинами > 1 мин/км — км вариативный (If pace diff > 1 min/km — variable km)
                 if len(bin_paces) >= 2:
                     internal_range = max(bin_paces) - min(bin_paces)
                     if internal_range >= 1.0:
@@ -293,8 +324,10 @@ def parse_tcx(file_path, max_hr=177):
                 'internal_range': internal_range, 'split_at': split_at,
             })
 
+        # Подсчёт вариативных км для классификации (Count variable km for classification)
         var_count = sum(1 for ks in km_stats if ks['internal_range'] >= 1.0)
 
+        # Формирование сегментов (Build segments)
         for ks in km_stats:
             needs_split = var_count >= 3 and ks['split_at'] is not None
 
@@ -353,28 +386,36 @@ def parse_tcx(file_path, max_hr=177):
                     'elevation_loss': elev_loss,
                 })
 
+    # Классификация типа тренировки (Training type classification)
     z2_pct = (time_in_zone[2] / total_duration_min * 100) if total_duration_min > 0 else 0
     hr_75 = 0.75 * max_hr
     long_z4 = [s for s in z4_plus_segments if s['duration'] > 5]
 
+    # 3+ вариативных км → Интервальная (3+ variable km → Interval)
     if var_count >= 3:
         t_type = 'interval'
         segments_count = var_count
+    # 1-2 вариативных км → Темповая (1-2 variable km → Tempo)
     elif var_count >= 1:
         t_type = 'tempo'
         segments_count = 1
+    # Длительная: ≥90 мин, ≥50% в Z2, без Z4+ >5 мин (Long: ≥90min, ≥50% Z2, no Z4+ >5min)
     elif total_duration_min >= 90 and z2_pct >= 50 and not long_z4:
         t_type = 'long'
         segments_count = 1
+    # Восстановительная: средний пульс ≤75% ЧССмакс, без Z4+ (Recovery: avg HR ≤75% max, no Z4+)
     elif avg_hr <= hr_75 and not long_z4:
         t_type = 'recovery'
         segments_count = 1
+    # По умолчанию — Темповая (Default: Tempo)
     else:
         t_type = 'tempo'
         segments_count = 1
 
+    # Формирование временного ряда пульса и темпа для графика (Build HR/pace time series for chart)
     hr_pace_series = []
     if len(times) >= 2:
+        # Сглаживание пульса (HR smoothing) — узкое окно для интервалов, широкое для остальных
         hr_window = 5 if var_count >= 3 else 40
         smoothed_hrs = list(hrs)
         for i in range(len(hrs)):
@@ -389,6 +430,7 @@ def parse_tcx(file_path, max_hr=177):
             if total_weight > 0:
                 smoothed_hrs[i] = round(weighted_sum / total_weight, 1)
 
+        # Расчёт сырого темпа по дистанции 250м (Raw pace calculation over 250m distance)
         raw_pace = [None] * len(times)
         pace_dist = 250
         for i in range(len(times)):
@@ -401,6 +443,7 @@ def parse_tcx(file_path, max_hr=177):
             if d_time >= 10 and d_dist >= 100:
                 raw_pace[i] = (d_time / 60) / (d_dist / 1000)
 
+        # Сглаживание темпа скользящим окном 45 сек (Pace smoothing with 45s window)
         pace_window = 45
         smoothed_pace = [None] * len(times)
         for i in range(len(times)):
@@ -419,6 +462,7 @@ def parse_tcx(file_path, max_hr=177):
             if total_weight > 0:
                 smoothed_pace[i] = weighted_sum / total_weight
 
+        # Двойное сглаживание и сбор финального ряда (Double smoothing and final series)
         for i in range(len(times)):
             if smoothed_pace[i] is None:
                 continue
@@ -441,6 +485,7 @@ def parse_tcx(file_path, max_hr=177):
                         'pace': round(pace_val, 2),
                     })
 
+    # Определение часового пояса по GPS (Determine timezone from GPS)
     positions = [(tp['lat'], tp['lon']) for tp in trackpoints if tp['lat'] is not None and tp['lon'] is not None]
     tz_name = find_timezone(positions)
     if tz_name:
@@ -449,6 +494,7 @@ def parse_tcx(file_path, max_hr=177):
     else:
         begin_ts = start_time_utc.replace(tzinfo=None)
 
+    # Расчёт суммарного набора/спуска высоты (Calculate total elevation gain/loss)
     avg_temperature = None
     weather_code = None
     total_elevation_gain = None
@@ -459,6 +505,7 @@ def parse_tcx(file_path, max_hr=177):
         total_elevation_gain = eg
         total_elevation_loss = el
 
+    # Запрос погоды через Open-Meteo (Fetch weather from Open-Meteo)
     if positions:
         mid_idx = len(positions) // 2
         center_lat, center_lon = positions[mid_idx]
@@ -478,6 +525,7 @@ def parse_tcx(file_path, max_hr=177):
                 seg['weather_code'] = get_weather_code_at_time(weather, aware(seg_dt))
                 cumul_min += seg['duration_min']
 
+    # Возврат результата парсинга (Return parsing result)
     return {
         'begin_ts': begin_ts,
         'total_distance_km': total_dist_km,

@@ -1,3 +1,4 @@
+# Импорт FastAPI и компонентов (FastAPI and component imports)
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from src.models import SessionLocal, TrainingSession, WeightMeasurement, get_settings
@@ -6,9 +7,11 @@ import shutil
 import os
 import tempfile
 
+# Создание экземпляра FastAPI (Create FastAPI app instance)
 app = FastAPI()
 os.makedirs("uploads", exist_ok=True)
 
+# Словарь типов тренировок на русском (Training type labels in Russian)
 TRAINING_TYPES_RU = {
     'interval': 'Интервальная',
     'long': 'Длинная',
@@ -16,8 +19,10 @@ TRAINING_TYPES_RU = {
     'tempo': 'Темповая',
 }
 
+# Цвета для пульсовых зон (Heart rate zone colors)
 ZONE_COLORS = ['', '#e8f5e9', '#c8e6c9', '#fff3e0', '#ffccbc', '#ffcdd2']
 
+# Форматирование длительности в человекочитаемый вид (Format duration for display)
 def fmt_duration(minutes):
     if not minutes:
         return ""
@@ -28,6 +33,7 @@ def fmt_duration(minutes):
         return f"{h}ч {rest}мин" if rest else f"{h}ч"
     return f"{m}мин"
 
+# Расчёт статистики по списку тренировок (Calculate statistics for a list of sessions)
 def calc_stats(sessions):
     total_km = 0.0
     total_duration_min = 0.0
@@ -51,6 +57,7 @@ def calc_stats(sessions):
         'type_count': type_count,
     }
 
+# Расчёт диапазонов пульсовых зон (Calculate heart rate zone ranges)
 def zone_ranges(max_hr):
     r = {}
     r[1] = f"≤{round(0.70 * max_hr)}"
@@ -60,6 +67,7 @@ def zone_ranges(max_hr):
     r[5] = f"{round(0.93 * max_hr) + 1}–{max_hr}"
     return r
 
+# Рендер HTML-полосок пульсовых зон (Render zone bar HTML)
 def render_zone_bars(zone_min, total_min, max_hr):
     if not total_min:
         return ""
@@ -72,6 +80,7 @@ def render_zone_bars(zone_min, total_min, max_hr):
         bars += f"<div style='display:flex;align-items:center;gap:6px;margin:3px 0;white-space:nowrap'><div style='width:90px;font-size:12px'>{zr[z]} уд/мин</div><div style='height:20px;width:{pct}%;background:{colors[z]};border-radius:4px;min-width:4px'></div><div style='font-size:12px;color:#666;margin-left:4px'>{fmt_duration(val)}</div></div>"
     return bars
 
+# Рендер строки с количеством тренировок по типам (Render training type count row)
 def render_type_row(type_count):
     labels = {'interval': 'Интервальная', 'tempo': 'Темповая', 'long': 'Длинная', 'recovery': 'Восстановительная'}
     parts = []
@@ -81,6 +90,7 @@ def render_type_row(type_count):
             parts.append(f"{label}: {c}")
     return ", ".join(parts) if parts else "—"
 
+# Основная функция рендеринга главной страницы (Main page render function)
 def render_page():
     db = SessionLocal()
     all_sessions = db.query(TrainingSession).order_by(TrainingSession.begin_ts.desc()).all()
@@ -450,6 +460,7 @@ SETTINGS_PAGE = '''
 '''
 
 
+# Событие при запуске сервера: инициализация БД и миграции (Startup event: DB init and migrations)
 @app.on_event("startup")
 def startup():
     from src.models import init_db, engine
@@ -478,11 +489,13 @@ def startup():
         db.close()
 
 
+# Главная страница: список тренировок и статистика (Main page: session list and stats)
 @app.get('/', response_class=HTMLResponse)
 async def index():
     return render_page()
 
 
+# Загрузка TCX-файлов (TCX file upload endpoint)
 @app.post('/upload')
 async def upload_files(files: list[UploadFile] = File(...)):
     settings = get_settings()
@@ -507,6 +520,7 @@ async def upload_files(files: list[UploadFile] = File(...)):
     return RedirectResponse(url='/', status_code=303)
 
 
+# Детальный просмотр тренировки (Training session detail page)
 @app.get('/session/{session_id}', response_class=HTMLResponse)
 async def session_detail(session_id: int):
     db = SessionLocal()
@@ -564,6 +578,7 @@ async def session_detail(session_id: int):
     )
 
 
+# Страница настроек (Settings page)
 @app.get('/settings', response_class=HTMLResponse)
 async def settings_page():
     settings = get_settings()
@@ -576,6 +591,7 @@ async def settings_page():
     return SETTINGS_PAGE.format(max_hr=m, weight=settings.weight, z1=z1, z2=z2, z3=z3, z4=z4, z5=z5)
 
 
+# Удаление тренировки (Delete training session)
 @app.post('/session/{session_id}/delete')
 async def session_delete(session_id: int):
     db = SessionLocal()
@@ -589,6 +605,7 @@ async def session_delete(session_id: int):
     return RedirectResponse(url='/', status_code=303)
 
 
+# Сохранение настроек (Save settings)
 @app.post('/settings')
 async def settings_save(max_hr: int = Form(...), weight: float = Form(...)):
     from src.models import UserSettings
