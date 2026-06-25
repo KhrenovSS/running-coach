@@ -126,7 +126,11 @@ def render_page():
         else:
             temp_str = "—"
         elev_str = f"↑{s.elevation_gain}" if s.elevation_gain is not None else ""
-        warn = "⚠️" if s.suspect_flags else ""
+        warn = ""
+        if s.cleaning_log:
+            warn = "✂️"
+        elif s.suspect_flags:
+            warn = "⚠️"
         rows += f"<tr onclick=\"window.location='/session/{s.id}'\" style='cursor:pointer'>"
         rows += f"<td>{warn} {t}</td><td>{dur}</td><td>{s.total_distance_km:.2f}</td><td>{s.avg_heart_rate}</td>"
         rows += f"<td>{TRAINING_TYPES_RU.get(s.training_type, s.training_type)}</td><td>{s.segments_count}</td><td>{temp_str}</td><td>{elev_str}</td></tr>"
@@ -484,6 +488,7 @@ def startup():
                 'weather_code': 'INTEGER',
                 'hr_pace_series': 'JSON',
                 'suspect_flags': 'JSON',
+                'cleaning_log': 'JSON',
             }
             for col, col_type in cols_to_add.items():
                 try:
@@ -507,22 +512,6 @@ def startup():
     settings = get_settings()
     db = SessionLocal()
     try:
-        # Ре-валидация существующих сессий без suspect_flags (Re-validate sessions missing flags)
-        from src.parsers.tcx_parser import detect_suspicious
-        sessions = db.query(TrainingSession).filter(TrainingSession.suspect_flags.is_(None)).all()
-        for s in sessions:
-            flags = detect_suspicious({
-                'segments_json': s.segments_json or [],
-                'avg_heart_rate': s.avg_heart_rate,
-                'total_distance_km': s.total_distance_km,
-                'duration_minutes': s.duration_minutes,
-            }, trackpoints=None, max_hr=settings.max_hr,
-               max_credible_pace=settings.max_credible_pace,
-               max_gps_jump_m=settings.max_gps_jump_m,
-               min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
-            if flags:
-                s.suspect_flags = flags
-                db.commit()
         # Первое измерение веса (First weight measurement)
         existing = db.query(WeightMeasurement).first()
         if not existing and settings.weight:
@@ -561,8 +550,11 @@ async def upload_files(files: list[UploadFile] = File(...)):
                     TrainingSession.begin_ts == data['begin_ts']
                 ).first()
                 if not exists:
+                    cleaning_log = data.pop('cleaning_log', None)
                     flags = data.pop('suspect_flags', None)
                     session = TrainingSession(**data)
+                    if cleaning_log:
+                        session.cleaning_log = cleaning_log
                     if flags:
                         session.suspect_flags = flags
                     db.add(session)
@@ -617,14 +609,30 @@ async def session_detail(session_id: int):
 
     suspect_badge = ""
     suspect_detail = ""
-    if s.suspect_flags:
-        flag_labels = {
-            'pace_impossible': 'Нереальный темп (Impossible pace)',
-            'hr_pace_mismatch': 'Пульс не соответствует темпу (HR/pace mismatch)',
-            'gps_spike': 'Скачки GPS (GPS jumps)',
-            'too_short': 'Слишком короткая тренировка (Too short)',
-        }
-        items = "".join(f"<li>{flag_labels.get(f, f)}</li>" for f in s.suspect_flags)
+    reason_labels = {
+        'pace_impossible': 'Нереальный темп (Impossible pace)',
+        'hr_pace_mismatch': 'Пульс не соответствует темпу (HR/pace mismatch)',
+        'gps_spike': 'Скачки GPS (GPS jumps)',
+        'too_short': 'Слишком короткая тренировка (Too short)',
+        'anomaly': 'Аномалия (Anomaly)',
+    }
+    if s.cleaning_log:
+        items = ""
+        total_removed_dur = 0
+        total_removed_dist = 0
+        for entry in s.cleaning_log:
+            reasons = ", ".join(reason_labels.get(r, r) for r in (entry.get('reason') or ['unknown']))
+            removed_dur = entry.get('removed_dur_s', 0)
+            removed_dist = entry.get('removed_dist_m', 0)
+            total_removed_dur += removed_dur
+            total_removed_dist += removed_dist
+            dur_str = f"{removed_dur // 60}:{removed_dur % 60:02d}" if removed_dur else "—"
+            items += f"<li>Удалён участок: {entry.get('removed_count', '?')} точек, {removed_dist}м, {dur_str} — {reasons}</li>"
+        if items:
+            suspect_badge = '<span style="background:#ff9800;color:white;padding:2px 10px;border-radius:4px;font-size:14px">✂️ Очищено</span>'
+            suspect_detail = f'<div style="background:#fff3e0;border:1px solid #ffccbc;border-radius:8px;padding:10px;margin-bottom:15px"><b>✂️ Удалены ошибочные участки тренировки:</b><ul style="margin:5px 0 0 0;padding-left:20px">{items}</ul></div>'
+    elif s.suspect_flags:
+        items = "".join(f"<li>{reason_labels.get(f, f)}</li>" for f in s.suspect_flags)
         suspect_badge = '<span style="background:#ff5722;color:white;padding:2px 10px;border-radius:4px;font-size:14px">⚠️ Ошибочные данные</span>'
         suspect_detail = f'<div style="background:#fff3e0;border:1px solid #ffccbc;border-radius:8px;padding:10px;margin-bottom:15px"><b>⚠️ Обнаружены проблемы:</b><ul style="margin:5px 0 0 0;padding-left:20px">{items}</ul></div>'
 

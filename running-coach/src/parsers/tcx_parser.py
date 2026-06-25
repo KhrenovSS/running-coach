@@ -147,57 +147,106 @@ def get_temp_at_time(weather, dt_local):
             best = round(temp)
     return best
 
-# Детекция подозрительных тренировок (Suspicious session detection)
-def detect_suspicious(result, trackpoints, max_hr, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130):
-    flags = []
-    segs = result.get('segments_json', [])
-    hr = result.get('avg_heart_rate', 0)
-    dur = result.get('duration_minutes', 0)
+# Расчёт расстояния по гаверсинусу (Haversine distance between two GPS points)
+def haversine_m(lat1, lon1, lat2, lon2):
+    from math import radians, cos, sin, sqrt, asin
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
+    return 6371000 * 2 * asin(sqrt(min(a, 1)))
 
-    # Флаг 1: средний темп быстрее max_credible_pace (Impossibly fast average pace)
-    avg_pace_val = None
-    if result.get('total_distance_km', 0) > 0 and dur > 0:
-        avg_pace_val = dur / result['total_distance_km']
-        if avg_pace_val < max_credible_pace and dur > 1.0:
-            flags.append('pace_impossible')
-    # Проверка по сегментам (Check per segment)
-    if not flags:
-        fast_segs = [s for s in segs if s.get('pace_min_km') and s['pace_min_km'] < max_credible_pace and s.get('duration_min', 0) > 0.3]
-        if fast_segs:
-            flags.append('pace_impossible')
+# Очистка трекпоинтов от ошибочных точек (Clean trackpoints — remove bad GPS/pace points)
+def clean_trackpoints(trackpoints, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130):
+    original_count = len(trackpoints)
+    if original_count < 3:
+        return trackpoints, []
 
-    # Флаг 2: низкий пульс при очень быстром темпе (Low HR with impossibly fast pace)
-    if hr < min_hr_for_fast_pace and avg_pace_val and avg_pace_val < 3.5:
-        flags.append('hr_pace_mismatch')
-    if segs and 'hr_pace_mismatch' not in flags:
-        mismatched = [s for s in segs if s.get('pace_min_km') and s['pace_min_km'] < 3.5 and s.get('avg_hr', 0) < min_hr_for_fast_pace and s.get('duration_min', 0) > 0.5]
-        if mismatched:
-            flags.append('hr_pace_mismatch')
+    cleaning_log = []
+    bad_indices = set()
 
-    # Флаг 3: GPS-скачки (Sudden GPS coordinate jumps) — только при наличии трекпоинтов (only if trackpoints available)
-    if trackpoints and len(trackpoints) > 1:
-        jumps = 0
-        prev = trackpoints[0]
-        for tp in trackpoints[1:]:
-            if prev['lat'] is not None and prev['lon'] is not None and tp['lat'] is not None and tp['lon'] is not None:
-                from math import radians, cos, sqrt, asin
-                dlat = radians(tp['lat'] - prev['lat'])
-                dlon = radians(tp['lon'] - prev['lon'])
-                a = sin(dlat/2)**2 + cos(radians(prev['lat'])) * cos(radians(tp['lat'])) * sin(dlon/2)**2
-                c = 2 * asin(sqrt(min(a, 1)))
-                dist_m = 6371000 * c
-                if dist_m > max_gps_jump_m:
-                    jumps += 1
-            prev = tp
-        # Если >5% трекпоинтов имеют GPS-скачки (If >5% of trackpoints have GPS jumps)
-        if jumps > len(trackpoints) * 0.05 and jumps >= 3:
-            flags.append('gps_spike')
+    # Проход 1: GPS-скачки — точка сильно отскочила и вернулась (Pass 1: GPS spikes — point jumped and came back)
+    for i in range(1, original_count - 1):
+        prev = trackpoints[i-1]
+        cur = trackpoints[i]
+        nxt = trackpoints[i+1]
+        if cur['lat'] is None or cur['lon'] is None:
+            continue
+        if prev['lat'] is None or prev['lon'] is None or nxt['lat'] is None or nxt['lon'] is None:
+            continue
+        d1 = haversine_m(prev['lat'], prev['lon'], cur['lat'], cur['lon'])
+        d2 = haversine_m(cur['lat'], cur['lon'], nxt['lat'], nxt['lon'])
+        d_skip = haversine_m(prev['lat'], prev['lon'], nxt['lat'], nxt['lon'])
+        if d1 > max_gps_jump_m and d_skip < d1 * 0.5:
+            bad_indices.add(i)
 
-    # Флаг 4: слишком короткая тренировка с большой дистанцией (Too short for the distance)
-    if dur < 2.0 and result.get('total_distance_km', 0) > 0.3:
-        flags.append('too_short')
+    # Проход 2: нереальный темп на коротком интервале (Pass 2: impossible pace on short interval)
+    for i in range(1, original_count):
+        prev = trackpoints[i-1]
+        cur = trackpoints[i]
+        if prev['time'] and cur['time'] and prev['dist'] is not None and cur['dist'] is not None:
+            delta_t = (cur['time'] - prev['time']).total_seconds() / 60
+            delta_d = max(0, cur['dist'] - prev['dist'])
+            if delta_d > 0 and delta_t > 0:
+                pace = delta_t / (delta_d / 1000)
+                hr = cur.get('hr')
+                if pace < max_credible_pace and (hr is None or hr < min_hr_for_fast_pace):
+                    bad_indices.add(i)
+                    bad_indices.add(i-1)
 
-    return flags
+    # Формирование лога очистки (Build cleaning log)
+    if bad_indices:
+        sorted_bad = sorted(bad_indices)
+        groups = []
+        start = sorted_bad[0]
+        end = sorted_bad[0]
+        for idx in sorted_bad[1:]:
+            if idx == end + 1:
+                end = idx
+            else:
+                groups.append((start, end))
+                start = idx
+                end = idx
+        groups.append((start, end))
+
+        for gs, ge in groups:
+            gs_t = trackpoints[gs]['time']
+            ge_t = trackpoints[ge]['time']
+            segment_dur = (ge_t - gs_t).total_seconds() if gs_t and ge_t else 0
+            segment_dist = max(0, (trackpoints[ge]['dist'] or 0) - (trackpoints[gs]['dist'] or 0))
+            reasons = []
+            mid = trackpoints[(gs + ge) // 2]
+            if mid['lat'] is not None and mid['lon'] is not None:
+                d1 = haversine_m(trackpoints[max(0,gs-1)]['lat'] if trackpoints[max(0,gs-1)]['lat'] else mid['lat'],
+                                  trackpoints[max(0,gs-1)]['lon'] if trackpoints[max(0,gs-1)]['lon'] else mid['lon'],
+                                  mid['lat'], mid['lon'])
+                if d1 > max_gps_jump_m:
+                    reasons.append('gps_spike')
+            if segment_dur > 0 and segment_dist > 0:
+                pace = (segment_dur / 60) / (segment_dist / 1000)
+                if pace < max_credible_pace:
+                    reasons.append('pace_impossible')
+            if not reasons:
+                reasons.append('anomaly')
+            cleaning_log.append({
+                'removed_count': ge - gs + 1,
+                'removed_dist_m': round(segment_dist),
+                'removed_dur_s': round(segment_dur),
+                'reason': reasons,
+            })
+
+        # Фильтрация: оставить только чистые точки (Filter: keep only clean points)
+        trackpoints = [tp for i, tp in enumerate(trackpoints) if i not in bad_indices]
+
+    # Если после очистки осталось <2 точек — вся тренировка не подлежит восстановлению (Too few points left)
+    if len(trackpoints) < 2:
+        cleaning_log.append({
+            'removed_count': original_count,
+            'removed_dist_m': 0,
+            'removed_dur_s': 0,
+            'reason': ['too_short'],
+        })
+
+    return trackpoints, cleaning_log
 
 
 # Основная функция парсинга TCX-файла (Main TCX file parsing function)
@@ -231,11 +280,50 @@ def parse_tcx(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0
     if len(trackpoints) < 2:
         return None
 
+    # Очистка трекпоинтов от ошибочных GPS/pace точек (Clean trackpoints — remove bad GPS/pace points)
+    trackpoints, cleaning_log = clean_trackpoints(
+        trackpoints, max_credible_pace, max_gps_jump_m, min_hr_for_fast_pace
+    )
+
+    # Если после очистки осталось слишком мало точек — пропускаем (Too few points after cleaning)
+    if len(trackpoints) < 2:
+        return {
+            'begin_ts': start_time_utc.replace(tzinfo=None),
+            'total_distance_km': 0,
+            'avg_heart_rate': 0,
+            'max_heart_rate': 0,
+            'training_type': 'invalid',
+            'segments_count': 0,
+            'duration_minutes': 0,
+            'segments_json': [],
+            'hr_pace_series': [],
+            'avg_temperature': None,
+            'weather_code': None,
+            'elevation_gain': 0,
+            'elevation_loss': 0,
+            'cleaning_log': cleaning_log,
+        }
+
     # Сбор значений пульса и дистанции (Collect HR and distance values)
     hr_values = [tp['hr'] for tp in trackpoints if tp['hr'] is not None]
     distances = [tp['dist'] for tp in trackpoints if tp['dist'] is not None]
     if not distances or not hr_values:
-        return None
+        return {
+            'begin_ts': start_time_utc.replace(tzinfo=None),
+            'total_distance_km': 0,
+            'avg_heart_rate': 0,
+            'max_heart_rate': 0,
+            'training_type': 'invalid',
+            'segments_count': 0,
+            'duration_minutes': 0,
+            'segments_json': [],
+            'hr_pace_series': [],
+            'avg_temperature': None,
+            'weather_code': None,
+            'elevation_gain': 0,
+            'elevation_loss': 0,
+            'cleaning_log': cleaning_log,
+        }
 
     # Общая дистанция, средний и максимальный пульс (Total distance, avg and max HR)
     total_dist_km = distances[-1] / 1000
@@ -595,9 +683,13 @@ def parse_tcx(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0
         'elevation_loss': total_elevation_loss,
     }
 
-    # Детекция подозрительных тренировок (Detect suspicious/bogus sessions)
-    suspect_flags = detect_suspicious(result, trackpoints, max_hr,
-                                       max_credible_pace, max_gps_jump_m, min_hr_for_fast_pace)
-    if suspect_flags:
-        result['suspect_flags'] = suspect_flags
+    # Добавление лога очистки и флагов подозрительности (Add cleaning log and suspicion flags)
+    if cleaning_log:
+        result['cleaning_log'] = cleaning_log
+        # Если были удалены точки — у сессии больше нет нереального темпа, оставляем только лог (Points removed, keep only log)
+    else:
+        # Детекция глобальных проблем (например, слишком короткая) (Detect global issues like too_short)
+        if result['duration_minutes'] < 2.0 and result['total_distance_km'] > 0.3:
+            result['suspect_flags'] = ['too_short']
+
     return result

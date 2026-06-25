@@ -27,6 +27,7 @@ class TrainingSession(Base):
     elevation_gain = Column(Integer, nullable=True)  # Суммарный набор высоты в метрах (Total elevation gain)
     elevation_loss = Column(Integer, nullable=True)  # Суммарный спуск в метрах (Total elevation loss)
     suspect_flags = Column(JSON, default=list)  # Флаги подозрительности: pace_impossible, gps_spike, hr_pace_mismatch, too_short (Suspicion flags)
+    cleaning_log = Column(JSON, default=list)  # Лог удалённых ошибочных участков тренировки (Cleaning log — removed bad segments)
 
 # Модель настроек пользователя (User settings model)
 class UserSettings(Base):
