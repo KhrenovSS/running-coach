@@ -147,8 +147,61 @@ def get_temp_at_time(weather, dt_local):
             best = round(temp)
     return best
 
+# Детекция подозрительных тренировок (Suspicious session detection)
+def detect_suspicious(result, trackpoints, max_hr, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130):
+    flags = []
+    segs = result.get('segments_json', [])
+    hr = result.get('avg_heart_rate', 0)
+    dur = result.get('duration_minutes', 0)
+
+    # Флаг 1: средний темп быстрее max_credible_pace (Impossibly fast average pace)
+    avg_pace_val = None
+    if result.get('total_distance_km', 0) > 0 and dur > 0:
+        avg_pace_val = dur / result['total_distance_km']
+        if avg_pace_val < max_credible_pace and dur > 1.0:
+            flags.append('pace_impossible')
+    # Проверка по сегментам (Check per segment)
+    if not flags:
+        fast_segs = [s for s in segs if s.get('pace_min_km') and s['pace_min_km'] < max_credible_pace and s.get('duration_min', 0) > 0.3]
+        if fast_segs:
+            flags.append('pace_impossible')
+
+    # Флаг 2: низкий пульс при очень быстром темпе (Low HR with impossibly fast pace)
+    if hr < min_hr_for_fast_pace and avg_pace_val and avg_pace_val < 3.5:
+        flags.append('hr_pace_mismatch')
+    if segs and 'hr_pace_mismatch' not in flags:
+        mismatched = [s for s in segs if s.get('pace_min_km') and s['pace_min_km'] < 3.5 and s.get('avg_hr', 0) < min_hr_for_fast_pace and s.get('duration_min', 0) > 0.5]
+        if mismatched:
+            flags.append('hr_pace_mismatch')
+
+    # Флаг 3: GPS-скачки (Sudden GPS coordinate jumps) — только при наличии трекпоинтов (only if trackpoints available)
+    if trackpoints and len(trackpoints) > 1:
+        jumps = 0
+        prev = trackpoints[0]
+        for tp in trackpoints[1:]:
+            if prev['lat'] is not None and prev['lon'] is not None and tp['lat'] is not None and tp['lon'] is not None:
+                from math import radians, cos, sqrt, asin
+                dlat = radians(tp['lat'] - prev['lat'])
+                dlon = radians(tp['lon'] - prev['lon'])
+                a = sin(dlat/2)**2 + cos(radians(prev['lat'])) * cos(radians(tp['lat'])) * sin(dlon/2)**2
+                c = 2 * asin(sqrt(min(a, 1)))
+                dist_m = 6371000 * c
+                if dist_m > max_gps_jump_m:
+                    jumps += 1
+            prev = tp
+        # Если >5% трекпоинтов имеют GPS-скачки (If >5% of trackpoints have GPS jumps)
+        if jumps > len(trackpoints) * 0.05 and jumps >= 3:
+            flags.append('gps_spike')
+
+    # Флаг 4: слишком короткая тренировка с большой дистанцией (Too short for the distance)
+    if dur < 2.0 and result.get('total_distance_km', 0) > 0.3:
+        flags.append('too_short')
+
+    return flags
+
+
 # Основная функция парсинга TCX-файла (Main TCX file parsing function)
-def parse_tcx(file_path, max_hr=177):
+def parse_tcx(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130):
     # Парсинг XML и получение корневого элемента (Parse XML and get root element)
     tree = ET.parse(file_path)
     root = tree.getroot()
@@ -525,8 +578,8 @@ def parse_tcx(file_path, max_hr=177):
                 seg['weather_code'] = get_weather_code_at_time(weather, aware(seg_dt))
                 cumul_min += seg['duration_min']
 
-    # Возврат результата парсинга (Return parsing result)
-    return {
+    # Формирование результата (Build result dict)
+    result = {
         'begin_ts': begin_ts,
         'total_distance_km': total_dist_km,
         'avg_heart_rate': avg_hr,
@@ -541,3 +594,10 @@ def parse_tcx(file_path, max_hr=177):
         'elevation_gain': total_elevation_gain,
         'elevation_loss': total_elevation_loss,
     }
+
+    # Детекция подозрительных тренировок (Detect suspicious/bogus sessions)
+    suspect_flags = detect_suspicious(result, trackpoints, max_hr,
+                                       max_credible_pace, max_gps_jump_m, min_hr_for_fast_pace)
+    if suspect_flags:
+        result['suspect_flags'] = suspect_flags
+    return result

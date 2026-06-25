@@ -26,6 +26,7 @@ class TrainingSession(Base):
     weather_code = Column(Integer, nullable=True)  # WMO код погоды (WMO weather code)
     elevation_gain = Column(Integer, nullable=True)  # Суммарный набор высоты в метрах (Total elevation gain)
     elevation_loss = Column(Integer, nullable=True)  # Суммарный спуск в метрах (Total elevation loss)
+    suspect_flags = Column(JSON, default=list)  # Флаги подозрительности: pace_impossible, gps_spike, hr_pace_mismatch, too_short (Suspicion flags)
 
 # Модель настроек пользователя (User settings model)
 class UserSettings(Base):
@@ -33,6 +34,9 @@ class UserSettings(Base):
     id = Column(Integer, primary_key=True)  # Уникальный идентификатор (Unique ID)
     max_hr = Column(Integer, default=177)  # Максимальная ЧСС пользователя (User max heart rate)
     weight = Column(Float, default=85.0)  # Вес пользователя в кг (User weight in kg)
+    max_credible_pace = Column(Float, default=3.0)  # Минимальный реальный темп мин/км (Minimum credible pace min/km)
+    max_gps_jump_m = Column(Float, default=100.0)  # Максимальный GPS-скачок в метрах (Max GPS jump in meters)
+    min_hr_for_fast_pace = Column(Integer, default=130)  # Минимальный пульс для быстрого темпа (Min HR for fast pace)
 
 # Модель измерения веса (Weight measurement model)
 class WeightMeasurement(Base):
@@ -57,7 +61,7 @@ def get_settings():
     try:
         settings = db.query(UserSettings).first()
         if not settings:
-            settings = UserSettings(max_hr=177, weight=85.0)
+            settings = UserSettings(max_hr=177, weight=85.0, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130)
             db.add(settings)
             db.commit()
             db.refresh(settings)

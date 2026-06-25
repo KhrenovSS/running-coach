@@ -126,8 +126,9 @@ def render_page():
         else:
             temp_str = "—"
         elev_str = f"↑{s.elevation_gain}" if s.elevation_gain is not None else ""
+        warn = "⚠️" if s.suspect_flags else ""
         rows += f"<tr onclick=\"window.location='/session/{s.id}'\" style='cursor:pointer'>"
-        rows += f"<td>{t}</td><td>{dur}</td><td>{s.total_distance_km:.2f}</td><td>{s.avg_heart_rate}</td>"
+        rows += f"<td>{warn} {t}</td><td>{dur}</td><td>{s.total_distance_km:.2f}</td><td>{s.avg_heart_rate}</td>"
         rows += f"<td>{TRAINING_TYPES_RU.get(s.training_type, s.training_type)}</td><td>{s.segments_count}</td><td>{temp_str}</td><td>{elev_str}</td></tr>"
 
     week_bars = render_zone_bars(week_stats['zone_min'], week_stats['total_min'], settings.max_hr) if week_stats else ""
@@ -341,8 +342,9 @@ SESSION_HTML = '''
     </style>
 </head>
 <body>
-    <h2>🏃 {type_ru}</h2>
+    <h2>🏃 {type_ru} {suspect_badge}</h2>
     <p style='color:#666;'>{date}</p>
+    {suspect_detail}
 
     <div class='card'>
         <div class='info'>
@@ -441,6 +443,14 @@ SETTINGS_PAGE = '''
             <input type='number' name='max_hr' value='{max_hr}' min='100' max='250'>
             <label><b>Вес (кг):</b></label>
             <input type='number' name='weight' value='{weight}' min='30' max='250' step='0.1'>
+            <hr>
+            <h4>Детекция ошибочных тренировок (Bogus session detection)</h4>
+            <label><b>Мин. темп (мин/км):</b> темп быстрее этого считается ошибкой</label>
+            <input type='number' name='max_credible_pace' value='{max_credible_pace}' min='2.0' max='6.0' step='0.1'>
+            <label><b>Макс. GPS-скачок (м):</b> прыжок координат больше этого — ошибка</label>
+            <input type='number' name='max_gps_jump_m' value='{max_gps_jump_m}' min='10' max='500' step='10'>
+            <label><b>Мин. пульс для быстрого темпа:</b> если пульс ниже, а темп быстрее — ошибка</label>
+            <input type='number' name='min_hr_for_fast_pace' value='{min_hr_for_fast_pace}' min='90' max='180'>
             <br><br>
             <button type='submit' class='btn'>Сохранить</button>
             <a href='/' class='btn' style='background:#888;'>&larr; Назад</a>
@@ -467,11 +477,28 @@ def startup():
     from datetime import datetime
     init_db()
     try:
-        from sqlalchemy import text
+        from sqlalchemy import text, JSON as SA_JSON
         with engine.connect() as conn:
-            for col in ['weather_code', 'hr_pace_series']:
+            # Миграция колонок training_sessions (Migrate training_sessions columns)
+            cols_to_add = {
+                'weather_code': 'INTEGER',
+                'hr_pace_series': 'JSON',
+                'suspect_flags': 'JSON',
+            }
+            for col, col_type in cols_to_add.items():
                 try:
-                    conn.execute(text(f"ALTER TABLE training_sessions ADD COLUMN {col} {('JSON' if col == 'hr_pace_series' else 'INTEGER')}"))
+                    conn.execute(text(f"ALTER TABLE training_sessions ADD COLUMN {col} {col_type}"))
+                except Exception:
+                    pass
+            # Миграция колонок user_settings (Migrate user_settings columns)
+            settings_cols = {
+                'max_credible_pace': 'FLOAT DEFAULT 3.0',
+                'max_gps_jump_m': 'FLOAT DEFAULT 100.0',
+                'min_hr_for_fast_pace': 'INTEGER DEFAULT 130',
+            }
+            for col, col_type in settings_cols.items():
+                try:
+                    conn.execute(text(f"ALTER TABLE user_settings ADD COLUMN {col} {col_type}"))
                 except Exception:
                     pass
             conn.commit()
@@ -480,11 +507,30 @@ def startup():
     settings = get_settings()
     db = SessionLocal()
     try:
+        # Ре-валидация существующих сессий без suspect_flags (Re-validate sessions missing flags)
+        from src.parsers.tcx_parser import detect_suspicious
+        sessions = db.query(TrainingSession).filter(TrainingSession.suspect_flags.is_(None)).all()
+        for s in sessions:
+            flags = detect_suspicious({
+                'segments_json': s.segments_json or [],
+                'avg_heart_rate': s.avg_heart_rate,
+                'total_distance_km': s.total_distance_km,
+                'duration_minutes': s.duration_minutes,
+            }, trackpoints=None, max_hr=settings.max_hr,
+               max_credible_pace=settings.max_credible_pace,
+               max_gps_jump_m=settings.max_gps_jump_m,
+               min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
+            if flags:
+                s.suspect_flags = flags
+                db.commit()
+        # Первое измерение веса (First weight measurement)
         existing = db.query(WeightMeasurement).first()
         if not existing and settings.weight:
             wm = WeightMeasurement(weight_kg=settings.weight, measured_at=datetime.utcnow())
             db.add(wm)
             db.commit()
+    except Exception:
+        pass
     finally:
         db.close()
 
@@ -505,14 +551,20 @@ async def upload_files(files: list[UploadFile] = File(...)):
             with tempfile.NamedTemporaryFile(delete=False, suffix=".tcx") as tmp:
                 shutil.copyfileobj(file.file, tmp)
                 tmp_path = tmp.name
-            data = parse_tcx(tmp_path, max_hr=settings.max_hr)
+            data = parse_tcx(tmp_path, max_hr=settings.max_hr,
+                             max_credible_pace=settings.max_credible_pace,
+                             max_gps_jump_m=settings.max_gps_jump_m,
+                             min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
             os.unlink(tmp_path)
             if data:
                 exists = db.query(TrainingSession).filter(
                     TrainingSession.begin_ts == data['begin_ts']
                 ).first()
                 if not exists:
+                    flags = data.pop('suspect_flags', None)
                     session = TrainingSession(**data)
+                    if flags:
+                        session.suspect_flags = flags
                     db.add(session)
                     db.commit()
     finally:
@@ -563,8 +615,23 @@ async def session_detail(session_id: int):
     import json
     chart_json = json.dumps(s.hr_pace_series or [])
 
+    suspect_badge = ""
+    suspect_detail = ""
+    if s.suspect_flags:
+        flag_labels = {
+            'pace_impossible': 'Нереальный темп (Impossible pace)',
+            'hr_pace_mismatch': 'Пульс не соответствует темпу (HR/pace mismatch)',
+            'gps_spike': 'Скачки GPS (GPS jumps)',
+            'too_short': 'Слишком короткая тренировка (Too short)',
+        }
+        items = "".join(f"<li>{flag_labels.get(f, f)}</li>" for f in s.suspect_flags)
+        suspect_badge = '<span style="background:#ff5722;color:white;padding:2px 10px;border-radius:4px;font-size:14px">⚠️ Ошибочные данные</span>'
+        suspect_detail = f'<div style="background:#fff3e0;border:1px solid #ffccbc;border-radius:8px;padding:10px;margin-bottom:15px"><b>⚠️ Обнаружены проблемы:</b><ul style="margin:5px 0 0 0;padding-left:20px">{items}</ul></div>'
+
     return SESSION_HTML.format(
         session_id=s.id,
+        suspect_badge=suspect_badge,
+        suspect_detail=suspect_detail,
         type_ru=TRAINING_TYPES_RU.get(s.training_type, s.training_type),
         date=s.begin_ts.strftime("%d.%m.%Y %H:%M") if s.begin_ts else "",
         dist=f"{s.total_distance_km:.2f}",
@@ -588,7 +655,10 @@ async def settings_page():
     z3 = f"{round(m * 0.7)}-{round(m * 0.8)}"
     z4 = f"{round(m * 0.8)}-{round(m * 0.9)}"
     z5 = f"{round(m * 0.9)}-{round(m)}"
-    return SETTINGS_PAGE.format(max_hr=m, weight=settings.weight, z1=z1, z2=z2, z3=z3, z4=z4, z5=z5)
+    return SETTINGS_PAGE.format(max_hr=m, weight=settings.weight, z1=z1, z2=z2, z3=z3, z4=z4, z5=z5,
+                                max_credible_pace=settings.max_credible_pace,
+                                max_gps_jump_m=settings.max_gps_jump_m,
+                                min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
 
 
 # Удаление тренировки (Delete training session)
@@ -607,7 +677,10 @@ async def session_delete(session_id: int):
 
 # Сохранение настроек (Save settings)
 @app.post('/settings')
-async def settings_save(max_hr: int = Form(...), weight: float = Form(...)):
+async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
+                        max_credible_pace: float = Form(3.0),
+                        max_gps_jump_m: float = Form(100.0),
+                        min_hr_for_fast_pace: int = Form(130)):
     from src.models import UserSettings
     from datetime import datetime
     db = SessionLocal()
@@ -617,6 +690,9 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...)):
             old_weight = s.weight
             s.max_hr = max_hr
             s.weight = weight
+            s.max_credible_pace = max_credible_pace
+            s.max_gps_jump_m = max_gps_jump_m
+            s.min_hr_for_fast_pace = min_hr_for_fast_pace
             if weight != old_weight:
                 wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.utcnow())
                 db.add(wm)
