@@ -230,21 +230,21 @@ MAIN_HTML = '''
                 if (r.headers.get('content-type')?.includes('application/json')) {{
                     const j = JSON.parse(t);
                     let msg = '';
-                    if (j.saved) msg += `✅ Сохранено: ${{j.saved}}\n`;
+                    if (j.saved) msg += '✅ Сохранено: ' + j.saved + '\\n';
                     if (j.problems?.length) {{
                         for (const p of j.problems) {{
                             const log = p.cleaning_log || [];
                             const reasons = log.map(e => (e.reason || []).join(', ')).filter(Boolean).join('; ') || 'все данные удалены';
-                            msg += `❌ ${{p.filename}}: ${{reasons}}\n`;
+                            msg += '❌ ' + p.filename + ': ' + reasons + '\\n';
                         }}
-                        msg += '\nДобавить проблемные тренировки?';
+                        msg += '\\nДобавить проблемные тренировки?';
                         if (confirm(msg)) {{
                             const f2 = new FormData();
                             for (const p of j.problems) f2.append('temp_ids', p.temp_id);
                             fetch('/upload/confirm', {{ method: 'POST', body: f2 }})
                                 .then(() => window.location.href = '/');
                         }} else {{
-                            window.location.href = '/';
+                            window.location.href = '/?discard=1';
                         }}
                     }} else {{
                         window.location.href = '/';
@@ -571,6 +571,10 @@ async def index():
 # Загрузка TCX-файлов (TCX file upload endpoint)
 @app.post('/upload')
 async def upload_files(files: list[UploadFile] = File(...)):
+    # Очистка старых отменённых загрузок (Cleanup old discarded uploads)
+    for tid, pending in list(_pending.items()):
+        Path(pending['path']).unlink(missing_ok=True)
+        _pending.pop(tid, None)
     settings = get_settings()
     db = SessionLocal()
     problems = []
