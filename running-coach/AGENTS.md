@@ -56,6 +56,8 @@ Python + FastAPI + SQLite, написано через ИИ (open code style).
 ## Важные моменты
 - `killall uvicorn` НЕ убивает процесс (команда python, а не uvicorn). Использовать `pkill -9 -f "uvicorn main"`.
 - При удалении БД через rm старый процесс продолжает держать данные через file descriptor. Надо убить процесс, потом удалять БД, потом запускать заново.
+- - TCX — универсальный формат, не привязан к Garmin. Подходят часы Coros, Polar, Suunto и любые другие, умеющие экспортировать TCX.
+- В перспективе: получение данных о сне и восстановлении с часов Coros (через Coros API или экспорт).
 - TCX-файлы лежат в `/home/nimda/uploads/` и `/home/nimda/projects/tcx/`
 - Настройка max_hr вынесена в Settings (POST /settings, доступно по /settings)
 - Время тренировки сохраняется в локальном часовом поясе (без tzinfo). Определяется по GPS через timezonefinder.
