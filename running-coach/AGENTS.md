@@ -1,7 +1,7 @@
 # Контекст проекта Running Coach
 
 ## Суть
-Персональный AI-тренер для бега. Парсит TCX-файлы с Garmin, анализирует тренировки, определяет тип (интервальная/темповая/long/recovery), разбивает на сегменты, считает пульсовые зоны.
+Персональный AI-тренер для бега. Парсит TCX-файлы (любые часы: Garmin, Coros, Polar, Suunto), анализирует тренировки, определяет тип (интервальная/темповая/long/recovery), разбивает на сегменты, считает пульсовые зоны, очищает GPS-ошибки.
 
 ## Стек
 Python + FastAPI + SQLite, написано через ИИ (open code style).  
@@ -62,7 +62,7 @@ Python + FastAPI + SQLite, написано через ИИ (open code style).
 - Настройка max_hr вынесена в Settings (POST /settings, доступно по /settings)
 - Время тренировки сохраняется в локальном часовом поясе (без tzinfo). Определяется по GPS через timezonefinder.
 - Open-Meteo API: `archive-api.open-meteo.com/v1/archive`. Параметры: lat, lon, start_date, end_date, hourly=temperature_2m,precipitation, timezone=UTC.
-- Новые поля модели TrainingSession: `avg_temperature`, `elevation_gain`, `elevation_loss`.
+- Полная модель TrainingSession: `id`, `begin_ts`, `total_distance_km`, `avg_heart_rate`, `max_heart_rate`, `training_type`, `segments_count`, `duration_minutes`, `segments_json`, `hr_pace_series`, `avg_temperature`, `weather_code`, `elevation_gain`, `elevation_loss`, `suspect_flags`, `cleaning_log`.
 
 ## Что было сделано (21.06.2026, вечер)
 1. **Иконка погоды в колонке «Погода»**: Вместо «Темп.» теперь колонка «Погода». Температура отображается с иконкой (☀️⛅☁️🌫️🌦️🌧️❄️🌨️⛈️) и знаком градуса без C (25°C → ☀️ 25°).
@@ -127,3 +127,25 @@ def calc_avg_pace(...):
 
 ## Идея проекта (из описания пользователя)
 Накопить статистику тренировок, чтобы система сама рекомендовала тренировки, хвалила за успехи, ругала за пропуски, отслеживала прогресс, контролировала восстановление, не давала перетренироваться — как настоящий тренер.
+
+## Текущее состояние (Session end — 25.06.2026)
+
+**Сервер:** запущен на `http://localhost:8000` (PID можно найти `ps aux | grep uvicorn`)  
+**Команда запуска:** `cd /home/nimda/projects/running-coach/running-coach && nohup /home/nimda/projects/running-coach/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000 > /tmp/uvicorn.log 2>&1 &`  
+**Команда пуша:** `set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/nimda/projects/running-coach && git add -A && git commit -m "..." && git push "https://KhrenovSS:${GITHUB_TOKEN}@github.com/KhrenovSS/running-coach.git" main`
+
+**БД:** SQLite, 6 тренировок (ID=1..6, все чистые, без cleaning_log), файл `running_coach.db`
+
+**Реализованный функционал:**
+- Парсинг TCX (дистанция, пульс, высота, GPS, время)
+- Сегментация по км-блокам, сплит для интервальных
+- Классификация: интервальная (3+ вариативных км), темповая (1-2), long/recovery
+- Пульсовые зоны Z1-Z5
+- Погода (Open-Meteo, температура + WMO иконка)
+- Высота (набор/спуск по сегментам и суммарно)
+- График пульса/темпа (Chart.js, скользящее окно 10 сек)
+- Очистка GPS-скачков и нереального темпа (clean_trackpoints + пересчёт дистанции)
+- Подтверждение загрузки проблемных тренировок (confirm диалог)
+- Вес пользователя (график + таблица)
+- Настройки (ЧССмакс, вес, пороги детекции ошибок)
+- Полноэкранный режим, overlay загрузки
