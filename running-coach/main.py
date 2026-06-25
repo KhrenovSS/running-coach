@@ -1,15 +1,22 @@
 # Импорт FastAPI и компонентов (FastAPI and component imports)
 from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from src.models import SessionLocal, TrainingSession, WeightMeasurement, get_settings
 from src.parsers.tcx_parser import parse_tcx, weather_icon
 import shutil
 import os
 import tempfile
+import uuid
+from pathlib import Path
 
 # Создание экземпляра FastAPI (Create FastAPI app instance)
 app = FastAPI()
 os.makedirs("uploads", exist_ok=True)
+
+# Хранилище для загруженных TCX, ожидающих подтверждения (Pending uploads awaiting user confirmation)
+PENDING_DIR = Path("/tmp/opencode/uploads")
+PENDING_DIR.mkdir(parents=True, exist_ok=True)
+_pending = {}  # temp_id -> dict with 'path', 'filename', 'data'
 
 # Словарь типов тренировок на русском (Training type labels in Russian)
 TRAINING_TYPES_RU = {
@@ -218,7 +225,34 @@ MAIN_HTML = '''
         const fd = new FormData();
         for (const f of this.files) fd.append('files', f);
         fetch('/upload', {{ method: 'POST', body: fd }})
-            .then(() => window.location.href = '/')
+            .then(r => r.text().then(t => [r, t]))
+            .then(([r, t]) => {{
+                if (r.headers.get('content-type')?.includes('application/json')) {{
+                    const j = JSON.parse(t);
+                    let msg = '';
+                    if (j.saved) msg += `✅ Сохранено: ${{j.saved}}\n`;
+                    if (j.problems?.length) {{
+                        for (const p of j.problems) {{
+                            const log = p.cleaning_log || [];
+                            const reasons = log.map(e => (e.reason || []).join(', ')).filter(Boolean).join('; ') || 'все данные удалены';
+                            msg += `❌ ${{p.filename}}: ${{reasons}}\n`;
+                        }}
+                        msg += '\nДобавить проблемные тренировки?';
+                        if (confirm(msg)) {{
+                            const f2 = new FormData();
+                            for (const p of j.problems) f2.append('temp_ids', p.temp_id);
+                            fetch('/upload/confirm', {{ method: 'POST', body: f2 }})
+                                .then(() => window.location.href = '/');
+                        }} else {{
+                            window.location.href = '/';
+                        }}
+                    }} else {{
+                        window.location.href = '/';
+                    }}
+                }} else {{
+                    window.location.href = '/';
+                }}
+            }})
             .catch(() => window.location.href = '/');
     }});
     </script>
@@ -480,6 +514,10 @@ def startup():
     from src.models import init_db, engine
     from datetime import datetime
     init_db()
+    # Очистка старых pending-файлов (Cleanup old pending uploads)
+    for f in PENDING_DIR.glob("*.tcx"):
+        f.unlink(missing_ok=True)
+    _pending.clear()
     try:
         from sqlalchemy import text, JSON as SA_JSON
         with engine.connect() as conn:
@@ -535,6 +573,8 @@ async def index():
 async def upload_files(files: list[UploadFile] = File(...)):
     settings = get_settings()
     db = SessionLocal()
+    problems = []
+    saved = 0
     try:
         for file in files:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".tcx") as tmp:
@@ -544,21 +584,77 @@ async def upload_files(files: list[UploadFile] = File(...)):
                              max_credible_pace=settings.max_credible_pace,
                              max_gps_jump_m=settings.max_gps_jump_m,
                              min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
+            if data is None:
+                os.unlink(tmp_path)
+                continue
+            cleaning_log = data.get('cleaning_log', [])
+            # Сомнительная: очищено много точек, осталось <1 км (Problematic: heavily cleaned, <1 km left)
+            is_problematic = (
+                data.get('training_type') == 'invalid'
+                or (cleaning_log and (data.get('total_distance_km') or 0) < 1.0)
+            )
+            if is_problematic:
+                temp_id = str(uuid.uuid4())
+                dest = PENDING_DIR / f"{temp_id}.tcx"
+                shutil.move(tmp_path, str(dest))
+                _pending[temp_id] = {
+                    'path': str(dest), 'filename': file.filename or 'unknown',
+                    'data': data, 'settings': settings,
+                }
+                problems.append({
+                    'temp_id': temp_id, 'filename': file.filename or 'unknown',
+                    'cleaning_log': cleaning_log,
+                })
+                continue
+            # Сохраняем хорошую тренировку (Save valid training)
+            exists = db.query(TrainingSession).filter(
+                TrainingSession.begin_ts == data['begin_ts']
+            ).first()
+            if not exists:
+                cleaning_log_val = data.pop('cleaning_log', None)
+                flags_val = data.pop('suspect_flags', None)
+                session = TrainingSession(**data)
+                if cleaning_log_val:
+                    session.cleaning_log = cleaning_log_val
+                if flags_val:
+                    session.suspect_flags = flags_val
+                db.add(session)
+                db.commit()
+                saved += 1
             os.unlink(tmp_path)
-            if data:
-                exists = db.query(TrainingSession).filter(
-                    TrainingSession.begin_ts == data['begin_ts']
-                ).first()
-                if not exists:
-                    cleaning_log = data.pop('cleaning_log', None)
-                    flags = data.pop('suspect_flags', None)
-                    session = TrainingSession(**data)
-                    if cleaning_log:
-                        session.cleaning_log = cleaning_log
-                    if flags:
-                        session.suspect_flags = flags
-                    db.add(session)
-                    db.commit()
+    finally:
+        db.close()
+    if problems:
+        return JSONResponse({'problems': problems, 'saved': saved})
+    return RedirectResponse(url='/', status_code=303)
+
+
+# Подтверждение сомнительных тренировок (Confirm problematic uploads)
+@app.post('/upload/confirm')
+async def confirm_upload(temp_ids: list[str] = Form(...)):
+    db = SessionLocal()
+    confirmed = 0
+    try:
+        for temp_id in temp_ids:
+            pending = _pending.pop(temp_id, None)
+            if not pending:
+                continue
+            data = pending['data']
+            exists = db.query(TrainingSession).filter(
+                TrainingSession.begin_ts == data['begin_ts']
+            ).first()
+            if not exists:
+                cleaning_log_val = data.pop('cleaning_log', None)
+                flags_val = data.pop('suspect_flags', None)
+                session = TrainingSession(**data)
+                if cleaning_log_val:
+                    session.cleaning_log = cleaning_log_val
+                if flags_val:
+                    session.suspect_flags = flags_val
+                db.add(session)
+                db.commit()
+                confirmed += 1
+            Path(pending['path']).unlink(missing_ok=True)
     finally:
         db.close()
     return RedirectResponse(url='/', status_code=303)
