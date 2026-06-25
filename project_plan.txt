@@ -1,0 +1,13 @@
+Roadmap of the "Running Coach" Project:
+1. Environment and configuration
+2. Database models
+3. Data import (TCX, Strava)
+4. Data processing and validation
+5. Training type classification
+6. Weekly statistics aggregation
+7. Planning and recovery recommendations
+8. Telegram bot
+9. Web UI
+10. Background tasks
+11. User management
+12. Monitoring and maintenance
