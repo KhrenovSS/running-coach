@@ -195,6 +195,10 @@ MAIN_HTML = '''
     <div class='overlay' id='uploadOverlay'>
         <div class='spinner'></div>
         <p style='margin-top:16px;font-size:18px;color:#333;'>Обработка файлов…</p>
+        <p id='progressText' style='margin-top:8px;font-size:15px;color:#555;'></p>
+        <div style='margin-top:12px;width:300px;background:#e0e0e0;border-radius:6px;height:10px;overflow:hidden;'>
+            <div id='progressBar' style='width:0%;background:#4CAF50;border-radius:6px;height:10px;transition:width 0.3s;'></div>
+        </div>
     </div>
 
     <h2>🏃 AI Running Coach</h2>
@@ -219,41 +223,61 @@ MAIN_HTML = '''
         </div>
     </div>
     <script>
-    document.getElementById('fileInput').addEventListener('change', function() {{
+    document.getElementById('fileInput').addEventListener('change', async function() {{
         if (!this.files.length) return;
-        document.getElementById('uploadOverlay').classList.add('active');
-        const fd = new FormData();
-        for (const f of this.files) fd.append('files', f);
-        fetch('/upload', {{ method: 'POST', body: fd }})
-            .then(r => r.text().then(t => [r, t]))
-            .then(([r, t]) => {{
-                if (r.headers.get('content-type')?.includes('application/json')) {{
-                    const j = JSON.parse(t);
-                    let msg = '';
-                    if (j.saved) msg += '✅ Сохранено: ' + j.saved + '\\n';
-                    if (j.problems?.length) {{
-                        for (const p of j.problems) {{
-                            const log = p.cleaning_log || [];
-                            const reasons = log.map(e => (e.reason || []).join(', ')).filter(Boolean).join('; ') || 'все данные удалены';
-                            msg += '❌ ' + p.filename + ': ' + reasons + '\\n';
-                        }}
-                        msg += '\\nДобавить проблемные тренировки?';
-                        if (confirm(msg)) {{
-                            const f2 = new FormData();
-                            for (const p of j.problems) f2.append('temp_ids', p.temp_id);
-                            fetch('/upload/confirm', {{ method: 'POST', body: f2 }})
-                                .then(() => window.location.href = '/');
-                        }} else {{
-                            window.location.href = '/?discard=1';
-                        }}
-                    }} else {{
-                        window.location.href = '/';
-                    }}
-                }} else {{
-                    window.location.href = '/';
+        const files = Array.from(this.files);
+        const total = files.length;
+        let processed = 0;
+        let allProblems = [];
+        let allSaved = 0;
+
+        const overlay = document.getElementById('uploadOverlay');
+        const progressText = document.getElementById('progressText');
+        const progressBar = document.getElementById('progressBar');
+
+        overlay.classList.add('active');
+
+        for (const file of files) {{
+            const fd = new FormData();
+            fd.append('files', file);
+            try {{
+                const resp = await fetch('/upload', {{ method: 'POST', body: fd }});
+                const text = await resp.text();
+                let j;
+                try {{
+                    j = JSON.parse(text);
+                }} catch (e) {{
+                    continue;
                 }}
-            }})
-            .catch(() => window.location.href = '/');
+                allSaved += j.saved || 0;
+                if (j.problems && j.problems.length) {{
+                    allProblems = allProblems.concat(j.problems);
+                }}
+            }} catch (e) {{
+                // ignore network errors for individual files
+            }}
+            processed++;
+            const pct = Math.round(processed / total * 100);
+            progressText.textContent = `Обработано ${{processed}} из ${{total}} (${{pct}}%)`;
+            progressBar.style.width = pct + '%';
+        }}
+
+        if (allProblems.length) {{
+            let msg = '';
+            if (allSaved) msg += '✅ Сохранено: ' + allSaved + '\\n';
+            for (const p of allProblems) {{
+                const log = p.cleaning_log || [];
+                const reasons = log.map(e => (e.reason || []).join(', ')).filter(Boolean).join('; ') || 'все данные удалены';
+                msg += '❌ ' + p.filename + ': ' + reasons + '\\n';
+            }}
+            msg += '\\nДобавить проблемные тренировки?';
+            if (confirm(msg)) {{
+                const f2 = new FormData();
+                for (const p of allProblems) f2.append('temp_ids', p.temp_id);
+                await fetch('/upload/confirm', {{ method: 'POST', body: f2 }});
+            }}
+        }}
+        window.location.href = '/';
     }});
     </script>
 
@@ -571,10 +595,6 @@ async def index():
 # Загрузка TCX-файлов (TCX file upload endpoint)
 @app.post('/upload')
 async def upload_files(files: list[UploadFile] = File(...)):
-    # Очистка старых отменённых загрузок (Cleanup old discarded uploads)
-    for tid, pending in list(_pending.items()):
-        Path(pending['path']).unlink(missing_ok=True)
-        _pending.pop(tid, None)
     settings = get_settings()
     db = SessionLocal()
     problems = []
@@ -628,9 +648,7 @@ async def upload_files(files: list[UploadFile] = File(...)):
             os.unlink(tmp_path)
     finally:
         db.close()
-    if problems:
-        return JSONResponse({'problems': problems, 'saved': saved})
-    return RedirectResponse(url='/', status_code=303)
+    return JSONResponse({'problems': problems, 'saved': saved})
 
 
 # Подтверждение сомнительных тренировок (Confirm problematic uploads)
