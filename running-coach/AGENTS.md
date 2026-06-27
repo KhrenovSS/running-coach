@@ -142,7 +142,7 @@ def calc_avg_pace(...):
   2. **Сделать commit (если есть незакоммиченные изменения) + push** в GitHub. Это «итог дня».
   3. Сообщить пользователю, что изменения сохранены и запушены.
 
-## Текущее состояние (Session end — 27.06.2026)
+## Текущее состояние (Session end — 27.06.2026, вечер)
 
 **Сервер:** запущен через systemd --user (`running-coach.service`), автозапуск при включении ПК  
 **Команда управления:** `systemctl --user start/stop/status/restart running-coach.service`  
@@ -162,6 +162,7 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 - **Исправлен email** во всей истории git: `khrenovss@yandex.ru` / `nimda@debian.sergey` → `khrenov.ss@gmail.com`
 - **Изменён remote URL** — убран токен из URL, теперь используется чистый `https://github.com/KhrenovSS/running-coach.git`
 - **Force push** переписанной истории на GitHub
+- **Обновлён AGENTS.md**: явное правило «коммитить после каждой логической задачи», формат пуша с токеном из `.env`, email в git config
 
 **Реализованный функционал:**
 - Парсинг TCX (дистанция, пульс, высота, GPS, время)
