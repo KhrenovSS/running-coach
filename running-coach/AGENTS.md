@@ -97,12 +97,17 @@ def calc_avg_pace(...):
 Ветка: `main`
 
 **Правила работы:**
-- После каждого изменения кода (новый функционал, исправление, рефакторинг) делать коммит и пуш в GitHub.
-- **По завершении сессии работы обязательно выполнить финальный commit + push в GitHub.**
+- **Каждый раз после завершения небольшой логически законченной задачи делай commit.** Новый функционал, исправление, рефакторинг — сразу коммит. Не копить изменения.
+- Сообщение коммита — кратко, на русском с английским в скобках или просто на английском.
+- **В конце сессии:** сделать финальный commit (если остались незакоммиченные изменения) + push в GitHub. Это «итог дня» — вся проделанная работа на GitHub.
 - Токен для пуша хранится в `/home/nimda/projects/running-coach/.env` в переменной `GITHUB_TOKEN`. Этот файл в `.gitignore`.
-- Перед пушем прочитать `.env` через `set -a && source /home/nimda/projects/running-coach/.env && set +a`, либо экспортировать переменные вручную.
-- Исключать из коммитов: `running_coach.db`, `.venv/`, `__pycache__/`, `uploads/` (проверять `git status` перед коммитом).
+- Команда для пуша (из любой директории):
+  ```
+  set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/nimda/projects/running-coach && git push "https://KhrenovSS:${GITHUB_TOKEN}@github.com/KhrenovSS/running-coach.git" main
+  ```
+- Перед коммитом проверить `git status`. Исключать из коммитов: `running_coach.db`, `.venv/`, `__pycache__/`, `uploads/` (они в `.gitignore`).
 - Не хранить токен, пароли или ключи в исходном коде.
+- Email в git config: `khrenov.ss@gmail.com` (привязан к GitHub).
 - **Формат коммитов**: сообщение писать на русском с английским переводом в скобках, кратко и по делу. Пример:
   ```
   Fix: rebuild cumulative distance after cleaning; add confirm dialog before saving empty sessions
@@ -133,15 +138,18 @@ def calc_avg_pace(...):
 ## Завершение сессии (End of session)
 
 - Когда пользователь говорит «На сегодня все» или «продолжим завтра»:
-  1. **Обновить секцию «Текущее состояние»** ниже — записать актуальную информацию: состояние сервера, БД, список реализованного функционала, что было сделано в этой сессии
-  2. **Сделать commit + push** в GitHub с сообщением о проделанной работе
-  3. Сообщить пользователю, что изменения сохранены
+  1. **Обновить секцию «Текущее состояние»** ниже — записать актуальную информацию: состояние сервера, БД, что сделано в этой сессии
+  2. **Сделать commit (если есть незакоммиченные изменения) + push** в GitHub. Это «итог дня».
+  3. Сообщить пользователю, что изменения сохранены и запушены.
 
 ## Текущее состояние (Session end — 27.06.2026)
 
 **Сервер:** запущен через systemd --user (`running-coach.service`), автозапуск при включении ПК  
 **Команда управления:** `systemctl --user start/stop/status/restart running-coach.service`  
-**Команда пуша:** `set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/nimda/projects/running-coach && git add -A && git commit -m "..." && git push "https://KhrenovSS:${GITHUB_TOKEN}@github.com/KhrenovSS/running-coach.git" main`
+**Команда пуша (из любой папки):**
+```bash
+set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/nimda/projects/running-coach && git push "https://KhrenovSS:${GITHUB_TOKEN}@github.com/KhrenovSS/running-coach.git" main
+```
 
 **БД:** SQLite, пусто (0 тренировок), файл `running_coach.db`
 
@@ -151,6 +159,9 @@ def calc_avg_pace(...):
 - `/upload` теперь всегда возвращает JSON (вместо RedirectResponse)
 - Обновлён CHANGELOG.md: даты в формате `ДД.ММ.ГГГГ`, добавлена запись о прогресс-баре
 - Обновлён AGENTS.md: инструкции по ведению changelog, формат дат, завершение сессии
+- **Исправлен email** во всей истории git: `khrenovss@yandex.ru` / `nimda@debian.sergey` → `khrenov.ss@gmail.com`
+- **Изменён remote URL** — убран токен из URL, теперь используется чистый `https://github.com/KhrenovSS/running-coach.git`
+- **Force push** переписанной истории на GitHub
 
 **Реализованный функционал:**
 - Парсинг TCX (дистанция, пульс, высота, GPS, время)
