@@ -2,7 +2,9 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from src.models import SessionLocal, TrainingSession, WeightMeasurement, get_settings
-from src.parsers.tcx_parser import parse_tcx, weather_icon
+from src.parsers.tcx_parser import parse_tcx
+from src.parsers.fit_parser import parse_fit
+from src.parsers.common import weather_icon
 import shutil
 import os
 import tempfile
@@ -207,8 +209,8 @@ MAIN_HTML = '''
     <div class='settings'>
         <span><b>ЧССмакс:</b> {max_hr} уд/мин</span>
         <span id='weightToggle' style='cursor:pointer' onclick='toggleWeightChart()'><b>Вес:</b> {weight} кг ▾</span>
-        <input type='file' name='files' accept='.tcx' multiple id='fileInput' style='display:none'>
-        <button type='button' class='btn' onclick='document.getElementById("fileInput").click()' style='margin-left:auto'>&#128206; Загрузить TCX</button>
+        <input type='file' name='files' accept='.tcx,.fit' multiple id='fileInput' style='display:none'>
+        <button type='button' class='btn' onclick='document.getElementById("fileInput").click()' style='margin-left:auto'>&#128206; Загрузить TCX/FIT</button>
         <a href='/settings' class='btn'>⚙️ Настройки</a>
     </div>
     <div id='weightChartContainer' style='display:none; margin-bottom:15px'>
@@ -604,13 +606,21 @@ async def upload_files(files: list[UploadFile] = File(...)):
     saved = 0
     try:
         for file in files:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".tcx") as tmp:
+            ext = os.path.splitext(file.filename or '')[1].lower()
+            suffix = ".fit" if ext == ".fit" else ".tcx"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 shutil.copyfileobj(file.file, tmp)
                 tmp_path = tmp.name
-            data = parse_tcx(tmp_path, max_hr=settings.max_hr,
-                             max_credible_pace=settings.max_credible_pace,
-                             max_gps_jump_m=settings.max_gps_jump_m,
-                             min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
+            if ext == ".fit":
+                data = parse_fit(tmp_path, max_hr=settings.max_hr,
+                                 max_credible_pace=settings.max_credible_pace,
+                                 max_gps_jump_m=settings.max_gps_jump_m,
+                                 min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
+            else:
+                data = parse_tcx(tmp_path, max_hr=settings.max_hr,
+                                 max_credible_pace=settings.max_credible_pace,
+                                 max_gps_jump_m=settings.max_gps_jump_m,
+                                 min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
             if data is None:
                 os.unlink(tmp_path)
                 continue

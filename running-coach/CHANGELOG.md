@@ -11,6 +11,14 @@ All notable changes to this project are tracked here.
   - Каденс по сегментам отображается в детальном просмотре тренировки в таблице отрезков
   - Данные сохраняются в модель `TrainingSession` (`avg_cadence`) и в каждый сегмент (`segments_json[].avg_cadence`)
   - Автомиграция БД: колонка `avg_cadence` добавляется при старте сервера
+- **FIT-парсер (FIT parser)**
+  - Новый парсер бинарного формата `.fit` (стандарт Garmin/FIT, используется Coros, Garmin, Polar, Suunto)
+  - Содержит все метрики: дистанция, пульс, каденс, темп, высота, GPS
+  - Каденс в FIT (spm) доступен «из коробки», в отличие от TCX от Coros
+  - Загрузка `.fit` файлов через тот же интерфейс — кнопка «Загрузить TCX/FIT»
+- **Рефакторинг: общая логика обработки (Refactoring: shared processing pipeline)**
+  - Выделен `src/parsers/common.py` — общие функции: очистка трекпоинтов, сегментация, классификация, погода
+  - `tcx_parser.py` и `fit_parser.py` только парсят формат и вызывают `process_trackpoints()` из common
 
 ## [27.06.2026]
 
