@@ -9,8 +9,10 @@ Python + FastAPI + SQLite, написано через ИИ (open code style).
 
 ## Структура файлов
 - `main.py` — FastAPI-роуты, HTML-шаблоны, отображение списка и деталей тренировок
-- `src/parsers/tcx_parser.py` — весь парсинг, сегментация и классификация
 - `src/models.py` — модель TrainingSession (SQLAlchemy), путь к БД абсолютный
+- `src/parsers/common.py` — общая логика: очистка треков, сегментация, классификация, погода (`process_trackpoints()`)
+- `src/parsers/tcx_parser.py` — парсинг TCX-файлов (XML) → вызов `process_trackpoints()`
+- `src/parsers/fit_parser.py` — парсинг FIT-файлов (бинарный) → вызов `process_trackpoints()`
 
 ## Реализованная логика
 
@@ -142,7 +144,7 @@ def calc_avg_pace(...):
   2. **Сделать commit (если есть незакоммиченные изменения) + push** в GitHub. Это «итог дня».
   3. Сообщить пользователю, что изменения сохранены и запушены.
 
-## Текущее состояние (Session end — 27.06.2026, вечер)
+## Текущее состояние (Session — 28.06.2026, день)
 
 **Сервер:** запущен через systemd --user (`running-coach.service`), автозапуск при включении ПК  
 **Команда управления:** `systemctl --user start/stop/status/restart running-coach.service`  
@@ -164,6 +166,11 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 - **Force push** переписанной истории на GitHub
 - **Обновлён AGENTS.md**: явное правило «коммитить после каждой логической задачи», формат пуша с токеном из `.env`, email в git config
 
+**Что сделано в сессии 28.06.2026:**
+- **Каденс (Cadence)**: парсинг `RunCadence` из `Extensions/TPX` в TCX (Garmin и другие), отображение на главной (колонка «Каденс») и в детальном просмотре (карточка + таблица сегментов). Колонка `avg_cadence` в `TrainingSession`, автомиграция БД
+- **FIT-парсер**: новый `src/parsers/fit_parser.py` — парсинг бинарного формата `.fit` (Coros, Garmin, Polar, Suunto). Каденс получается «из коробки». Загрузка `.fit` через ту же кнопку
+- **Рефакторинг**: выделен `src/parsers/common.py` — общая логика обработки трекпоинтов (очистка, сегментация, классификация, погода). `tcx_parser.py` и `fit_parser.py` только парсят формат и вызывают `process_trackpoints()`
+
 **Реализованный функционал:**
 - Парсинг TCX (дистанция, пульс, высота, GPS, время)
 - Сегментация по км-блокам, сплит для интервальных
@@ -179,3 +186,5 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 - Настройки (ЧССмакс, вес, пороги детекции ошибок)
 - Полноэкранный режим, overlay загрузки
 - systemd-сервис с автозапуском при старте системы
+- Каденс (Cadence) — парсинг из TCX (Garmin TPX) и FIT; отображение на главной и в деталях
+- FIT-парсер — поддержка бинарного формата `.fit` (Coros, Garmin, Polar, Suunto)
