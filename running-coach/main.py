@@ -128,7 +128,16 @@ def render_page():
     for s in all_sessions[:20]:
         t = s.begin_ts.strftime("%d.%m.%Y %H:%M") if s.begin_ts else ""
         dur = fmt_duration(s.duration_minutes)
-        elev_str = f"↑{s.elevation_gain}" if s.elevation_gain is not None else ""
+        eg = s.elevation_gain
+        el = s.elevation_loss
+        if eg is not None and el is not None:
+            elev_str = f"↑{eg} / ↓{el}"
+        elif eg is not None:
+            elev_str = f"↑{eg}"
+        elif el is not None:
+            elev_str = f"↓{el}"
+        else:
+            elev_str = ""
         warn = ""
         if s.cleaning_log:
             warn = "✂️"
@@ -365,7 +374,7 @@ MAIN_HTML = '''
     <h3>Последние 20 тренировок</h3>
     <table>
             <thead>
-                <tr><th>Дата</th><th>Длит.</th><th>Дист., км</th><th>Пульс, уд/мин</th><th>Тип</th><th>Сегм.</th><th>Каденс</th><th>Метрики</th><th>Набор</th></tr>
+                <tr><th>Дата</th><th>Длительность</th><th>Дист., км</th><th>Пульс, уд/мин</th><th>Тип</th><th>Сегм.</th><th>Каденс</th><th>Сожженные калории</th><th>Набор</th></tr>
             </thead>
         <tbody>
             {rows}
@@ -468,7 +477,7 @@ SESSION_HTML = '''
         <h3>Детали по отрезкам</h3>
         <table>
             <thead>
-                <tr><th>#</th><th>Зона</th><th>Длит.</th><th>Дист., км</th><th>Пульс, уд/мин</th><th>Каденс</th><th>Темп</th><th>↑ м</th><th>↓ м</th></tr>
+                <tr><th>#</th><th>Зона</th><th>Длительность</th><th>Дист., км</th><th>Пульс, уд/мин</th><th>Каденс</th><th>Темп</th><th>↑ м</th><th>↓ м</th></tr>
             </thead>
             <tbody>
                 {segments_rows}
