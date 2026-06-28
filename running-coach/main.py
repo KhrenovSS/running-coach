@@ -2,10 +2,10 @@
 from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
-from src.models import SessionLocal, TrainingSession, WeightMeasurement, get_settings
+from src.models import SessionLocal, TrainingSession, WeightMeasurement, DeletedTraining, get_settings
 from src.parsers.tcx_parser import parse_tcx
 from src.parsers.fit_parser import parse_fit
-from src.parsers.common import weather_icon
+from src.parsers.common import weather_icon, format_pace, format_duration
 from src.logger import get_logger
 from src.crypto import encrypt, decrypt
 logger = get_logger("app")
@@ -292,6 +292,16 @@ MAIN_HTML = '''
         .active-year {{ background: #4CAF50; color: white; border-color: #4CAF50; }}
         .active-month {{ background: #2196F3; color: white; border-color: #2196F3; }}
         .ym-title {{ font-size: 14px; color: #666; margin-bottom: 8px; font-weight: bold; }}
+        .modal {{ background: white; border-radius: 12px; padding: 20px; max-width: 500px; width: 90%; box-shadow: 0 4px 24px rgba(0,0,0,0.15); }}
+        .modal h3 {{ margin-top: 0; }}
+        .modal table {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}
+        .modal td {{ padding: 4px 8px; border-bottom: 1px solid #eee; }}
+        .modal td:first-child {{ color: #666; width: 40%; }}
+        .modal-buttons {{ display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }}
+        .btn-import {{ background: #4CAF50; color: white; padding: 8px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }}
+        .btn-skip {{ background: #f5f5f5; color: #333; padding: 8px 20px; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; font-size: 14px; }}
+        .btn-import:hover {{ background: #43a047; }}
+        .btn-skip:hover {{ background: #e0e0e0; }}
     </style>
 </head>
 <body>
@@ -309,6 +319,17 @@ MAIN_HTML = '''
         <p id='syncProgressText' style='margin-top:8px;font-size:15px;color:#555;'></p>
         <div style='margin-top:12px;width:300px;background:#e0e0e0;border-radius:6px;height:10px;overflow:hidden;'>
             <div id='syncProgressBar' style='width:0%;background:#2196F3;border-radius:6px;height:10px;transition:width 0.3s;'></div>
+        </div>
+    </div>
+    <div class='overlay' id='deletedConfirmOverlay'>
+        <div class='modal'>
+            <h3>⚠️ Тренировка была удалена</h3>
+            <p style='color:#555;'>Эта тренировка ранее была удалена. Хотите импортировать её заново?</p>
+            <div id='deletedDetails'></div>
+            <div class='modal-buttons'>
+                <button class='btn-skip' id='deletedSkipBtn'>Пропустить</button>
+                <button class='btn-import' id='deletedImportBtn'>Импортировать</button>
+            </div>
         </div>
     </div>
 
@@ -336,6 +357,48 @@ MAIN_HTML = '''
         </div>
     </div>
     <script>
+    // Функция для показа модала подтверждения удалённой тренировки (Show deleted training confirmation modal)
+    function showDeletedModal(match, tempId) {{
+        return new Promise((resolve) => {{
+            const overlay = document.getElementById('deletedConfirmOverlay');
+            const details = document.getElementById('deletedDetails');
+            details.innerHTML = `
+                <table>
+                    <tr><td>Дата</td><td>${{match.date}}</td></tr>
+                    <tr><td>Дистанция</td><td>${{match.distance_display || match.distance}}</td></tr>
+                    <tr><td>Темп</td><td>${{match.pace}}</td></tr>
+                    <tr><td>Длительность</td><td>${{match.duration}}</td></tr>
+                    <tr><td>Тип</td><td>${{match.type}}</td></tr>
+                    <tr><td>Пульс</td><td>${{match.hr}}</td></tr>
+                    <tr><td>Калории</td><td>${{match.calories}}</td></tr>
+                </table>`;
+            overlay.classList.add('active');
+
+            const skipBtn = document.getElementById('deletedSkipBtn');
+            const importBtn = document.getElementById('deletedImportBtn');
+
+            const cleanup = () => {{
+                overlay.classList.remove('active');
+                skipBtn.replaceWith(skipBtn.cloneNode(true));
+                importBtn.replaceWith(importBtn.cloneNode(true));
+            }};
+
+            document.getElementById('deletedSkipBtn').onclick = () => {{ cleanup(); resolve(false); }};
+            document.getElementById('deletedImportBtn').onclick = async () => {{
+                cleanup();
+                const fd = new FormData();
+                fd.append('temp_id', tempId);
+                try {{
+                    const r = await fetch('/upload/confirm_deleted', {{ method: 'POST', body: fd }});
+                    const j = await r.json();
+                    resolve(j.ok);
+                }} catch (e) {{
+                    resolve(false);
+                }}
+            }};
+        }});
+    }}
+
     document.getElementById('fileInput').addEventListener('change', async function() {{
         if (!this.files.length) return;
         const files = Array.from(this.files);
@@ -361,7 +424,15 @@ MAIN_HTML = '''
                 }} catch (e) {{
                     continue;
                 }}
-                allSaved += j.saved || 0;
+                // Если сервер обнаружил, что файл был ранее удалён (If server found this was previously deleted)
+                if (j.deleted_match && j.temp_id) {{
+                    const imported = await showDeletedModal(j.deleted_match, j.temp_id);
+                    if (imported) {{
+                        allSaved++;
+                    }}
+                }} else {{
+                    allSaved += j.saved || 0;
+                }}
             }} catch (e) {{
                 // ignore network errors for individual files
             }}
@@ -711,7 +782,7 @@ SETTINGS_PAGE = '''
 # Событие при запуске сервера: инициализация БД и миграции (Startup event: DB init and migrations)
 @app.on_event("startup")
 def startup():
-    from src.models import init_db, engine
+    from src.models import init_db, engine, DeletedTraining
     from datetime import datetime
     init_db()
     # Очистка старых pending-файлов (Cleanup old pending uploads)
@@ -749,6 +820,11 @@ def startup():
                     conn.execute(text(f"ALTER TABLE user_settings ADD COLUMN {col} {col_type}"))
                 except Exception:
                     pass
+            # Миграция таблицы deleted_trainings (Migrate deleted_trainings table)
+            try:
+                DeletedTraining.__table__.create(conn)
+            except Exception:
+                pass
             conn.commit()
     except Exception:
         pass
@@ -773,13 +849,14 @@ async def index(year: Optional[int] = None, month: Optional[int] = None):
     return render_page(year=year, month=month)
 
 
-# Загрузка TCX-файлов (TCX file upload endpoint)
+# Загрузка TCX/FIT-файлов (TCX/FIT file upload endpoint)
 @app.post('/upload')
 async def upload_files(files: list[UploadFile] = File(...)):
     settings = get_settings()
     db = SessionLocal()
-    problems = []
     saved = 0
+    deleted_hit = None
+    temp_id = None
     try:
         for file in files:
             ext = os.path.splitext(file.filename or '')[1].lower()
@@ -801,9 +878,36 @@ async def upload_files(files: list[UploadFile] = File(...)):
                 logger.warning("Загрузка: не удалось распарсить %s (Upload: parse failed)", file.filename)
                 os.unlink(tmp_path)
                 continue
-            cleaning_log = data.get('cleaning_log', [])
-            # Сомнительные тренировки тоже сохраняем сразу (Save problematic sessions directly)
-            # Сохраняем тренировку (Save training)
+            # Проверка, не было ли эта тренировка удалена ранее (Check if this training was previously deleted)
+            deleted_match = None
+            bt = data['begin_ts']
+            if bt:
+                all_deleted = db.query(DeletedTraining).all()
+                for d in all_deleted:
+                    if d.begin_ts and abs((d.begin_ts - bt).total_seconds()) < 120:
+                        deleted_match = d
+                        break
+            if deleted_match:
+                # Сохраняем распарсенные данные в _pending для отложенного сохранения (Store parsed data for deferred save)
+                tid = str(uuid.uuid4())
+                _pending[tid] = {'path': tmp_path, 'filename': file.filename, 'data': data}
+                pace_str = format_pace(deleted_match.avg_pace) if deleted_match.avg_pace else '—'
+                deleted_hit = {
+                    'id': deleted_match.id,
+                    'date': deleted_match.begin_ts.strftime('%d.%m.%Y %H:%M'),
+                    'distance': round(deleted_match.total_distance_km, 1) if deleted_match.total_distance_km else '—',
+                    'distance_display': f'{deleted_match.total_distance_km:.1f} км' if deleted_match.total_distance_km else '—',
+                    'pace': pace_str,
+                    'pace_val': round(deleted_match.avg_pace, 2) if deleted_match.avg_pace else None,
+                    'duration': format_duration(deleted_match.duration_minutes) if deleted_match.duration_minutes else '—',
+                    'type': deleted_match.training_type or '—',
+                    'hr': f'{deleted_match.avg_heart_rate}' if deleted_match.avg_heart_rate else '—',
+                    'calories': f'{deleted_match.calories}' if deleted_match.calories else '—',
+                }
+                temp_id = tid
+                os.unlink(tmp_path)  # не удалять tmp — перенесём в _pending
+                break
+            # Проверка, существует ли уже такая тренировка (Check if training already exists)
             exists = db.query(TrainingSession).filter(
                 TrainingSession.begin_ts == data['begin_ts']
             ).first()
@@ -821,6 +925,8 @@ async def upload_files(files: list[UploadFile] = File(...)):
             os.unlink(tmp_path)
     finally:
         db.close()
+    if deleted_hit:
+        return JSONResponse({'saved': saved, 'deleted_match': deleted_hit, 'temp_id': temp_id})
     return JSONResponse({'saved': saved})
 
 
@@ -853,6 +959,44 @@ async def confirm_upload(temp_ids: list[str] = Form(...)):
     finally:
         db.close()
     return RedirectResponse(url='/', status_code=303)
+
+
+# Принудительное сохранение ранее удалённой тренировки (Force-save a previously deleted training)
+@app.post('/upload/confirm_deleted')
+async def confirm_deleted(temp_id: str = Form(...)):
+    db = SessionLocal()
+    try:
+        pending = _pending.pop(temp_id, None)
+        if not pending:
+            return JSONResponse({'ok': False, 'error': 'temp_id not found'})
+        data = pending['data']
+        bt = data.get('begin_ts')
+        # Удаляем запись DeletedTraining (Remove DeletedTraining entry)
+        if bt:
+            all_deleted = db.query(DeletedTraining).all()
+            for d in all_deleted:
+                if d.begin_ts and abs((d.begin_ts - bt).total_seconds()) < 120:
+                    db.delete(d)
+                    break
+        # Сохраняем тренировку (Save training)
+        exists = db.query(TrainingSession).filter(
+            TrainingSession.begin_ts == bt
+        ).first()
+        if not exists:
+            cleaning_log_val = data.pop('cleaning_log', None)
+            flags_val = data.pop('suspect_flags', None)
+            session = TrainingSession(**data)
+            if cleaning_log_val:
+                session.cleaning_log = cleaning_log_val
+            if flags_val:
+                session.suspect_flags = flags_val
+            db.add(session)
+            db.commit()
+            logger.info("Удалённая тренировка от %s повторно импортирована (Deleted training re-imported)", bt)
+        Path(pending.get('path', '')).unlink(missing_ok=True)
+        return JSONResponse({'ok': True})
+    finally:
+        db.close()
 
 
 # Детальный просмотр тренировки (Training session detail page)
@@ -962,15 +1106,40 @@ async def settings_page():
                                 coros_password=pw_placeholder)
 
 
-# Удаление тренировки (Delete training session)
+# Удаление тренировки с сохранением метаданных (Delete training, save metadata for re-upload confirmation)
 @app.post('/session/{session_id}/delete')
 async def session_delete(session_id: int):
     db = SessionLocal()
     try:
         s = db.query(TrainingSession).filter(TrainingSession.id == session_id).first()
         if s:
+            segs = s.segments_json or []
+            # Средний темп из сегментов (Compute average pace from segments)
+            pace = None
+            if segs:
+                paces = [seg.get('pace_min_km') for seg in segs if seg.get('pace_min_km')]
+                if paces:
+                    pace = round(sum(paces) / len(paces), 2)
+            # Сохраняем метаданные тренировки перед удалением (Save training metadata before delete)
+            deleted = DeletedTraining(
+                begin_ts=s.begin_ts,
+                total_distance_km=s.total_distance_km,
+                avg_heart_rate=s.avg_heart_rate,
+                max_heart_rate=s.max_heart_rate,
+                training_type=s.training_type,
+                duration_minutes=s.duration_minutes,
+                avg_temperature=s.avg_temperature,
+                elevation_gain=s.elevation_gain,
+                avg_cadence=s.avg_cadence,
+                training_effect=s.training_effect,
+                vo2max=s.vo2max,
+                calories=s.calories,
+                avg_pace=pace,
+            )
+            db.add(deleted)
             db.delete(s)
             db.commit()
+            logger.info("Тренировка #%s удалена, метаданные сохранены (Session #%s deleted, metadata saved)", session_id, session_id)
     finally:
         db.close()
     return RedirectResponse(url='/', status_code=303)
@@ -1137,6 +1306,20 @@ async def coros_sync():
                     if data is None:
                         logger.warning("Не удалось распарсить FIT для %s", act['name'])
                         progress['errors'].append(f"{act['name']}: parse failed")
+                        os.unlink(tmp.name)
+                        continue
+
+                    # Проверка, не удалялась ли эта тренировка ранее (Skip if previously deleted)
+                    bt_sync = data.get('begin_ts')
+                    is_deleted = False
+                    if bt_sync:
+                        all_del = db.query(DeletedTraining).all()
+                        for d in all_del:
+                            if d.begin_ts and abs((d.begin_ts - bt_sync).total_seconds()) < 120:
+                                is_deleted = True
+                                logger.info("Пропуск ранее удалённой тренировки %s (%s) (Skipping previously deleted)", act['name'], bt_sync)
+                                break
+                    if is_deleted:
                         os.unlink(tmp.name)
                         continue
 

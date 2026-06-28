@@ -47,6 +47,25 @@ class UserSettings(Base):
     coros_password = Column(String(255), nullable=True)  # Пароль Coros (Coros account password)
     last_coros_sync = Column(DateTime, nullable=True)  # Дата последней синхронизации с Coros (Last Coros sync timestamp)
 
+# Модель удалённой тренировки (Deleted training model — used to ask confirmation on re-upload / повторный импорт)
+class DeletedTraining(Base):
+    __tablename__ = 'deleted_trainings'
+    id = Column(Integer, primary_key=True)
+    begin_ts = Column(DateTime, nullable=False)  # Начало тренировки (Training start time)
+    total_distance_km = Column(Float, nullable=True)  # Дистанция км (Distance in km)
+    avg_heart_rate = Column(Integer, nullable=True)  # Средний пульс (Average HR)
+    max_heart_rate = Column(Integer, nullable=True)  # Максимальный пульс (Max HR)
+    training_type = Column(String(50), nullable=True)  # Тип тренировки (Training type)
+    duration_minutes = Column(Float, nullable=True)  # Длительность мин (Duration in minutes)
+    avg_temperature = Column(Integer, nullable=True)  # Температура (Temperature)
+    elevation_gain = Column(Integer, nullable=True)  # Набор высоты (Elevation gain)
+    avg_cadence = Column(Integer, nullable=True)  # Каденс (Cadence)
+    training_effect = Column(Float, nullable=True)  # Тренировочный эффект (Training effect)
+    vo2max = Column(Float, nullable=True)  # VO2max
+    calories = Column(Integer, nullable=True)  # Калории (Calories)
+    avg_pace = Column(Float, nullable=True)  # Средний темп мин/км (Average pace min/km)
+    deleted_at = Column(DateTime, default=datetime.utcnow)  # Когда удалён (When deleted)
+
 # Модель измерения веса (Weight measurement model)
 class WeightMeasurement(Base):
     __tablename__ = 'weight_measurements'
