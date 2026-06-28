@@ -386,8 +386,8 @@ SESSION_HTML = '''
         body {{ font-family: sans-serif; max-width: 98%; margin: 20px 30px; line-height: 1.6; }}
         .card {{ border: 1px solid #ccc; padding: 20px; border-radius: 10px; background: #f9f9f9; margin-bottom: 20px; }}
         .info {{ display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr; gap: 10px; margin: 15px 0; }}
-        .info-item {{ background: white; padding: 10px; border-radius: 6px; text-align: center; }}
-        .info-item b {{ display: block; font-size: 20px; color: #4CAF50; }}
+        .info-item {{ background: white; padding: 8px; border-radius: 6px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 1px; }}
+        .info-item b {{ font-size: 20px; color: #4CAF50; font-weight: bold; }}
         table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
         th, td {{ padding: 8px; text-align: center; border-bottom: 1px solid #ddd; }}
         th {{ background: #4CAF50; color: white; }}
@@ -400,7 +400,8 @@ SESSION_HTML = '''
         .btn:hover {{ background: #45a049; }}
         .btn-danger {{ background: #e53935; }}
         .btn-danger:hover {{ background: #c62828; }}
-        .info-label {{ display: block; font-size: 12px; color: #666; margin-top: 2px; }}
+        .info-label {{ font-size: 13px; font-weight: bold; color: #444; }}
+        .info-unit {{ font-size: 12px; font-weight: bold; color: #666; }}
     </style>
 </head>
 <body>
@@ -411,13 +412,13 @@ SESSION_HTML = '''
 
     <div class='card'>
         <div class='info'>
-            <div class='info-item'><b>{dist}</b> км<span class='info-label'>Дистанция</span></div>
-            <div class='info-item'><b>{dur}</b><span class='info-label'>Общее время</span></div>
-            <div class='info-item'><b>{hr}</b> уд/мин<span class='info-label'>Пульс</span></div>
-            <div class='info-item'><b>{cadence}</b><span class='info-label'>Каденс</span></div>
-            <div class='info-item'><b>↑{elev_gain}</b> м<span class='info-label'>Подъем</span></div>
-            <div class='info-item'><b>↓{elev_loss}</b> м<span class='info-label'>Спуск</span></div>
-            <div class='info-item'><b>{cal}</b> ккал<span class='info-label'>Калории</span></div>
+            <div class='info-item'><span class='info-label'>Дистанция</span><b>{dist}</b><span class='info-unit'>км</span></div>
+            <div class='info-item'><span class='info-label'>Общее время</span><b>{dur}</b><span class='info-unit'></span></div>
+            <div class='info-item'><span class='info-label'>Пульс</span><b>{hr}</b><span class='info-unit'>уд/мин</span></div>
+            <div class='info-item'><span class='info-label'>Каденс</span><b>{cadence}</b><span class='info-unit'></span></div>
+            <div class='info-item'><span class='info-label'>Подъем</span><b>{elev_gain}</b><span class='info-unit'>м</span></div>
+            <div class='info-item'><span class='info-label'>Спуск</span><b>{elev_loss}</b><span class='info-unit'>м</span></div>
+            <div class='info-item'><span class='info-label'>Калории</span><b>{cal}</b><span class='info-unit'>ккал</span></div>
         </div>
 
         <h3>Пульс и темп</h3>
