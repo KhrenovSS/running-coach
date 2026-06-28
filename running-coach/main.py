@@ -148,7 +148,7 @@ def render_page():
         extra_str = cal_str
         rows += f"<tr onclick=\"window.location='/session/{s.id}'\" style='cursor:pointer'>"
         rows += f"<td>{warn} {t}</td><td>{dur}</td><td>{s.total_distance_km:.2f}</td><td>{s.avg_heart_rate}</td>"
-        rows += f"<td>{TRAINING_TYPES_RU.get(s.training_type, s.training_type)}</td><td>{s.segments_count}</td><td>{cad_str}</td><td>{extra_str}</td><td>{elev_str}</td></tr>"
+        rows += f"<td>{TRAINING_TYPES_RU.get(s.training_type, s.training_type)}</td><td>{s.segments_count}</td><td>{cad_str}</td><td>{elev_str}</td><td>{extra_str}</td></tr>"
 
     week_bars = render_zone_bars(week_stats['zone_min'], week_stats['total_min'], settings.max_hr) if week_stats else ""
     month_bars = render_zone_bars(month_stats['zone_min'], month_stats['total_min'], settings.max_hr) if month_stats else ""
@@ -179,7 +179,7 @@ MAIN_HTML = '''
     <style>
         body {{ font-family: sans-serif; max-width: 98%; margin: 20px 30px; line-height: 1.6; }}
         table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
-        th, td {{ padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }}
+        th, td {{ padding: 10px; text-align: center; border-bottom: 1px solid #ddd; }}
         th {{ background: #4CAF50; color: white; }}
         tr:hover {{ background: #f1f1f1; }}
         h2, h3 {{ color: #333; }}
@@ -374,7 +374,7 @@ MAIN_HTML = '''
     <h3>Последние 20 тренировок</h3>
     <table>
             <thead>
-                <tr><th>Дата</th><th>Длительность</th><th>Дист., км</th><th>Пульс, уд/мин</th><th>Тип</th><th>Сегм.</th><th>Каденс</th><th>Сожженные калории</th><th>Набор</th></tr>
+                <tr><th>Дата</th><th>Длительность</th><th>Дист., км</th><th>Пульс, уд/мин</th><th>Тип</th><th>Сегм.</th><th>Каденс</th><th>Набор</th><th>Энергозатраты, ккал</th></tr>
             </thead>
         <tbody>
             {rows}
