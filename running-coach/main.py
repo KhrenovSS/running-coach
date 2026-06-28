@@ -1059,6 +1059,7 @@ async def coros_sync():
     with _sync_tasks_lock:
         _sync_tasks[task_id] = progress
 
+    # Фоновая синхронизация Coros (Background Coros sync)
     def _run():
         db = SessionLocal()
         try:
@@ -1090,6 +1091,7 @@ async def coros_sync():
 
             # Фильтруем новые (не в БД)
             existing_times = {r[0] for r in db.query(TrainingSession.begin_ts).all()}
+            # Проверка, импортирована ли тренировка (с окном ±120 с) (Check if training already imported with ±120s window)
             def already_imported(ts):
                 for et in existing_times:
                     if et is not None and abs((et - ts).total_seconds()) < 120:

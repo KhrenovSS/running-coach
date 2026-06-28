@@ -29,18 +29,22 @@ SPORT_TYPE_RUNNING = 100
 SPORT_TYPE_TRAIL_RUNNING = 101
 SPORT_TYPES_RUN = {SPORT_TYPE_RUNNING, SPORT_TYPE_TRAIL_RUNNING}
 
+# Ошибка аутентификации Coros (Coros authentication error)
 class CorosAuthError(Exception):
     pass
 
+# Ошибка API Coros (Coros API error)
 class CorosAPIError(Exception):
     pass
 
+# Хэш пароля Coros: MD5 + bcrypt (Coros password hash: MD5 + bcrypt)
 def _coros_hash(password: str) -> tuple[str, str]:
     password_md5 = hashlib.md5(password.encode("utf-8")).hexdigest()
     salt = bcrypt.gensalt(rounds=10)
     hashed = bcrypt.hashpw(password_md5.encode("utf-8"), salt)
     return hashed.decode("utf-8"), salt.decode("utf-8")
 
+# Клиент для неофициального API Coros Training Hub (Coros Training Hub API client)
 class CorosClient:
     def __init__(self, email: str, password: str, timeout: int = 30):
         self.email = email
@@ -51,6 +55,7 @@ class CorosClient:
         self.accesstoken: Optional[str] = None
         self.user_id: Optional[str] = None
 
+    # Аутентификация на Coros API (Coros API authentication)
     def authenticate(self) -> bool:
         hashed, salt = _coros_hash(self.password)
         payload = {
@@ -73,12 +78,14 @@ class CorosClient:
         except requests.RequestException as e:
             raise CorosAuthError(f"Network error: {e}") from e
 
+    # Заголовки авторизации для API-запросов (Authorization headers for API requests)
     def _auth_headers(self) -> dict:
         return {
             "accesstoken": self.accesstoken,
             "yfheader": f'{{"userId":"{self.user_id}"}}',
         }
 
+    # Получить список активностей с пагинацией (Get activity list with pagination)
     def list_activities(self, limit: int = 50, since: Optional[datetime] = None) -> list[dict]:
         if not self.accesstoken:
             raise CorosAPIError("Not authenticated")
@@ -123,6 +130,7 @@ class CorosClient:
             })
         return activities
 
+    # Скачать FIT-файл активности (Download activity FIT file)
     def download_fit(self, activity_id: str, sport_type: int, output_path: str) -> bool:
         if not self.accesstoken:
             raise CorosAPIError("Not authenticated")

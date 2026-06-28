@@ -8,6 +8,7 @@ LOG_FILE = os.path.join(LOG_DIR, "app.log")
 
 _loggers = {}
 
+# Получить или создать логгер с ротацией файлов (Get or create a logger with file rotation)
 def get_logger(name: str) -> logging.Logger:
     if name in _loggers:
         return _loggers[name]

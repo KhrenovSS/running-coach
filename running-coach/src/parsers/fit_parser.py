@@ -2,8 +2,10 @@ import fitdecode
 from datetime import datetime
 from .common import process_trackpoints
 
+# Константа для конвертации полуокружностей в градусы (Semicircles to degrees)
 SEMICIRCLE_TO_DEG = 180.0 / 2**31
 
+# Парсинг FIT-файла (FIT file parsing)
 def parse_fit(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130):
     trackpoints = []
     start_time_utc = None
@@ -13,6 +15,7 @@ def parse_fit(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0
         for frame in fit:
             if frame.frame_type != fitdecode.FIT_FRAME_DATA:
                 continue
+            # Обработка record-сообщений (трэкпоинты) (Parse record messages — trackpoints)
             if frame.name == 'record':
                 data = {f.name: f.value for f in frame.fields}
                 t = data.get('timestamp')
@@ -30,6 +33,7 @@ def parse_fit(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0
                     lat = data['position_lat'] * SEMICIRCLE_TO_DEG
                 if 'position_long' in data and data['position_long'] is not None:
                     lon = data['position_long'] * SEMICIRCLE_TO_DEG
+                # Расчёт дистанции через скорость, если distance отсутствует (Calculate distance from speed if missing)
                 if dist is None:
                     speed = data.get('enhanced_speed') or data.get('speed')
                     if speed is not None and trackpoints:
@@ -41,6 +45,7 @@ def parse_fit(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0
                     'time': t, 'hr': hr, 'dist': dist,
                     'alt': alt, 'lat': lat, 'lon': lon, 'cad': cad,
                 })
+            # Обработка session-сообщений (калории) (Parse session messages — calories)
             elif frame.name == 'session':
                 sdata = {f.name: f.value for f in frame.fields}
                 cal = sdata.get('total_calories')

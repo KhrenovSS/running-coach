@@ -6,10 +6,12 @@ KEY_ENV_VAR = 'COROS_CRED_KEY'
 _fernet_cache = None
 
 
+# Путь к .env файлу (Path to .env file)
 def _get_env_path():
     return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '.env')
 
 
+# Прочитать ключ из .env файла (Read key from .env file)
 def _read_key_from_env_file():
     env_path = _get_env_path()
     if not os.path.exists(env_path):
@@ -23,6 +25,7 @@ def _read_key_from_env_file():
     return key
 
 
+# Получить Fernet-экземпляр (кэшируется после первого вызова) (Get Fernet instance, cached after first call)
 def _get_fernet():
     global _fernet_cache
     if _fernet_cache is not None:
@@ -43,12 +46,14 @@ def _get_fernet():
     return _fernet_cache
 
 
+# Зашифровать строку (Encrypt a string)
 def encrypt(plaintext: str) -> str:
     if not plaintext:
         return ''
     return _get_fernet().encrypt(plaintext.encode()).decode()
 
 
+# Расшифровать строку (Decrypt a string)
 def decrypt(ciphertext: str) -> str:
     if not ciphertext:
         return ''

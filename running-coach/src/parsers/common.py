@@ -641,6 +641,7 @@ def process_trackpoints(trackpoints, start_time_utc, max_hr=177,
         weather = fetch_weather(center_lat, center_lon, date_str)
         if weather:
             ref_tz = ZoneInfo(tz_name) if tz_name else None
+            # Добавить часовой пояс к наивному datetime (Add timezone to naive datetime)
             def aware(dt_naive):
                 return dt_naive.replace(tzinfo=ref_tz) if ref_tz else dt_naive
             avg_temperature = get_temp_at_time(weather, aware(begin_ts))
