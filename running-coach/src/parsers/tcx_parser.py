@@ -6,7 +6,10 @@ from timezonefinder import TimezoneFinder
 import requests
 
 # Пространство имён Garmin TCX (Garmin TCX XML namespace)
-NS = {'tcx': 'http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2'}
+NS = {
+    'tcx': 'http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2',
+    'tpx': 'http://www.garmin.com/xmlschemas/ActivityExtension/v2',
+}
 
 # Глобальные переменные: поиск часового пояса и кэш погоды (Globals: timezone finder and weather cache)
 _tf = TimezoneFinder()
@@ -268,13 +271,16 @@ def parse_tcx(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0
         alt_str = tp.findtext('tcx:AltitudeMeters', namespaces=NS)
         lat_str = tp.findtext('tcx:Position/tcx:LatitudeDegrees', namespaces=NS)
         lon_str = tp.findtext('tcx:Position/tcx:LongitudeDegrees', namespaces=NS)
+        # Парсинг каденса из секции Extensions/TPX (Parse cadence from Extensions/TPX)
+        cad_str = tp.findtext('tcx:Extensions/tpx:RunCadence', namespaces=NS)
         t = datetime.fromisoformat(time_str.replace('Z', '+00:00')) if time_str else None
         hr = int(hr_str) if hr_str else None
         dist = float(dist_str) if dist_str else None
         alt = float(alt_str) if alt_str else None
         lat = float(lat_str) if lat_str else None
         lon = float(lon_str) if lon_str else None
-        trackpoints.append({'time': t, 'hr': hr, 'dist': dist, 'alt': alt, 'lat': lat, 'lon': lon})
+        cad = int(float(cad_str)) if cad_str else None
+        trackpoints.append({'time': t, 'hr': hr, 'dist': dist, 'alt': alt, 'lat': lat, 'lon': lon, 'cad': cad})
 
     # Минимум 2 trackpoint для анализа (Minimum 2 trackpoints required)
     if len(trackpoints) < 2:
@@ -301,6 +307,7 @@ def parse_tcx(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0
             'weather_code': None,
             'elevation_gain': 0,
             'elevation_loss': 0,
+            'avg_cadence': None,
             'cleaning_log': cleaning_log,
         }
 
@@ -347,6 +354,7 @@ def parse_tcx(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0
             'weather_code': None,
             'elevation_gain': 0,
             'elevation_loss': 0,
+            'avg_cadence': None,
             'cleaning_log': cleaning_log,
         }
 
@@ -515,6 +523,7 @@ def parse_tcx(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0
                 sub_dur = 0.0
                 sub_dist = 0.0
                 sub_hrs = []
+                sub_cads = []
                 sub_alts = []
                 prev_tp = sub_chunk[0]
                 for tp in sub_chunk[1:]:
@@ -527,6 +536,8 @@ def parse_tcx(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0
                     sub_dist += d_dist
                     if prev_tp['hr'] is not None:
                         sub_hrs.append((prev_tp['hr'], d_delta))
+                    if prev_tp['cad'] is not None:
+                        sub_cads.append((prev_tp['cad'], d_delta))
                     if prev_tp['alt'] is not None:
                         sub_alts.append(prev_tp['alt'])
                     if tp['alt'] is not None:
@@ -539,6 +550,7 @@ def parse_tcx(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0
                 avg_hr_seg = round(sum(h * d for h, d in sub_hrs) / total_hr_weight) if total_hr_weight > 0 else 0
                 pace_val = sub_dur / sub_dist_km if sub_dist_km > 0 else None
                 elev_gain, elev_loss = calc_elevation(sub_alts) if sub_alts else (None, None)
+                avg_cad_seg = round(sum(c * d for c, d in sub_cads) / sum(d for _, d in sub_cads)) if sub_cads else None
                 segments.append({
                     'duration_min': round(sub_dur, 1),
                     'duration': format_duration(sub_dur),
@@ -546,6 +558,7 @@ def parse_tcx(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0
                     'avg_hr': avg_hr_seg,
                     'pace': format_pace(pace_val) if pace_val else None,
                     'pace_min_km': round(pace_val, 2) if pace_val else None,
+                    'avg_cadence': avg_cad_seg,
                     'zone': get_zone(avg_hr_seg, max_hr),
                     'band': get_band(avg_hr_seg, max_hr),
                     'elevation_gain': elev_gain,
@@ -691,6 +704,10 @@ def parse_tcx(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0
                 seg['weather_code'] = get_weather_code_at_time(weather, aware(seg_dt))
                 cumul_min += seg['duration_min']
 
+    # Средний каденс за тренировку (Average cadence for the session)
+    all_cads = [tp['cad'] for tp in trackpoints if tp['cad'] is not None]
+    avg_cadence = round(sum(all_cads) / len(all_cads)) if all_cads else None
+
     # Формирование результата (Build result dict)
     result = {
         'begin_ts': begin_ts,
@@ -706,6 +723,7 @@ def parse_tcx(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0
         'weather_code': weather_code,
         'elevation_gain': total_elevation_gain,
         'elevation_loss': total_elevation_loss,
+        'avg_cadence': avg_cadence,
     }
 
     # Добавление лога очистки и флагов подозрительности (Add cleaning log and suspicion flags)
