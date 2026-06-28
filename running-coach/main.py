@@ -1,14 +1,19 @@
 # Импорт FastAPI и компонентов (FastAPI and component imports)
+from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from src.models import SessionLocal, TrainingSession, WeightMeasurement, get_settings
 from src.parsers.tcx_parser import parse_tcx
 from src.parsers.fit_parser import parse_fit
 from src.parsers.common import weather_icon
+from src.logger import get_logger
+logger = get_logger("app")
 import shutil
 import os
 import tempfile
 import uuid
+import threading
+import time
 from pathlib import Path
 
 # Создание экземпляра FastAPI (Create FastAPI app instance)
@@ -19,6 +24,8 @@ os.makedirs("uploads", exist_ok=True)
 PENDING_DIR = Path("/tmp/opencode/uploads")
 PENDING_DIR.mkdir(parents=True, exist_ok=True)
 _pending = {}  # temp_id -> dict with 'path', 'filename', 'data'
+_sync_tasks = {}  # task_id -> dict with progress info
+_sync_tasks_lock = threading.Lock()
 
 # Словарь типов тренировок на русском (Training type labels in Russian)
 TRAINING_TYPES_RU = {
@@ -99,8 +106,66 @@ def render_type_row(type_count):
             parts.append(f"{label}: {c}")
     return ", ".join(parts) if parts else "—"
 
+# Названия месяцев (Month names in Russian)
+MONTHS_RU = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+             'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
+MONTHS_RU_SHORT = ['', 'Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн',
+                   'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
+
+# Построить навигацию по годам/месяцам (Build year/month navigation)
+def build_nav_html(all_sessions, sel_year, sel_month):
+    # Собираем уникальные (год, месяц) из всех тренировок
+    years = {}
+    for s in all_sessions:
+        if s.begin_ts is None:
+            continue
+        y, m = s.begin_ts.year, s.begin_ts.month
+        if y not in years:
+            years[y] = set()
+        years[y].add(m)
+
+    if not years:
+        return ""
+
+    sorted_years = sorted(years.keys(), reverse=True)
+
+    # Если год/месяц не указаны — выбираем последний месяц с данными
+    if sel_year is None or sel_year not in years:
+        sel_year = sorted_years[0]
+    if sel_month is None or sel_month not in years[sel_year]:
+        sel_month = max(years[sel_year])
+
+    html = '<div class="ym-nav">'
+
+    # Строка годов (Year row)
+    html += '<div class="year-row">'
+    for y in sorted_years:
+        cls = 'ym-pill active-year' if y == sel_year else 'ym-pill'
+        html += f'<a href="/?year={y}" class="{cls}">{y}</a>'
+    html += '</div>'
+
+    # Строка месяцев (Month row)
+    html += '<div class="month-row">'
+    for m in sorted(years[sel_year]):
+        cls = 'ym-pill active-month' if m == sel_month else 'ym-pill'
+        html += f'<a href="/?year={sel_year}&month={m}" class="{cls}">{MONTHS_RU_SHORT[m]}</a>'
+    html += '</div>'
+
+    # Заголовок (Title)
+    if sel_year and sel_month:
+        title = f'Тренировки за {MONTHS_RU[sel_month]} {sel_year}'
+    elif sel_year:
+        title = f'Тренировки за {sel_year} год'
+    else:
+        title = 'Все тренировки'
+    html += f'<div class="ym-title">{title}</div>'
+    html += '</div>'
+
+    return html, sel_year, sel_month
+
+
 # Основная функция рендеринга главной страницы (Main page render function)
-def render_page():
+def render_page(year=None, month=None):
     db = SessionLocal()
     all_sessions = db.query(TrainingSession).order_by(TrainingSession.begin_ts.desc()).all()
     settings = get_settings()
@@ -124,8 +189,23 @@ def render_page():
         week_stats = calc_stats(week_sessions)
         month_stats = calc_stats(month_sessions)
 
+    # Навигация (Navigation)
+    nav_html = ""
+    sel_year, sel_month = year, month
+    if all_sessions:
+        nav_result = build_nav_html(all_sessions, sel_year, sel_month)
+        if nav_result:
+            nav_html, sel_year, sel_month = nav_result
+
+    # Фильтруем или показываем последние 20 (Filter or show latest 20)
+    if sel_year and sel_month:
+        filtered = [s for s in all_sessions
+                    if s.begin_ts and s.begin_ts.year == sel_year and s.begin_ts.month == sel_month]
+    else:
+        filtered = all_sessions[:20]
+
     rows = ""
-    for s in all_sessions[:20]:
+    for s in filtered:
         t = s.begin_ts.strftime("%d.%m.%Y %H:%M") if s.begin_ts else ""
         dur = fmt_duration(s.duration_minutes)
         eg = s.elevation_gain
@@ -148,7 +228,10 @@ def render_page():
         extra_str = cal_str
         rows += f"<tr onclick=\"window.location='/session/{s.id}'\" style='cursor:pointer'>"
         rows += f"<td>{warn} {t}</td><td>{dur}</td><td>{s.total_distance_km:.2f}</td><td>{s.avg_heart_rate}</td>"
-        rows += f"<td>{TRAINING_TYPES_RU.get(s.training_type, s.training_type)}</td><td>{s.segments_count}</td><td>{cad_str}</td><td>{elev_str}</td><td>{extra_str}</td></tr>"
+        rows += f"<td>{TRAINING_TYPES_RU.get(s.training_type, s.training_type)}</td><td>{cad_str}</td><td>{elev_str}</td><td>{extra_str}</td></tr>"
+
+    if not rows:
+        rows = "<tr><td colspan='8' style='color:#888;padding:30px;'>Нет тренировок за выбранный период</td></tr>"
 
     week_bars = render_zone_bars(week_stats['zone_min'], week_stats['total_min'], settings.max_hr) if week_stats else ""
     month_bars = render_zone_bars(month_stats['zone_min'], month_stats['total_min'], settings.max_hr) if month_stats else ""
@@ -156,7 +239,7 @@ def render_page():
     month_types = render_type_row(month_stats['type_count']) if month_stats else ""
 
     return MAIN_HTML.format(
-        rows=rows, max_hr=settings.max_hr, weight=settings.weight,
+        rows=rows, nav_html=nav_html, max_hr=settings.max_hr, weight=settings.weight,
         week_km=week_stats['total_km'] if week_stats else 0,
         week_dur=week_stats['total_dur'] if week_stats else "",
         week_bars=week_bars,
@@ -197,6 +280,17 @@ MAIN_HTML = '''
         .overlay.active {{ display: flex; }}
         .spinner {{ border: 4px solid #e0e0e0; border-top: 4px solid #4CAF50; border-radius: 50%; width: 40px; height: 40px; animation: spin 0.8s linear infinite; }}
         @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
+        .sync-status {{ padding: 6px 10px; border-radius: 4px; margin-top: 6px; font-size: 13px; }}
+        .sync-ok {{ background: #e8f5e9; color: #2e7d32; }}
+        .sync-error {{ background: #ffebee; color: #c62828; }}
+        .ym-nav {{ margin: 10px 0; }}
+        .year-row, .month-row {{ display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }}
+        .ym-pill {{ display: inline-block; padding: 4px 12px; border-radius: 14px; font-size: 13px;
+                    text-decoration: none; color: #555; background: #f0f0f0; border: 1px solid #ddd; }}
+        .ym-pill:hover {{ background: #e0e0e0; }}
+        .active-year {{ background: #4CAF50; color: white; border-color: #4CAF50; }}
+        .active-month {{ background: #2196F3; color: white; border-color: #2196F3; }}
+        .ym-title {{ font-size: 14px; color: #666; margin-bottom: 8px; font-weight: bold; }}
     </style>
 </head>
 <body>
@@ -208,6 +302,14 @@ MAIN_HTML = '''
             <div id='progressBar' style='width:0%;background:#4CAF50;border-radius:6px;height:10px;transition:width 0.3s;'></div>
         </div>
     </div>
+    <div class='overlay' id='syncOverlay'>
+        <div class='spinner'></div>
+        <p style='margin-top:16px;font-size:18px;color:#333;' id='syncStatusText'>Синхронизация Coros…</p>
+        <p id='syncProgressText' style='margin-top:8px;font-size:15px;color:#555;'></p>
+        <div style='margin-top:12px;width:300px;background:#e0e0e0;border-radius:6px;height:10px;overflow:hidden;'>
+            <div id='syncProgressBar' style='width:0%;background:#2196F3;border-radius:6px;height:10px;transition:width 0.3s;'></div>
+        </div>
+    </div>
 
     <h2>🏃 AI Running Coach</h2>
 
@@ -215,8 +317,10 @@ MAIN_HTML = '''
         <span><b>ЧССмакс:</b> {max_hr} уд/мин</span>
         <span id='weightToggle' style='cursor:pointer' onclick='toggleWeightChart()'><b>Вес:</b> {weight} кг ▾</span>
         <input type='file' name='files' accept='.tcx,.fit' multiple id='fileInput' style='display:none'>
-        <button type='button' class='btn' onclick='document.getElementById("fileInput").click()' style='margin-left:auto'>&#128206; Загрузить TCX/FIT</button>
+        <button type='button' class='btn' onclick='document.getElementById("fileInput").click()'>&#128206; Загрузить TCX/FIT</button>
+        <button type='button' class='btn' id='corosSyncBtn' style='background:#2196F3'>🔄 Coros Sync</button>
         <a href='/settings' class='btn'>⚙️ Настройки</a>
+        <div id='corosSyncStatus' style='width:100%;margin-top:6px;font-size:13px;'></div>
     </div>
     <div id='weightChartContainer' style='display:none; margin-bottom:15px'>
         <div class='stats-card'>
@@ -236,7 +340,6 @@ MAIN_HTML = '''
         const files = Array.from(this.files);
         const total = files.length;
         let processed = 0;
-        let allProblems = [];
         let allSaved = 0;
 
         const overlay = document.getElementById('uploadOverlay');
@@ -258,9 +361,6 @@ MAIN_HTML = '''
                     continue;
                 }}
                 allSaved += j.saved || 0;
-                if (j.problems && j.problems.length) {{
-                    allProblems = allProblems.concat(j.problems);
-                }}
             }} catch (e) {{
                 // ignore network errors for individual files
             }}
@@ -270,21 +370,6 @@ MAIN_HTML = '''
             progressBar.style.width = pct + '%';
         }}
 
-        if (allProblems.length) {{
-            let msg = '';
-            if (allSaved) msg += '✅ Сохранено: ' + allSaved + '\\n';
-            for (const p of allProblems) {{
-                const log = p.cleaning_log || [];
-                const reasons = log.map(e => (e.reason || []).join(', ')).filter(Boolean).join('; ') || 'все данные удалены';
-                msg += '❌ ' + p.filename + ': ' + reasons + '\\n';
-            }}
-            msg += '\\nДобавить проблемные тренировки?';
-            if (confirm(msg)) {{
-                const f2 = new FormData();
-                for (const p of allProblems) f2.append('temp_ids', p.temp_id);
-                await fetch('/upload/confirm', {{ method: 'POST', body: f2 }});
-            }}
-        }}
         window.location.href = '/';
     }});
     </script>
@@ -371,10 +456,80 @@ MAIN_HTML = '''
     }}
     </script>
 
-    <h3>Последние 20 тренировок</h3>
+    <script>
+    async function syncCoros() {{
+        const btn = document.getElementById('corosSyncBtn');
+        const statusDiv = document.getElementById('corosSyncStatus');
+        const overlay = document.getElementById('syncOverlay');
+        const statusText = document.getElementById('syncStatusText');
+        const progressText = document.getElementById('syncProgressText');
+        const progressBar = document.getElementById('syncProgressBar');
+        btn.disabled = true;
+        btn.textContent = '🔄 Синхронизация…';
+        statusDiv.className = 'sync-status';
+        statusDiv.textContent = 'Запуск...';
+        overlay.classList.add('active');
+        statusText.textContent = 'Подключение к Coros...';
+        progressText.textContent = '';
+        progressBar.style.width = '0%';
+        try {{
+            const resp = await fetch('/coros/sync', {{ method: 'POST' }});
+            const j = await resp.json();
+            if (j.status !== 'started') {{
+                overlay.classList.remove('active');
+                statusDiv.className = 'sync-status sync-error';
+                statusDiv.textContent = '❌ ' + (j.message || 'Ошибка запуска');
+                btn.disabled = false;
+                btn.textContent = '🔄 Coros Sync';
+                return;
+            }}
+            const taskId = j.task_id;
+            let done = false;
+            while (!done) {{
+                await new Promise(r => setTimeout(r, 800));
+                const sr = await fetch('/coros/sync/status/' + taskId);
+                const sp = await sr.json();
+                statusText.textContent = sp.message || '';
+                if (sp.total > 0) {{
+                    const pct = Math.round(sp.current / sp.total * 100);
+                    progressText.textContent = sp.current + ' из ' + sp.total;
+                    progressBar.style.width = pct + '%';
+                }}
+                if (sp.step === 'done' || sp.step === 'error') {{
+                    done = true;
+                    overlay.classList.remove('active');
+                    if (sp.step === 'error') {{
+                        statusDiv.className = 'sync-status sync-error';
+                        statusDiv.textContent = '❌ ' + (sp.message || 'Ошибка');
+                    }} else if (sp.synced > 0) {{
+                        statusDiv.className = 'sync-status sync-ok';
+                        statusDiv.textContent = '✅ Синхронизировано: ' + sp.synced;
+                        if (sp.total_found) statusDiv.textContent += ' (найдено ' + sp.total_found + ')';
+                        window.location.href = '/';
+                    }} else {{
+                        statusDiv.className = 'sync-status sync-ok';
+                        statusDiv.textContent = '✅ ' + (sp.message || 'Новых тренировок нет');
+                        setTimeout(() => {{ statusDiv.textContent = ''; }}, 5000);
+                    }}
+                }}
+            }}
+        }} catch (e) {{
+            overlay.classList.remove('active');
+            statusDiv.className = 'sync-status sync-error';
+            statusDiv.textContent = '❌ ' + e.message;
+        }} finally {{
+            btn.disabled = false;
+            btn.textContent = '🔄 Coros Sync';
+        }}
+    }}
+
+    document.getElementById('corosSyncBtn').addEventListener('click', syncCoros);
+    </script>
+
+    {nav_html}
     <table>
             <thead>
-                <tr><th>Дата</th><th>Длительность</th><th>Дист., км</th><th>Пульс, уд/мин</th><th>Тип</th><th>Сегм.</th><th>Каденс</th><th>Набор</th><th>Энергозатраты, ккал</th></tr>
+                <tr><th>Дата</th><th>Длительность</th><th>Дист., км</th><th>Пульс, уд/мин</th><th>Тип</th><th>Каденс</th><th>Набор</th><th>Энергозатраты, ккал</th></tr>
             </thead>
         <tbody>
             {rows}
@@ -526,6 +681,13 @@ SETTINGS_PAGE = '''
             <input type='number' name='max_gps_jump_m' value='{max_gps_jump_m}' min='10' max='500' step='10'>
             <label><b>Мин. пульс для быстрого темпа:</b> если пульс ниже, а темп быстрее — ошибка</label>
             <input type='number' name='min_hr_for_fast_pace' value='{min_hr_for_fast_pace}' min='90' max='180'>
+            <hr>
+            <h4>Синхронизация Coros (Coros sync)</h4>
+            <label><b>Email Coros Training Hub:</b></label>
+            <input type='email' name='coros_email' value='{coros_email}' style='width:250px;padding:6px;font-size:14px'>
+            <label><b>Пароль Coros:</b></label>
+            <input type='password' name='coros_password' value='{coros_password}' style='width:250px;padding:6px;font-size:14px'>
+            <div style='font-size:12px;color:#888;margin-top:4px'>Пароль хранится локально в БД. Используется только для связи с Coros API.</div>
             <br><br>
             <button type='submit' class='btn'>Сохранить</button>
             <a href='/' class='btn' style='background:#888;'>&larr; Назад</a>
@@ -577,6 +739,9 @@ def startup():
                 'max_credible_pace': 'FLOAT DEFAULT 3.0',
                 'max_gps_jump_m': 'FLOAT DEFAULT 100.0',
                 'min_hr_for_fast_pace': 'INTEGER DEFAULT 130',
+                'coros_email': 'VARCHAR(255)',
+                'coros_password': 'VARCHAR(255)',
+                'last_coros_sync': 'DATETIME',
             }
             for col, col_type in settings_cols.items():
                 try:
@@ -603,8 +768,8 @@ def startup():
 
 # Главная страница: список тренировок и статистика (Main page: session list and stats)
 @app.get('/', response_class=HTMLResponse)
-async def index():
-    return render_page()
+async def index(year: Optional[int] = None, month: Optional[int] = None):
+    return render_page(year=year, month=month)
 
 
 # Загрузка TCX-файлов (TCX file upload endpoint)
@@ -632,28 +797,12 @@ async def upload_files(files: list[UploadFile] = File(...)):
                                  max_gps_jump_m=settings.max_gps_jump_m,
                                  min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
             if data is None:
+                logger.warning("Загрузка: не удалось распарсить %s (Upload: parse failed)", file.filename)
                 os.unlink(tmp_path)
                 continue
             cleaning_log = data.get('cleaning_log', [])
-            # Сомнительная: очищено много точек, осталось <1 км (Problematic: heavily cleaned, <1 km left)
-            is_problematic = (
-                data.get('training_type') == 'invalid'
-                or (cleaning_log and (data.get('total_distance_km') or 0) < 1.0)
-            )
-            if is_problematic:
-                temp_id = str(uuid.uuid4())
-                dest = PENDING_DIR / f"{temp_id}.tcx"
-                shutil.move(tmp_path, str(dest))
-                _pending[temp_id] = {
-                    'path': str(dest), 'filename': file.filename or 'unknown',
-                    'data': data, 'settings': settings,
-                }
-                problems.append({
-                    'temp_id': temp_id, 'filename': file.filename or 'unknown',
-                    'cleaning_log': cleaning_log,
-                })
-                continue
-            # Сохраняем хорошую тренировку (Save valid training)
+            # Сомнительные тренировки тоже сохраняем сразу (Save problematic sessions directly)
+            # Сохраняем тренировку (Save training)
             exists = db.query(TrainingSession).filter(
                 TrainingSession.begin_ts == data['begin_ts']
             ).first()
@@ -671,7 +820,7 @@ async def upload_files(files: list[UploadFile] = File(...)):
             os.unlink(tmp_path)
     finally:
         db.close()
-    return JSONResponse({'problems': problems, 'saved': saved})
+    return JSONResponse({'saved': saved})
 
 
 # Подтверждение сомнительных тренировок (Confirm problematic uploads)
@@ -806,7 +955,9 @@ async def settings_page():
     return SETTINGS_PAGE.format(max_hr=m, weight=settings.weight, z1=z1, z2=z2, z3=z3, z4=z4, z5=z5,
                                 max_credible_pace=settings.max_credible_pace,
                                 max_gps_jump_m=settings.max_gps_jump_m,
-                                min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
+                                min_hr_for_fast_pace=settings.min_hr_for_fast_pace,
+                                coros_email=settings.coros_email or '',
+                                coros_password=settings.coros_password or '')
 
 
 # Удаление тренировки (Delete training session)
@@ -828,7 +979,9 @@ async def session_delete(session_id: int):
 async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
                         max_credible_pace: float = Form(3.0),
                         max_gps_jump_m: float = Form(100.0),
-                        min_hr_for_fast_pace: int = Form(130)):
+                        min_hr_for_fast_pace: int = Form(130),
+                        coros_email: str = Form(''),
+                        coros_password: str = Form('')):
     from src.models import UserSettings
     from datetime import datetime
     db = SessionLocal()
@@ -841,6 +994,8 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
             s.max_credible_pace = max_credible_pace
             s.max_gps_jump_m = max_gps_jump_m
             s.min_hr_for_fast_pace = min_hr_for_fast_pace
+            s.coros_email = coros_email or None
+            s.coros_password = coros_password or None
             if weight != old_weight:
                 wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.utcnow())
                 db.add(wm)
@@ -848,3 +1003,202 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
     finally:
         db.close()
     return RedirectResponse(url='/', status_code=303)
+
+
+# Просмотр лога операций (View operation log)
+@app.get('/logs')
+async def view_logs(lines: int = 100):
+    log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.log")
+    if not os.path.exists(log_path):
+        return HTMLResponse("<html><body><h2>Лог пуст</h2></body></html>")
+    with open(log_path, "r", encoding="utf-8") as f:
+        all_lines = f.readlines()
+    tail = all_lines[-lines:]
+    html = "<html><head><meta charset='utf-8'><title>Лог операций</title>"
+    html += "<style>body{font-family:monospace;font-size:13px;background:#1e1e1e;color:#d4d4d4;padding:20px}"
+    html += ".INFO{color:#4ec9b0}.WARNING{color:#ce9178}.ERROR{color:#f44747}.DEBUG{color:#808080}"
+    html += "a{color:#569cd6;text-decoration:none;margin-right:10px}</style></head><body>"
+    html += "<h2>📋 Лог операций</h2>"
+    html += f"<p>Последние {len(tail)} строк (<a href='/logs?lines=50'>50</a> "
+    html += f"<a href='/logs?lines=200'>200</a> <a href='/logs?lines=1000'>все</a>)</p>"
+    html += "<pre>"
+    for line in tail:
+        level = "INFO" if " [INFO] " in line else ("WARNING" if " [WARNING] " in line else
+                ("ERROR" if " [ERROR] " in line else "DEBUG"))
+        html += f"<span class='{level}'>{line.strip()}</span>\n"
+    html += "</pre></body></html>"
+    return HTMLResponse(html)
+
+
+# Синхронизация тренировок с Coros — запуск в фоне (Coros sync — background task)
+@app.post('/coros/sync')
+async def coros_sync():
+    from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
+    from src.parsers.fit_parser import parse_fit
+    from src.models import UserSettings
+    import tempfile
+
+    db = SessionLocal()
+    try:
+        us = db.query(UserSettings).first()
+        if not us or not us.coros_email or not us.coros_password:
+            return JSONResponse({'status': 'error', 'message': 'Coros credentials not configured.'})
+    finally:
+        db.close()
+
+    task_id = str(uuid.uuid4())
+    progress = {
+        'task_id': task_id, 'step': 'queued', 'message': 'В очереди...',
+        'total': 0, 'current': 0, 'synced': 0, 'errors': [], 'total_found': 0, 'done': False,
+    }
+    with _sync_tasks_lock:
+        _sync_tasks[task_id] = progress
+
+    def _run():
+        db = SessionLocal()
+        try:
+            us = db.query(UserSettings).first()
+            progress['step'] = 'auth'
+            progress['message'] = 'Подключение к Coros...'
+            logger.info("Запуск синхронизации Coros (Coros sync started)")
+            client = CorosClient(us.coros_email, us.coros_password, timeout=15)
+            client.authenticate()
+            logger.info("Аутентификация Coros пройдена (Coros auth successful)")
+
+            progress['step'] = 'fetch'
+            progress['message'] = 'Получение списка активностей...'
+            activities = client.list_activities(limit=50, since=None)
+            progress['total_found'] = len(activities)
+            logger.info("Получено активностей из Coros: %d", len(activities))
+
+            if not activities:
+                progress['step'] = 'done'
+                progress['message'] = 'Нет новых беговых активностей'
+                progress['done'] = True
+                logger.info("Синхронизация Coros: нет беговых активностей")
+                return
+
+            # Фильтруем новые (не в БД)
+            existing_times = {r[0] for r in db.query(TrainingSession.begin_ts).all()}
+            def already_imported(ts):
+                for et in existing_times:
+                    if et is not None and abs((et - ts).total_seconds()) < 120:
+                        return True
+                return False
+
+            new_acts = [a for a in activities if not already_imported(a['start_time'])]
+            if not new_acts:
+                progress['step'] = 'done'
+                progress['message'] = 'Все активности уже импортированы'
+                progress['total'] = 0
+                progress['done'] = True
+                logger.info("Синхронизация Coros: все активности уже в БД")
+                return
+
+            progress['total'] = len(new_acts)
+            synced = 0
+            max_act_ts = us.last_coros_sync
+            latest_ts = us.last_coros_sync
+
+            for i, act in enumerate(new_acts):
+                progress['step'] = 'download'
+                progress['current'] = i + 1
+                progress['message'] = f'Скачивание {i+1}/{len(new_acts)}: {act["name"]}'
+                logger.info("Загрузка новой активности: %s (%s)", act['name'], act['start_time'])
+
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.fit')
+                tmp.close()
+                try:
+                    ok = client.download_fit(act['id'], act['sport_type'], tmp.name)
+                    if not ok:
+                        logger.warning("Не удалось скачать FIT для %s", act['name'])
+                        progress['errors'].append(f"{act['name']}: download failed")
+                        os.unlink(tmp.name)
+                        continue
+
+                    progress['step'] = 'parse'
+                    progress['message'] = f'Обработка {i+1}/{len(new_acts)}: {act["name"]}'
+                    data = parse_fit(tmp.name, max_hr=us.max_hr,
+                                     max_credible_pace=us.max_credible_pace,
+                                     max_gps_jump_m=us.max_gps_jump_m,
+                                     min_hr_for_fast_pace=us.min_hr_for_fast_pace)
+                    if data is None:
+                        logger.warning("Не удалось распарсить FIT для %s", act['name'])
+                        progress['errors'].append(f"{act['name']}: parse failed")
+                        os.unlink(tmp.name)
+                        continue
+
+                    cleaning_log = data.pop('cleaning_log', None)
+                    flags_val = data.pop('suspect_flags', None)
+                    if data.get('training_type') in ('invalid', None):
+                        logger.warning("Некорректные данные для %s", act['name'])
+                        progress['errors'].append(f"{act['name']}: invalid data")
+                        os.unlink(tmp.name)
+                        continue
+
+                    session = TrainingSession(**data)
+                    if cleaning_log:
+                        session.cleaning_log = cleaning_log
+                    if flags_val:
+                        session.suspect_flags = flags_val
+                    db.add(session)
+                    db.commit()
+                    synced += 1
+                    progress['synced'] = synced
+                    logger.info("Активность сохранена: %s (%s)", act['name'], act['start_time'])
+                    if latest_ts is None or act['start_time'] > latest_ts:
+                        latest_ts = act['start_time']
+                except Exception as e:
+                    logger.exception("Ошибка при обработке %s", act['name'])
+                    progress['errors'].append(f"{act['name']}: {str(e)}")
+                finally:
+                    if os.path.exists(tmp.name):
+                        os.unlink(tmp.name)
+                if max_act_ts is None or act['start_time'] > max_act_ts:
+                    max_act_ts = act['start_time']
+
+            if max_act_ts is not None and (us.last_coros_sync is None or max_act_ts > us.last_coros_sync):
+                us.last_coros_sync = max_act_ts
+                db.commit()
+                logger.info("last_coros_sync обновлён: %s", max_act_ts)
+
+            logger.info("Синхронизация Coros завершена: synced=%d, errors=%d", synced, len(progress['errors']))
+            progress['step'] = 'done'
+            progress['message'] = f'Синхронизировано: {synced}'
+            progress['done'] = True
+        except CorosAuthError as e:
+            progress['step'] = 'error'
+            progress['message'] = f'Ошибка аутентификации Coros: {e}'
+            progress['done'] = True
+            logger.error("Coros auth error: %s", e)
+        except CorosAPIError as e:
+            progress['step'] = 'error'
+            progress['message'] = f'Ошибка Coros API: {e}'
+            progress['done'] = True
+            logger.error("Coros API error: %s", e)
+        except Exception as e:
+            if 'Timeout' in type(e).__name__:
+                progress['message'] = 'Таймаут подключения к Coros'
+            elif 'ConnectionError' in type(e).__name__:
+                progress['message'] = 'Не удалось подключиться к Coros'
+            else:
+                progress['message'] = f'Ошибка: {type(e).__name__}: {e}'
+            progress['step'] = 'error'
+            progress['done'] = True
+            logger.error("Coros sync error", exc_info=True)
+        finally:
+            db.close()
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    return JSONResponse({'task_id': task_id, 'status': 'started'})
+
+
+# Статус фоновой синхронизации Coros (Background Coros sync status)
+@app.get('/coros/sync/status/{task_id}')
+async def coros_sync_status(task_id: str):
+    with _sync_tasks_lock:
+        p = _sync_tasks.get(task_id)
+    if not p:
+        return JSONResponse({'status': 'error', 'message': 'Task not found'})
+    return JSONResponse(p)

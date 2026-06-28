@@ -43,6 +43,9 @@ class UserSettings(Base):
     max_credible_pace = Column(Float, default=3.0)  # Минимальный реальный темп мин/км (Minimum credible pace min/km)
     max_gps_jump_m = Column(Float, default=100.0)  # Максимальный GPS-скачок в метрах (Max GPS jump in meters)
     min_hr_for_fast_pace = Column(Integer, default=130)  # Минимальный пульс для быстрого темпа (Min HR for fast pace)
+    coros_email = Column(String(255), nullable=True)  # Email для входа в Coros Training Hub (Coros account email)
+    coros_password = Column(String(255), nullable=True)  # Пароль Coros (Coros account password)
+    last_coros_sync = Column(DateTime, nullable=True)  # Дата последней синхронизации с Coros (Last Coros sync timestamp)
 
 # Модель измерения веса (Weight measurement model)
 class WeightMeasurement(Base):
