@@ -405,15 +405,15 @@ SESSION_HTML = '''
 <body>
     <h2>🏃 {type_ru} {suspect_badge}</h2>
     <p style='color:#666;'>{date}</p>
-    <p style='color:#999;font-size:13px;margin:0 0 10px 0'>{background_info}</p>
     {suspect_detail}
+    <p style='color:#666;font-size:14px;margin:0 0 10px 0'>{background_info}</p>
 
     <div class='card'>
         <div class='info'>
             <div class='info-item'><b>{dist}</b> км</div>
             <div class='info-item'><b>{dur}</b></div>
             <div class='info-item'><b>{hr}</b> уд/мин</div>
-            <div class='info-item'><b>{cadence}</b></div>
+            <div class='info-item'><b>{cadence}</b> каденс</div>
             <div class='info-item'><b>↑{elev_gain}</b> / ↓{elev_loss} м</div>
             <div class='info-item'><b>{cal_display}</b></div>
         </div>
@@ -734,7 +734,7 @@ async def session_detail(session_id: int):
         temp_display = f"{s.avg_temperature}°"
     else:
         temp_display = None
-    background_info = f"Фон: {temp_display}" if temp_display else ""
+    background_info = temp_display if temp_display else ""
 
     import json
     chart_json = json.dumps(s.hr_pace_series or [])
@@ -768,7 +768,7 @@ async def session_detail(session_id: int):
         suspect_badge = '<span style="background:#ff5722;color:white;padding:2px 10px;border-radius:4px;font-size:14px">⚠️ Ошибочные данные</span>'
         suspect_detail = f'<div style="background:#fff3e0;border:1px solid #ffccbc;border-radius:8px;padding:10px;margin-bottom:15px"><b>⚠️ Обнаружены проблемы:</b><ul style="margin:5px 0 0 0;padding-left:20px">{items}</ul></div>'
 
-    cadence_display = f"каденс {s.avg_cadence}" if s.avg_cadence is not None else "—"
+    cadence_display = str(s.avg_cadence) if s.avg_cadence is not None else "—"
     cal_display = f"{s.calories} ккал" if s.calories is not None else "—"
 
     return SESSION_HTML.format(

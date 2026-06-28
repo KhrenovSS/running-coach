@@ -614,9 +614,13 @@ def process_trackpoints(trackpoints, start_time_utc, max_hr=177,
     tz_name = find_timezone(positions)
     if tz_name:
         local_tz = ZoneInfo(tz_name)
-        begin_ts = start_time_utc.astimezone(local_tz).replace(tzinfo=None)
     else:
-        begin_ts = start_time_utc.replace(tzinfo=None)
+        local_tz = ZoneInfo("Europe/Moscow")
+    if start_time_utc.tzinfo is None:
+        start_utc_aware = start_time_utc.replace(tzinfo=ZoneInfo("UTC"))
+    else:
+        start_utc_aware = start_time_utc
+    begin_ts = start_utc_aware.astimezone(local_tz).replace(tzinfo=None)
 
     # Расчёт суммарного набора/спуска высоты (Calculate total elevation gain/loss)
     avg_temperature = None
