@@ -29,7 +29,10 @@ def parse_fit(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0
         hr = data.get('heart_rate')
         dist = data.get('distance')  # метры, накопленная (cumulative meters)
         alt = data.get('enhanced_altitude') or data.get('altitude')
-        cad = data.get('cadence')  # шагов/мин для бега (steps per minute for running)
+        cad = data.get('cadence')  # шагов/мин для бега; Coros хранит в RPM (Steps per minute; Coros stores RPM)
+        # Coros хранит каденс в RPM (половина от SPM), авто-удвоение если явно низкое (Coros stores RPM = spm/2)
+        if cad is not None and cad < 100:
+            cad = cad * 2
 
         # Конвертация полуокружностей в градусы (Convert semicircles to degrees)
         lat = None
@@ -75,33 +78,8 @@ def parse_fit(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0
         for field in session:
             sdata[field.name] = field.value
 
-        te = sdata.get('total_training_effect')
-        if te is not None:
-            result['training_effect'] = round(float(te), 1)
-
-        ate = sdata.get('anaerobic_training_effect')
-        if ate is not None:
-            result['anaerobic_training_effect'] = round(float(ate), 1)
-
-        # VO2max — может быть в session или в record, берём из session
-        for vo2_key in ('vo2max_value', 'vo2max', 'estimated_vo2max'):
-            vo2 = sdata.get(vo2_key)
-            if vo2 is not None:
-                result['vo2max'] = round(float(vo2), 1)
-                break
-
         cal = sdata.get('total_calories')
         if cal is not None:
             result['calories'] = int(cal)
-
-    # Если VO2max не нашёлся в session, проверим в developer_data или record
-    if 'vo2max' not in result:
-        for record in fitfile.get_messages('record'):
-            for field in record:
-                if field.name in ('vo2max_value', 'vo2max', 'estimated_vo2max') and field.value is not None:
-                    result['vo2max'] = round(float(field.value), 1)
-                    break
-            if 'vo2max' in result:
-                break
 
     return result
