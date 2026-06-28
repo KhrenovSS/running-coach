@@ -424,8 +424,6 @@ SESSION_HTML = '''
             <div class='info-item'><b>{cadence}</b></div>
             <div class='info-item'><b>{temp_display}</b></div>
             <div class='info-item'><b>↑{elev_gain}</b> / ↓{elev_loss} м</div>
-            <div class='info-item'><b>{te_display}</b></div>
-            <div class='info-item'><b>{vo2_display}</b></div>
             <div class='info-item'><b>{cal_display}</b></div>
         </div>
 
@@ -564,9 +562,6 @@ def startup():
                 'suspect_flags': 'JSON',
                 'cleaning_log': 'JSON',
                 'avg_cadence': 'INTEGER',
-                'training_effect': 'FLOAT',
-                'anaerobic_training_effect': 'FLOAT',
-                'vo2max': 'FLOAT',
                 'calories': 'INTEGER',
             }
             for col, col_type in cols_to_add.items():
@@ -782,8 +777,6 @@ async def session_detail(session_id: int):
         suspect_detail = f'<div style="background:#fff3e0;border:1px solid #ffccbc;border-radius:8px;padding:10px;margin-bottom:15px"><b>⚠️ Обнаружены проблемы:</b><ul style="margin:5px 0 0 0;padding-left:20px">{items}</ul></div>'
 
     cadence_display = f"{s.avg_cadence} spm" if s.avg_cadence is not None else "—"
-    te_display = f"TE {s.training_effect}" if s.training_effect is not None else "—"
-    vo2_display = f"VO₂max {s.vo2max}" if s.vo2max is not None else "—"
     cal_display = f"{s.calories} ккал" if s.calories is not None else "—"
 
     return SESSION_HTML.format(
@@ -796,8 +789,6 @@ async def session_detail(session_id: int):
         dur=fmt_duration(s.duration_minutes),
         hr=s.avg_heart_rate,
         cadence=cadence_display,
-        te_display=te_display,
-        vo2_display=vo2_display,
         cal_display=cal_display,
         temp_display=temp_display,
         elev_gain=eg_total,
