@@ -128,12 +128,6 @@ def render_page():
     for s in all_sessions[:20]:
         t = s.begin_ts.strftime("%d.%m.%Y %H:%M") if s.begin_ts else ""
         dur = fmt_duration(s.duration_minutes)
-        if s.weather_code is not None and s.avg_temperature is not None:
-            temp_str = f"{weather_icon(s.weather_code)} {s.avg_temperature}°"
-        elif s.avg_temperature is not None:
-            temp_str = f"{s.avg_temperature}°"
-        else:
-            temp_str = "—"
         elev_str = f"↑{s.elevation_gain}" if s.elevation_gain is not None else ""
         warn = ""
         if s.cleaning_log:
@@ -141,14 +135,11 @@ def render_page():
         elif s.suspect_flags:
             warn = "⚠️"
         cad_str = str(s.avg_cadence) if s.avg_cadence is not None else "—"
-        te_str = f"TE {s.training_effect}" if s.training_effect is not None else ""
-        vo2_str = f"VO₂max {s.vo2max}" if s.vo2max is not None else ""
         cal_str = f"{s.calories}" if s.calories is not None else ""
-        extra_parts = [x for x in (te_str, vo2_str, cal_str) if x]
-        extra_str = " ".join(extra_parts)
+        extra_str = cal_str
         rows += f"<tr onclick=\"window.location='/session/{s.id}'\" style='cursor:pointer'>"
         rows += f"<td>{warn} {t}</td><td>{dur}</td><td>{s.total_distance_km:.2f}</td><td>{s.avg_heart_rate}</td>"
-        rows += f"<td>{TRAINING_TYPES_RU.get(s.training_type, s.training_type)}</td><td>{s.segments_count}</td><td>{cad_str}</td><td>{extra_str}</td><td>{temp_str}</td><td>{elev_str}</td></tr>"
+        rows += f"<td>{TRAINING_TYPES_RU.get(s.training_type, s.training_type)}</td><td>{s.segments_count}</td><td>{cad_str}</td><td>{extra_str}</td><td>{elev_str}</td></tr>"
 
     week_bars = render_zone_bars(week_stats['zone_min'], week_stats['total_min'], settings.max_hr) if week_stats else ""
     month_bars = render_zone_bars(month_stats['zone_min'], month_stats['total_min'], settings.max_hr) if month_stats else ""
@@ -374,7 +365,7 @@ MAIN_HTML = '''
     <h3>Последние 20 тренировок</h3>
     <table>
             <thead>
-                <tr><th>Дата</th><th>Длит.</th><th>Дист., км</th><th>Пульс, bpm</th><th>Тип</th><th>Сегм.</th><th>Каденс</th><th>Метрики</th><th>Погода</th><th>Набор</th></tr>
+                <tr><th>Дата</th><th>Длит.</th><th>Дист., км</th><th>Пульс, уд/мин</th><th>Тип</th><th>Сегм.</th><th>Каденс</th><th>Метрики</th><th>Набор</th></tr>
             </thead>
         <tbody>
             {rows}
@@ -414,15 +405,15 @@ SESSION_HTML = '''
 <body>
     <h2>🏃 {type_ru} {suspect_badge}</h2>
     <p style='color:#666;'>{date}</p>
+    <p style='color:#999;font-size:13px;margin:0 0 10px 0'>{background_info}</p>
     {suspect_detail}
 
     <div class='card'>
         <div class='info'>
             <div class='info-item'><b>{dist}</b> км</div>
             <div class='info-item'><b>{dur}</b></div>
-            <div class='info-item'><b>{hr}</b> bpm</div>
+            <div class='info-item'><b>{hr}</b> уд/мин</div>
             <div class='info-item'><b>{cadence}</b></div>
-            <div class='info-item'><b>{temp_display}</b></div>
             <div class='info-item'><b>↑{elev_gain}</b> / ↓{elev_loss} м</div>
             <div class='info-item'><b>{cal_display}</b></div>
         </div>
@@ -439,7 +430,7 @@ SESSION_HTML = '''
                 type: 'line',
                 data: {{
                     datasets: [{{
-                        label: 'Пульс (bpm)',
+                        label: 'Пульс (уд/мин)',
                         data: data.map(d => ({{x: d.dist_km, y: d.hr}})),
                         borderColor: '#e53935',
                         backgroundColor: 'transparent',
@@ -463,7 +454,7 @@ SESSION_HTML = '''
                     interaction: {{ mode: 'index', intersect: false }},
                     scales: {{
                         x: {{ type: 'linear', title: {{ display: true, text: 'Дистанция, км' }}, ticks: {{ stepSize: 0.25, autoSkip: false }} }},
-                        y: {{ title: {{ display: true, text: 'Пульс, bpm' }}, position: 'left' }},
+                        y: {{ title: {{ display: true, text: 'Пульс, уд/мин' }}, position: 'left' }},
                         y1: {{ title: {{ display: true, text: 'Темп, мин/км' }}, position: 'right', reverse: true }},
                     }}
                 }}
@@ -474,7 +465,7 @@ SESSION_HTML = '''
         <h3>Детали по отрезкам</h3>
         <table>
             <thead>
-                <tr><th>#</th><th>Зона</th><th>Длит.</th><th>Дист., км</th><th>Пульс, bpm</th><th>Каденс</th><th>Темп</th><th>↑/↓ м</th><th>Погода</th></tr>
+                <tr><th>#</th><th>Зона</th><th>Длит.</th><th>Дист., км</th><th>Пульс, уд/мин</th><th>Каденс</th><th>Темп</th><th>↑/↓ м</th></tr>
             </thead>
             <tbody>
                 {segments_rows}
@@ -733,7 +724,7 @@ async def session_detail(session_id: int):
             temp_str = "—"
         cad_seg = seg.get('avg_cadence')
         cad_seg_str = str(cad_seg) if cad_seg is not None else "—"
-        seg_rows += f"<tr class='{cls}'><td>{i}</td><td>Z{zone}</td><td>{dur}</td><td>{seg['distance_km']}</td><td>{seg['avg_hr']}</td><td>{cad_seg_str}</td><td>{pace}</td><td>{elev}</td><td>{temp_str}</td></tr>"
+        seg_rows += f"<tr class='{cls}'><td>{i}</td><td>Z{zone}</td><td>{dur}</td><td>{seg['distance_km']}</td><td>{seg['avg_hr']}</td><td>{cad_seg_str}</td><td>{pace}</td><td>{elev}</td></tr>"
 
     eg_total = s.elevation_gain or 0
     el_total = s.elevation_loss or 0
@@ -742,7 +733,8 @@ async def session_detail(session_id: int):
     elif s.avg_temperature is not None:
         temp_display = f"{s.avg_temperature}°"
     else:
-        temp_display = "—"
+        temp_display = None
+    background_info = f"Фон: {temp_display}" if temp_display else ""
 
     import json
     chart_json = json.dumps(s.hr_pace_series or [])
@@ -776,7 +768,7 @@ async def session_detail(session_id: int):
         suspect_badge = '<span style="background:#ff5722;color:white;padding:2px 10px;border-radius:4px;font-size:14px">⚠️ Ошибочные данные</span>'
         suspect_detail = f'<div style="background:#fff3e0;border:1px solid #ffccbc;border-radius:8px;padding:10px;margin-bottom:15px"><b>⚠️ Обнаружены проблемы:</b><ul style="margin:5px 0 0 0;padding-left:20px">{items}</ul></div>'
 
-    cadence_display = f"{s.avg_cadence} spm" if s.avg_cadence is not None else "—"
+    cadence_display = f"каденс {s.avg_cadence}" if s.avg_cadence is not None else "—"
     cal_display = f"{s.calories} ккал" if s.calories is not None else "—"
 
     return SESSION_HTML.format(
@@ -790,7 +782,7 @@ async def session_detail(session_id: int):
         hr=s.avg_heart_rate,
         cadence=cadence_display,
         cal_display=cal_display,
-        temp_display=temp_display,
+        background_info=background_info,
         elev_gain=eg_total,
         elev_loss=el_total,
         segments_rows=seg_rows,
