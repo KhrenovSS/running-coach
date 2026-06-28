@@ -141,9 +141,14 @@ def render_page():
         elif s.suspect_flags:
             warn = "⚠️"
         cad_str = str(s.avg_cadence) if s.avg_cadence is not None else "—"
+        te_str = f"TE {s.training_effect}" if s.training_effect is not None else ""
+        vo2_str = f"VO₂max {s.vo2max}" if s.vo2max is not None else ""
+        cal_str = f"{s.calories}" if s.calories is not None else ""
+        extra_parts = [x for x in (te_str, vo2_str, cal_str) if x]
+        extra_str = " ".join(extra_parts)
         rows += f"<tr onclick=\"window.location='/session/{s.id}'\" style='cursor:pointer'>"
         rows += f"<td>{warn} {t}</td><td>{dur}</td><td>{s.total_distance_km:.2f}</td><td>{s.avg_heart_rate}</td>"
-        rows += f"<td>{TRAINING_TYPES_RU.get(s.training_type, s.training_type)}</td><td>{s.segments_count}</td><td>{cad_str}</td><td>{temp_str}</td><td>{elev_str}</td></tr>"
+        rows += f"<td>{TRAINING_TYPES_RU.get(s.training_type, s.training_type)}</td><td>{s.segments_count}</td><td>{cad_str}</td><td>{extra_str}</td><td>{temp_str}</td><td>{elev_str}</td></tr>"
 
     week_bars = render_zone_bars(week_stats['zone_min'], week_stats['total_min'], settings.max_hr) if week_stats else ""
     month_bars = render_zone_bars(month_stats['zone_min'], month_stats['total_min'], settings.max_hr) if month_stats else ""
@@ -369,7 +374,7 @@ MAIN_HTML = '''
     <h3>Последние 20 тренировок</h3>
     <table>
             <thead>
-                <tr><th>Дата</th><th>Длит.</th><th>Дист., км</th><th>Пульс, bpm</th><th>Тип</th><th>Сегм.</th><th>Каденс</th><th>Погода</th><th>Набор</th></tr>
+                <tr><th>Дата</th><th>Длит.</th><th>Дист., км</th><th>Пульс, bpm</th><th>Тип</th><th>Сегм.</th><th>Каденс</th><th>Метрики</th><th>Погода</th><th>Набор</th></tr>
             </thead>
         <tbody>
             {rows}
@@ -389,7 +394,7 @@ SESSION_HTML = '''
     <style>
         body {{ font-family: sans-serif; max-width: 98%; margin: 20px 30px; line-height: 1.6; }}
         .card {{ border: 1px solid #ccc; padding: 20px; border-radius: 10px; background: #f9f9f9; margin-bottom: 20px; }}
-        .info {{ display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr; gap: 10px; margin: 15px 0; }}
+        .info {{ display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr; gap: 10px; margin: 15px 0; }}
         .info-item {{ background: white; padding: 10px; border-radius: 6px; text-align: center; }}
         .info-item b {{ display: block; font-size: 20px; color: #4CAF50; }}
         table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
@@ -419,6 +424,9 @@ SESSION_HTML = '''
             <div class='info-item'><b>{cadence}</b></div>
             <div class='info-item'><b>{temp_display}</b></div>
             <div class='info-item'><b>↑{elev_gain}</b> / ↓{elev_loss} м</div>
+            <div class='info-item'><b>{te_display}</b></div>
+            <div class='info-item'><b>{vo2_display}</b></div>
+            <div class='info-item'><b>{cal_display}</b></div>
         </div>
 
         <h3>Пульс и темп</h3>
@@ -556,6 +564,10 @@ def startup():
                 'suspect_flags': 'JSON',
                 'cleaning_log': 'JSON',
                 'avg_cadence': 'INTEGER',
+                'training_effect': 'FLOAT',
+                'anaerobic_training_effect': 'FLOAT',
+                'vo2max': 'FLOAT',
+                'calories': 'INTEGER',
             }
             for col, col_type in cols_to_add.items():
                 try:
@@ -770,6 +782,9 @@ async def session_detail(session_id: int):
         suspect_detail = f'<div style="background:#fff3e0;border:1px solid #ffccbc;border-radius:8px;padding:10px;margin-bottom:15px"><b>⚠️ Обнаружены проблемы:</b><ul style="margin:5px 0 0 0;padding-left:20px">{items}</ul></div>'
 
     cadence_display = f"{s.avg_cadence} spm" if s.avg_cadence is not None else "—"
+    te_display = f"TE {s.training_effect}" if s.training_effect is not None else "—"
+    vo2_display = f"VO₂max {s.vo2max}" if s.vo2max is not None else "—"
+    cal_display = f"{s.calories} ккал" if s.calories is not None else "—"
 
     return SESSION_HTML.format(
         session_id=s.id,
@@ -781,6 +796,9 @@ async def session_detail(session_id: int):
         dur=fmt_duration(s.duration_minutes),
         hr=s.avg_heart_rate,
         cadence=cadence_display,
+        te_display=te_display,
+        vo2_display=vo2_display,
+        cal_display=cal_display,
         temp_display=temp_display,
         elev_gain=eg_total,
         elev_loss=el_total,

@@ -29,6 +29,10 @@ class TrainingSession(Base):
     suspect_flags = Column(JSON, default=list)  # Флаги подозрительности: pace_impossible, gps_spike, hr_pace_mismatch, too_short (Suspicion flags)
     cleaning_log = Column(JSON, default=list)  # Лог удалённых ошибочных участков тренировки (Cleaning log — removed bad segments)
     avg_cadence = Column(Integer, nullable=True)  # Средний каденс за тренировку в spm (Average cadence in steps per minute)
+    training_effect = Column(Float, nullable=True)  # Аэробный тренировочный эффект 0.0-5.0 (Aerobic training effect)
+    anaerobic_training_effect = Column(Float, nullable=True)  # Анаэробный тренировочный эффект (Anaerobic training effect)
+    vo2max = Column(Float, nullable=True)  # Оценка VO2max за тренировку (Estimated VO2max for the session)
+    calories = Column(Integer, nullable=True)  # Сожжённые калории (Total calories burned)
 
 # Модель настроек пользователя (User settings model)
 class UserSettings(Base):

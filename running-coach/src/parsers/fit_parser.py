@@ -64,5 +64,44 @@ def parse_fit(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0
     start_time_utc = trackpoints[0]['time']
 
     # Обработка через общий процессор (Process through shared pipeline)
-    return process_trackpoints(trackpoints, start_time_utc, max_hr,
-                                max_credible_pace, max_gps_jump_m, min_hr_for_fast_pace)
+    result = process_trackpoints(trackpoints, start_time_utc, max_hr,
+                                  max_credible_pace, max_gps_jump_m, min_hr_for_fast_pace)
+    if result is None:
+        return None
+
+    # Парсинг session-сообщений: дополнительные метрики (Parse session messages for extra metrics)
+    for session in fitfile.get_messages('session'):
+        sdata = {}
+        for field in session:
+            sdata[field.name] = field.value
+
+        te = sdata.get('total_training_effect')
+        if te is not None:
+            result['training_effect'] = round(float(te), 1)
+
+        ate = sdata.get('anaerobic_training_effect')
+        if ate is not None:
+            result['anaerobic_training_effect'] = round(float(ate), 1)
+
+        # VO2max — может быть в session или в record, берём из session
+        for vo2_key in ('vo2max_value', 'vo2max', 'estimated_vo2max'):
+            vo2 = sdata.get(vo2_key)
+            if vo2 is not None:
+                result['vo2max'] = round(float(vo2), 1)
+                break
+
+        cal = sdata.get('total_calories')
+        if cal is not None:
+            result['calories'] = int(cal)
+
+    # Если VO2max не нашёлся в session, проверим в developer_data или record
+    if 'vo2max' not in result:
+        for record in fitfile.get_messages('record'):
+            for field in record:
+                if field.name in ('vo2max_value', 'vo2max', 'estimated_vo2max') and field.value is not None:
+                    result['vo2max'] = round(float(field.value), 1)
+                    break
+            if 'vo2max' in result:
+                break
+
+    return result

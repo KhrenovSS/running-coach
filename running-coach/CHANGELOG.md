@@ -16,6 +16,7 @@ All notable changes to this project are tracked here.
   - Содержит все метрики: дистанция, пульс, каденс, темп, высота, GPS
   - Каденс в FIT (spm) доступен «из коробки», в отличие от TCX от Coros
   - Загрузка `.fit` файлов через тот же интерфейс — кнопка «Загрузить TCX/FIT»
+  - Парсинг session-сообщений: **Training Effect** (аэробный/анаэробный), **VO₂max**, **калории**
 - **Рефакторинг: общая логика обработки (Refactoring: shared processing pipeline)**
   - Выделен `src/parsers/common.py` — общие функции: очистка трекпоинтов, сегментация, классификация, погода
   - `tcx_parser.py` и `fit_parser.py` только парсят формат и вызывают `process_trackpoints()` из common
