@@ -573,6 +573,18 @@ MAIN_HTML = '''
                     if (sp.step === 'error') {{
                         statusDiv.className = 'sync-status sync-error';
                         statusDiv.textContent = '❌ ' + (sp.message || 'Ошибка');
+                    }} else if (sp.has_pending_deleted && sp.pending_deleted) {{
+                        // Показываем модал для каждой удалённой тренировки (Show modal for each deleted training)
+                        statusDiv.className = 'sync-status sync-ok';
+                        statusDiv.textContent = '✅ Найдены ранее удалённые тренировки';
+                        for (const pd of sp.pending_deleted) {{
+                            const imported = await showDeletedModal(pd, pd.temp_id);
+                            if (imported) {{
+                                sp.synced = (sp.synced || 0) + 1;
+                            }}
+                        }}
+                        statusDiv.textContent = '✅ Обработано: ' + (sp.synced || 0) + ' / ' + sp.pending_deleted.length;
+                        window.location.href = '/';
                     }} else if (sp.synced > 0) {{
                         statusDiv.className = 'sync-status sync-ok';
                         statusDiv.textContent = '✅ Синхронизировано: ' + sp.synced;
@@ -1309,18 +1321,37 @@ async def coros_sync():
                         os.unlink(tmp.name)
                         continue
 
-                    # Проверка, не удалялась ли эта тренировка ранее (Skip if previously deleted)
+                    # Проверка, не удалялась ли эта тренировка ранее (Check if previously deleted)
                     bt_sync = data.get('begin_ts')
-                    is_deleted = False
+                    deleted_match_sync = None
                     if bt_sync:
                         all_del = db.query(DeletedTraining).all()
                         for d in all_del:
                             if d.begin_ts and abs((d.begin_ts - bt_sync).total_seconds()) < 120:
-                                is_deleted = True
-                                logger.info("Пропуск ранее удалённой тренировки %s (%s) (Skipping previously deleted)", act['name'], bt_sync)
+                                deleted_match_sync = d
                                 break
-                    if is_deleted:
-                        os.unlink(tmp.name)
+                    if deleted_match_sync:
+                        # Сохраняем данные в _pending для показа модала (Store in _pending for confirmation modal)
+                        tid = str(uuid.uuid4())
+                        _pending[tid] = {'path': tmp.name, 'filename': act['name'], 'data': data}
+                        pace_str_s = format_pace(deleted_match_sync.avg_pace) if deleted_match_sync.avg_pace else '—'
+                        dur_s = format_duration(deleted_match_sync.duration_minutes) if deleted_match_sync.duration_minutes else '—'
+                        pending_info = {
+                            'temp_id': tid,
+                            'date': deleted_match_sync.begin_ts.strftime('%d.%m.%Y %H:%M'),
+                            'distance': round(deleted_match_sync.total_distance_km, 1) if deleted_match_sync.total_distance_km else '—',
+                            'distance_display': f'{deleted_match_sync.total_distance_km:.1f} км' if deleted_match_sync.total_distance_km else '—',
+                            'pace': pace_str_s,
+                            'duration': dur_s,
+                            'type': deleted_match_sync.training_type or '—',
+                            'hr': f'{deleted_match_sync.avg_heart_rate}' if deleted_match_sync.avg_heart_rate else '—',
+                            'calories': f'{deleted_match_sync.calories}' if deleted_match_sync.calories else '—',
+                        }
+                        if 'pending_deleted' not in progress:
+                            progress['pending_deleted'] = []
+                            progress['has_pending_deleted'] = True
+                        progress['pending_deleted'].append(pending_info)
+                        logger.info("Найдена ранее удалённая тренировка %s (%s) — ожидает подтверждения (Deleted training found, awaiting confirmation)", act['name'], bt_sync)
                         continue
 
                     cleaning_log = data.pop('cleaning_log', None)
