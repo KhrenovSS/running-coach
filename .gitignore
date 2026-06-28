@@ -27,5 +27,8 @@ Thumbs.db
 .env
 .env.local
 
+# Logs
+*.log
+
 # Discussion files
 обсуждение

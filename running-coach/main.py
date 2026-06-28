@@ -7,6 +7,7 @@ from src.parsers.tcx_parser import parse_tcx
 from src.parsers.fit_parser import parse_fit
 from src.parsers.common import weather_icon
 from src.logger import get_logger
+from src.crypto import encrypt, decrypt
 logger = get_logger("app")
 import shutil
 import os
@@ -686,8 +687,8 @@ SETTINGS_PAGE = '''
             <label><b>Email Coros Training Hub:</b></label>
             <input type='email' name='coros_email' value='{coros_email}' style='width:250px;padding:6px;font-size:14px'>
             <label><b>Пароль Coros:</b></label>
-            <input type='password' name='coros_password' value='{coros_password}' style='width:250px;padding:6px;font-size:14px'>
-            <div style='font-size:12px;color:#888;margin-top:4px'>Пароль хранится локально в БД. Используется только для связи с Coros API.</div>
+            <input type='password' name='coros_password' placeholder='{coros_password}' style='width:250px;padding:6px;font-size:14px'>
+            <div style='font-size:12px;color:#888;margin-top:4px'>Пароль хранится в зашифрованном виде (Fernet). Оставьте пустым, чтобы не менять.</div>
             <br><br>
             <button type='submit' class='btn'>Сохранить</button>
             <a href='/' class='btn' style='background:#888;'>&larr; Назад</a>
@@ -952,12 +953,13 @@ async def settings_page():
     z3 = f"{round(m * 0.7)}-{round(m * 0.8)}"
     z4 = f"{round(m * 0.8)}-{round(m * 0.9)}"
     z5 = f"{round(m * 0.9)}-{round(m)}"
+    pw_placeholder = '********' if settings.coros_password else ''
     return SETTINGS_PAGE.format(max_hr=m, weight=settings.weight, z1=z1, z2=z2, z3=z3, z4=z4, z5=z5,
                                 max_credible_pace=settings.max_credible_pace,
                                 max_gps_jump_m=settings.max_gps_jump_m,
                                 min_hr_for_fast_pace=settings.min_hr_for_fast_pace,
                                 coros_email=settings.coros_email or '',
-                                coros_password=settings.coros_password or '')
+                                coros_password=pw_placeholder)
 
 
 # Удаление тренировки (Delete training session)
@@ -995,7 +997,10 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
             s.max_gps_jump_m = max_gps_jump_m
             s.min_hr_for_fast_pace = min_hr_for_fast_pace
             s.coros_email = coros_email or None
-            s.coros_password = coros_password or None
+            if coros_password and coros_password != '********':
+                s.coros_password = encrypt(coros_password)
+            elif not coros_email:
+                s.coros_password = None
             if weight != old_weight:
                 wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.utcnow())
                 db.add(wm)
@@ -1061,7 +1066,12 @@ async def coros_sync():
             progress['step'] = 'auth'
             progress['message'] = 'Подключение к Coros...'
             logger.info("Запуск синхронизации Coros (Coros sync started)")
-            client = CorosClient(us.coros_email, us.coros_password, timeout=15)
+            try:
+                plain_password = decrypt(us.coros_password)
+            except Exception:
+                logger.warning("Не удалось расшифровать пароль Coros, используется как есть (plaintext fallback)")
+                plain_password = us.coros_password
+            client = CorosClient(us.coros_email, plain_password, timeout=15)
             client.authenticate()
             logger.info("Аутентификация Coros пройдена (Coros auth successful)")
 
