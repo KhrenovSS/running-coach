@@ -385,7 +385,7 @@ SESSION_HTML = '''
     <style>
         body {{ font-family: sans-serif; max-width: 98%; margin: 20px 30px; line-height: 1.6; }}
         .card {{ border: 1px solid #ccc; padding: 20px; border-radius: 10px; background: #f9f9f9; margin-bottom: 20px; }}
-        .info {{ display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr; gap: 10px; margin: 15px 0; }}
+        .info {{ display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr; gap: 10px; margin: 15px 0; }}
         .info-item {{ background: white; padding: 10px; border-radius: 6px; text-align: center; }}
         .info-item b {{ display: block; font-size: 20px; color: #4CAF50; }}
         table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
@@ -400,6 +400,7 @@ SESSION_HTML = '''
         .btn:hover {{ background: #45a049; }}
         .btn-danger {{ background: #e53935; }}
         .btn-danger:hover {{ background: #c62828; }}
+        .info-label {{ display: block; font-size: 12px; color: #666; margin-top: 2px; }}
     </style>
 </head>
 <body>
@@ -410,12 +411,13 @@ SESSION_HTML = '''
 
     <div class='card'>
         <div class='info'>
-            <div class='info-item'><b>{dist}</b> км</div>
-            <div class='info-item'><b>{dur}</b></div>
-            <div class='info-item'><b>{hr}</b> уд/мин</div>
-            <div class='info-item'><b>{cadence}</b> каденс</div>
-            <div class='info-item'><b>↑{elev_gain}</b> / ↓{elev_loss} м</div>
-            <div class='info-item'><b>{cal_display}</b></div>
+            <div class='info-item'><b>{dist}</b> км<span class='info-label'>Дистанция</span></div>
+            <div class='info-item'><b>{dur}</b><span class='info-label'>Общее время</span></div>
+            <div class='info-item'><b>{hr}</b> уд/мин<span class='info-label'>Пульс</span></div>
+            <div class='info-item'><b>{cadence}</b><span class='info-label'>Каденс</span></div>
+            <div class='info-item'><b>↑{elev_gain}</b> м<span class='info-label'>Подъем</span></div>
+            <div class='info-item'><b>↓{elev_loss}</b> м<span class='info-label'>Спуск</span></div>
+            <div class='info-item'><b>{cal}</b> ккал<span class='info-label'>Калории</span></div>
         </div>
 
         <h3>Пульс и темп</h3>
@@ -465,7 +467,7 @@ SESSION_HTML = '''
         <h3>Детали по отрезкам</h3>
         <table>
             <thead>
-                <tr><th>#</th><th>Зона</th><th>Длит.</th><th>Дист., км</th><th>Пульс, уд/мин</th><th>Каденс</th><th>Темп</th><th>↑/↓ м</th></tr>
+                <tr><th>#</th><th>Зона</th><th>Длит.</th><th>Дист., км</th><th>Пульс, уд/мин</th><th>Каденс</th><th>Темп</th><th>↑ м</th><th>↓ м</th></tr>
             </thead>
             <tbody>
                 {segments_rows}
@@ -709,22 +711,13 @@ async def session_detail(session_id: int):
         cls = f"zone-z{zone}" if zone else ""
         pace = seg.get('pace') or "—"
         dur = seg.get('duration') or f"{seg['duration_min']:.0f}"
-        elev = ""
         eg = seg.get('elevation_gain')
         el = seg.get('elevation_loss')
-        if eg is not None and el is not None:
-            elev = f"↑{eg}/↓{el}"
-        temp = seg.get('temperature')
-        wc = seg.get('weather_code')
-        if wc is not None and temp is not None:
-            temp_str = f"{weather_icon(wc)} {temp}°"
-        elif temp is not None:
-            temp_str = f"{temp}°"
-        else:
-            temp_str = "—"
+        seg_eg = str(eg) if eg is not None else "—"
+        seg_el = str(el) if el is not None else "—"
         cad_seg = seg.get('avg_cadence')
         cad_seg_str = str(cad_seg) if cad_seg is not None else "—"
-        seg_rows += f"<tr class='{cls}'><td>{i}</td><td>Z{zone}</td><td>{dur}</td><td>{seg['distance_km']}</td><td>{seg['avg_hr']}</td><td>{cad_seg_str}</td><td>{pace}</td><td>{elev}</td></tr>"
+        seg_rows += f"<tr class='{cls}'><td>{i}</td><td>Z{zone}</td><td>{dur}</td><td>{seg['distance_km']}</td><td>{seg['avg_hr']}</td><td>{cad_seg_str}</td><td>{pace}</td><td>{seg_eg}</td><td>{seg_el}</td></tr>"
 
     eg_total = s.elevation_gain or 0
     el_total = s.elevation_loss or 0
@@ -769,7 +762,7 @@ async def session_detail(session_id: int):
         suspect_detail = f'<div style="background:#fff3e0;border:1px solid #ffccbc;border-radius:8px;padding:10px;margin-bottom:15px"><b>⚠️ Обнаружены проблемы:</b><ul style="margin:5px 0 0 0;padding-left:20px">{items}</ul></div>'
 
     cadence_display = str(s.avg_cadence) if s.avg_cadence is not None else "—"
-    cal_display = f"{s.calories} ккал" if s.calories is not None else "—"
+    cal = str(s.calories) if s.calories is not None else "—"
 
     return SESSION_HTML.format(
         session_id=s.id,
@@ -781,7 +774,7 @@ async def session_detail(session_id: int):
         dur=fmt_duration(s.duration_minutes),
         hr=s.avg_heart_rate,
         cadence=cadence_display,
-        cal_display=cal_display,
+        cal=cal,
         background_info=background_info,
         elev_gain=eg_total,
         elev_loss=el_total,
