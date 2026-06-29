@@ -17,6 +17,7 @@ ACTIVITIES_URL = f"{COROS_API_BASE}/activity/query"
 DOWNLOAD_URL = f"{COROS_API_BASE}/activity/detail/download"
 DASHBOARD_URL = f"{COROS_API_BASE}/dashboard/query"
 ANALYSE_DETAIL_URL = f"{COROS_API_BASE}/analyse/dayDetail/query"
+ANALYSE_QUERY_URL = f"{COROS_API_BASE}/analyse/query"
 
 BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
@@ -154,6 +155,19 @@ class CorosClient:
         body = resp.json()
         if body.get("result") != "0000":
             raise CorosAPIError(f"Analyse API error: {body.get('message')}")
+        return body.get("data", {}).get("dayList", [])
+
+    # Получить аналитику за 12 недель — VO2max, LTHR, LTSP, stamina trend (Get 12-week analytics)
+    def get_analytics(self) -> list[dict]:
+        if not self.accesstoken:
+            raise CorosAPIError("Not authenticated")
+        headers = self._auth_headers()
+        params = {"sportType": 100}
+        resp = self.session.get(ANALYSE_QUERY_URL, params=params, headers=headers, timeout=self.timeout)
+        resp.raise_for_status()
+        body = resp.json()
+        if body.get("result") != "0000":
+            raise CorosAPIError(f"Analyse query API error: {body.get('message')}")
         return body.get("data", {}).get("dayList", [])
 
     # Скачать FIT-файл активности (Download activity FIT file)

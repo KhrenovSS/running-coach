@@ -1069,6 +1069,16 @@ def startup():
                 DailyMetrics.__table__.create(conn)
             except Exception:
                 pass
+            # Миграция колонок daily_metrics (Migrate daily_metrics columns)
+            daily_cols = {
+                'ltsp': 'FLOAT',
+                'stamina_level_7d': 'FLOAT',
+            }
+            for col, col_type in daily_cols.items():
+                try:
+                    conn.execute(text(f"ALTER TABLE daily_metrics ADD COLUMN {col} {col_type}"))
+                except Exception:
+                    pass
             conn.commit()
     except Exception:
         pass
@@ -1757,6 +1767,22 @@ async def coros_sync_health():
                 progress['done'] = True
                 return
 
+            # Получение аналитики (12-week analytics for VO2max, LTHR, LTSP, stamina)
+            analytics_by_date = {}
+            try:
+                analytics_list = client.get_analytics()
+                logger.info("Получено записей аналитики из Coros: %d", len(analytics_list))
+                for a in analytics_list:
+                    ad = a.get('happenDay')
+                    if ad:
+                        try:
+                            d = datetime.strptime(str(ad), "%Y%m%d").date()
+                            analytics_by_date[d] = a
+                        except (ValueError, TypeError):
+                            pass
+            except Exception as e:
+                logger.warning("Не удалось получить аналитику Coros: %s", e)
+
             synced = 0
             progress['total'] = len(metrics_list)
 
@@ -1770,7 +1796,7 @@ async def coros_sync_health():
                     entry_date = datetime.strptime(happen_day, "%Y%m%d").date()
                 except (ValueError, TypeError):
                     try:
-                        entry_date = datetime.strptime(happen_day_str, "%Y-%m-%d").date()
+                        entry_date = datetime.strptime(happen_day, "%Y-%m-%d").date()
                     except (ValueError, TypeError):
                         continue
 
@@ -1778,6 +1804,8 @@ async def coros_sync_health():
                     logger.debug("Пропуск: дата %s уже есть в БД", entry_date)
                     continue
 
+                # Мерж данных из dayDetail + аналитики (Merge dayDetail + analytics data)
+                ana = analytics_by_date.get(entry_date, {})
                 dm = DailyMetrics(
                     date=entry_date,
                     avg_sleep_hrv=entry.get('avgSleepHrv'),
@@ -1790,9 +1818,11 @@ async def coros_sync_health():
                     performance=entry.get('performance'),
                     ati=entry.get('ati'),
                     cti=entry.get('cti'),
-                    vo2max=entry.get('vo2max'),
-                    lthr=entry.get('lthr'),
-                    stamina_level=entry.get('staminaLevel'),
+                    vo2max=entry.get('vo2max') or ana.get('vo2max'),
+                    lthr=entry.get('lthr') or ana.get('lthr'),
+                    stamina_level=entry.get('staminaLevel') or ana.get('staminaLevel'),
+                    ltsp=ana.get('ltsp'),
+                    stamina_level_7d=ana.get('staminaLevel7d'),
                 )
                 db.add(dm)
                 synced += 1
@@ -1803,6 +1833,31 @@ async def coros_sync_health():
 
             db.commit()
             logger.info("Синхронизация метрик Coros завершена: synced=%d", synced)
+
+            # Обновление существующих записей аналитикой (Update existing records with analytics)
+            if analytics_by_date:
+                updated = 0
+                for entry_date, ana in analytics_by_date.items():
+                    existing = db.query(DailyMetrics).filter(DailyMetrics.date == entry_date).first()
+                    if not existing:
+                        continue
+                    changed = False
+                    if existing.vo2max is None and ana.get('vo2max') is not None:
+                        existing.vo2max = ana.get('vo2max'); changed = True
+                    if existing.lthr is None and ana.get('lthr') is not None:
+                        existing.lthr = ana.get('lthr'); changed = True
+                    if existing.stamina_level is None and ana.get('staminaLevel') is not None:
+                        existing.stamina_level = ana.get('staminaLevel'); changed = True
+                    if existing.ltsp is None and ana.get('ltsp') is not None:
+                        existing.ltsp = ana.get('ltsp'); changed = True
+                    if existing.stamina_level_7d is None and ana.get('staminaLevel7d') is not None:
+                        existing.stamina_level_7d = ana.get('staminaLevel7d'); changed = True
+                    if changed:
+                        updated += 1
+                if updated:
+                    db.commit()
+                    logger.info("Обновлено аналитикой записей: %d", updated)
+
             progress['step'] = 'done'
             progress['message'] = f'Синхронизировано: {synced}'
             progress['done'] = True

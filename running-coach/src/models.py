@@ -84,6 +84,8 @@ class DailyMetrics(Base):
     vo2max = Column(Float, nullable=True)  # VO2max (Estimated VO2max)
     lthr = Column(Integer, nullable=True)  # Пульс лактатного порога (Lactate threshold HR)
     stamina_level = Column(Float, nullable=True)  # Уровень выносливости (Stamina level)
+    ltsp = Column(Float, nullable=True)  # Темп лактатного порога, с/км (Lactate threshold pace s/km)
+    stamina_level_7d = Column(Float, nullable=True)  # Тренд выносливости за 7 дней (Stamina 7-day trend)
     synced_at = Column(DateTime, default=datetime.utcnow)  # Когда данные получены (When synced)
 
 # Модель измерения веса (Weight measurement model)
