@@ -348,14 +348,17 @@ def _sync_for_user(user: User, chat_id: int, token: str):
                     # Уведомление + запрос оценки для каждой новой тренировки (Notify + rating prompt)
                     token_bot = os.getenv("TELEGRAM_BOT_TOKEN", "")
                     for act, sid, data in new_session_ids:
-                        rows = [[{"text": str(i), "callback_data": f"feedback:{sid}:{i}"} for i in range(1, 6)]]
+                        row1 = [{"text": str(i), "callback_data": f"feedback:{sid}:{i}"} for i in range(0, 6)]
+                        row2 = [{"text": str(i), "callback_data": f"feedback:{sid}:{i}"} for i in range(6, 11)]
                         _send_message(
                             token_bot, chat_id,
                             f"🏃 *Новая тренировка!*\n"
                             f"▫️ {act['name']}\n"
                             f"▫️ {data.get('total_distance_km', 0):.1f} км\n\n"
-                            f"Как прошло? Оцени:",
-                            reply_markup={"inline_keyboard": rows},
+                            f"Насколько тяжёлой была тренировка?\n"
+                            f"`0` — вообще легко\n"
+                            f"`10` — почти умер",
+                            reply_markup={"inline_keyboard": [row1, row2]},
                         )
 
             msg_parts.append(f"тренировки: {synced_acts}")
@@ -561,6 +564,65 @@ async def daily_weight_job(context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
+async def daily_recovery_check_job(context: ContextTypes.DEFAULT_TYPE):
+    """Проверка данных сна: старт в 10:00, повтор каждые 2 часа. Если данные есть — следующая проверка вечером (18:00). Если нет — продолжаем каждые 2 часа до 18:00 (Recovery data check: start at 10:00, repeat every 2 hours. If data found — next check at 18:00. If not — continue every 2 hours until 18:00)"""
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        hour = now.hour
+
+        # За пределами активного времени (0:00–8:00 и после 19:00) — пропускаем (Outside active hours — skip)
+        if hour < 8 or hour >= 20:
+            next_run = now.replace(hour=10, minute=0, second=0, microsecond=0)
+            if next_run <= now:
+                next_run += timedelta(days=1)
+            context.job_queue.run_once(daily_recovery_check_job, int((next_run - now).total_seconds()))
+            return
+
+        cutoff = now - timedelta(hours=12)
+        users = db.query(User).filter(
+            User.telegram_chat_id.isnot(None),
+            User.is_active == True,
+        ).all()
+
+        any_missing = False
+        for user in users:
+            # Проверяем, есть ли данные о сне за последние 12 часов (Check if recovery data exists for last 12 hours)
+            latest_metrics = db.query(DailyMetrics).filter(
+                DailyMetrics.user_id == user.id,
+                DailyMetrics.date >= cutoff.date(),
+            ).order_by(DailyMetrics.date.desc()).first()
+
+            if not latest_metrics:
+                any_missing = True
+                try:
+                    await context.bot.send_message(
+                        chat_id=user.telegram_chat_id,
+                        text="🌙 *Нет данных о восстановлении*\n\n"
+                             "У тебя нет свежих данных о сне и HRV за последние 12 часов.\n"
+                             "Используй /sync чтобы синхронизировать данные с Coros.",
+                        parse_mode="Markdown",
+                    )
+                    logger.info("Sent recovery reminder to user %s (chat_id=%s)", user.id, user.telegram_chat_id)
+                except Exception as e:
+                    logger.warning("Failed to send recovery reminder to %s: %s", user.telegram_chat_id, e)
+
+        # Планируем следующую проверку (Schedule next check)
+        if any_missing:
+            # Данные не получены — проверяем через 2 часа (Data not found — check again in 2 hours)
+            next_run = now + timedelta(hours=2)
+        else:
+            # Данные получены — следующая проверка вечером (18:00) (Data found — next check at 18:00)
+            evening_run = now.replace(hour=18, minute=0, second=0, microsecond=0)
+            if evening_run <= now:
+                evening_run += timedelta(days=1)
+            next_run = evening_run
+
+        context.job_queue.run_once(daily_recovery_check_job, int((next_run - now).total_seconds()))
+    finally:
+        db.close()
+
+
 async def cmd_delete_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user = get_user(chat_id)
@@ -608,7 +670,7 @@ async def feedback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rating = int(rating_str)
     except ValueError:
         return
-    if rating < 1 or rating > 5:
+    if rating < 0 or rating > 10:
         return
 
     chat_id = update.effective_chat.id
@@ -627,7 +689,7 @@ async def feedback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ).first()
         if fb:
             await query.edit_message_text(
-                f"✅ Оценка уже была сохранена ранее: {fb.rating}/5"
+                f"✅ Оценка уже была сохранена ранее: {fb.rating}/10"
             )
             return
 
@@ -638,9 +700,10 @@ async def feedback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         db.add(fb)
         db.commit()
-        labels = {1: "😣", 2: "😐", 3: "🙂", 4: "😊", 5: "🔥"}
+        labels = {0: "😴", 1: "😌", 2: "🙂", 3: "😐", 4: "😅", 5: "💪",
+                  6: "😤", 7: "🥵", 8: "😵", 9: "💀", 10: "⚰️"}
         await query.edit_message_text(
-            f"✅ Спасибо! Оценка {rating}/5 {labels.get(rating, '')} сохранена."
+            f"✅ Спасибо! Оценка {rating}/10 {labels.get(rating, '')} сохранена."
         )
     except Exception as e:
         db.rollback()
@@ -685,6 +748,10 @@ def run_bot():
     # Планировщик ежедневного опроса веса в 9:00 (Daily weight prompt at 9:00)
     application.job_queue.run_daily(daily_weight_job, time=dt_time(hour=9, minute=0))
     logger.info("Ежедневный опрос веса запланирован на 9:00")
+
+    # Проверка данных сна — старт в 10:00, дальше функция сама планирует (Recovery check starts at 10:00, then schedules itself)
+    application.job_queue.run_daily(daily_recovery_check_job, time=dt_time(hour=10, minute=0))
+    logger.info("Проверка данных сна запланирована на 10:00")
 
     logger.info("Telegram-obot polling started")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
