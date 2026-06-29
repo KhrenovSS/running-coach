@@ -224,7 +224,7 @@ def render_page(year=None, month=None):
     settings = get_settings()
     weight_measurements = db.query(WeightMeasurement).order_by(WeightMeasurement.measured_at).all()
     # Последние метрики восстановления (Latest recovery metrics)
-    recovery_metrics = db.query(DailyMetrics).order_by(DailyMetrics.date.desc()).limit(7).all()
+    recovery_metrics = db.query(DailyMetrics).order_by(DailyMetrics.date.desc()).limit(30).all()
     db.close()
 
     import json
@@ -233,13 +233,11 @@ def render_page(year=None, month=None):
         'weight': wm.weight_kg,
     } for wm in weight_measurements])
 
+    # Для графика: от старых к новым (слева направо), для карточки: последняя сверху
     recovery_json = json.dumps([{
         'date': rm.date.strftime('%Y-%m-%d'),
-        'hrv': rm.avg_sleep_hrv,
         'rhr': rm.rhr,
-        'tired_rate': rm.tired_rate,
-        'performance': rm.performance,
-    } for rm in recovery_metrics])
+    } for rm in reversed(recovery_metrics)])
 
     latest = all_sessions[0].begin_ts if all_sessions else None
     week_stats = month_stats = None
@@ -554,12 +552,12 @@ MAIN_HTML = '''
                 <span>Усталость: <b>{latest_tired}</b></span>
                 <span>Состояние: <b>{latest_perf}</b></span>
             </div>
-            <div style='font-size:13px;color:#888;margin-top:4px' id='recoveryToggle'>▾ График HRV</div>
+            <div style='font-size:13px;color:#888;margin-top:4px' id='recoveryToggle'>▾ График пульса покоя</div>
         </div>
     </div>
     <div id='recoveryChartContainer' style='display:none; margin-bottom:15px'>
         <div class='stats-card'>
-            <h4>📈 Динамика восстановления (7 дней)</h4>
+            <h4>📈 Пульс покоя (RHR)</h4>
             <canvas id='recoveryChart' height='80'></canvas>
         </div>
     </div>
@@ -573,11 +571,11 @@ MAIN_HTML = '''
         const toggle = document.getElementById('recoveryToggle');
         if (container.style.display === 'none') {{
             container.style.display = 'block';
-            toggle.textContent = '▴ График HRV';
+            toggle.textContent = '▴ График пульса покоя';
             renderRecoveryChart();
         }} else {{
             container.style.display = 'none';
-            toggle.textContent = '▾ График HRV';
+            toggle.textContent = '▾ График пульса покоя';
         }}
     }}
 
@@ -592,37 +590,26 @@ MAIN_HTML = '''
             data: {{
                 labels: recoveryData.map(d => d.date),
                 datasets: [{{
-                    label: 'HRV (мс)',
-                    data: recoveryData.map(d => d.hrv),
-                    borderColor: '#7B1FA2',
-                    backgroundColor: 'transparent',
-                    tension: 0.4,
-                    pointRadius: 5,
-                    pointBackgroundColor: '#7B1FA2',
-                    pointBorderColor: '#fff',
-                    pointBorderWidth: 2,
-                    yAxisID: 'y',
-                }}, {{
-                    label: 'Пульс покоя',
+                    label: 'Пульс покоя (уд/мин)',
                     data: recoveryData.map(d => d.rhr),
                     borderColor: '#e53935',
                     backgroundColor: 'transparent',
                     tension: 0.4,
-                    pointRadius: 5,
+                    pointRadius: 4,
                     pointBackgroundColor: '#e53935',
                     pointBorderColor: '#fff',
                     pointBorderWidth: 2,
-                    yAxisID: 'y1',
+                    fill: true,
+                    backgroundColor: 'rgba(229,57,53,0.08)',
                 }}]
             }},
             options: {{
                 responsive: true,
                 scales: {{
                     x: {{ title: {{ display: true, text: 'Дата' }} }},
-                    y: {{ title: {{ display: true, text: 'HRV (мс)' }}, position: 'left', beginAtZero: false }},
-                    y1: {{ title: {{ display: true, text: 'RHR (уд/мин)' }}, position: 'right', beginAtZero: false }},
+                    y: {{ title: {{ display: true, text: 'уд/мин' }}, beginAtZero: false }},
                 }},
-                plugins: {{ legend: {{ display: true }} }}
+                plugins: {{ legend: {{ display: false }} }}
             }}
         }});
     }}
