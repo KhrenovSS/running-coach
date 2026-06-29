@@ -171,18 +171,20 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 
 **БД:** SQLite, файл `running_coach.db`, 26+ тренировок (с дубликатами после перезагрузок)
 
-**Что сделано за сессию 29.06.2026 (Telegram bot + clean slate):**
+**Что сделано за сессию 29.06.2026 (Telegram bot + clean slate + daily weight):**
 1. Установлен `python-telegram-bot` v22
 2. Создан `src/telegram_bot.py` с полным функционалом:
-   - `/start` — ConversationHandler: email → пароль → сохранение в User + UserSettings (шифрование)
+   - `/start` — ConversationHandler: email → пароль (сообщение с паролем удаляется) → сохранение в User + UserSettings
    - `/sync` — полная синхронизация Coros (health + activities) для конкретного пользователя
    - `/stats` — статистика (всего, за 7 дней)
    - `/trainings` — последние 5 тренировок
+   - `/weight` — ручной ввод веса (/weight 75.5)
    - `/delete_me` — удаление данных пользователя
-3. Бот запускается в фоновом потоке при старте сервера (`_start_telegram_bot()`)
-4. `_sync_for_user()` — функция синхронизации для конкретного User (не зависит от _current_user_id)
-5. База очищена: удалены 26 тренировок, 48 метрик здоровья, 2 замера веса, Coros credentials
-6. .env: добавлен `TELEGRAM_BOT_TOKEN=` (заполнить после создания бота у @BotFather)
+   - Ежедневный опрос веса в 9:00 (apscheduler)
+3. Бот запускается как отдельный процесс через subprocess (не thread)
+4. `_sync_for_user()` — функция синхронизации для конкретного User
+5. База очищена, пользователь зарегистрирован через бота, автосинхронизация работает
+6. Установлены зависимости: `python-telegram-bot[job-queue]` (apscheduler, tzlocal)
 7. Закоммичено и запушено
 
 **Текущее состояние**: сервер запущен, БД пустая, Telegram-бот ждёт токен. Пользователь должен:

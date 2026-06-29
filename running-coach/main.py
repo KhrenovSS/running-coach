@@ -2119,10 +2119,14 @@ def _start_auto_sync():
 # Запуск Telegram-бота (Start Telegram bot)
 def _start_telegram_bot():
     try:
-        from src.telegram_bot import run_bot
-        thread = threading.Thread(target=run_bot, daemon=True, name="telegram-bot")
-        thread.start()
-        logger.info("Telegram-бот: фоновый поток запущен")
+        import subprocess
+        import sys
+        bot_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_telegram_bot.py")
+        proc = subprocess.Popen(
+            [sys.executable, bot_script],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        logger.info("Telegram-бот: процесс запущен (pid=%s)", proc.pid)
     except Exception as e:
         logger.error("Telegram-бот: ошибка запуска: %s", e)
 

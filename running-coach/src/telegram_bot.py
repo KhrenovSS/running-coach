@@ -4,7 +4,7 @@ import logging
 import os
 import threading
 import tempfile
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, time as dt_time
 from typing import Optional
 
 from telegram import Update
@@ -21,8 +21,9 @@ from src.models import (
 from src.crypto import encrypt, decrypt
 from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
 from src.parsers.fit_parser import parse_fit
+from src.logger import get_logger
 
-logger = logging.getLogger("telegram_bot")
+logger = get_logger("telegram_bot")
 
 EMAIL, PASSWORD = range(2)
 
@@ -62,6 +63,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"/sync — синхронизировать тренировки\n"
             f"/stats — статистика\n"
             f"/trainings — последние тренировки\n"
+            f"/weight — ввести вес (или /weight 75.5)\n"
             f"/delete_me — удалить мои данные",
         )
         return ConversationHandler.END
@@ -99,6 +101,12 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     username = update.effective_user.username
     name = update.effective_user.full_name
+
+    # Удаляем сообщение с паролем из чата (Delete password message from chat)
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
 
     db = SessionLocal()
     try:
@@ -142,7 +150,8 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"✅ *Готово!* Аккаунт Coros привязан.\n\n"
-        f"Email: `{email}`\n\n"
+        f"Email: `{email}`\n"
+        f"Пароль: 🔒 получен (сообщение удалено из чата)\n\n"
         f"/sync — синхронизировать тренировки\n"
         f"/stats — статистика\n"
         f"/trainings — последние тренировки",
@@ -423,6 +432,108 @@ async def cmd_trainings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
+# === Ежедневный учёт веса (Daily weight tracking) ===
+
+_awaiting_weight: dict[int, bool] = {}
+
+
+async def handle_weight_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает ответ на запрос веса (Handle weight reply from daily prompt)"""
+    chat_id = update.effective_chat.id
+    if not _awaiting_weight.get(chat_id):
+        return
+
+    text = update.message.text.strip().replace(",", ".")
+    try:
+        weight = float(text)
+        if weight < 20 or weight > 300:
+            await update.message.reply_text(
+                "Похоже, это не похоже на вес в кг. Попробуй ещё раз (например: 75.5):"
+            )
+            return
+    except ValueError:
+        await update.message.reply_text("Пожалуйста, введи число (например: 75.5):")
+        return
+
+    db = SessionLocal()
+    try:
+        user = get_user(chat_id)
+        if not user:
+            await update.message.reply_text("❌ Пользователь не найден. Используй /start.")
+            return
+        wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.utcnow(), user_id=user.id)
+        db.add(wm)
+        db.commit()
+        await update.message.reply_text(f"✅ Вес {weight} кг сохранён!")
+    except Exception as e:
+        db.rollback()
+        logger.error("Weight save error: %s", e)
+        await update.message.reply_text("😔 Ошибка при сохранении веса.")
+    finally:
+        db.close()
+
+    _awaiting_weight.pop(chat_id, None)
+
+
+async def cmd_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ручной ввод веса (/weight 75.5)"""
+    chat_id = update.effective_chat.id
+    user = get_user(chat_id)
+    if not user:
+        await update.message.reply_text("❌ Сначала используй /start чтобы зарегистрироваться.")
+        return
+
+    args = context.args
+    if not args:
+        await update.message.reply_text("Использование: /weight 75.5")
+        return
+
+    try:
+        w = float(args[0].replace(",", "."))
+        if w < 20 or w > 300:
+            await update.message.reply_text("Похоже, это не похоже на вес в кг.")
+            return
+    except ValueError:
+        await update.message.reply_text("Введи число, например: /weight 75.5")
+        return
+
+    db = SessionLocal()
+    try:
+        wm = WeightMeasurement(weight_kg=w, measured_at=datetime.utcnow(), user_id=user.id)
+        db.add(wm)
+        db.commit()
+        await update.message.reply_text(f"✅ Вес {w} кг сохранён!")
+    except Exception as e:
+        db.rollback()
+        logger.error("Weight save error: %s", e)
+        await update.message.reply_text("😔 Ошибка при сохранении.")
+    finally:
+        db.close()
+
+
+async def daily_weight_job(context: ContextTypes.DEFAULT_TYPE):
+    """Ежедневный опрос веса (Daily weight prompt at 9:00)"""
+    db = SessionLocal()
+    try:
+        users = db.query(User).filter(
+            User.telegram_chat_id.isnot(None),
+            User.is_active == True,
+        ).all()
+        for user in users:
+            try:
+                await context.bot.send_message(
+                    chat_id=user.telegram_chat_id,
+                    text="⏰ *Доброе утро!* Введи свой сегодняшний вес (в кг):\n"
+                         "например: 75.5",
+                    parse_mode="Markdown",
+                )
+                _awaiting_weight[user.telegram_chat_id] = True
+            except Exception as e:
+                logger.warning("Failed to send weight prompt to %s: %s", user.telegram_chat_id, e)
+    finally:
+        db.close()
+
+
 async def cmd_delete_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user = get_user(chat_id)
@@ -453,13 +564,19 @@ async def cmd_delete_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def run_bot():
-    """Запускает Telegram бота в отдельном потоке (Run Telegram bot in a separate thread)"""
+    """Запускает Telegram бота (блокирующий вызов — запускать в отдельном процессе)"""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         logger.warning("TELEGRAM_BOT_TOKEN не задан — бот не запущен")
         return
 
-    application = Application.builder().token(token).build()
+    from telegram.ext import JobQueue
+    application = (
+        Application.builder()
+        .token(token)
+        .job_queue(JobQueue())
+        .build()
+    )
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
@@ -473,7 +590,13 @@ def run_bot():
     application.add_handler(CommandHandler("sync", cmd_sync))
     application.add_handler(CommandHandler("stats", cmd_stats))
     application.add_handler(CommandHandler("trainings", cmd_trainings))
+    application.add_handler(CommandHandler("weight", cmd_weight))
     application.add_handler(CommandHandler("delete_me", cmd_delete_me))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_weight_message))
 
-    logger.info("Telegram-бот запущен")
+    # Планировщик ежедневного опроса веса в 9:00 (Daily weight prompt at 9:00)
+    application.job_queue.run_daily(daily_weight_job, time=dt_time(hour=9, minute=0))
+    logger.info("Ежедневный опрос веса запланирован на 9:00")
+
+    logger.info("Telegram-obot polling started")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
