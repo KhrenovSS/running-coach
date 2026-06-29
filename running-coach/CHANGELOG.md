@@ -4,6 +4,9 @@ All notable changes to this project are tracked here.
 
 ## [29.06.2026]
 
+### Fixed
+- **Coros health sync: даты в формате YYYYMMDD и тип int** — API `/analyse/dayDetail/query` принимает даты без дефисов (`20260601`), поле `happenDay` приходит как `int`, а не `str`. Исправлено: формат дат в `strftime("%Y%m%d")`, преобразование `happenDay` в строку перед парсингом.
+
 ### Added
 - **Ежедневные метрики здоровья из Coros (Coros daily health metrics — sleep, HRV, recovery)**
   - Новые эндпоинты в `coros_client.py`: `get_dashboard()` (HRV за 7 дней) и `get_daily_metrics(start_day, end_day)` (дневные метрики за период) через Training Hub API (`/dashboard/query`, `/analyse/dayDetail/query`)

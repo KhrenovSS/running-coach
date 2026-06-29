@@ -136,24 +136,25 @@ class CorosClient:
     def get_dashboard(self) -> dict:
         if not self.accesstoken:
             raise CorosAPIError("Not authenticated")
-        resp = self.session.get(DASHBOARD_URL, headers=self._auth_headers(), timeout=self.timeout)
+        headers = {k: v for k, v in self._auth_headers().items() if k != "Content-Type"}
+        resp = self.session.get(DASHBOARD_URL, headers=headers, timeout=self.timeout)
         resp.raise_for_status()
-        data = resp.json()
-        if data.get("result") != "0000":
-            raise CorosAPIError(f"Dashboard API error: {data.get('message')}")
-        return data.get("data", {})
+        body = resp.json()
+        if body.get("result") != "0000":
+            raise CorosAPIError(f"Dashboard API error: {body.get('message')}")
+        return body.get("data", {})
 
     # Получить ежедневные метрики за период (Get daily health metrics for date range)
     def get_daily_metrics(self, start_day: str, end_day: str) -> list[dict]:
         if not self.accesstoken:
             raise CorosAPIError("Not authenticated")
+        headers = self._auth_headers()
         params = {"startDay": start_day, "endDay": end_day}
-        resp = self.session.get(ANALYSE_DETAIL_URL, params=params, headers=self._auth_headers(), timeout=self.timeout)
-        resp.raise_for_status()
-        data = resp.json()
-        if data.get("result") != "0000":
-            raise CorosAPIError(f"Analyse API error: {data.get('message')}")
-        return data.get("data", [])
+        resp = self.session.get(ANALYSE_DETAIL_URL, params=params, headers=headers, timeout=self.timeout)
+        body = resp.json()
+        if body.get("result") != "0000":
+            raise CorosAPIError(f"Analyse API error: {body.get('message')}")
+        return body.get("data", {}).get("dayList", [])
 
     # Скачать FIT-файл активности (Download activity FIT file)
     def download_fit(self, activity_id: str, sport_type: int, output_path: str) -> bool:

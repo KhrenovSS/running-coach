@@ -1687,10 +1687,10 @@ async def coros_sync_health():
 
             # Определяем диапазон дат для синхронизации (Determine date range for sync)
             existing_dates = {r[0] for r in db.query(DailyMetrics.date).all()}
-            from datetime import timedelta, date
+            from datetime import timedelta, date, datetime
             today = date.today()
-            start_day = (today - timedelta(days=180)).strftime("%Y-%m-%d")
-            end_day = today.strftime("%Y-%m-%d")
+            start_day = (today - timedelta(days=120)).strftime("%Y%m%d")
+            end_day = today.strftime("%Y%m%d")
 
             metrics_list = client.get_daily_metrics(start_day, end_day)
             progress['total_found'] = len(metrics_list)
@@ -1710,13 +1710,17 @@ async def coros_sync_health():
                 happen_day = entry.get('happenDay')
                 if not happen_day:
                     continue
-
+                happen_day = str(happen_day)
                 try:
-                    entry_date = datetime.strptime(happen_day, "%Y-%m-%d").date()
+                    entry_date = datetime.strptime(happen_day, "%Y%m%d").date()
                 except (ValueError, TypeError):
-                    continue
+                    try:
+                        entry_date = datetime.strptime(happen_day_str, "%Y-%m-%d").date()
+                    except (ValueError, TypeError):
+                        continue
 
                 if entry_date in existing_dates:
+                    logger.debug("Пропуск: дата %s уже есть в БД", entry_date)
                     continue
 
                 dm = DailyMetrics(
