@@ -1739,8 +1739,8 @@ _auto_sync_status = {
 _AUTO_SYNC_STATUS_LOCK = threading.Lock()
 
 # Интервалы синхронизации из переменных окружения (с квотер-джиттером)
-_HEALTH_SYNC_INTERVAL = int(os.getenv("COROS_HEALTH_SYNC_INTERVAL", "3600"))
-_ACTIVITY_SYNC_INTERVAL = int(os.getenv("COROS_ACTIVITY_SYNC_INTERVAL", "10800"))
+_HEALTH_SYNC_INTERVAL = int(os.getenv("COROS_HEALTH_SYNC_INTERVAL", "21600"))  # 6 часов
+_ACTIVITY_SYNC_INTERVAL = int(os.getenv("COROS_ACTIVITY_SYNC_INTERVAL", "3600"))  # 1 час
 _AUTO_SYNC_LOCK = threading.Lock()
 
 # Синхронизация метрик здоровья (авто, без прогресса) (Auto health metrics sync)
