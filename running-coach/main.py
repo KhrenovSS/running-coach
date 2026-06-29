@@ -309,6 +309,32 @@ def render_page(year=None, month=None):
     else:
         latest_hrv = latest_rhr = latest_tired = latest_perf = ''
 
+    # Статус автосинхронизации (Auto-sync status)
+    from datetime import datetime
+    now = datetime.now()
+    with _AUTO_SYNC_STATUS_LOCK:
+        as_health = dict(_auto_sync_status['health'])
+        as_activity = dict(_auto_sync_status['activity'])
+    def fmt_sync_time(t):
+        if not t:
+            return '—'
+        diff = (now - t).total_seconds()
+        if diff < 60:
+            return 'только что'
+        elif diff < 3600:
+            return f'{int(diff/60)} мин назад'
+        elif diff < 86400:
+            return f'{int(diff/3600)} ч назад'
+        else:
+            return t.strftime('%d.%m %H:%M')
+    def fmt_next_sync(t):
+        if not t:
+            return '—'
+        left = (t - now).total_seconds()
+        if left < 0:
+            return 'скоро'
+        return f'через {int(left/60)} мин'
+
     return MAIN_HTML.format(
         rows=rows, nav_html=nav_html, max_hr=settings.max_hr, weight=settings.weight,
         week_km=week_stats['total_km'] if week_stats else 0,
@@ -325,6 +351,12 @@ def render_page(year=None, month=None):
         latest_rhr=latest_rhr,
         latest_tired=latest_tired,
         latest_perf=latest_perf,
+        auto_health_last=fmt_sync_time(as_health['last_run']),
+        auto_health_next=fmt_next_sync(as_health['next_run']),
+        auto_health_status=as_health['status'],
+        auto_activity_last=fmt_sync_time(as_activity['last_run']),
+        auto_activity_next=fmt_next_sync(as_activity['next_run']),
+        auto_activity_status=as_activity['status'],
     )
 
 
@@ -560,6 +592,15 @@ MAIN_HTML = '''
             <h4>📈 Пульс покоя (RHR)</h4>
             <canvas id='recoveryChart' height='80'></canvas>
         </div>
+    </div>
+
+    <!-- Статус автосинхронизации Coros (Auto-sync status) -->
+    <div class='sync-status' style='font-size:12px;color:#888;margin-bottom:15px;display:flex;gap:20px;flex-wrap:wrap;padding:8px 12px;background:#f9f9f9;border-radius:6px;'>
+        <span>🔄 <b>Автосинхронизация:</b></span>
+        <span>Health: <span id='autoHealthStatus'>{auto_health_status}</span>
+              (последняя: {auto_health_last}, след.: {auto_health_next})</span>
+        <span>Activities: <span id='autoActivityStatus'>{auto_activity_status}</span>
+              (последняя: {auto_activity_last}, след.: {auto_activity_next})</span>
     </div>
 
     <script>
@@ -1690,6 +1731,13 @@ async def coros_sync():
 
 # === Фоновая автоматическая синхронизация Coros (Auto background sync) ===
 
+# Статус автосинхронизации (Auto-sync status tracking)
+_auto_sync_status = {
+    'health': {'last_run': None, 'status': 'idle', 'message': '', 'next_run': None},
+    'activity': {'last_run': None, 'status': 'idle', 'message': '', 'next_run': None},
+}
+_AUTO_SYNC_STATUS_LOCK = threading.Lock()
+
 # Интервалы синхронизации из переменных окружения (с квотер-джиттером)
 _HEALTH_SYNC_INTERVAL = int(os.getenv("COROS_HEALTH_SYNC_INTERVAL", "3600"))
 _ACTIVITY_SYNC_INTERVAL = int(os.getenv("COROS_ACTIVITY_SYNC_INTERVAL", "10800"))
@@ -1697,6 +1745,26 @@ _AUTO_SYNC_LOCK = threading.Lock()
 
 # Синхронизация метрик здоровья (авто, без прогресса) (Auto health metrics sync)
 def _auto_sync_health():
+    from datetime import timedelta, date, datetime
+    with _AUTO_SYNC_STATUS_LOCK:
+        _auto_sync_status['health']['status'] = 'syncing'
+    try:
+        _auto_sync_health_inner()
+        with _AUTO_SYNC_STATUS_LOCK:
+            s = _auto_sync_status['health']
+            s['status'] = 'ok'
+            s['last_run'] = datetime.now()
+            s['message'] = '✓'
+            s['next_run'] = s['last_run'] + timedelta(seconds=_HEALTH_SYNC_INTERVAL)
+    except Exception as e:
+        with _AUTO_SYNC_STATUS_LOCK:
+            s = _auto_sync_status['health']
+            s['status'] = 'error'
+            s['last_run'] = datetime.now()
+            s['message'] = str(e)[:80]
+            s['next_run'] = s['last_run'] + timedelta(seconds=_HEALTH_SYNC_INTERVAL)
+
+def _auto_sync_health_inner():
     from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
     from src.models import UserSettings
     from datetime import timedelta, date, datetime
@@ -1812,8 +1880,28 @@ def _auto_sync_health():
 
 # Синхронизация активностей (авто, без прогресса) (Auto activity sync)
 def _auto_sync_activities():
+    from datetime import timedelta, datetime
+    with _AUTO_SYNC_STATUS_LOCK:
+        _auto_sync_status['activity']['status'] = 'syncing'
+    try:
+        _auto_sync_activities_inner()
+        with _AUTO_SYNC_STATUS_LOCK:
+            s = _auto_sync_status['activity']
+            s['status'] = 'ok'
+            s['last_run'] = datetime.now()
+            s['message'] = '✓'
+            s['next_run'] = s['last_run'] + timedelta(seconds=_ACTIVITY_SYNC_INTERVAL)
+    except Exception as e:
+        with _AUTO_SYNC_STATUS_LOCK:
+            s = _auto_sync_status['activity']
+            s['status'] = 'error'
+            s['last_run'] = datetime.now()
+            s['message'] = str(e)[:80]
+            s['next_run'] = s['last_run'] + timedelta(seconds=_ACTIVITY_SYNC_INTERVAL)
+
+def _auto_sync_activities_inner():
     from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
-    from src.models import UserSettings
+    from src.models import UserSettings, DeletedTraining
     from src.parsers.fit_parser import parse_fit
     import tempfile
 
@@ -1830,15 +1918,26 @@ def _auto_sync_activities():
         client = CorosClient(us.coros_email, plain_password, timeout=15)
         client.authenticate()
 
-        activities = client.list_activities(limit=50, since=None)
+        activities = client.list_activities(limit=50, since=us.last_coros_sync)
         logger.info("Автосинхронизация активностей: получено %d активностей", len(activities))
         if not activities:
             return
 
         existing_times = {r[0] for r in db.query(TrainingSession.begin_ts).all()}
+        deleted_times = set()
+        for d in db.query(DeletedTraining).all():
+            if d.begin_ts:
+                deleted_times.add(d.begin_ts)
+
         def already_imported(ts):
             for et in existing_times:
                 if et is not None and abs((et - ts).total_seconds()) < 120:
+                    return True
+            return False
+
+        def was_deleted(ts):
+            for dt in deleted_times:
+                if abs((dt - ts).total_seconds()) < 120:
                     return True
             return False
 
@@ -1851,6 +1950,9 @@ def _auto_sync_activities():
         errors = []
         max_act_ts = us.last_coros_sync
         for act in new_acts:
+            if was_deleted(act['start_time']):
+                logger.info("Автосинхронизация: пропуск ранее удалённой %s (%s)", act['name'], act['start_time'])
+                continue
             logger.info("Автосинхронизация: загрузка %s (%s)", act['name'], act['start_time'])
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.fit')
             tmp.close()
