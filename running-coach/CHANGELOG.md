@@ -16,6 +16,12 @@ All notable changes to this project are tracked here.
 - **Новые поля `ltsp` и `stamina_level_7d`** в модели `DailyMetrics` — темп лактатного порога и 7-дневный тренд выносливости
 - **Автомиграция** для новых колонок `daily_metrics`
 - **Мерж аналитики в health sync** — при синхронизации данные из `/analyse/query` дозаполняются в записи daily_metrics (22 записи обновлено)
+- **Автоматическая фоновая синхронизация Coros** — сервер сам проверяет новые данные без нажатия кнопок:
+  - Health sync: раз в ~60 мин (env `COROS_HEALTH_SYNC_INTERVAL`, ±20% jitter)
+  - Activity sync: раз в ~180 мин (env `COROS_ACTIVITY_SYNC_INTERVAL`, ±20% jitter)
+  - Запускается при старте сервера через daemon-thread в `_auto_sync_health()` / `_auto_sync_activities()`
+  - Graceful error handling: ошибки API не роняют планировщик
+  - Логирование в `app.log` с префиксом `Автосинхронизация`
 
 ### Changed
 - **График на главной странице**: только пульс покоя (RHR), 30 дней данных, хронологический порядок (слева направо). HRV убран с графика.

@@ -1083,6 +1083,9 @@ def startup():
     finally:
         db.close()
 
+    # Запуск фоновой автосинхронизации Coros (Start background auto-sync)
+    _start_auto_sync()
+
 
 # Главная страница: список тренировок и статистика (Main page: session list and stats)
 @app.get('/', response_class=HTMLResponse)
@@ -1680,10 +1683,273 @@ async def coros_sync():
             logger.error("Coros sync error", exc_info=True)
         finally:
             db.close()
-
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
     return JSONResponse({'task_id': task_id, 'status': 'started'})
+
+
+# === Фоновая автоматическая синхронизация Coros (Auto background sync) ===
+
+# Интервалы синхронизации из переменных окружения (с квотер-джиттером)
+_HEALTH_SYNC_INTERVAL = int(os.getenv("COROS_HEALTH_SYNC_INTERVAL", "3600"))
+_ACTIVITY_SYNC_INTERVAL = int(os.getenv("COROS_ACTIVITY_SYNC_INTERVAL", "10800"))
+_AUTO_SYNC_LOCK = threading.Lock()
+
+# Синхронизация метрик здоровья (авто, без прогресса) (Auto health metrics sync)
+def _auto_sync_health():
+    from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
+    from src.models import UserSettings
+    from datetime import timedelta, date, datetime
+
+    db = SessionLocal()
+    try:
+        us = db.query(UserSettings).first()
+        if not us or not us.coros_email or not us.coros_password:
+            logger.debug("Автосинхронизация здоровья: нет учётных данных Coros")
+            return
+        try:
+            plain_password = decrypt(us.coros_password)
+        except Exception:
+            plain_password = us.coros_password
+        client = CorosClient(us.coros_email, plain_password, timeout=15)
+        client.authenticate()
+
+        existing_dates = {r[0] for r in db.query(DailyMetrics.date).all()}
+        today = date.today()
+        start_day = (today - timedelta(days=120)).strftime("%Y%m%d")
+        end_day = today.strftime("%Y%m%d")
+
+        metrics_list = client.get_daily_metrics(start_day, end_day)
+        logger.info("Автосинхронизация здоровья: получено %d записей из Coros", len(metrics_list))
+        if not metrics_list:
+            return
+
+        analytics_by_date = {}
+        try:
+            analytics_list = client.get_analytics()
+            for a in analytics_list:
+                ad = a.get('happenDay')
+                if ad:
+                    try:
+                        d = datetime.strptime(str(ad), "%Y%m%d").date()
+                        analytics_by_date[d] = a
+                    except (ValueError, TypeError):
+                        pass
+        except Exception as e:
+            logger.warning("Автосинхронизация: не удалось получить аналитику Coros: %s", e)
+
+        synced = 0
+        for entry in metrics_list:
+            happen_day = entry.get('happenDay')
+            if not happen_day:
+                continue
+            happen_day = str(happen_day)
+            try:
+                entry_date = datetime.strptime(happen_day, "%Y%m%d").date()
+            except (ValueError, TypeError):
+                continue
+            if entry_date in existing_dates:
+                continue
+
+            ana = analytics_by_date.get(entry_date, {})
+            dm = DailyMetrics(
+                date=entry_date,
+                avg_sleep_hrv=entry.get('avgSleepHrv'),
+                sleep_hrv_baseline=entry.get('sleepHrvBase'),
+                sleep_hrv_sd=entry.get('sleepHrvSd'),
+                rhr=entry.get('rhr'),
+                tired_rate=entry.get('tiredRateNew'),
+                training_load=entry.get('trainingLoad'),
+                training_load_ratio=entry.get('trainingLoadRatio'),
+                performance=entry.get('performance'),
+                ati=entry.get('ati'),
+                cti=entry.get('cti'),
+                vo2max=entry.get('vo2max') or ana.get('vo2max'),
+                lthr=entry.get('lthr') or ana.get('lthr'),
+                stamina_level=entry.get('staminaLevel') or ana.get('staminaLevel'),
+                ltsp=ana.get('ltsp'),
+                stamina_level_7d=ana.get('staminaLevel7d'),
+            )
+            db.add(dm)
+            synced += 1
+
+        if synced:
+            db.commit()
+            logger.info("Автосинхронизация здоровья: synced=%d", synced)
+        else:
+            logger.info("Автосинхронизация здоровья: новых записей нет")
+
+        if analytics_by_date:
+            updated = 0
+            for entry_date, ana in analytics_by_date.items():
+                existing = db.query(DailyMetrics).filter(DailyMetrics.date == entry_date).first()
+                if not existing:
+                    continue
+                changed = False
+                if existing.vo2max is None and ana.get('vo2max') is not None:
+                    existing.vo2max = ana.get('vo2max'); changed = True
+                if existing.lthr is None and ana.get('lthr') is not None:
+                    existing.lthr = ana.get('lthr'); changed = True
+                if existing.stamina_level is None and ana.get('staminaLevel') is not None:
+                    existing.stamina_level = ana.get('staminaLevel'); changed = True
+                if existing.ltsp is None and ana.get('ltsp') is not None:
+                    existing.ltsp = ana.get('ltsp'); changed = True
+                if existing.stamina_level_7d is None and ana.get('staminaLevel7d') is not None:
+                    existing.stamina_level_7d = ana.get('staminaLevel7d'); changed = True
+                if changed:
+                    updated += 1
+            if updated:
+                db.commit()
+                logger.info("Автосинхронизация: обновлено аналитикой %d записей", updated)
+    except CorosAuthError as e:
+        logger.warning("Автосинхронизация здоровья: ошибка аутентификации: %s", e)
+    except CorosAPIError as e:
+        logger.warning("Автосинхронизация здоровья: ошибка Coros API: %s", e)
+    except Exception:
+        logger.exception("Автосинхронизация здоровья: неожиданная ошибка")
+    finally:
+        db.close()
+
+# Синхронизация активностей (авто, без прогресса) (Auto activity sync)
+def _auto_sync_activities():
+    from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
+    from src.models import UserSettings
+    from src.parsers.fit_parser import parse_fit
+    import tempfile
+
+    db = SessionLocal()
+    try:
+        us = db.query(UserSettings).first()
+        if not us or not us.coros_email or not us.coros_password:
+            logger.debug("Автосинхронизация активностей: нет учётных данных Coros")
+            return
+        try:
+            plain_password = decrypt(us.coros_password)
+        except Exception:
+            plain_password = us.coros_password
+        client = CorosClient(us.coros_email, plain_password, timeout=15)
+        client.authenticate()
+
+        activities = client.list_activities(limit=50, since=None)
+        logger.info("Автосинхронизация активностей: получено %d активностей", len(activities))
+        if not activities:
+            return
+
+        existing_times = {r[0] for r in db.query(TrainingSession.begin_ts).all()}
+        def already_imported(ts):
+            for et in existing_times:
+                if et is not None and abs((et - ts).total_seconds()) < 120:
+                    return True
+            return False
+
+        new_acts = [a for a in activities if not already_imported(a['start_time'])]
+        if not new_acts:
+            logger.info("Автосинхронизация активностей: все активности уже в БД")
+            return
+
+        synced = 0
+        errors = []
+        max_act_ts = us.last_coros_sync
+        for act in new_acts:
+            logger.info("Автосинхронизация: загрузка %s (%s)", act['name'], act['start_time'])
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.fit')
+            tmp.close()
+            try:
+                ok = client.download_fit(act['id'], act['sport_type'], tmp.name)
+                if not ok:
+                    logger.warning("Автосинхронизация: не удалось скачать %s", act['name'])
+                    errors.append(f"{act['name']}: download failed")
+                    continue
+
+                data = parse_fit(tmp.name, max_hr=us.max_hr,
+                                 max_credible_pace=us.max_credible_pace,
+                                 max_gps_jump_m=us.max_gps_jump_m,
+                                 min_hr_for_fast_pace=us.min_hr_for_fast_pace)
+                if not data:
+                    logger.warning("Автосинхронизация: не удалось распарсить %s", act['name'])
+                    errors.append(f"{act['name']}: parse failed")
+                    continue
+
+                cleaning_log = data.pop('cleaning_log', None)
+                flags_val = data.pop('suspect_flags', None)
+                if data.get('training_type') in ('invalid', None):
+                    logger.warning("Автосинхронизация: некорректные данные %s", act['name'])
+                    errors.append(f"{act['name']}: invalid data")
+                    continue
+
+                session = TrainingSession(**data)
+                if cleaning_log:
+                    session.cleaning_log = cleaning_log
+                if flags_val:
+                    session.suspect_flags = flags_val
+                db.add(session)
+                db.commit()
+                synced += 1
+                logger.info("Автосинхронизация: сохранена %s (%s)", act['name'], act['start_time'])
+                if max_act_ts is None or act['start_time'] > max_act_ts:
+                    max_act_ts = act['start_time']
+            except Exception as e:
+                logger.exception("Ошибка при обработке %s", act['name'])
+                errors.append(f"{act['name']}: {str(e)}")
+            finally:
+                if os.path.exists(tmp.name):
+                    os.unlink(tmp.name)
+
+        if max_act_ts is not None and (us.last_coros_sync is None or max_act_ts > us.last_coros_sync):
+            us.last_coros_sync = max_act_ts
+            db.commit()
+            logger.info("Автосинхронизация: last_coros_sync обновлён: %s", max_act_ts)
+
+        logger.info("Автосинхронизация активностей: synced=%d, errors=%d", synced, len(errors))
+    except CorosAuthError as e:
+        logger.warning("Автосинхронизация активностей: ошибка аутентификации: %s", e)
+    except CorosAPIError as e:
+        logger.warning("Автосинхронизация активностей: ошибка Coros API: %s", e)
+    except Exception:
+        logger.exception("Автосинхронизация активностей: неожиданная ошибка")
+    finally:
+        db.close()
+
+# Фоновый планировщик автосинхронизации (Background auto-sync scheduler)
+def _start_auto_sync():
+    import random
+
+    with _AUTO_SYNC_LOCK:
+        if hasattr(_start_auto_sync, '_started') and _start_auto_sync._started:
+            return
+        _start_auto_sync._started = True
+
+    def _loop():
+        logger.info("Автосинхронизация: запуск планировщика (health=%dс, activities=%dс)",
+                     _HEALTH_SYNC_INTERVAL, _ACTIVITY_SYNC_INTERVAL)
+        time.sleep(30)
+
+        last_health = 0.0
+        last_activity = 0.0
+
+        while True:
+            now = time.time()
+            try:
+                if now - last_health >= _HEALTH_SYNC_INTERVAL * random.uniform(0.8, 1.2):
+                    logger.info("Автосинхронизация: health sync")
+                    _auto_sync_health()
+                    last_health = time.time()
+            except Exception:
+                logger.exception("Автосинхронизация: ошибка health sync")
+
+            try:
+                if now - last_activity >= _ACTIVITY_SYNC_INTERVAL * random.uniform(0.8, 1.2):
+                    logger.info("Автосинхронизация: activity sync")
+                    _auto_sync_activities()
+                    last_activity = time.time()
+            except Exception:
+                logger.exception("Автосинхронизация: ошибка activity sync")
+
+            time.sleep(300)
+
+    thread = threading.Thread(target=_loop, daemon=True, name="coros-auto-sync")
+    thread.start()
+    logger.info("Автосинхронизация Coros: фоновый поток запущен")
 
 
 # Статус фоновой синхронизации Coros (Background Coros sync status)
