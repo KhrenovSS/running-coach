@@ -512,14 +512,23 @@ async def cmd_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def daily_weight_job(context: ContextTypes.DEFAULT_TYPE):
-    """Ежедневный опрос веса (Daily weight prompt at 9:00)"""
+    """Ежедневный опрос веса в 9:00 — только если ещё не вводили сегодня (Daily weight prompt at 9:00 — skip if already logged today)"""
     db = SessionLocal()
     try:
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
         users = db.query(User).filter(
             User.telegram_chat_id.isnot(None),
             User.is_active == True,
         ).all()
         for user in users:
+            # Проверяем, был ли уже введён вес сегодня (Check if weight already logged today)
+            existing = db.query(WeightMeasurement).filter(
+                WeightMeasurement.user_id == user.id,
+                WeightMeasurement.measured_at >= today_start,
+            ).first()
+            if existing:
+                continue
+
             try:
                 await context.bot.send_message(
                     chat_id=user.telegram_chat_id,

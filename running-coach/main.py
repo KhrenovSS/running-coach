@@ -9,6 +9,7 @@ from src.parsers.common import weather_icon, format_pace, format_duration
 from src.logger import get_logger
 from src.crypto import encrypt, decrypt
 logger = get_logger("app")
+import httpx
 import shutil
 import os
 import tempfile
@@ -38,6 +39,28 @@ TRAINING_TYPES_RU = {
     'recovery': 'Восстановительная',
     'tempo': 'Темповая',
 }
+
+# Отправить уведомление пользователю в Telegram (Send notification to user via Telegram)
+def _telegram_notify(text: str):
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token:
+        return
+    db = SessionLocal()
+    try:
+        from src.models import User
+        user = db.query(User).filter(User.id == _current_user_id, User.telegram_chat_id.isnot(None)).first()
+        if not user:
+            return
+        try:
+            with httpx.Client(timeout=5) as client:
+                client.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={"chat_id": user.telegram_chat_id, "text": text, "parse_mode": "Markdown"},
+                )
+        except Exception:
+            pass
+    finally:
+        db.close()
 
 # Цвета для пульсовых зон (Heart rate zone colors)
 ZONE_COLORS = ['', '#e8f5e9', '#c8e6c9', '#fff3e0', '#ffccbc', '#ffcdd2']
@@ -1905,6 +1928,7 @@ def _auto_sync_health_inner():
         if synced:
             db.commit()
             logger.info("Автосинхронизация здоровья: synced=%d", synced)
+            _telegram_notify(f"🩺 Синхронизировано {synced} записей здоровья")
         else:
             logger.info("Автосинхронизация здоровья: новых записей нет")
 
@@ -2046,10 +2070,17 @@ def _auto_sync_activities_inner():
                     session.cleaning_log = cleaning_log
                 if flags_val:
                     session.suspect_flags = flags_val
+                session.user_id = _current_user_id
                 db.add(session)
                 db.commit()
                 synced += 1
                 logger.info("Автосинхронизация: сохранена %s (%s)", act['name'], act['start_time'])
+                # Уведомление в Telegram (Telegram notification)
+                _telegram_notify(
+                    f"🏃 *Новая тренировка!*\n"
+                    f"▫️ {act['name']}\n"
+                    f"▫️ {data.get('total_distance_km', 0):.1f} км"
+                )
                 if max_act_ts is None or act['start_time'] > max_act_ts:
                     max_act_ts = act['start_time']
             except Exception as e:
