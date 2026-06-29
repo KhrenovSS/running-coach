@@ -147,6 +147,20 @@ class WeightMeasurement(Base):
     user = relationship("User", back_populates="weight_measurements")
 
 
+# Модель обратной связи по тренировке (Training feedback model)
+class TrainingFeedback(Base):
+    __tablename__ = 'training_feedback'
+    id = Column(Integer, primary_key=True)
+    session_id = Column(Integer, ForeignKey('training_sessions.id'), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+    rating = Column(Integer, nullable=False)  # 1–5
+    notes = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    session = relationship("TrainingSession")
+    user = relationship("User")
+
+
 # Определение пути к БД и создание подключения (Database path and connection setup)
 DB_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_DIR}/running_coach.db")

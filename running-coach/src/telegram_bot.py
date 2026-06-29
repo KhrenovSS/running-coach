@@ -7,15 +7,15 @@ import tempfile
 from datetime import datetime, timedelta, date, time as dt_time
 from typing import Optional
 
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, ConversationHandler,
+    Application, CommandHandler, ConversationHandler, CallbackQueryHandler,
     MessageHandler, filters, ContextTypes,
 )
 
 from src.models import (
     SessionLocal, User, UserSettings, TrainingSession,
-    DailyMetrics, WeightMeasurement, DeletedTraining,
+    DailyMetrics, WeightMeasurement, DeletedTraining, TrainingFeedback,
     get_user_by_telegram,
 )
 from src.crypto import encrypt, decrypt
@@ -35,14 +35,17 @@ TRAINING_TYPES_RU = {
 }
 
 
-def _send_message(token: str, chat_id: int, text: str):
+def _send_message(token: str, chat_id: int, text: str, reply_markup: dict = None):
     """Отправляет сообщение через Telegram Bot API напрямую (Send message via Telegram Bot API directly)"""
     import httpx
     try:
+        payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
         with httpx.Client(timeout=10) as client:
             client.post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
-                json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+                json=payload,
             )
     except Exception as e:
         logger.error("Failed to send Telegram message: %s", e)
@@ -303,6 +306,7 @@ def _sync_for_user(user: User, chat_id: int, token: str):
 
                 new_acts = [a for a in activities if not already_imported(a['start_time'])]
                 max_act_ts = user.last_coros_sync
+                new_session_ids = []
                 for act in new_acts:
                     tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.fit')
                     tmp.close()
@@ -322,6 +326,8 @@ def _sync_for_user(user: User, chat_id: int, token: str):
                             session = TrainingSession(**data)
                             session.user_id = user.id
                             db.add(session)
+                            db.flush()
+                            new_session_ids.append((act, session.id, data))
                             synced_acts += 1
                             if max_act_ts is None or act['start_time'] > max_act_ts:
                                 max_act_ts = act['start_time']
@@ -339,6 +345,18 @@ def _sync_for_user(user: User, chat_id: int, token: str):
                     if us:
                         us.last_coros_sync = max_act_ts
                     db.commit()
+                    # Уведомление + запрос оценки для каждой новой тренировки (Notify + rating prompt)
+                    token_bot = os.getenv("TELEGRAM_BOT_TOKEN", "")
+                    for act, sid, data in new_session_ids:
+                        rows = [[{"text": str(i), "callback_data": f"feedback:{sid}:{i}"} for i in range(1, 6)]]
+                        _send_message(
+                            token_bot, chat_id,
+                            f"🏃 *Новая тренировка!*\n"
+                            f"▫️ {act['name']}\n"
+                            f"▫️ {data.get('total_distance_km', 0):.1f} км\n\n"
+                            f"Как прошло? Оцени:",
+                            reply_markup={"inline_keyboard": rows},
+                        )
 
             msg_parts.append(f"тренировки: {synced_acts}")
         except Exception as e:
@@ -572,6 +590,66 @@ async def cmd_delete_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
+# === Обратная связь по тренировке (Training feedback) ===
+
+async def feedback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает нажатие кнопки оценки тренировки (Handle training rating button press)"""
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    if not data or not data.startswith("feedback:"):
+        return
+    parts = data.split(":")
+    if len(parts) != 3:
+        return
+    _, session_id_str, rating_str = parts
+    try:
+        session_id = int(session_id_str)
+        rating = int(rating_str)
+    except ValueError:
+        return
+    if rating < 1 or rating > 5:
+        return
+
+    chat_id = update.effective_chat.id
+    user = get_user(chat_id)
+    if not user:
+        await query.edit_message_text(
+            "❌ Пользователь не найден. Используй /start чтобы зарегистрироваться."
+        )
+        return
+
+    db = SessionLocal()
+    try:
+        fb = db.query(TrainingFeedback).filter(
+            TrainingFeedback.session_id == session_id,
+            TrainingFeedback.user_id == user.id,
+        ).first()
+        if fb:
+            await query.edit_message_text(
+                f"✅ Оценка уже была сохранена ранее: {fb.rating}/5"
+            )
+            return
+
+        fb = TrainingFeedback(
+            session_id=session_id,
+            user_id=user.id,
+            rating=rating,
+        )
+        db.add(fb)
+        db.commit()
+        labels = {1: "😣", 2: "😐", 3: "🙂", 4: "😊", 5: "🔥"}
+        await query.edit_message_text(
+            f"✅ Спасибо! Оценка {rating}/5 {labels.get(rating, '')} сохранена."
+        )
+    except Exception as e:
+        db.rollback()
+        logger.error("Feedback save error: %s", e)
+        await query.edit_message_text("😔 Ошибка при сохранении оценки.")
+    finally:
+        db.close()
+
+
 def run_bot():
     """Запускает Telegram бота (блокирующий вызов — запускать в отдельном процессе)"""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -601,6 +679,7 @@ def run_bot():
     application.add_handler(CommandHandler("trainings", cmd_trainings))
     application.add_handler(CommandHandler("weight", cmd_weight))
     application.add_handler(CommandHandler("delete_me", cmd_delete_me))
+    application.add_handler(CallbackQueryHandler(feedback_callback, pattern="^feedback:"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_weight_message))
 
     # Планировщик ежедневного опроса веса в 9:00 (Daily weight prompt at 9:00)

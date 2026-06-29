@@ -41,7 +41,7 @@ TRAINING_TYPES_RU = {
 }
 
 # Отправить уведомление пользователю в Telegram (Send notification to user via Telegram)
-def _telegram_notify(text: str):
+def _telegram_notify(text: str, reply_markup: dict = None):
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         return
@@ -52,10 +52,13 @@ def _telegram_notify(text: str):
         if not user:
             return
         try:
+            payload = {"chat_id": user.telegram_chat_id, "text": text, "parse_mode": "Markdown"}
+            if reply_markup:
+                payload["reply_markup"] = reply_markup
             with httpx.Client(timeout=5) as client:
                 client.post(
                     f"https://api.telegram.org/bot{token}/sendMessage",
-                    json={"chat_id": user.telegram_chat_id, "text": text, "parse_mode": "Markdown"},
+                    json=payload,
                 )
         except Exception:
             pass
@@ -1928,7 +1931,6 @@ def _auto_sync_health_inner():
         if synced:
             db.commit()
             logger.info("Автосинхронизация здоровья: synced=%d", synced)
-            _telegram_notify(f"🩺 Синхронизировано {synced} записей здоровья")
         else:
             logger.info("Автосинхронизация здоровья: новых записей нет")
 
@@ -2072,14 +2074,19 @@ def _auto_sync_activities_inner():
                     session.suspect_flags = flags_val
                 session.user_id = _current_user_id
                 db.add(session)
+                db.flush()
+                session_id = session.id
                 db.commit()
                 synced += 1
                 logger.info("Автосинхронизация: сохранена %s (%s)", act['name'], act['start_time'])
-                # Уведомление в Telegram (Telegram notification)
+                # Уведомление + запрос оценки в Telegram (Notification + rating request)
+                rows = [[{"text": str(i), "callback_data": f"feedback:{session_id}:{i}"} for i in range(1, 6)]]
                 _telegram_notify(
                     f"🏃 *Новая тренировка!*\n"
                     f"▫️ {act['name']}\n"
-                    f"▫️ {data.get('total_distance_km', 0):.1f} км"
+                    f"▫️ {data.get('total_distance_km', 0):.1f} км\n\n"
+                    f"Как прошло? Оцени:",
+                    reply_markup={"inline_keyboard": rows},
                 )
                 if max_act_ts is None or act['start_time'] > max_act_ts:
                     max_act_ts = act['start_time']
