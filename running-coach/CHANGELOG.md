@@ -5,12 +5,21 @@ All notable changes to this project are tracked here.
 ## [29.06.2026]
 
 ### Added
-- **Многопользовательская архитектура (multi-user DB)**: начало рефакторинга
-  - Новая модель `User` — единая таблица пользователей с профилем, целями, Coros-данными
-  - `user_id` добавлен во все сущности: тренировки, метрики здоровья, измерения веса, удалённые тренировки
-  - Миграция при старте: создание таблиц, импорт первого пользователя из `UserSettings`
-  - `UserSettings` замещён моделью `User` (таблица сохранена для обратной совместимости)
-  - План: Telegram-бот → регистрация пользователей по chat_id → каждому своя БД и рекомендации
+- **Telegram-бот** (`src/telegram_bot.py`):
+  - `/start` — диалог регистрации: сбор Coros email + пароль, сохранение в `User` модель (шифрование)
+  - `/sync` — синхронизация тренировок и метрик здоровья для пользователя
+  - `/stats` — общая статистика (тренировки, дистанция, время, здоровье)
+  - `/trainings` — последние 5 тренировок
+  - `/delete_me` — удаление всех данных пользователя
+  - Фоновый поток при старте сервера (запускается в `startup()`)
+  - Работает через `python-telegram-bot` v22, токен из `.env` (`TELEGRAM_BOT_TOKEN`)
+- **Очистка БД**: удалены все тренировки (26), метрики (48), замеры веса, Coros credentials — пользователь начинает с нуля
+
+### Fixed
+- **user_id во всех запросах БД**: upload, confirm_upload, confirm_deleted, session_detail, session_delete, settings_save, coros_sync, coros_sync_health, _auto_sync_* — везде добавлен `.filter(Table.user_id == _current_user_id)`
+- **settings_save** теперь сохраняет настройки также в модель `User`
+- **Создание записей**: добавлен `user_id=_current_user_id` при создании DailyMetrics, WeightMeasurement, DeletedTraining, TrainingSession
+- **Исправлены ошибки отступов** в session_delete и coros_sync_health (синтаксис Python)
 
 ### Added
 - **Документация метрик здоровья Coros** в `docs/coros_health_metrics.md` — теоретическая база для будущего модуля анализа и рекомендаций (HRV, RHR, tiredness, readiness, нагрузка, ATI/CTI, stamina)

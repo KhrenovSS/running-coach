@@ -1163,6 +1163,9 @@ def startup():
     # Запуск фоновой автосинхронизации Coros (Start background auto-sync)
     _start_auto_sync()
 
+    # Запуск Telegram-бота (Start Telegram bot)
+    _start_telegram_bot()
+
 
 # Главная страница: список тренировок и статистика (Main page: session list and stats)
 @app.get('/', response_class=HTMLResponse)
@@ -2111,6 +2114,17 @@ def _start_auto_sync():
     thread = threading.Thread(target=_loop, daemon=True, name="coros-auto-sync")
     thread.start()
     logger.info("Автосинхронизация Coros: фоновый поток запущен")
+
+
+# Запуск Telegram-бота (Start Telegram bot)
+def _start_telegram_bot():
+    try:
+        from src.telegram_bot import run_bot
+        thread = threading.Thread(target=run_bot, daemon=True, name="telegram-bot")
+        thread.start()
+        logger.info("Telegram-бот: фоновый поток запущен")
+    except Exception as e:
+        logger.error("Telegram-бот: ошибка запуска: %s", e)
 
 
 # Статус фоновой синхронизации Coros (Background Coros sync status)

@@ -171,37 +171,30 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 
 **БД:** SQLite, файл `running_coach.db`, 26+ тренировок (с дубликатами после перезагрузок)
 
-**Что сделано за сессию 29.06.2026 (Coros health metrics — chart fix, docs, analyse/query, display, auto-sync):**
-1. **Bug fix**: "Analyse API error: Service exceptions" — API принимает `YYYYMMDD`, передавалось `YYYY-MM-DD`; `happenDay` — `int`, а не `str`
-2. **Incremental health sync**: 48 записей; при повторном запуске synced=0 (новых нет)
-3. **Эндпоинт `/analyse/query`** в `coros_client.py` (`get_analytics()`) — VO₂max, LTHR, LTSP, stamina level, 7d stamina trend
-4. **Новые поля в DailyMetrics**: `ltsp`, `stamina_level_7d`; automigration
-5. **Мерж аналитики**: health sync загружает аналитику и обновляет 22 записи
-6. **Осмысленные подписи**: `HRV: 38.0` → `Нервная система: 🟢 Норма (38)`, RHR → `Пульс покоя: 57 уд/мин`, tired_rate → текст, performance → готовность, load → интенсивность
-7. **График исправлен**: только RHR (без HRV), 30 точек, хронологический порядок
-8. **Документация**: `docs/coros_health_metrics.md` — полная база: 10+ метрик EvoLab, AI-правила, пороги, формулы, таблица доступности (✅ API / 🧮 расчёт / ❌ OAuth)
-9. **Автоматическая синхронизация Coros**: фоновый поток при старте сервера
-   - Health sync: каждые ~60 мин (+ jitter), env `COROS_HEALTH_SYNC_INTERVAL`
-   - Activity sync: каждые ~180 мин (+ jitter), env `COROS_ACTIVITY_SYNC_INTERVAL`
-   - Graceful error handling, логи в app.log
-   - Уже работает: при старте сервера через 30с выполнились health sync (0 новых) и activity sync (1 новая)
-10. **Автосинхронизация доработана**:
-    - `_auto_sync_activities` использует `since=us.last_coros_sync` — загружает только новые активности
-    - Пропускает ранее удалённые тренировки (только ручное подтверждение через UI)
-    - Статус автосинхронизации на главной странице (health + activities, время последней/следующей)
-    - Трекинг статуса в `_auto_sync_status` c error-handling
-11. **CHANGELOG.md**: обновлён
-12. Всё закоммичено и запущено в GitHub
+**Что сделано за сессию 29.06.2026 (Telegram bot + clean slate):**
+1. Установлен `python-telegram-bot` v22
+2. Создан `src/telegram_bot.py` с полным функционалом:
+   - `/start` — ConversationHandler: email → пароль → сохранение в User + UserSettings (шифрование)
+   - `/sync` — полная синхронизация Coros (health + activities) для конкретного пользователя
+   - `/stats` — статистика (всего, за 7 дней)
+   - `/trainings` — последние 5 тренировок
+   - `/delete_me` — удаление данных пользователя
+3. Бот запускается в фоновом потоке при старте сервера (`_start_telegram_bot()`)
+4. `_sync_for_user()` — функция синхронизации для конкретного User (не зависит от _current_user_id)
+5. База очищена: удалены 26 тренировок, 48 метрик здоровья, 2 замера веса, Coros credentials
+6. .env: добавлен `TELEGRAM_BOT_TOKEN=` (заполнить после создания бота у @BotFather)
+7. Закоммичено и запушено
 
-**Текущее состояние**: сервер работает через systemd --user, БД — 48 записей DailyMetrics, 38+ тренировок. Health sync работает инкрементально.
+**Текущее состояние**: сервер запущен, БД пустая, Telegram-бот ждёт токен. Пользователь должен:
+1. Создать бота у @BotFather → получить токен
+2. Добавить токен в `.env` → `systemctl --user restart running-coach.service`
+3. Написать боту `/start` → ввести Coros email/пароль → `/sync`
 
-**Следующие шаги (на следующую сессию):**
-- ⬜ **AI-рекомендации**: реализовать 8 IF-THEN правил из `docs/coros_health_metrics.md` для персонализированных советов по восстановлению
-- ⬜ **Training Status**: расчёт (Base Fitness = CTI/42d avg TL, Load Impact = ATI/7d avg TL, Intensity Trend)
-- ⬜ **Running Efficiency**: расчёт (pace vs HR относительно исторической нормы)
-- ⬜ **Telegram бот** — уведомления и рекомендации
-- ⬜ **Стадии сна** (deep/light/REM) через Mobile API Coros
+**Следующие шаги:**
+- ⬜ **Запуск бота**: добавить токен, протестировать регистрацию и синхронизацию
+- ⬜ **AI-рекомендации**: 8 IF-THEN правил из `docs/coros_health_metrics.md`
+- ⬜ **Training Status / Running Efficiency**: расчётные метрики
 - ⬜ **Фильтр по типу** тренировки на главной (вкладки Все / Бег / Ходьба)
-- ⬜ **Общая дистанция и время** за неделю/месяц на главной странице
+- ⬜ **Общая дистанция и время** за неделю/месяц
 
 **Важно:** при продолжении работы сначала прочитать `AGENTS.md` до конца, чтобы восстановить контекст проекта.
