@@ -185,8 +185,13 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
    - Activity sync: каждые ~180 мин (+ jitter), env `COROS_ACTIVITY_SYNC_INTERVAL`
    - Graceful error handling, логи в app.log
    - Уже работает: при старте сервера через 30с выполнились health sync (0 новых) и activity sync (1 новая)
-10. **CHANGELOG.md**: обновлён
-11. Всё закоммичено и запущено в GitHub
+10. **Автосинхронизация доработана**:
+    - `_auto_sync_activities` использует `since=us.last_coros_sync` — загружает только новые активности
+    - Пропускает ранее удалённые тренировки (только ручное подтверждение через UI)
+    - Статус автосинхронизации на главной странице (health + activities, время последней/следующей)
+    - Трекинг статуса в `_auto_sync_status` c error-handling
+11. **CHANGELOG.md**: обновлён
+12. Всё закоммичено и запущено в GitHub
 
 **Текущее состояние**: сервер работает через systemd --user, БД — 48 записей DailyMetrics, 38+ тренировок. Health sync работает инкрементально.
 
