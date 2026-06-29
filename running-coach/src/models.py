@@ -1,5 +1,5 @@
 # Импорт библиотек SQLAlchemy и стандартных модулей (SQLAlchemy and standard library imports)
-from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, JSON
+from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, Date, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -65,6 +65,26 @@ class DeletedTraining(Base):
     calories = Column(Integer, nullable=True)  # Калории (Calories)
     avg_pace = Column(Float, nullable=True)  # Средний темп мин/км (Average pace min/km)
     deleted_at = Column(DateTime, default=datetime.utcnow)  # Когда удалён (When deleted)
+
+# Модель ежедневных метрик здоровья — сон, HRV, восстановление (Daily health metrics — sleep, HRV, recovery)
+class DailyMetrics(Base):
+    __tablename__ = 'daily_metrics'
+    id = Column(Integer, primary_key=True)
+    date = Column(Date, nullable=False, unique=True)  # Дата метрик (Metrics date)
+    avg_sleep_hrv = Column(Float, nullable=True)  # Средний HRV во сне (Average HRV during sleep)
+    sleep_hrv_baseline = Column(Float, nullable=True)  # Базовая линия HRV (HRV baseline)
+    sleep_hrv_sd = Column(Float, nullable=True)  # SDNN HRV (HRV standard deviation)
+    rhr = Column(Integer, nullable=True)  # Пульс покоя (Resting heart rate)
+    tired_rate = Column(Integer, nullable=True)  # Уровень усталости (Tiredness rate)
+    training_load = Column(Float, nullable=True)  # Тренировочная нагрузка (Training load)
+    training_load_ratio = Column(Float, nullable=True)  # Соотношение нагрузки (Acute:Chronic load ratio)
+    performance = Column(Integer, nullable=True)  # Производительность / готовность (Performance / readiness)
+    ati = Column(Float, nullable=True)  # Острая тренировочная нагрузка (Acute Training Impulse)
+    cti = Column(Float, nullable=True)  # Хроническая тренировочная нагрузка (Chronic Training Impulse)
+    vo2max = Column(Float, nullable=True)  # VO2max (Estimated VO2max)
+    lthr = Column(Integer, nullable=True)  # Пульс лактатного порога (Lactate threshold HR)
+    stamina_level = Column(Float, nullable=True)  # Уровень выносливости (Stamina level)
+    synced_at = Column(DateTime, default=datetime.utcnow)  # Когда данные получены (When synced)
 
 # Модель измерения веса (Weight measurement model)
 class WeightMeasurement(Base):

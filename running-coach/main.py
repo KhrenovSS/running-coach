@@ -2,7 +2,7 @@
 from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
-from src.models import SessionLocal, TrainingSession, WeightMeasurement, DeletedTraining, get_settings
+from src.models import SessionLocal, TrainingSession, WeightMeasurement, DeletedTraining, DailyMetrics, get_settings
 from src.parsers.tcx_parser import parse_tcx
 from src.parsers.fit_parser import parse_fit
 from src.parsers.common import weather_icon, format_pace, format_duration
@@ -171,6 +171,8 @@ def render_page(year=None, month=None):
     all_sessions = db.query(TrainingSession).order_by(TrainingSession.begin_ts.desc()).all()
     settings = get_settings()
     weight_measurements = db.query(WeightMeasurement).order_by(WeightMeasurement.measured_at).all()
+    # Последние метрики восстановления (Latest recovery metrics)
+    recovery_metrics = db.query(DailyMetrics).order_by(DailyMetrics.date.desc()).limit(7).all()
     db.close()
 
     import json
@@ -178,6 +180,14 @@ def render_page(year=None, month=None):
         'date': wm.measured_at.strftime('%Y-%m-%d'),
         'weight': wm.weight_kg,
     } for wm in weight_measurements])
+
+    recovery_json = json.dumps([{
+        'date': rm.date.strftime('%Y-%m-%d'),
+        'hrv': rm.avg_sleep_hrv,
+        'rhr': rm.rhr,
+        'tired_rate': rm.tired_rate,
+        'performance': rm.performance,
+    } for rm in recovery_metrics])
 
     latest = all_sessions[0].begin_ts if all_sessions else None
     week_stats = month_stats = None
@@ -239,6 +249,13 @@ def render_page(year=None, month=None):
     week_types = render_type_row(week_stats['type_count']) if week_stats else ""
     month_types = render_type_row(month_stats['type_count']) if month_stats else ""
 
+    # Последние метрики для отображения (Latest metrics for display)
+    latest_rm = recovery_metrics[0] if recovery_metrics else None
+    latest_hrv = latest_rm.avg_sleep_hrv if latest_rm and latest_rm.avg_sleep_hrv else ''
+    latest_rhr = str(latest_rm.rhr) if latest_rm and latest_rm.rhr else ''
+    latest_tired = str(latest_rm.tired_rate) if latest_rm and latest_rm.tired_rate is not None else ''
+    latest_perf = str(latest_rm.performance) if latest_rm and latest_rm.performance else ''
+
     return MAIN_HTML.format(
         rows=rows, nav_html=nav_html, max_hr=settings.max_hr, weight=settings.weight,
         week_km=week_stats['total_km'] if week_stats else 0,
@@ -250,6 +267,11 @@ def render_page(year=None, month=None):
         month_bars=month_bars,
         month_types=month_types,
         weight_json=weight_json,
+        recovery_json=recovery_json,
+        latest_hrv=latest_hrv,
+        latest_rhr=latest_rhr,
+        latest_tired=latest_tired,
+        latest_perf=latest_perf,
     )
 
 
@@ -272,7 +294,7 @@ MAIN_HTML = '''
         .btn {{ display: inline-block; padding: 6px 14px; background: #4CAF50; color: white; text-decoration: none; border-radius: 5px; font-size: 14px; border: none; cursor: pointer; }}
         .btn:hover {{ background: #45a049; }}
         input[type=number] {{ width: 70px; padding: 4px; }}
-        .stats-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 15px 0; }}
+        .stats-grid {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin: 15px 0; }}
         .stats-card {{ border: 1px solid #ddd; border-radius: 8px; padding: 15px; background: #fafafa; }}
         .stats-card h4 {{ margin: 0 0 8px 0; color: #4CAF50; }}
         .stats-summary {{ display: flex; gap: 15px; flex-wrap: wrap; font-size: 14px; margin-bottom: 10px; }}
@@ -341,8 +363,10 @@ MAIN_HTML = '''
         <input type='file' name='files' accept='.tcx,.fit' multiple id='fileInput' style='display:none'>
         <button type='button' class='btn' onclick='document.getElementById("fileInput").click()'>&#128206; Загрузить TCX/FIT</button>
         <button type='button' class='btn' id='corosSyncBtn' style='background:#2196F3'>🔄 Coros Sync</button>
+        <button type='button' class='btn' id='healthSyncBtn' style='background:#7B1FA2'>❤️ Health Sync</button>
         <a href='/settings' class='btn'>⚙️ Настройки</a>
         <div id='corosSyncStatus' style='width:100%;margin-top:6px;font-size:13px;'></div>
+        <div id='healthSyncStatus' style='width:100%;margin-top:4px;font-size:13px;'></div>
     </div>
     <div id='weightChartContainer' style='display:none; margin-bottom:15px'>
         <div class='stats-card'>
@@ -467,9 +491,87 @@ MAIN_HTML = '''
             <div>{month_bars}</div>
             <div style='font-size:13px;color:#555;margin-top:6px'>{month_types}</div>
         </div>
+        <div class='stats-card' id='recoveryCard' onclick='toggleRecoveryChart()' style='cursor:pointer'>
+            <h4>❤️ Восстановление</h4>
+            <div class='stats-summary'>
+                <span>HRV: <b>{latest_hrv}</b></span>
+                <span>RHR: <b>{latest_rhr}</b></span>
+                <span>Усталость: <b>{latest_tired}</b></span>
+                <span>Готовность: <b>{latest_perf}</b></span>
+            </div>
+            <div style='font-size:13px;color:#888;margin-top:4px' id='recoveryToggle'>▾ График HRV</div>
+        </div>
+    </div>
+    <div id='recoveryChartContainer' style='display:none; margin-bottom:15px'>
+        <div class='stats-card'>
+            <h4>📈 Динамика восстановления (7 дней)</h4>
+            <canvas id='recoveryChart' height='80'></canvas>
+        </div>
     </div>
 
     <script>
+    const recoveryData = {recovery_json};
+    let recoveryChart = null;
+
+    function toggleRecoveryChart() {{
+        const container = document.getElementById('recoveryChartContainer');
+        const toggle = document.getElementById('recoveryToggle');
+        if (container.style.display === 'none') {{
+            container.style.display = 'block';
+            toggle.textContent = '▴ График HRV';
+            renderRecoveryChart();
+        }} else {{
+            container.style.display = 'none';
+            toggle.textContent = '▾ График HRV';
+        }}
+    }}
+
+    function renderRecoveryChart() {{
+        if (recoveryData.length < 2) return;
+        if (recoveryChart) {{
+            recoveryChart.destroy();
+            recoveryChart = null;
+        }}
+        recoveryChart = new Chart(document.getElementById('recoveryChart'), {{
+            type: 'line',
+            data: {{
+                labels: recoveryData.map(d => d.date),
+                datasets: [{{
+                    label: 'HRV (мс)',
+                    data: recoveryData.map(d => d.hrv),
+                    borderColor: '#7B1FA2',
+                    backgroundColor: 'transparent',
+                    tension: 0.4,
+                    pointRadius: 5,
+                    pointBackgroundColor: '#7B1FA2',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    yAxisID: 'y',
+                }}, {{
+                    label: 'Пульс покоя',
+                    data: recoveryData.map(d => d.rhr),
+                    borderColor: '#e53935',
+                    backgroundColor: 'transparent',
+                    tension: 0.4,
+                    pointRadius: 5,
+                    pointBackgroundColor: '#e53935',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    yAxisID: 'y1',
+                }}]
+            }},
+            options: {{
+                responsive: true,
+                scales: {{
+                    x: {{ title: {{ display: true, text: 'Дата' }} }},
+                    y: {{ title: {{ display: true, text: 'HRV (мс)' }}, position: 'left', beginAtZero: false }},
+                    y1: {{ title: {{ display: true, text: 'RHR (уд/мин)' }}, position: 'right', beginAtZero: false }},
+                }},
+                plugins: {{ legend: {{ display: true }} }}
+            }}
+        }});
+    }}
+
     const weightData = {weight_json};
     let weightChart = null;
 
@@ -608,6 +710,73 @@ MAIN_HTML = '''
     }}
 
     document.getElementById('corosSyncBtn').addEventListener('click', syncCoros);
+
+    async function syncHealth() {{
+        const btn = document.getElementById('healthSyncBtn');
+        const statusDiv = document.getElementById('healthSyncStatus');
+        const overlay = document.getElementById('syncOverlay');
+        const statusText = document.getElementById('syncStatusText');
+        const progressText = document.getElementById('syncProgressText');
+        const progressBar = document.getElementById('syncProgressBar');
+        btn.disabled = true;
+        btn.textContent = '❤️ Синхронизация…';
+        statusDiv.className = 'sync-status';
+        statusDiv.textContent = 'Запуск...';
+        overlay.classList.add('active');
+        statusText.textContent = 'Подключение к Coros...';
+        progressText.textContent = '';
+        progressBar.style.width = '0%';
+        try {{
+            const resp = await fetch('/coros/sync/health', {{ method: 'POST' }});
+            const j = await resp.json();
+            if (j.status !== 'started') {{
+                overlay.classList.remove('active');
+                statusDiv.className = 'sync-status sync-error';
+                statusDiv.textContent = '❌ ' + (j.message || 'Ошибка');
+                btn.disabled = false;
+                btn.textContent = '❤️ Health Sync';
+                return;
+            }}
+            const taskId = j.task_id;
+            let done = false;
+            while (!done) {{
+                await new Promise(r => setTimeout(r, 800));
+                const sr = await fetch('/coros/sync/status/' + taskId);
+                const sp = await sr.json();
+                statusText.textContent = sp.message || '';
+                if (sp.total > 0) {{
+                    const pct = Math.round(sp.current / sp.total * 100);
+                    progressText.textContent = sp.current + ' из ' + sp.total;
+                    progressBar.style.width = pct + '%';
+                }}
+                if (sp.step === 'done' || sp.step === 'error') {{
+                    done = true;
+                    overlay.classList.remove('active');
+                    if (sp.step === 'error') {{
+                        statusDiv.className = 'sync-status sync-error';
+                        statusDiv.textContent = '❌ ' + (sp.message || 'Ошибка');
+                    }} else if (sp.synced > 0) {{
+                        statusDiv.className = 'sync-status sync-ok';
+                        statusDiv.textContent = '✅ Синхронизировано метрик: ' + sp.synced;
+                        window.location.href = '/';
+                    }} else {{
+                        statusDiv.className = 'sync-status sync-ok';
+                        statusDiv.textContent = '✅ ' + (sp.message || 'Новых данных нет');
+                        setTimeout(() => {{ statusDiv.textContent = ''; }}, 5000);
+                    }}
+                }}
+            }}
+        }} catch (e) {{
+            overlay.classList.remove('active');
+            statusDiv.className = 'sync-status sync-error';
+            statusDiv.textContent = '❌ ' + e.message;
+        }} finally {{
+            btn.disabled = false;
+            btn.textContent = '❤️ Health Sync';
+        }}
+    }}
+
+    document.getElementById('healthSyncBtn').addEventListener('click', syncHealth);
     </script>
 
     {nav_html}
@@ -657,6 +826,8 @@ SESSION_HTML = '''
     <p style='color:#666;'>{date}</p>
     {suspect_detail}
     <p style='color:#666;font-size:14px;margin:0 0 10px 0'>{background_info}</p>
+
+    {recovery_html}
 
     <div class='card'>
         <div class='info'>
@@ -835,6 +1006,12 @@ def startup():
             # Миграция таблицы deleted_trainings (Migrate deleted_trainings table)
             try:
                 DeletedTraining.__table__.create(conn)
+            except Exception:
+                pass
+            # Миграция таблицы daily_metrics (Migrate daily_metrics table)
+            try:
+                from src.models import DailyMetrics
+                DailyMetrics.__table__.create(conn)
             except Exception:
                 pass
             conn.commit()
@@ -1016,9 +1193,30 @@ async def confirm_deleted(temp_id: str = Form(...)):
 async def session_detail(session_id: int):
     db = SessionLocal()
     s = db.query(TrainingSession).filter(TrainingSession.id == session_id).first()
-    db.close()
     if not s:
+        db.close()
         return HTMLResponse("<h2>Тренировка не найдена</h2><a href='/'>Назад</a>", status_code=404)
+
+    # Получаем метрики восстановления на день тренировки (Get recovery metrics for training day)
+    recovery_info = None
+    if s.begin_ts:
+        from datetime import date
+        training_date = s.begin_ts.date()
+        rm = db.query(DailyMetrics).filter(DailyMetrics.date == training_date).first()
+        if rm:
+            hrv_str = f"{rm.avg_sleep_hrv}" if rm.avg_sleep_hrv is not None else "—"
+            rhr_str = f"{rm.rhr}" if rm.rhr is not None else "—"
+            tired_str = f"{rm.tired_rate}" if rm.tired_rate is not None else "—"
+            perf_str = f"{rm.performance}" if rm.performance is not None else "—"
+            load_str = f"{rm.training_load:.0f}" if rm.training_load is not None else "—"
+            recovery_info = {
+                'hrv': hrv_str,
+                'rhr': rhr_str,
+                'tired_rate': tired_str,
+                'performance': perf_str,
+                'training_load': load_str,
+            }
+    db.close()
 
     seg_rows = ""
     segs = s.segments_json or []
@@ -1080,6 +1278,21 @@ async def session_detail(session_id: int):
     cadence_display = str(s.avg_cadence) if s.avg_cadence is not None else "—"
     cal = str(s.calories) if s.calories is not None else "—"
 
+    # Рендер recovery-блока (Render recovery info block)
+    recovery_html = ""
+    if recovery_info:
+        recovery_html = f'''
+        <div class='card' style='background:#f3e5f5;border-color:#ce93d8'>
+            <h4 style='margin:0 0 10px 0;color:#7B1FA2'>❤️ Восстановление перед тренировкой</h4>
+            <div class='info'>
+                <div class='info-item'><span class='info-label'>HRV (ночной)</span><b>{recovery_info["hrv"]}</b><span class='info-unit'>мс</span></div>
+                <div class='info-item'><span class='info-label'>Пульс покоя</span><b>{recovery_info["rhr"]}</b><span class='info-unit'>уд/мин</span></div>
+                <div class='info-item'><span class='info-label'>Усталость</span><b>{recovery_info["tired_rate"]}</b><span class='info-unit'>/10</span></div>
+                <div class='info-item'><span class='info-label'>Готовность</span><b>{recovery_info["performance"]}</b><span class='info-unit'>%</span></div>
+                <div class='info-item'><span class='info-label'>Нагрузка</span><b>{recovery_info["training_load"]}</b><span class='info-unit'></span></div>
+            </div>
+        </div>'''
+
     return SESSION_HTML.format(
         session_id=s.id,
         suspect_badge=suspect_badge,
@@ -1096,6 +1309,7 @@ async def session_detail(session_id: int):
         elev_loss=el_total,
         segments_rows=seg_rows,
         chart_json=chart_json,
+        recovery_html=recovery_html,
     )
 
 
@@ -1428,3 +1642,130 @@ async def coros_sync_status(task_id: str):
     if not p:
         return JSONResponse({'status': 'error', 'message': 'Task not found'})
     return JSONResponse(p)
+
+
+# Синхронизация ежедневных метрик здоровья с Coros (Coros health metrics sync — sleep, HRV, recovery)
+@app.post('/coros/sync/health')
+async def coros_sync_health():
+    from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
+    from src.models import UserSettings
+
+    db = SessionLocal()
+    try:
+        us = db.query(UserSettings).first()
+        if not us or not us.coros_email or not us.coros_password:
+            return JSONResponse({'status': 'error', 'message': 'Coros credentials not configured.'})
+    finally:
+        db.close()
+
+    task_id = str(uuid.uuid4())
+    progress = {
+        'task_id': task_id, 'step': 'queued', 'message': 'В очереди...',
+        'total': 0, 'current': 0, 'synced': 0, 'errors': [], 'done': False,
+    }
+    with _sync_tasks_lock:
+        _sync_tasks[task_id] = progress
+
+    # Фоновая синхронизация метрик здоровья (Background health metrics sync)
+    def _run():
+        db = SessionLocal()
+        try:
+            us = db.query(UserSettings).first()
+            progress['step'] = 'auth'
+            progress['message'] = 'Подключение к Coros...'
+            logger.info("Запуск синхронизации метрик здоровья Coros (Coros health sync started)")
+            try:
+                plain_password = decrypt(us.coros_password)
+            except Exception:
+                plain_password = us.coros_password
+            client = CorosClient(us.coros_email, plain_password, timeout=15)
+            client.authenticate()
+            logger.info("Аутентификация Coros пройдена")
+
+            progress['step'] = 'fetch'
+            progress['message'] = 'Получение дневных метрик...'
+
+            # Определяем диапазон дат для синхронизации (Determine date range for sync)
+            existing_dates = {r[0] for r in db.query(DailyMetrics.date).all()}
+            from datetime import timedelta, date
+            today = date.today()
+            start_day = (today - timedelta(days=180)).strftime("%Y-%m-%d")
+            end_day = today.strftime("%Y-%m-%d")
+
+            metrics_list = client.get_daily_metrics(start_day, end_day)
+            progress['total_found'] = len(metrics_list)
+            logger.info("Получено дневных метрик из Coros: %d", len(metrics_list))
+
+            if not metrics_list:
+                progress['step'] = 'done'
+                progress['message'] = 'Нет данных о восстановлении'
+                progress['done'] = True
+                return
+
+            synced = 0
+            progress['total'] = len(metrics_list)
+
+            for i, entry in enumerate(metrics_list):
+                progress['current'] = i + 1
+                happen_day = entry.get('happenDay')
+                if not happen_day:
+                    continue
+
+                try:
+                    entry_date = datetime.strptime(happen_day, "%Y-%m-%d").date()
+                except (ValueError, TypeError):
+                    continue
+
+                if entry_date in existing_dates:
+                    continue
+
+                dm = DailyMetrics(
+                    date=entry_date,
+                    avg_sleep_hrv=entry.get('avgSleepHrv'),
+                    sleep_hrv_baseline=entry.get('sleepHrvBase'),
+                    sleep_hrv_sd=entry.get('sleepHrvSd'),
+                    rhr=entry.get('rhr'),
+                    tired_rate=entry.get('tiredRateNew'),
+                    training_load=entry.get('trainingLoad'),
+                    training_load_ratio=entry.get('trainingLoadRatio'),
+                    performance=entry.get('performance'),
+                    ati=entry.get('ati'),
+                    cti=entry.get('cti'),
+                    vo2max=entry.get('vo2max'),
+                    lthr=entry.get('lthr'),
+                    stamina_level=entry.get('staminaLevel'),
+                )
+                db.add(dm)
+                synced += 1
+                progress['synced'] = synced
+                progress['message'] = f'Синхронизировано: {synced}/{len(metrics_list)}'
+                logger.info("Сохранены метрики за %s (HRV=%s, RHR=%s)", happen_day,
+                            entry.get('avgSleepHrv'), entry.get('rhr'))
+
+            db.commit()
+            logger.info("Синхронизация метрик Coros завершена: synced=%d", synced)
+            progress['step'] = 'done'
+            progress['message'] = f'Синхронизировано: {synced}'
+            progress['done'] = True
+
+        except CorosAuthError as e:
+            progress['step'] = 'error'
+            progress['message'] = f'Ошибка аутентификации Coros: {e}'
+            progress['done'] = True
+            logger.error("Coros auth error: %s", e)
+        except CorosAPIError as e:
+            progress['step'] = 'error'
+            progress['message'] = f'Ошибка Coros API: {e}'
+            progress['done'] = True
+            logger.error("Coros API error: %s", e)
+        except Exception as e:
+            progress['step'] = 'error'
+            progress['message'] = f'Ошибка: {type(e).__name__}: {e}'
+            progress['done'] = True
+            logger.error("Coros health sync error", exc_info=True)
+        finally:
+            db.close()
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    return JSONResponse({'task_id': task_id, 'status': 'started'})

@@ -66,6 +66,9 @@ Python + FastAPI + SQLite, написано через ИИ (open code style).
 - Время тренировки сохраняется в локальном часовом поясе (без tzinfo). Определяется по GPS через timezonefinder.
 - Open-Meteo API: `archive-api.open-meteo.com/v1/archive`. Параметры: lat, lon, start_date, end_date, hourly=temperature_2m,precipitation, timezone=UTC.
 - Полная модель TrainingSession: `id`, `begin_ts`, `total_distance_km`, `avg_heart_rate`, `max_heart_rate`, `training_type`, `segments_count`, `duration_minutes`, `segments_json`, `hr_pace_series`, `avg_temperature`, `weather_code`, `elevation_gain`, `elevation_loss`, `suspect_flags`, `cleaning_log`.
+- Модель DailyMetrics: `date` (unique), `avg_sleep_hrv`, `sleep_hrv_baseline`, `sleep_hrv_sd`, `rhr`, `tired_rate`, `training_load`, `training_load_ratio`, `performance`, `ati`, `cti`, `vo2max`, `lthr`, `stamina_level`, `synced_at`.
+- Health sync endpoint: `POST /coros/sync/health` — фоновая синхронизация через `/analyse/dayDetail/query` за 180 дней инкрементально.
+- На странице детального просмотра тренировки показывается блок восстановления (`recovery_html`) если на дату тренировки есть записи в `DailyMetrics`.
 
 ## Что было сделано (21.06.2026, вечер)
 1. **Иконка погоды в колонке «Погода»**: Вместо «Темп.» теперь колонка «Погода». Температура отображается с иконкой (☀️⛅☁️🌫️🌦️🌧️❄️🌨️⛈️) и знаком градуса без C (25°C → ☀️ 25°).
@@ -157,7 +160,7 @@ def calc_avg_pace(...):
   2. **Сделать commit (если есть незакоммиченные изменения) + push** в GitHub. Это «итог дня».
   3. Сообщить пользователю, что изменения сохранены и запушены.
 
-## Текущее состояние (Session — 28.06.2026, итоговая, закрытие)
+## Текущее состояние (Session — 29.06.2026)
 
 **Сервер:** запущен через systemd --user (`running-coach.service`), автозапуск при включении ПК  
 **Команда управления:** `systemctl --user start/stop/status/restart running-coach.service`  
@@ -168,17 +171,18 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 
 **БД:** SQLite, файл `running_coach.db`, 26+ тренировок (с дубликатами после перезагрузок)
 
-**Что сделано за сессию 28.06.2026 (вечер — деактивация и удаление тренировок):**
-- **Модель DeletedTraining** (`src/models.py`) — хранит метаданные удалённой тренировки (дата, дистанция, темп, пульс, тип, длительность, калории, каденс, VO₂max, эффект)
-- **Автомиграция** — таблица `deleted_trainings` создаётся при старте сервера
-- **session_delete** — перед удалением сохраняет метаданные в `DeletedTraining`; темп вычисляется как среднее из `pace_min_km` сегментов
-- **`/upload`** — после парсинга проверяет `DeletedTraining` (±120с), если найден — возвращает `{deleted_match: {...}, temp_id: "..."}`, не сохраняя в БД
-- **`POST /upload/confirm_deleted`** — принимает `temp_id`, сохраняет тренировку и удаляет запись из `DeletedTraining`
-- **Coros sync** — при обнаружении ранее удалённой тренировки сохраняет данные в `_pending`, добавляет в `progress['pending_deleted']`; после завершения синхронизации фронтенд показывает модал для каждой
-- **UI** — модальное окно `deletedConfirmOverlay` с деталями тренировки (дата, дистанция, темп, длительность, тип, пульс, калории) и кнопками «Импортировать» / «Пропустить»
-- **README.md** — обновлён: добавлены crypto/logger/deleted-tracking, убран Strava из Roadmap, актуализированы Features и Project Structure
-- **Скриншоты** — пересняты: `main_page.png`, `session_detail.png`, `settings_page.png`
-- **Git** — 25 коммитов, всё запушено на GitHub
+**Что сделано за сессию 29.06.2026 (Coros daily health metrics — HRV, sleep, recovery):**
+- **Новые эндпоинты API** в `coros_client.py`:
+  - `get_dashboard()` — `/dashboard/query` — HRV за 7 дней
+  - `get_daily_metrics(start_day, end_day)` — `/analyse/dayDetail/query` — дневные метрики: HRV, RHR, TiredRate, Training Load, ATI/CTI, Performance, VO₂max, LTHR, Stamina
+- **Модель `DailyMetrics`** в `models.py` — новая таблица `daily_metrics` с полями: `date` (unique), `avg_sleep_hrv`, `sleep_hrv_baseline`, `sleep_hrv_sd`, `rhr`, `tired_rate`, `training_load`, `training_load_ratio`, `performance`, `ati`, `cti`, `vo2max`, `lthr`, `stamina_level`, `synced_at`
+- **Автомиграция** — таблица `daily_metrics` создаётся при старте сервера
+- **`POST /coros/sync/health`** — фоновый эндпоинт синхронизации метрик здоровья за последние 180 дней, инкрементально (только новые даты); использует ту же систему прогресса (`_sync_tasks`)
+- **Кнопка «❤️ Health Sync»** на главной странице (фиолетовая) — запускает синхронизацию с прогресс-баром
+- **Карточка восстановления** на главной — показывает последние HRV, RHR, усталость, готовность; клик открывает график HRV и RHR за 7 дней (Chart.js, двойная ось)
+- **Блок восстановления** на странице детального просмотра тренировки — если на дату тренировки есть метрики, показывается фиолетовая карточка с HRV, RHR, уровнем усталости, готовностью и тренировочной нагрузкой
+- **README.md** — обновлён Features и Roadmap
+- **CHANGELOG.md** — обновлён
 
 **Правила, закреплённые в AGENTS.md:**
 - Комментарии писать СРАЗУ при написании кода (не отдельным коммитом)
@@ -187,8 +191,8 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 - push в конце сессии
 
 **Следующие шаги (на следующую сессию):**
-- ⬜ Планирование и рекомендации по восстановлению (AI-рекомендации)
+- ⬜ Планирование и рекомендации по восстановлению (AI-рекомендации с учётом HRV/RHR/усталости)
 - ⬜ Telegram бот
-- ⬜ Данные о сне и восстановлении (Coros) — сон, HRV, уровень восстановления
+- ⬜ Стадии сна (deep/light/REM) через Mobile API Coros
 
 **Важно:** при продолжении работы сначала прочитать `AGENTS.md` до конца, чтобы восстановить контекст проекта.

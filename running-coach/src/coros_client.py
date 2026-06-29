@@ -15,6 +15,8 @@ COROS_API_BASE = "https://teameuapi.coros.com"
 AUTH_URL = f"{COROS_API_BASE}/account/login"
 ACTIVITIES_URL = f"{COROS_API_BASE}/activity/query"
 DOWNLOAD_URL = f"{COROS_API_BASE}/activity/detail/download"
+DASHBOARD_URL = f"{COROS_API_BASE}/dashboard/query"
+ANALYSE_DETAIL_URL = f"{COROS_API_BASE}/analyse/dayDetail/query"
 
 BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
@@ -129,6 +131,29 @@ class CorosClient:
                 "duration_s": act.get("workoutTime", 0),
             })
         return activities
+
+    # Получить данные дашборда — HRV за последние 7 дней (Get dashboard data — HRV for last 7 days)
+    def get_dashboard(self) -> dict:
+        if not self.accesstoken:
+            raise CorosAPIError("Not authenticated")
+        resp = self.session.get(DASHBOARD_URL, headers=self._auth_headers(), timeout=self.timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("result") != "0000":
+            raise CorosAPIError(f"Dashboard API error: {data.get('message')}")
+        return data.get("data", {})
+
+    # Получить ежедневные метрики за период (Get daily health metrics for date range)
+    def get_daily_metrics(self, start_day: str, end_day: str) -> list[dict]:
+        if not self.accesstoken:
+            raise CorosAPIError("Not authenticated")
+        params = {"startDay": start_day, "endDay": end_day}
+        resp = self.session.get(ANALYSE_DETAIL_URL, params=params, headers=self._auth_headers(), timeout=self.timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("result") != "0000":
+            raise CorosAPIError(f"Analyse API error: {data.get('message')}")
+        return data.get("data", [])
 
     # Скачать FIT-файл активности (Download activity FIT file)
     def download_fit(self, activity_id: str, sport_type: int, output_path: str) -> bool:

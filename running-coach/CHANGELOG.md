@@ -2,6 +2,19 @@
 
 All notable changes to this project are tracked here.
 
+## [29.06.2026]
+
+### Added
+- **Ежедневные метрики здоровья из Coros (Coros daily health metrics — sleep, HRV, recovery)**
+  - Новые эндпоинты в `coros_client.py`: `get_dashboard()` (HRV за 7 дней) и `get_daily_metrics(start_day, end_day)` (дневные метрики за период) через Training Hub API (`/dashboard/query`, `/analyse/dayDetail/query`)
+  - Новая модель `DailyMetrics` в БД — хранит: HRV, RHR, уровень усталости, тренировочную нагрузку, готовность, VO₂max, LTHR, stamina
+  - Автомиграция: таблица `daily_metrics` создаётся при старте сервера
+  - Фоновый эндпоинт `POST /coros/sync/health` — синхронизирует метрики за последние 180 дней инкрементально (только новые даты)
+  - Кнопка «❤️ Health Sync» на главной странице (фиолетовая, рядом с Coros Sync)
+  - Карточка «Восстановление» на главной — показывает последние HRV, RHR, усталость, готовность с кликабельным графиком HRV за 7 дней
+  - Блок «Восстановление перед тренировкой» на странице детального просмотра тренировки — HRV, пульс покоя, усталость, готовность, нагрузка на день тренировки
+  - HRV и RHR графики на одной шкале (Chart.js, фиолетовый/красный)
+
 ## [28.06.2026]
 
 ### Changed
