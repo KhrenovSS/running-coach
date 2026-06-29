@@ -2080,13 +2080,16 @@ def _auto_sync_activities_inner():
                 synced += 1
                 logger.info("Автосинхронизация: сохранена %s (%s)", act['name'], act['start_time'])
                 # Уведомление + запрос оценки в Telegram (Notification + rating request)
-                rows = [[{"text": str(i), "callback_data": f"feedback:{session_id}:{i}"} for i in range(1, 6)]]
+                row1 = [{"text": str(i), "callback_data": f"feedback:{session_id}:{i}"} for i in range(0, 6)]
+                row2 = [{"text": str(i), "callback_data": f"feedback:{session_id}:{i}"} for i in range(6, 11)]
                 _telegram_notify(
                     f"🏃 *Новая тренировка!*\n"
                     f"▫️ {act['name']}\n"
                     f"▫️ {data.get('total_distance_km', 0):.1f} км\n\n"
-                    f"Как прошло? Оцени:",
-                    reply_markup={"inline_keyboard": rows},
+                    f"Насколько тяжёлой была тренировка?\n"
+                    f"`0` — вообще легко\n"
+                    f"`10` — почти умер",
+                    reply_markup={"inline_keyboard": [row1, row2]},
                 )
                 if max_act_ts is None or act['start_time'] > max_act_ts:
                     max_act_ts = act['start_time']

@@ -153,7 +153,7 @@ class TrainingFeedback(Base):
     id = Column(Integer, primary_key=True)
     session_id = Column(Integer, ForeignKey('training_sessions.id'), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
-    rating = Column(Integer, nullable=False)  # 1–5
+    rating = Column(Integer, nullable=False)  # 0–10 (тяжесть тренировки)
     notes = Column(String(500), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
