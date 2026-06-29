@@ -28,6 +28,9 @@ _pending = {}  # temp_id -> dict with 'path', 'filename', 'data'
 _sync_tasks = {}  # task_id -> dict with progress info
 _sync_tasks_lock = threading.Lock()
 
+# Текущий пользователь (по умолчанию admin=1, пока нет Telegram-бота) (Current user ID, defaults to admin=1)
+_current_user_id = 1
+
 # Словарь типов тренировок на русском (Training type labels in Russian)
 TRAINING_TYPES_RU = {
     'interval': 'Интервальная',
@@ -220,11 +223,11 @@ def _load_label(training_load):
 # Основная функция рендеринга главной страницы (Main page render function)
 def render_page(year=None, month=None):
     db = SessionLocal()
-    all_sessions = db.query(TrainingSession).order_by(TrainingSession.begin_ts.desc()).all()
+    all_sessions = db.query(TrainingSession).filter(TrainingSession.user_id == _current_user_id).order_by(TrainingSession.begin_ts.desc()).all()
     settings = get_settings()
-    weight_measurements = db.query(WeightMeasurement).order_by(WeightMeasurement.measured_at).all()
+    weight_measurements = db.query(WeightMeasurement).filter(WeightMeasurement.user_id == _current_user_id).order_by(WeightMeasurement.measured_at).all()
     # Последние метрики восстановления (Latest recovery metrics)
-    recovery_metrics = db.query(DailyMetrics).order_by(DailyMetrics.date.desc()).limit(30).all()
+    recovery_metrics = db.query(DailyMetrics).filter(DailyMetrics.user_id == _current_user_id).order_by(DailyMetrics.date.desc()).limit(30).all()
     db.close()
 
     import json
@@ -1048,7 +1051,7 @@ SETTINGS_PAGE = '''
 # Событие при запуске сервера: инициализация БД и миграции (Startup event: DB init and migrations)
 @app.on_event("startup")
 def startup():
-    from src.models import init_db, engine, DeletedTraining
+    from src.models import init_db, engine, DeletedTraining, User
     from datetime import datetime
     init_db()
     # Очистка старых pending-файлов (Cleanup old pending uploads)
@@ -1107,6 +1110,39 @@ def startup():
                     conn.execute(text(f"ALTER TABLE daily_metrics ADD COLUMN {col} {col_type}"))
                 except Exception:
                     pass
+            # === Многопользовательская миграция (Multi-user migration) ===
+            # Создание таблицы users (Create users table)
+            try:
+                User.__table__.create(conn)
+            except Exception:
+                pass
+            # Добавление колонок user_id в существующие таблицы (Add user_id columns)
+            for tbl, col_info in {
+                'training_sessions': ('INTEGER', 'user_id'),
+                'daily_metrics': ('INTEGER', 'user_id'),
+                'deleted_trainings': ('INTEGER', 'user_id'),
+                'weight_measurements': ('INTEGER', 'user_id'),
+            }.items():
+                try:
+                    conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN {col_info[1]} {col_info[0]}"))
+                except Exception:
+                    pass
+            # Создание первого пользователя (admin) из UserSettings (Create admin user from UserSettings)
+            row = conn.execute(text("SELECT coros_email, coros_password, last_coros_sync FROM user_settings LIMIT 1")).fetchone()
+            if row:
+                existing_admin = conn.execute(text("SELECT id FROM users WHERE id = 1")).fetchone()
+                if not existing_admin:
+                    conn.execute(
+                        text("INSERT INTO users (id, coros_email, coros_password, last_coros_sync) VALUES (1, :email, :pwd, :sync)"),
+                        {"email": row[0], "pwd": row[1], "sync": row[2]}
+                    )
+                    conn.commit()
+            # Проставить user_id=1 для всех существующих записей (Set user_id=1 for existing records)
+            for tbl in ('training_sessions', 'daily_metrics', 'deleted_trainings', 'weight_measurements'):
+                try:
+                    conn.execute(text(f"UPDATE {tbl} SET user_id = 1 WHERE user_id IS NULL"))
+                except Exception:
+                    pass
             conn.commit()
     except Exception:
         pass
@@ -1114,9 +1150,9 @@ def startup():
     db = SessionLocal()
     try:
         # Первое измерение веса (First weight measurement)
-        existing = db.query(WeightMeasurement).first()
+        existing = db.query(WeightMeasurement).filter(WeightMeasurement.user_id == _current_user_id).first()
         if not existing and settings.weight:
-            wm = WeightMeasurement(weight_kg=settings.weight, measured_at=datetime.utcnow())
+            wm = WeightMeasurement(weight_kg=settings.weight, measured_at=datetime.utcnow(), user_id=_current_user_id)
             db.add(wm)
             db.commit()
     except Exception:
@@ -1167,7 +1203,7 @@ async def upload_files(files: list[UploadFile] = File(...)):
             deleted_match = None
             bt = data['begin_ts']
             if bt:
-                all_deleted = db.query(DeletedTraining).all()
+                all_deleted = db.query(DeletedTraining).filter(DeletedTraining.user_id == _current_user_id).all()
                 for d in all_deleted:
                     if d.begin_ts and abs((d.begin_ts - bt).total_seconds()) < 120:
                         deleted_match = d
@@ -1194,12 +1230,14 @@ async def upload_files(files: list[UploadFile] = File(...)):
                 break
             # Проверка, существует ли уже такая тренировка (Check if training already exists)
             exists = db.query(TrainingSession).filter(
-                TrainingSession.begin_ts == data['begin_ts']
+                TrainingSession.begin_ts == data['begin_ts'],
+                TrainingSession.user_id == _current_user_id
             ).first()
             if not exists:
                 cleaning_log_val = data.pop('cleaning_log', None)
                 flags_val = data.pop('suspect_flags', None)
                 session = TrainingSession(**data)
+                session.user_id = _current_user_id
                 if cleaning_log_val:
                     session.cleaning_log = cleaning_log_val
                 if flags_val:
@@ -1227,12 +1265,14 @@ async def confirm_upload(temp_ids: list[str] = Form(...)):
                 continue
             data = pending['data']
             exists = db.query(TrainingSession).filter(
-                TrainingSession.begin_ts == data['begin_ts']
+                TrainingSession.begin_ts == data['begin_ts'],
+                TrainingSession.user_id == _current_user_id
             ).first()
             if not exists:
                 cleaning_log_val = data.pop('cleaning_log', None)
                 flags_val = data.pop('suspect_flags', None)
                 session = TrainingSession(**data)
+                session.user_id = _current_user_id
                 if cleaning_log_val:
                     session.cleaning_log = cleaning_log_val
                 if flags_val:
@@ -1258,19 +1298,21 @@ async def confirm_deleted(temp_id: str = Form(...)):
         bt = data.get('begin_ts')
         # Удаляем запись DeletedTraining (Remove DeletedTraining entry)
         if bt:
-            all_deleted = db.query(DeletedTraining).all()
+            all_deleted = db.query(DeletedTraining).filter(DeletedTraining.user_id == _current_user_id).all()
             for d in all_deleted:
                 if d.begin_ts and abs((d.begin_ts - bt).total_seconds()) < 120:
                     db.delete(d)
                     break
         # Сохраняем тренировку (Save training)
         exists = db.query(TrainingSession).filter(
-            TrainingSession.begin_ts == bt
+            TrainingSession.begin_ts == bt,
+            TrainingSession.user_id == _current_user_id
         ).first()
         if not exists:
             cleaning_log_val = data.pop('cleaning_log', None)
             flags_val = data.pop('suspect_flags', None)
             session = TrainingSession(**data)
+            session.user_id = _current_user_id
             if cleaning_log_val:
                 session.cleaning_log = cleaning_log_val
             if flags_val:
@@ -1288,7 +1330,7 @@ async def confirm_deleted(temp_id: str = Form(...)):
 @app.get('/session/{session_id}', response_class=HTMLResponse)
 async def session_detail(session_id: int):
     db = SessionLocal()
-    s = db.query(TrainingSession).filter(TrainingSession.id == session_id).first()
+    s = db.query(TrainingSession).filter(TrainingSession.id == session_id, TrainingSession.user_id == _current_user_id).first()
     if not s:
         db.close()
         return HTMLResponse("<h2>Тренировка не найдена</h2><a href='/'>Назад</a>", status_code=404)
@@ -1298,7 +1340,7 @@ async def session_detail(session_id: int):
     if s.begin_ts:
         from datetime import date
         training_date = s.begin_ts.date()
-        rm = db.query(DailyMetrics).filter(DailyMetrics.date == training_date).first()
+        rm = db.query(DailyMetrics).filter(DailyMetrics.user_id == _current_user_id, DailyMetrics.date == training_date).first()
         if rm:
             _, hrv_label = _hrv_status(rm.avg_sleep_hrv, rm.sleep_hrv_baseline, rm.sleep_hrv_sd)
             rhr_str = f"{rm.rhr}" if rm.rhr is not None else "—"
@@ -1433,7 +1475,7 @@ async def settings_page():
 async def session_delete(session_id: int):
     db = SessionLocal()
     try:
-        s = db.query(TrainingSession).filter(TrainingSession.id == session_id).first()
+        s = db.query(TrainingSession).filter(TrainingSession.id == session_id, TrainingSession.user_id == _current_user_id).first()
         if s:
             segs = s.segments_json or []
             # Средний темп из сегментов (Compute average pace from segments)
@@ -1444,6 +1486,7 @@ async def session_delete(session_id: int):
                     pace = round(sum(paces) / len(paces), 2)
             # Сохраняем метаданные тренировки перед удалением (Save training metadata before delete)
             deleted = DeletedTraining(
+                user_id=_current_user_id,
                 begin_ts=s.begin_ts,
                 total_distance_km=s.total_distance_km,
                 avg_heart_rate=s.avg_heart_rate,
@@ -1475,11 +1518,12 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
                         min_hr_for_fast_pace: int = Form(130),
                         coros_email: str = Form(''),
                         coros_password: str = Form('')):
-    from src.models import UserSettings
+    from src.models import UserSettings, User, WeightMeasurement
     from datetime import datetime
     db = SessionLocal()
     try:
         s = db.query(UserSettings).first()
+        old_weight = None
         if s:
             old_weight = s.weight
             s.max_hr = max_hr
@@ -1492,10 +1536,23 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
                 s.coros_password = encrypt(coros_password)
             elif not coros_email:
                 s.coros_password = None
-            if weight != old_weight:
-                wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.utcnow())
-                db.add(wm)
-            db.commit()
+        # Также сохраняем в User модель (Also save to User model)
+        user = db.query(User).filter(User.id == _current_user_id).first()
+        if user:
+            user.max_hr = max_hr
+            user.weight_kg = weight
+            user.max_credible_pace = max_credible_pace
+            user.max_gps_jump_m = max_gps_jump_m
+            user.min_hr_for_fast_pace = min_hr_for_fast_pace
+            user.coros_email = coros_email or None
+            if coros_password and coros_password != '********':
+                user.coros_password = encrypt(coros_password)
+            elif not coros_email:
+                user.coros_password = None
+        if old_weight != weight:
+            wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.utcnow(), user_id=_current_user_id)
+            db.add(wm)
+        db.commit()
     finally:
         db.close()
     return RedirectResponse(url='/', status_code=303)
@@ -1581,7 +1638,7 @@ async def coros_sync():
                 return
 
             # Фильтруем новые (не в БД)
-            existing_times = {r[0] for r in db.query(TrainingSession.begin_ts).all()}
+            existing_times = {r[0] for r in db.query(TrainingSession.begin_ts).filter(TrainingSession.user_id == _current_user_id).all()}
             # Проверка, импортирована ли тренировка (с окном ±120 с) (Check if training already imported with ±120s window)
             def already_imported(ts):
                 for et in existing_times:
@@ -1635,7 +1692,7 @@ async def coros_sync():
                     bt_sync = data.get('begin_ts')
                     deleted_match_sync = None
                     if bt_sync:
-                        all_del = db.query(DeletedTraining).all()
+                        all_del = db.query(DeletedTraining).filter(DeletedTraining.user_id == _current_user_id).all()
                         for d in all_del:
                             if d.begin_ts and abs((d.begin_ts - bt_sync).total_seconds()) < 120:
                                 deleted_match_sync = d
@@ -1782,7 +1839,7 @@ def _auto_sync_health_inner():
         client = CorosClient(us.coros_email, plain_password, timeout=15)
         client.authenticate()
 
-        existing_dates = {r[0] for r in db.query(DailyMetrics.date).all()}
+        existing_dates = {r[0] for r in db.query(DailyMetrics.date).filter(DailyMetrics.user_id == _current_user_id).all()}
         today = date.today()
         start_day = (today - timedelta(days=120)).strftime("%Y%m%d")
         end_day = today.strftime("%Y%m%d")
@@ -1821,6 +1878,7 @@ def _auto_sync_health_inner():
 
             ana = analytics_by_date.get(entry_date, {})
             dm = DailyMetrics(
+                user_id=_current_user_id,
                 date=entry_date,
                 avg_sleep_hrv=entry.get('avgSleepHrv'),
                 sleep_hrv_baseline=entry.get('sleepHrvBase'),
@@ -1850,7 +1908,7 @@ def _auto_sync_health_inner():
         if analytics_by_date:
             updated = 0
             for entry_date, ana in analytics_by_date.items():
-                existing = db.query(DailyMetrics).filter(DailyMetrics.date == entry_date).first()
+                existing = db.query(DailyMetrics).filter(DailyMetrics.user_id == _current_user_id, DailyMetrics.date == entry_date).first()
                 if not existing:
                     continue
                 changed = False
@@ -1923,9 +1981,10 @@ def _auto_sync_activities_inner():
         if not activities:
             return
 
-        existing_times = {r[0] for r in db.query(TrainingSession.begin_ts).all()}
+        existing_times = {r[0] for r in db.query(TrainingSession.begin_ts).filter(TrainingSession.user_id == _current_user_id).all()}
         deleted_times = set()
-        for d in db.query(DeletedTraining).all():
+        all_deleted = db.query(DeletedTraining).filter(DeletedTraining.user_id == _current_user_id).all()
+        for d in all_deleted:
             if d.begin_ts:
                 deleted_times.add(d.begin_ts)
 
@@ -2106,7 +2165,7 @@ async def coros_sync_health():
             progress['message'] = 'Получение дневных метрик...'
 
             # Определяем диапазон дат для синхронизации (Determine date range for sync)
-            existing_dates = {r[0] for r in db.query(DailyMetrics.date).all()}
+            existing_dates = {r[0] for r in db.query(DailyMetrics.date).filter(DailyMetrics.user_id == _current_user_id).all()}
             from datetime import timedelta, date, datetime
             today = date.today()
             start_day = (today - timedelta(days=120)).strftime("%Y%m%d")
@@ -2162,6 +2221,7 @@ async def coros_sync_health():
                 # Мерж данных из dayDetail + аналитики (Merge dayDetail + analytics data)
                 ana = analytics_by_date.get(entry_date, {})
                 dm = DailyMetrics(
+                    user_id=_current_user_id,
                     date=entry_date,
                     avg_sleep_hrv=entry.get('avgSleepHrv'),
                     sleep_hrv_baseline=entry.get('sleepHrvBase'),
@@ -2193,7 +2253,7 @@ async def coros_sync_health():
             if analytics_by_date:
                 updated = 0
                 for entry_date, ana in analytics_by_date.items():
-                    existing = db.query(DailyMetrics).filter(DailyMetrics.date == entry_date).first()
+                    existing = db.query(DailyMetrics).filter(DailyMetrics.user_id == _current_user_id, DailyMetrics.date == entry_date).first()
                     if not existing:
                         continue
                     changed = False

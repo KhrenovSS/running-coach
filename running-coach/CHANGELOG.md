@@ -47,6 +47,12 @@ All notable changes to this project are tracked here.
 - **Документация `coros_health_metrics.md`**: добавлена таблица статуса доступности каждой метрики (✅ из API / 🧮 расчёт / ❌ недоступно)
 
 ### Fixed
+- **user_id во всех запросах БД**: upload, confirm_upload, confirm_deleted, session_detail, session_delete, settings_save, coros_sync, coros_sync_health, _auto_sync_* — везде добавлен `.filter(Table.user_id == _current_user_id)`
+- **settings_save** теперь сохраняет настройки также в модель `User`
+- **Создание записей**: добавлен `user_id=_current_user_id` при создании DailyMetrics, WeightMeasurement, DeletedTraining, TrainingSession
+- **Исправлены ошибки отступов** в session_delete и coros_sync_health (синтаксис Python)
+
+### Fixed
 - **Coros health sync: даты в формате YYYYMMDD и тип int** — API `/analyse/dayDetail/query` принимает даты без дефисов (`20260601`), поле `happenDay` приходит как `int`, а не `str`. Исправлено: формат дат в `strftime("%Y%m%d")`, преобразование `happenDay` в строку перед парсингом.
 
 ### Added
