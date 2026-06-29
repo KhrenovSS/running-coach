@@ -165,6 +165,58 @@ def build_nav_html(all_sessions, sel_year, sel_month):
     return html, sel_year, sel_month
 
 
+# Классификация метрик здоровья для отображения (Health metrics display helpers)
+def _hrv_status(hrv, baseline, sd):
+    """Классификация HRV: Повышенная/Норма/Пониженная/Низкая (Classify HRV level)"""
+    if hrv is None:
+        return None, ''
+    if baseline is None or baseline == 0:
+        return None, f'{hrv:.0f}'
+    # Если SD неизвестен (API не отдаёт), оцениваем как 20% от baseline (If SD unknown, estimate 20% of baseline)
+    if sd is None or sd == 0:
+        sd = baseline * 0.2
+    if hrv > baseline + sd:
+        return 'elevated', f'🟣 Повышенная ({hrv:.0f})'
+    elif hrv >= baseline - sd:
+        return 'normal', f'🟢 Норма ({hrv:.0f})'
+    elif hrv >= baseline - 2 * sd:
+        return 'low', f'🟡 Пониженная ({hrv:.0f})'
+    else:
+        return 'very_low', f'🔴 Низкая ({hrv:.0f})'
+
+def _tired_label(tired_rate):
+    """Классификация уровня усталости (Classify tiredness level)"""
+    if tired_rate is None:
+        return ''
+    if tired_rate <= -5:
+        return '🟢 Низкая'
+    elif tired_rate <= 0:
+        return '🟡 Умеренная'
+    else:
+        return '🔴 Высокая'
+
+def _readiness_label(performance):
+    """Классификация готовности к нагрузкам (Classify readiness)"""
+    if performance is None:
+        return ''
+    if performance > 0.5:
+        return '🟢 Готов к тренировкам'
+    elif performance > -0.5:
+        return '🟡 Умеренная готовность'
+    else:
+        return '🔴 Требуется отдых'
+
+def _load_label(training_load):
+    """Классификация тренировочной нагрузки (Classify training load)"""
+    if training_load is None:
+        return ''
+    if training_load < 50:
+        return 'Лёгкая'
+    elif training_load < 150:
+        return 'Средняя'
+    else:
+        return 'Высокая'
+
 # Основная функция рендеринга главной страницы (Main page render function)
 def render_page(year=None, month=None):
     db = SessionLocal()
@@ -251,10 +303,13 @@ def render_page(year=None, month=None):
 
     # Последние метрики для отображения (Latest metrics for display)
     latest_rm = recovery_metrics[0] if recovery_metrics else None
-    latest_hrv = latest_rm.avg_sleep_hrv if latest_rm and latest_rm.avg_sleep_hrv else ''
-    latest_rhr = str(latest_rm.rhr) if latest_rm and latest_rm.rhr else ''
-    latest_tired = str(latest_rm.tired_rate) if latest_rm and latest_rm.tired_rate is not None else ''
-    latest_perf = str(latest_rm.performance) if latest_rm and latest_rm.performance else ''
+    if latest_rm:
+        _, latest_hrv = _hrv_status(latest_rm.avg_sleep_hrv, latest_rm.sleep_hrv_baseline, latest_rm.sleep_hrv_sd)
+        latest_rhr = str(latest_rm.rhr) if latest_rm.rhr is not None else ''
+        latest_tired = _tired_label(latest_rm.tired_rate)
+        latest_perf = _readiness_label(latest_rm.performance)
+    else:
+        latest_hrv = latest_rhr = latest_tired = latest_perf = ''
 
     return MAIN_HTML.format(
         rows=rows, nav_html=nav_html, max_hr=settings.max_hr, weight=settings.weight,
@@ -494,10 +549,10 @@ MAIN_HTML = '''
         <div class='stats-card' id='recoveryCard' onclick='toggleRecoveryChart()' style='cursor:pointer'>
             <h4>❤️ Восстановление</h4>
             <div class='stats-summary'>
-                <span>HRV: <b>{latest_hrv}</b></span>
-                <span>RHR: <b>{latest_rhr}</b></span>
+                <span>Нервная система: <b>{latest_hrv}</b></span>
+                <span>Пульс покоя: <b>{latest_rhr}</b> уд/мин</span>
                 <span>Усталость: <b>{latest_tired}</b></span>
-                <span>Готовность: <b>{latest_perf}</b></span>
+                <span>Состояние: <b>{latest_perf}</b></span>
             </div>
             <div style='font-size:13px;color:#888;margin-top:4px' id='recoveryToggle'>▾ График HRV</div>
         </div>
@@ -1204,13 +1259,13 @@ async def session_detail(session_id: int):
         training_date = s.begin_ts.date()
         rm = db.query(DailyMetrics).filter(DailyMetrics.date == training_date).first()
         if rm:
-            hrv_str = f"{rm.avg_sleep_hrv}" if rm.avg_sleep_hrv is not None else "—"
+            _, hrv_label = _hrv_status(rm.avg_sleep_hrv, rm.sleep_hrv_baseline, rm.sleep_hrv_sd)
             rhr_str = f"{rm.rhr}" if rm.rhr is not None else "—"
-            tired_str = f"{rm.tired_rate}" if rm.tired_rate is not None else "—"
-            perf_str = f"{rm.performance}" if rm.performance is not None else "—"
-            load_str = f"{rm.training_load:.0f}" if rm.training_load is not None else "—"
+            tired_str = _tired_label(rm.tired_rate) or "—"
+            perf_str = _readiness_label(rm.performance) or "—"
+            load_str = _load_label(rm.training_load) or "—"
             recovery_info = {
-                'hrv': hrv_str,
+                'hrv': hrv_label or "—",
                 'rhr': rhr_str,
                 'tired_rate': tired_str,
                 'performance': perf_str,
@@ -1285,11 +1340,11 @@ async def session_detail(session_id: int):
         <div class='card' style='background:#f3e5f5;border-color:#ce93d8'>
             <h4 style='margin:0 0 10px 0;color:#7B1FA2'>❤️ Восстановление перед тренировкой</h4>
             <div class='info'>
-                <div class='info-item'><span class='info-label'>HRV (ночной)</span><b>{recovery_info["hrv"]}</b><span class='info-unit'>мс</span></div>
+                <div class='info-item'><span class='info-label'>Нервная система</span><b>{recovery_info["hrv"]}</b></div>
                 <div class='info-item'><span class='info-label'>Пульс покоя</span><b>{recovery_info["rhr"]}</b><span class='info-unit'>уд/мин</span></div>
-                <div class='info-item'><span class='info-label'>Усталость</span><b>{recovery_info["tired_rate"]}</b><span class='info-unit'>/10</span></div>
-                <div class='info-item'><span class='info-label'>Готовность</span><b>{recovery_info["performance"]}</b><span class='info-unit'>%</span></div>
-                <div class='info-item'><span class='info-label'>Нагрузка</span><b>{recovery_info["training_load"]}</b><span class='info-unit'></span></div>
+                <div class='info-item'><span class='info-label'>Усталость</span><b>{recovery_info["tired_rate"]}</b></div>
+                <div class='info-item'><span class='info-label'>Состояние</span><b>{recovery_info["performance"]}</b></div>
+                <div class='info-item'><span class='info-label'>Нагрузка</span><b>{recovery_info["training_load"]}</b></div>
             </div>
         </div>'''
 
