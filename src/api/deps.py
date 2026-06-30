@@ -15,10 +15,10 @@ import time
 import logging
 from typing import Generator
 
-from fastapi import Depends, Request
+from fastapi import Depends, Request, HTTPException
 from sqlalchemy.orm import Session
 
-from src.models import SessionLocal
+from src.models import SessionLocal, User
 
 logger = logging.getLogger(__name__)
 
@@ -59,15 +59,20 @@ async def log_request(request: Request) -> None:
     logger.info(f"→ {request.method} {request.url.path}")
 
 
-def get_current_user_id() -> int:
+async def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     """
-    Получить ID текущего пользователя (Get current user ID)
+    Получить текущего пользователя из сессии (Get current user from session)
     
-    TODO: заменить после реализации аутентификации
-    TODO: replace after implementing authentication
-    
-    Сейчас возвращает hardcoded ID=1 (single-user mode).
-    Currently returns hardcoded ID=1 (single-user mode).
+    Если пользователь не авторизован — перенаправляет на главную с ошибкой.
+    If user is not authenticated — redirects to home with error.
     """
-    # Временное решение — один пользователь (Temporary — single user)
-    return 1
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    user = db.query(User).filter(User.id == user_id).filter((User.is_active == True) | (User.is_active.is_(None))).first()
+    if not user:
+        request.session.clear()
+        raise HTTPException(status_code=401, detail="User not found")
+    
+    return user

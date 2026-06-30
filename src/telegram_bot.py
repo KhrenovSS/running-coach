@@ -23,8 +23,20 @@ from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
 from src.parsers.fit_parser import parse_fit
 from src.logger import get_logger
 from src.services.audit import AuditService
+from src.services.auth import generate_telegram_login_token
 
 logger = get_logger("telegram_bot")
+
+
+def _get_web_app_url() -> str:
+    """Базовый URL веб-приложения (Web app base URL)"""
+    return os.getenv("WEB_APP_URL", "http://localhost:8000").rstrip("/")
+
+
+def _generate_login_link(db, user: User) -> str:
+    """Сгенерировать одноразовую ссылку для входа в веб (Generate single-use web login link)"""
+    token = generate_telegram_login_token(db, user)
+    return f"{_get_web_app_url()}/auth/telegram?token={token}"
 
 EMAIL, PASSWORD = range(2)
 
@@ -77,14 +89,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = update.effective_user.username
     user = get_user(chat_id)
     if user and user.coros_email:
+        # Генерируем ссылку для входа в веб (Generate web login link)
+        db = SessionLocal()
+        try:
+            login_link = _generate_login_link(db, user)
+        finally:
+            db.close()
         await update.message.reply_text(
             f"👋 Привет, {user.name or username or 'бегун'}!\n"
             f"Твой Coros аккаунт уже привязан: {user.coros_email}\n\n"
+            f"[🔗 Открыть веб-интерфейс]({login_link})\n\n"
             f"/sync — синхронизировать тренировки\n"
             f"/stats — статистика\n"
             f"/trainings — последние тренировки\n"
             f"/weight — ввести вес (или /weight 75.5)\n"
             f"/delete_me — удалить мои данные",
+            parse_mode="Markdown",
+            disable_web_page_preview=True,
         )
         return ConversationHandler.END
 
@@ -166,6 +187,9 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 changes=changes,
                 source="telegram_start",
             )
+        
+        # Генерируем ссылку для входа в веб (Generate web login link)
+        login_link = _generate_login_link(db, user)
     except Exception as e:
         db.rollback()
         logger.error("Ошибка сохранения пользователя: %s", e)
@@ -178,10 +202,12 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"✅ *Готово!* Аккаунт Coros привязан.\n\n"
         f"Email: `{email}`\n"
         f"Пароль: 🔒 получен (сообщение удалено из чата)\n\n"
+        f"[🔗 Открыть веб-интерфейс]({login_link})\n\n"
         f"/sync — синхронизировать тренировки\n"
         f"/stats — статистика\n"
         f"/trainings — последние тренировки",
         parse_mode="Markdown",
+        disable_web_page_preview=True,
     )
     return ConversationHandler.END
 

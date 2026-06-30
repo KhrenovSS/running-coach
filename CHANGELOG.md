@@ -34,6 +34,27 @@ All notable changes to this project are tracked here.
 ## [30.06.2026]
 
 ### Added
+- **Telegram-аутентификация для веб-интерфейса**:
+  - `src/services/auth.py` — генерация и верификация одноразовых токенов входа
+  - `src/api/routes/auth.py` — `/auth/telegram?token=...` для входа, `/auth/logout` для выхода
+  - `src/api/deps.py` — `get_current_user` зависимость из session-cookie
+  - `SessionMiddleware` в `src/api/middleware.py` с `SECRET_KEY` из `.env`
+  - `AuthToken` модель и Alembic-миграция `69f28e182276`
+  - Telegram-бот при `/start` и после регистрации отправляет ссылку «Открыть веб-интерфейс»
+- **Многопользовательская автосинхронизация Coros** — `_auto_sync_health()` и `_auto_sync_activities()` теперь обходят всех активных пользователей с учётными данными Coros
+- **`itsdangerous` и `WEB_APP_URL`** в `.env.example` для session-cookie и ссылок из бота
+
+### Changed
+- Убран `current_user_id = 1`; все веб-endpoints используют `current_user: User = Depends(get_current_user)`
+- `_update_last_health_sync()`, `_save_dashboard_data()`, `_auto_sync_health_inner()`, `_auto_sync_activities_inner()` теперь принимают `user_id`
+- Web UI: добавлен блок пользователя с именем и ссылкой «Выйти» на главной, странице тренировки и настройках
+
+### Fixed
+- `get_current_user` и автосинхронизация теперь корректно обрабатывают пользователей с `is_active=NULL` (legacy rows)
+
+## [30.06.2026]
+
+### Added
 - **`sleep_hrv_interval_list`** (TEXT, JSON) — колонка DailyMetrics для Coros-интервалов HRV (минимальное, низкое, норма start, норма end). Сохраняется из `summaryInfo.sleepHrvData.lastSleepHrvIntervalList` в `_save_dashboard_data()`
 - **Миграция**: `ALTER TABLE daily_metrics ADD COLUMN sleep_hrv_interval_list TEXT`
 

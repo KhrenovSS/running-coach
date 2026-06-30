@@ -169,6 +169,20 @@ class AuditEvent(Base):
     user = relationship("User")
 
 
+# Модель токена для Telegram-входа в веб (Telegram web login token model)
+class AuthToken(Base):
+    __tablename__ = 'auth_tokens'
+    
+    id = Column(Integer, primary_key=True)
+    token = Column(String(64), unique=True, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    used_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User")
+
+
 # Определение пути к БД и создание подключения (Database path and connection setup)
 DB_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_DIR}/running_coach.db")

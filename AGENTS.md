@@ -42,8 +42,10 @@ Python + FastAPI + SQLite, написано через ИИ (open code style).
 - `src/exceptions.py` — типизированные исключения приложения
 - `src/utils/logger.py` — структурированное логирование с ротацией
 - `src/services/audit.py` — сервис аудита (БД + файл)
-- `src/api/middleware.py` — централизованная обработка ошибок и логирование запросов
+- `src/services/auth.py` — генерация и проверка токенов Telegram-авторизации
+- `src/api/middleware.py` — централизованная обработка ошибок, логирование запросов и session middleware
 - `src/api/routes/health.py` — health check endpoint
+- `src/api/routes/auth.py` — маршруты аутентификации (`/auth/telegram`, `/auth/logout`)
 - `src/parsers/common.py` — общая логика: очистка треков, сегментация, классификация, погода (`process_trackpoints()`)
 - `src/parsers/tcx_parser.py` — парсинг TCX-файлов (XML) → вызов `process_trackpoints()`
 - `src/parsers/fit_parser.py` — парсинг FIT-файлов (бинарный) → вызов `process_trackpoints()`
@@ -286,12 +288,22 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
    - Alembic-миграция `eb50c256201f` — таблица `audit_events`
    - Аудит интегрирован в `main.py` (upload, delete, settings, Coros sync, Telegram notify) и `src/telegram_bot.py`
    - Документация: `docs/LOGGING.md`, `.env.example`
-8. **Коммиты**: (в процессе) Sprint 2.4 logging/audit. Предыдущие коммиты запушены.
+8. **Аутентификация через Telegram (Sprint 2.5)**:
+   - Убран `_current_user_id = 1`; все endpoints используют `current_user: User = Depends(get_current_user)`
+   - `src/services/auth.py` — генерация и проверка одноразовых токенов для входа
+   - `src/api/routes/auth.py` — `/auth/telegram?token=...` и `/auth/logout`
+   - `src/api/deps.py` — `get_current_user` из session-cookie
+   - `SessionMiddleware` в `src/api/middleware.py` (требует `SECRET_KEY`)
+   - Telegram-бот при `/start` и после регистрации отправляет ссылку для входа в веб
+   - Alembic-миграция `69f28e182276` — таблица `auth_tokens`
+   - Web UI: имя пользователя и кнопка «Выйти» на главной, деталях тренировки и настройках
+   - Автосинхронизация Coros теперь обходит всех активных пользователей с учётными данными Coros
+9. **Коммиты**: `aec48aa` (Sprint 2.4 logging/audit), (в процессе) Sprint 2.5 Telegram auth
 
-**Текущее состояние**: Спринт 2 (Alembic + UserSettings + get_db + Logging/Audit) завершён. Сервер запущен, тесты проходят, health check 200 OK.
+**Текущее состояние**: Спринт 2 завершён (Alembic + UserSettings + get_db + Logging/Audit + Telegram auth). Сервер запущен, тесты проходят, вход через Telegram-ссылку работает.
 
-**Следующие шаги (Sprint 2 — остаток):**
-- ⬜ **Аутентификация** — убрать `_current_user_id = 1`, добавить логин
+**Следующие шаги:**
+- ⬜ Доработки UI/UX по необходимости
 
 **Долгосрочные цели (после техдолга):**
 - ⬜ **Модуль аналитики** — 8 этапов из `decision_module_design.md`

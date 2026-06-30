@@ -57,6 +57,9 @@ logger.info("Sync completed", extra={"count": 5})
 | `coros.sync.failed` | Ошибка синхронизации Coros | Telegram `/sync`, `/coros/sync` |
 | `telegram.sent` | Telegram-уведомление отправлено | Telegram bot |
 | `telegram.failed` | Ошибка отправки Telegram | Telegram bot |
+| `auth.login` | Пользователь вошёл через Telegram | `/auth/telegram` |
+| `auth.login_failed` | Неудачная попытка входа | `/auth/telegram` |
+| `auth.logout` | Пользователь вышел | `/auth/logout` |
 
 ### Использование AuditService
 

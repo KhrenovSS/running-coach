@@ -3,7 +3,7 @@ from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Form, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from sqlalchemy.orm import Session
-from src.models import SessionLocal, TrainingSession, WeightMeasurement, DeletedTraining, DailyMetrics, get_settings, get_db
+from src.models import SessionLocal, User, TrainingSession, WeightMeasurement, DeletedTraining, DailyMetrics, get_settings, get_db
 from src.parsers.tcx_parser import parse_tcx
 from src.parsers.fit_parser import parse_fit
 from src.parsers.common import weather_icon, format_pace, format_duration
@@ -11,6 +11,8 @@ from src.logger import get_logger
 from src.crypto import encrypt, decrypt
 from src.api.middleware import register_middleware
 from src.api.routes.health import router as health_router
+from src.api.routes.auth import router as auth_router
+from src.api.deps import get_current_user
 from src.services.audit import AuditService
 logger = get_logger("app")
 import httpx
@@ -27,6 +29,7 @@ from pathlib import Path
 app = FastAPI(title="AI Running Coach")
 register_middleware(app)
 app.include_router(health_router)
+app.include_router(auth_router)
 os.makedirs("uploads", exist_ok=True)
 
 # Хранилище для загруженных TCX, ожидающих подтверждения (Pending uploads awaiting user confirmation)
@@ -35,9 +38,6 @@ PENDING_DIR.mkdir(parents=True, exist_ok=True)
 _pending = {}  # temp_id -> dict with 'path', 'filename', 'data'
 _sync_tasks = {}  # task_id -> dict with progress info
 _sync_tasks_lock = threading.Lock()
-
-# Текущий пользователь (по умолчанию admin=1, пока нет Telegram-бота) (Current user ID, defaults to admin=1)
-_current_user_id = 1
 
 # Словарь типов тренировок на русском (Training type labels in Russian)
 TRAINING_TYPES_RU = {
@@ -48,7 +48,7 @@ TRAINING_TYPES_RU = {
 }
 
 # Отправить уведомление пользователю в Telegram (Send notification to user via Telegram)
-def _telegram_notify(text: str, reply_markup: dict = None):
+def _telegram_notify(user_id: int, text: str, reply_markup: dict = None):
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         return
@@ -56,7 +56,7 @@ def _telegram_notify(text: str, reply_markup: dict = None):
     audit = AuditService(db)
     try:
         from src.models import User
-        user = db.query(User).filter(User.id == _current_user_id, User.telegram_chat_id.isnot(None)).first()
+        user = db.query(User).filter(User.id == user_id, User.telegram_chat_id.isnot(None)).first()
         if not user:
             return
         try:
@@ -293,12 +293,12 @@ def _load_label(training_load):
         return 'Высокая'
 
 # Основная функция рендеринга главной страницы (Main page render function)
-def render_page(db, year=None, month=None):
-    all_sessions = db.query(TrainingSession).filter(TrainingSession.user_id == _current_user_id).order_by(TrainingSession.begin_ts.desc()).all()
+def render_page(db, user_id: int, user_name: str = "Бегун", year=None, month=None):
+    all_sessions = db.query(TrainingSession).filter(TrainingSession.user_id == user_id).order_by(TrainingSession.begin_ts.desc()).all()
     settings = get_settings()
-    weight_measurements = db.query(WeightMeasurement).filter(WeightMeasurement.user_id == _current_user_id).order_by(WeightMeasurement.measured_at).all()
+    weight_measurements = db.query(WeightMeasurement).filter(WeightMeasurement.user_id == user_id).order_by(WeightMeasurement.measured_at).all()
     # Последние метрики восстановления (Latest recovery metrics)
-    recovery_metrics = db.query(DailyMetrics).filter(DailyMetrics.user_id == _current_user_id).order_by(DailyMetrics.date.desc()).limit(30).all()
+    recovery_metrics = db.query(DailyMetrics).filter(DailyMetrics.user_id == user_id).order_by(DailyMetrics.date.desc()).limit(30).all()
 
     weight_json = json.dumps([{
         'date': wm.measured_at.strftime('%Y-%m-%d'),
@@ -410,8 +410,9 @@ def render_page(db, year=None, month=None):
             return 'скоро'
         return f'через {int(left/60)} мин'
 
+    user_header = f"👤 {user_name} | <a href='/auth/logout'>Выйти</a>"
     return MAIN_HTML.format(
-        rows=rows, nav_html=nav_html, max_hr=settings.max_hr, weight=settings.weight,
+        rows=rows, nav_html=nav_html, user_header=user_header, max_hr=settings.max_hr, weight=settings.weight,
         week_km=week_stats['total_km'] if week_stats else 0,
         week_dur=week_stats['total_dur'] if week_stats else "",
         week_bars=week_bars,
@@ -518,7 +519,10 @@ MAIN_HTML = '''
         </div>
     </div>
 
-    <h2>🏃 AI Running Coach</h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0;">
+        <h2 style="margin:0;">🏃 AI Running Coach</h2>
+        <div>{user_header}</div>
+    </div>
 
     <div class='settings'>
         <span><b>ЧССмакс:</b> {max_hr} уд/мин</span>
@@ -984,6 +988,7 @@ SESSION_HTML = '''
     </style>
 </head>
 <body>
+    <div style="text-align:right;margin-bottom:10px;">{user_header}</div>
     <h2>🏃 {type_ru} {suspect_badge}</h2>
     <p style='color:#666;'>{date}</p>
     {suspect_detail}
@@ -1083,6 +1088,7 @@ SETTINGS_PAGE = '''
     </style>
 </head>
 <body>
+    <div style="text-align:right;margin-bottom:10px;">{user_header}</div>
     <h2>⚙️ Настройки</h2>
     <div class='card'>
         <form action='/settings' method='post'>
@@ -1139,21 +1145,6 @@ def startup():
     except Exception as e:
         logger.error("Ошибка Alembic миграции: %s", e)
 
-    # Логируем запуск приложения (Log application startup)
-    try:
-        db = SessionLocal()
-        try:
-            audit = AuditService(db)
-            audit.log_event(
-                event_type="app.startup",
-                message="Application started",
-                severity="info",
-                user_id=_current_user_id,
-            )
-        finally:
-            db.close()
-    except Exception as e:
-        logger.warning("Не удалось записать событие запуска в аудит: %s", e)
     # Очистка старых pending-файлов (Cleanup old pending uploads)
     for f in PENDING_DIR.glob("*.tcx"):
         f.unlink(missing_ok=True)
@@ -1161,14 +1152,32 @@ def startup():
     settings = get_settings()
     db = SessionLocal()
     try:
+        # Гарантируем существование пользователя-админа (Ensure admin user exists)
+        from src.models import User
+        admin_user = db.query(User).filter(User.id == 1).first()
+        if not admin_user:
+            admin_user = User(id=1, is_active=True, max_hr=177)
+            db.add(admin_user)
+            db.commit()
+            db.refresh(admin_user)
+        
         # Первое измерение веса (First weight measurement)
-        existing = db.query(WeightMeasurement).filter(WeightMeasurement.user_id == _current_user_id).first()
+        existing = db.query(WeightMeasurement).filter(WeightMeasurement.user_id == admin_user.id).first()
         if not existing and settings.weight:
-            wm = WeightMeasurement(weight_kg=settings.weight, measured_at=datetime.utcnow(), user_id=_current_user_id)
+            wm = WeightMeasurement(weight_kg=settings.weight, measured_at=datetime.utcnow(), user_id=admin_user.id)
             db.add(wm)
             db.commit()
+        
+        # Логируем запуск приложения (Log application startup)
+        audit = AuditService(db)
+        audit.log_event(
+            event_type="app.startup",
+            message="Application started",
+            severity="info",
+            user_id=admin_user.id,
+        )
     except Exception as e:
-        logger.warning("Не удалось создать начальное измерение веса: %s", e)
+        logger.warning("Не удалось инициализировать пользователя и аудит: %s", e)
     finally:
         db.close()
 
@@ -1181,13 +1190,16 @@ def startup():
 
 # Главная страница: список тренировок и статистика (Main page: session list and stats)
 @app.get('/', response_class=HTMLResponse)
-async def index(year: Optional[int] = None, month: Optional[int] = None, db: Session = Depends(get_db)):
-    return render_page(db, year=year, month=month)
+async def index(year: Optional[int] = None, month: Optional[int] = None, db: Session = Depends(get_db),
+                current_user: User = Depends(get_current_user)):
+    user_name = current_user.name or current_user.telegram_username or "Бегун"
+    return render_page(db, user_id=current_user.id, user_name=user_name, year=year, month=month)
 
 
 # Загрузка TCX/FIT-файлов (TCX/FIT file upload endpoint)
 @app.post('/upload')
-async def upload_files(files: list[UploadFile] = File(...), db: Session = Depends(get_db)):
+async def upload_files(files: list[UploadFile] = File(...), db: Session = Depends(get_db),
+                       current_user: User = Depends(get_current_user)):
     settings = get_settings()
     saved = 0
     deleted_hit = None
@@ -1222,7 +1234,7 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
         deleted_match = None
         bt = data['begin_ts']
         if bt:
-            all_deleted = db.query(DeletedTraining).filter(DeletedTraining.user_id == _current_user_id).all()
+            all_deleted = db.query(DeletedTraining).filter(DeletedTraining.user_id == current_user.id).all()
             for d in all_deleted:
                 if d.begin_ts and abs((d.begin_ts - bt).total_seconds()) < 120:
                     deleted_match = d
@@ -1250,13 +1262,13 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
         # Проверка, существует ли уже такая тренировка (Check if training already exists)
         exists = db.query(TrainingSession).filter(
             TrainingSession.begin_ts == data['begin_ts'],
-            TrainingSession.user_id == _current_user_id
+            TrainingSession.user_id == current_user.id
         ).first()
         if not exists:
             cleaning_log_val = data.pop('cleaning_log', None)
             flags_val = data.pop('suspect_flags', None)
             session = TrainingSession(**data)
-            session.user_id = _current_user_id
+            session.user_id = current_user.id
             if cleaning_log_val:
                 session.cleaning_log = cleaning_log_val
             if flags_val:
@@ -1266,7 +1278,7 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
             db.refresh(session)
             saved += 1
             audit.log_training_uploaded(
-                user_id=_current_user_id,
+                user_id=current_user.id,
                 training_id=session.id,
                 filename=file.filename or "unknown",
                 distance_km=session.total_distance_km,
@@ -1280,7 +1292,7 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
             event_type="training.upload_summary",
             message=f"Upload finished: {saved} saved, {len(parse_errors)} parse errors",
             severity="warning" if parse_errors else "info",
-            user_id=_current_user_id,
+            user_id=current_user.id,
             metadata={"saved": saved, "files": uploaded_filenames, "parse_errors": parse_errors, "deleted_match": bool(deleted_hit)},
         )
     
@@ -1291,7 +1303,8 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
 
 # Подтверждение сомнительных тренировок (Confirm problematic uploads)
 @app.post('/upload/confirm')
-async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(get_db)):
+async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(get_db),
+                          current_user: User = Depends(get_current_user)):
     confirmed = 0
     audit = AuditService(db)
     for temp_id in temp_ids:
@@ -1301,13 +1314,13 @@ async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(
         data = pending['data']
         exists = db.query(TrainingSession).filter(
             TrainingSession.begin_ts == data['begin_ts'],
-            TrainingSession.user_id == _current_user_id
+            TrainingSession.user_id == current_user.id
         ).first()
         if not exists:
             cleaning_log_val = data.pop('cleaning_log', None)
             flags_val = data.pop('suspect_flags', None)
             session = TrainingSession(**data)
-            session.user_id = _current_user_id
+            session.user_id = current_user.id
             if cleaning_log_val:
                 session.cleaning_log = cleaning_log_val
             if flags_val:
@@ -1317,7 +1330,7 @@ async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(
             db.refresh(session)
             confirmed += 1
             audit.log_training_uploaded(
-                user_id=_current_user_id,
+                user_id=current_user.id,
                 training_id=session.id,
                 filename=pending.get('filename', 'unknown'),
                 distance_km=session.total_distance_km,
@@ -1329,7 +1342,7 @@ async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(
         event_type="training.confirm_upload",
         message=f"Confirmed problematic uploads: {confirmed} saved",
         severity="info",
-        user_id=_current_user_id,
+        user_id=current_user.id,
         metadata={"confirmed": confirmed, "temp_ids": temp_ids},
     )
     return RedirectResponse(url='/', status_code=303)
@@ -1337,7 +1350,8 @@ async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(
 
 # Принудительное сохранение ранее удалённой тренировки (Force-save a previously deleted training)
 @app.post('/upload/confirm_deleted')
-async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db)):
+async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db),
+                           current_user: User = Depends(get_current_user)):
     pending = _pending.pop(temp_id, None)
     audit = AuditService(db)
     if not pending:
@@ -1345,7 +1359,7 @@ async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db
             event_type="training.confirm_deleted",
             message="Confirm deleted failed: temp_id not found",
             severity="warning",
-            user_id=_current_user_id,
+            user_id=current_user.id,
             metadata={"temp_id": temp_id},
         )
         return JSONResponse({'ok': False, 'error': 'temp_id not found'})
@@ -1353,7 +1367,7 @@ async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db
     bt = data.get('begin_ts')
     # Удаляем запись DeletedTraining (Remove DeletedTraining entry)
     if bt:
-        all_deleted = db.query(DeletedTraining).filter(DeletedTraining.user_id == _current_user_id).all()
+        all_deleted = db.query(DeletedTraining).filter(DeletedTraining.user_id == current_user.id).all()
         for d in all_deleted:
             if d.begin_ts and abs((d.begin_ts - bt).total_seconds()) < 120:
                 db.delete(d)
@@ -1361,13 +1375,13 @@ async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db
     # Сохраняем тренировку (Save training)
     exists = db.query(TrainingSession).filter(
         TrainingSession.begin_ts == bt,
-        TrainingSession.user_id == _current_user_id
+        TrainingSession.user_id == current_user.id
     ).first()
     if not exists:
         cleaning_log_val = data.pop('cleaning_log', None)
         flags_val = data.pop('suspect_flags', None)
         session = TrainingSession(**data)
-        session.user_id = _current_user_id
+        session.user_id = current_user.id
         if cleaning_log_val:
             session.cleaning_log = cleaning_log_val
         if flags_val:
@@ -1377,7 +1391,7 @@ async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db
         db.refresh(session)
         logger.info("Удалённая тренировка от %s повторно импортирована (Deleted training re-imported)", bt)
         audit.log_training_uploaded(
-            user_id=_current_user_id,
+            user_id=current_user.id,
             training_id=session.id,
             filename=pending.get('filename', 'unknown'),
             distance_km=session.total_distance_km,
@@ -1389,7 +1403,7 @@ async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db
         event_type="training.confirm_deleted",
         message="Previously deleted training re-imported",
         severity="info",
-        user_id=_current_user_id,
+        user_id=current_user.id,
         metadata={"begin_ts": str(bt) if bt else None},
     )
     return JSONResponse({'ok': True})
@@ -1397,8 +1411,9 @@ async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db
 
 # Детальный просмотр тренировки (Training session detail page)
 @app.get('/session/{session_id}', response_class=HTMLResponse)
-async def session_detail(session_id: int, db: Session = Depends(get_db)):
-    s = db.query(TrainingSession).filter(TrainingSession.id == session_id, TrainingSession.user_id == _current_user_id).first()
+async def session_detail(session_id: int, db: Session = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    s = db.query(TrainingSession).filter(TrainingSession.id == session_id, TrainingSession.user_id == current_user.id).first()
     if not s:
         return HTMLResponse("<h2>Тренировка не найдена</h2><a href='/'>Назад</a>", status_code=404)
 
@@ -1407,7 +1422,7 @@ async def session_detail(session_id: int, db: Session = Depends(get_db)):
     if s.begin_ts:
         from datetime import date
         training_date = s.begin_ts.date()
-        rm = db.query(DailyMetrics).filter(DailyMetrics.user_id == _current_user_id, DailyMetrics.date == training_date).first()
+        rm = db.query(DailyMetrics).filter(DailyMetrics.user_id == current_user.id, DailyMetrics.date == training_date).first()
         if rm:
             _, hrv_label = _hrv_status(rm.avg_sleep_hrv, rm.sleep_hrv_baseline, rm.sleep_hrv_sd,
                 json.loads(rm.sleep_hrv_interval_list) if rm.sleep_hrv_interval_list else None)
@@ -1503,7 +1518,10 @@ async def session_detail(session_id: int, db: Session = Depends(get_db)):
             </div>
         </div>'''
 
+    user_name = current_user.name or current_user.telegram_username or "Бегун"
+    user_header = f"👤 {user_name} | <a href='/auth/logout'>Выйти</a>"
     return SESSION_HTML.format(
+        user_header=user_header,
         session_id=s.id,
         suspect_badge=suspect_badge,
         suspect_detail=suspect_detail,
@@ -1525,7 +1543,7 @@ async def session_detail(session_id: int, db: Session = Depends(get_db)):
 
 # Страница настроек (Settings page)
 @app.get('/settings', response_class=HTMLResponse)
-async def settings_page():
+async def settings_page(current_user: User = Depends(get_current_user)):
     settings = get_settings()
     m = settings.max_hr
     z1 = f"{round(m * 0.5)}-{round(m * 0.6)}"
@@ -1534,18 +1552,24 @@ async def settings_page():
     z4 = f"{round(m * 0.8)}-{round(m * 0.9)}"
     z5 = f"{round(m * 0.9)}-{round(m)}"
     pw_placeholder = '********' if settings.coros_password else ''
-    return SETTINGS_PAGE.format(max_hr=m, weight=settings.weight, z1=z1, z2=z2, z3=z3, z4=z4, z5=z5,
-                                max_credible_pace=settings.max_credible_pace,
-                                max_gps_jump_m=settings.max_gps_jump_m,
-                                min_hr_for_fast_pace=settings.min_hr_for_fast_pace,
-                                coros_email=settings.coros_email or '',
-                                coros_password=pw_placeholder)
+    user_name = current_user.name or current_user.telegram_username or "Бегун"
+    user_header = f"👤 {user_name} | <a href='/auth/logout'>Выйти</a>"
+    return SETTINGS_PAGE.format(
+        user_header=user_header,
+        max_hr=m, weight=settings.weight, z1=z1, z2=z2, z3=z3, z4=z4, z5=z5,
+        max_credible_pace=settings.max_credible_pace,
+        max_gps_jump_m=settings.max_gps_jump_m,
+        min_hr_for_fast_pace=settings.min_hr_for_fast_pace,
+        coros_email=settings.coros_email or '',
+        coros_password=pw_placeholder,
+    )
 
 
 # Удаление тренировки с сохранением метаданных (Delete training, save metadata for re-upload confirmation)
 @app.post('/session/{session_id}/delete')
-async def session_delete(session_id: int, db: Session = Depends(get_db)):
-    s = db.query(TrainingSession).filter(TrainingSession.id == session_id, TrainingSession.user_id == _current_user_id).first()
+async def session_delete(session_id: int, db: Session = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    s = db.query(TrainingSession).filter(TrainingSession.id == session_id, TrainingSession.user_id == current_user.id).first()
     audit = AuditService(db)
     if s:
         segs = s.segments_json or []
@@ -1557,7 +1581,7 @@ async def session_delete(session_id: int, db: Session = Depends(get_db)):
                 pace = round(sum(paces) / len(paces), 2)
         # Сохраняем метаданные тренировки перед удалением (Save training metadata before delete)
         deleted = DeletedTraining(
-            user_id=_current_user_id,
+            user_id=current_user.id,
             begin_ts=s.begin_ts,
             total_distance_km=s.total_distance_km,
             avg_heart_rate=s.avg_heart_rate,
@@ -1577,7 +1601,7 @@ async def session_delete(session_id: int, db: Session = Depends(get_db)):
         db.commit()
         logger.info("Тренировка #%s удалена, метаданные сохранены (Session #%s deleted, metadata saved)", session_id, session_id)
         audit.log_training_deleted(
-            user_id=_current_user_id,
+            user_id=current_user.id,
             training_id=session_id,
             begin_ts=str(s.begin_ts) if s.begin_ts else None,
             distance_km=s.total_distance_km,
@@ -1588,7 +1612,7 @@ async def session_delete(session_id: int, db: Session = Depends(get_db)):
             event_type="training.delete_failed",
             message=f"Delete training failed: id={session_id} not found",
             severity="warning",
-            user_id=_current_user_id,
+            user_id=current_user.id,
             metadata={"training_id": session_id},
         )
     return RedirectResponse(url='/', status_code=303)
@@ -1602,13 +1626,14 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
                         min_hr_for_fast_pace: int = Form(130),
                         coros_email: str = Form(''),
                         coros_password: str = Form(''),
-                        db: Session = Depends(get_db)):
+                        db: Session = Depends(get_db),
+                        current_user: User = Depends(get_current_user)):
     from src.models import User, WeightMeasurement
     from datetime import datetime
-    user = db.query(User).filter(User.id == _current_user_id).first()
+    user = db.query(User).filter(User.id == current_user.id).first()
     audit = AuditService(db)
     if not user:
-        user = User(id=_current_user_id)
+        user = User(id=current_user.id)
         db.add(user)
     old_weight = user.weight_kg
     old_max_hr = user.max_hr
@@ -1624,7 +1649,7 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
     elif not coros_email:
         user.coros_password = None
     if old_weight != weight:
-        wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.utcnow(), user_id=_current_user_id)
+        wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.utcnow(), user_id=current_user.id)
         db.add(wm)
     db.commit()
     
@@ -1638,7 +1663,7 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
         changes['coros_email'] = {'old': old_coros_email, 'new': coros_email or None}
     if changes:
         audit.log_settings_changed(
-            user_id=_current_user_id,
+            user_id=current_user.id,
             changes=changes,
         )
     
@@ -1686,13 +1711,13 @@ async def view_logs(lines: int = 100):
 
 # Синхронизация тренировок с Coros — запуск в фоне (Coros sync — background task)
 @app.post('/coros/sync')
-async def coros_sync(db: Session = Depends(get_db)):
+async def coros_sync(db: Session = Depends(get_db),
+                     current_user: User = Depends(get_current_user)):
     from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
     from src.parsers.fit_parser import parse_fit
     from src.models import User
-    import tempfile
 
-    us = db.query(User).filter(User.id == _current_user_id).first()
+    us = db.query(User).filter(User.id == current_user.id).first()
     if not us or not us.coros_email or not us.coros_password:
         return JSONResponse({'status': 'error', 'message': 'Coros credentials not configured.'})
 
@@ -1709,7 +1734,7 @@ async def coros_sync(db: Session = Depends(get_db)):
         db = SessionLocal()
         audit = AuditService(db)
         try:
-            us = db.query(User).filter(User.id == _current_user_id).first()
+            us = db.query(User).filter(User.id == current_user.id).first()
             progress['step'] = 'auth'
             progress['message'] = 'Подключение к Coros...'
             logger.info("Запуск синхронизации Coros (Coros sync started)")
@@ -1741,7 +1766,7 @@ async def coros_sync(db: Session = Depends(get_db)):
                 return
 
             # Фильтруем новые (не в БД)
-            existing_times = {r[0] for r in db.query(TrainingSession.begin_ts).filter(TrainingSession.user_id == _current_user_id).all()}
+            existing_times = {r[0] for r in db.query(TrainingSession.begin_ts).filter(TrainingSession.user_id == current_user.id).all()}
             # Проверка, импортирована ли тренировка (с окном ±120 с) (Check if training already imported with ±120s window)
             def already_imported(ts):
                 for et in existing_times:
@@ -1795,7 +1820,7 @@ async def coros_sync(db: Session = Depends(get_db)):
                     bt_sync = data.get('begin_ts')
                     deleted_match_sync = None
                     if bt_sync:
-                        all_del = db.query(DeletedTraining).filter(DeletedTraining.user_id == _current_user_id).all()
+                        all_del = db.query(DeletedTraining).filter(DeletedTraining.user_id == current_user.id).all()
                         for d in all_del:
                             if d.begin_ts and abs((d.begin_ts - bt_sync).total_seconds()) < 120:
                                 deleted_match_sync = d
@@ -1938,13 +1963,13 @@ _ACTIVITY_SYNC_INTERVAL = int(os.getenv("COROS_ACTIVITY_SYNC_INTERVAL", "3600"))
 _AUTO_SYNC_LOCK = threading.Lock()
 
 # Сохраняет время последней синхронизации здоровья в БД (Save last health sync attempt time to DB)
-def _update_last_health_sync():
+def _update_last_health_sync(user_id: int):
     from src.models import User
     from datetime import datetime
     try:
         db = SessionLocal()
         try:
-            user = db.query(User).filter(User.id == _current_user_id).first()
+            user = db.query(User).filter(User.id == user_id).first()
             if user:
                 user.last_health_sync_at = datetime.now()
                 db.commit()
@@ -1954,7 +1979,7 @@ def _update_last_health_sync():
         logger.warning("Не удалось обновить last_health_sync_at: %s", e)
 
 # Сохраняет dashboard данные Coros в today's запись DailyMetrics (Save Coros dashboard data to today's DailyMetrics)
-def _save_dashboard_data(client, db):
+def _save_dashboard_data(client, db, user_id: int):
     from src.models import DailyMetrics
     from datetime import date
     try:
@@ -1969,11 +1994,11 @@ def _save_dashboard_data(client, db):
             return
         today = date.today()
         dm = db.query(DailyMetrics).filter(
-            DailyMetrics.user_id == _current_user_id,
+            DailyMetrics.user_id == user_id,
             DailyMetrics.date == today
         ).first()
         if not dm:
-            dm = DailyMetrics(user_id=_current_user_id, date=today)
+            dm = DailyMetrics(user_id=user_id, date=today)
             db.add(dm)
             db.flush()
         dm.recovery_pct = info.get('recoveryPct')
@@ -1997,23 +2022,42 @@ def _save_dashboard_data(client, db):
 
 # Синхронизация метрик здоровья (авто, без прогресса) (Auto health metrics sync)
 def _auto_sync_health():
-    from datetime import timedelta, date, datetime
+    from datetime import timedelta, datetime
+    from src.models import User
     with _AUTO_SYNC_STATUS_LOCK:
         _auto_sync_status['health']['status'] = 'syncing'
         _auto_sync_status['health']['message'] = 'Синхронизация...'
     try:
-        result = _auto_sync_health_inner()
+        db = SessionLocal()
+        try:
+            users = db.query(User).filter(
+                User.coros_email.isnot(None),
+                User.coros_password.isnot(None),
+                (User.is_active == True) | (User.is_active.is_(None)),
+            ).all()
+        finally:
+            db.close()
+
+        total_synced = 0
+        total_empty = 0
+        for user in users:
+            result = _auto_sync_health_inner(user.id)
+            _update_last_health_sync(user.id)
+            if result > 0:
+                total_synced += result
+            elif result == 0:
+                total_empty += 1
+
         with _AUTO_SYNC_STATUS_LOCK:
             s = _auto_sync_status['health']
             s['status'] = 'ok'
             s['last_run'] = datetime.now()
-            if result == 0:
+            if total_synced > 0:
+                s['message'] = f'✓ Синхронизировано: {total_synced}'
+            elif total_empty > 0:
                 s['message'] = '🟡 Синхронизация прошла, но данных о сне нет — возможно часы не синхронизированы с приложением'
-                logger.warning("Автосинхронизация здоровья: получен пустой список — часы Coros не синхронизированы с облаком")
             else:
-                s['message'] = f'✓ Получено: {result}'
-            # Сохраняем время последней попытки синхронизации здоровья в БД (Save last health sync attempt time to DB)
-            _update_last_health_sync()
+                s['message'] = 'Нет учётных данных Coros'
             s['next_run'] = s['last_run'] + timedelta(seconds=_HEALTH_SYNC_INTERVAL)
     except Exception as e:
         with _AUTO_SYNC_STATUS_LOCK:
@@ -2023,7 +2067,7 @@ def _auto_sync_health():
             s['message'] = str(e)[:80]
             s['next_run'] = s['last_run'] + timedelta(seconds=_HEALTH_SYNC_INTERVAL)
 
-def _auto_sync_health_inner() -> int:
+def _auto_sync_health_inner(user_id: int) -> int:
     """Возвращает количество новых синхронизированных записей (Return count of new synced records)"""
     from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
     from src.models import User
@@ -2031,7 +2075,7 @@ def _auto_sync_health_inner() -> int:
 
     db = SessionLocal()
     try:
-        us = db.query(User).filter(User.id == _current_user_id).first()
+        us = db.query(User).filter(User.id == user_id).first()
         if not us or not us.coros_email or not us.coros_password:
             logger.debug("Автосинхронизация здоровья: нет учётных данных Coros")
             return -1
@@ -2042,7 +2086,7 @@ def _auto_sync_health_inner() -> int:
         client = CorosClient(us.coros_email, plain_password, timeout=15)
         client.authenticate()
 
-        existing_dates = {r[0] for r in db.query(DailyMetrics.date).filter(DailyMetrics.user_id == _current_user_id).all()}
+        existing_dates = {r[0] for r in db.query(DailyMetrics.date).filter(DailyMetrics.user_id == user_id).all()}
         today = date.today()
         start_day = (today - timedelta(days=120)).strftime("%Y%m%d")
         end_day = today.strftime("%Y%m%d")
@@ -2051,7 +2095,7 @@ def _auto_sync_health_inner() -> int:
         logger.info("Автосинхронизация здоровья: получено %d записей из Coros", len(metrics_list))
         if not metrics_list:
             # Всё равно сохраняем dashboard данные (Still save dashboard data even if metrics empty)
-            _save_dashboard_data(client, db)
+            _save_dashboard_data(client, db, user_id)
             return 0
 
         analytics_by_date = {}
@@ -2083,7 +2127,7 @@ def _auto_sync_health_inner() -> int:
 
             ana = analytics_by_date.get(entry_date, {})
             dm = DailyMetrics(
-                user_id=_current_user_id,
+                user_id=user_id,
                 date=entry_date,
                 avg_sleep_hrv=entry.get('avgSleepHrv'),
                 sleep_hrv_baseline=entry.get('sleepHrvBase'),
@@ -2113,7 +2157,7 @@ def _auto_sync_health_inner() -> int:
         if analytics_by_date:
             updated = 0
             for entry_date, ana in analytics_by_date.items():
-                existing = db.query(DailyMetrics).filter(DailyMetrics.user_id == _current_user_id, DailyMetrics.date == entry_date).first()
+                existing = db.query(DailyMetrics).filter(DailyMetrics.user_id == user_id, DailyMetrics.date == entry_date).first()
                 if not existing:
                     continue
                 changed = False
@@ -2133,7 +2177,7 @@ def _auto_sync_health_inner() -> int:
                 db.commit()
                 logger.info("Автосинхронизация: обновлено аналитикой %d записей", updated)
         # Сохраняем dashboard данные после обработки метрик (Save dashboard data after metrics processing)
-        _save_dashboard_data(client, db)
+        _save_dashboard_data(client, db, user_id)
         return synced
     except CorosAuthError as e:
         logger.warning("Автосинхронизация здоровья: ошибка аутентификации: %s", e)
@@ -2150,19 +2194,35 @@ def _auto_sync_health_inner() -> int:
 # Синхронизация активностей (авто, без прогресса) (Auto activity sync)
 def _auto_sync_activities():
     from datetime import timedelta, datetime
+    from src.models import User
     with _AUTO_SYNC_STATUS_LOCK:
         _auto_sync_status['activity']['status'] = 'syncing'
         _auto_sync_status['activity']['message'] = 'Синхронизация...'
     try:
-        result = _auto_sync_activities_inner()
+        db = SessionLocal()
+        try:
+            users = db.query(User).filter(
+                User.coros_email.isnot(None),
+                User.coros_password.isnot(None),
+                (User.is_active == True) | (User.is_active.is_(None)),
+            ).all()
+        finally:
+            db.close()
+
+        total_synced = 0
+        for user in users:
+            result = _auto_sync_activities_inner(user.id)
+            if result > 0:
+                total_synced += result
+
         with _AUTO_SYNC_STATUS_LOCK:
             s = _auto_sync_status['activity']
             s['status'] = 'ok'
             s['last_run'] = datetime.now()
-            if result == 0:
+            if total_synced == 0:
                 s['message'] = '✓ Новых тренировок нет'
-            elif result > 0:
-                s['message'] = f'✓ Синхронизировано: {result}'
+            else:
+                s['message'] = f'✓ Синхронизировано: {total_synced}'
             s['next_run'] = s['last_run'] + timedelta(seconds=_ACTIVITY_SYNC_INTERVAL)
     except Exception as e:
         with _AUTO_SYNC_STATUS_LOCK:
@@ -2172,7 +2232,7 @@ def _auto_sync_activities():
             s['message'] = str(e)[:80]
             s['next_run'] = s['last_run'] + timedelta(seconds=_ACTIVITY_SYNC_INTERVAL)
 
-def _auto_sync_activities_inner() -> int:
+def _auto_sync_activities_inner(user_id: int) -> int:
     from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
     from src.models import DeletedTraining
     from src.parsers.fit_parser import parse_fit
@@ -2180,7 +2240,7 @@ def _auto_sync_activities_inner() -> int:
 
     db = SessionLocal()
     try:
-        us = db.query(User).filter(User.id == _current_user_id).first()
+        us = db.query(User).filter(User.id == user_id).first()
         if not us or not us.coros_email or not us.coros_password:
             logger.debug("Автосинхронизация активностей: нет учётных данных Coros")
             return -1
@@ -2196,9 +2256,9 @@ def _auto_sync_activities_inner() -> int:
         if not activities:
             return 0
 
-        existing_times = {r[0] for r in db.query(TrainingSession.begin_ts).filter(TrainingSession.user_id == _current_user_id).all()}
+        existing_times = {r[0] for r in db.query(TrainingSession.begin_ts).filter(TrainingSession.user_id == user_id).all()}
         deleted_times = set()
-        all_deleted = db.query(DeletedTraining).filter(DeletedTraining.user_id == _current_user_id).all()
+        all_deleted = db.query(DeletedTraining).filter(DeletedTraining.user_id == user_id).all()
         for d in all_deleted:
             if d.begin_ts:
                 deleted_times.add(d.begin_ts)
@@ -2258,7 +2318,7 @@ def _auto_sync_activities_inner() -> int:
                     session.cleaning_log = cleaning_log
                 if flags_val:
                     session.suspect_flags = flags_val
-                session.user_id = _current_user_id
+                session.user_id = user_id
                 db.add(session)
                 db.flush()
                 session_id = session.id
@@ -2374,11 +2434,12 @@ async def coros_sync_status(task_id: str):
 
 # Синхронизация ежедневных метрик здоровья с Coros (Coros health metrics sync — sleep, HRV, recovery)
 @app.post('/coros/sync/health')
-async def coros_sync_health(db: Session = Depends(get_db)):
+async def coros_sync_health(db: Session = Depends(get_db),
+                           current_user: User = Depends(get_current_user)):
     from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
     from src.models import User
 
-    us = db.query(User).filter(User.id == _current_user_id).first()
+    us = db.query(User).filter(User.id == current_user.id).first()
     if not us or not us.coros_email or not us.coros_password:
         return JSONResponse({'status': 'error', 'message': 'Coros credentials not configured.'})
 
@@ -2395,7 +2456,7 @@ async def coros_sync_health(db: Session = Depends(get_db)):
         db = SessionLocal()
         audit = AuditService(db)
         try:
-            us = db.query(User).filter(User.id == _current_user_id).first()
+            us = db.query(User).filter(User.id == current_user.id).first()
             progress['step'] = 'auth'
             progress['message'] = 'Подключение к Coros...'
             logger.info("Запуск синхронизации метрик здоровья Coros (Coros health sync started)")
@@ -2416,7 +2477,7 @@ async def coros_sync_health(db: Session = Depends(get_db)):
             progress['message'] = 'Получение дневных метрик...'
 
             # Определяем диапазон дат для синхронизации (Determine date range for sync)
-            existing_dates = {r[0] for r in db.query(DailyMetrics.date).filter(DailyMetrics.user_id == _current_user_id).all()}
+            existing_dates = {r[0] for r in db.query(DailyMetrics.date).filter(DailyMetrics.user_id == current_user.id).all()}
             from datetime import timedelta, date, datetime
             today = date.today()
             start_day = (today - timedelta(days=120)).strftime("%Y%m%d")
@@ -2472,7 +2533,7 @@ async def coros_sync_health(db: Session = Depends(get_db)):
                 # Мерж данных из dayDetail + аналитики (Merge dayDetail + analytics data)
                 ana = analytics_by_date.get(entry_date, {})
                 dm = DailyMetrics(
-                    user_id=_current_user_id,
+                    user_id=current_user.id,
                     date=entry_date,
                     avg_sleep_hrv=entry.get('avgSleepHrv'),
                     sleep_hrv_baseline=entry.get('sleepHrvBase'),
@@ -2504,7 +2565,7 @@ async def coros_sync_health(db: Session = Depends(get_db)):
             if analytics_by_date:
                 updated = 0
                 for entry_date, ana in analytics_by_date.items():
-                    existing = db.query(DailyMetrics).filter(DailyMetrics.user_id == _current_user_id, DailyMetrics.date == entry_date).first()
+                    existing = db.query(DailyMetrics).filter(DailyMetrics.user_id == current_user.id, DailyMetrics.date == entry_date).first()
                     if not existing:
                         continue
                     changed = False

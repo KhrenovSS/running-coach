@@ -7,10 +7,12 @@ API Middleware — centralized error handling and logging
     register_middleware(app)
 """
 
+import os
 import time
 import logging
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
+from starlette.middleware.sessions import SessionMiddleware
 
 from src.exceptions import AppError
 from src.utils.logger import get_requests_logger, get_logger
@@ -20,6 +22,9 @@ requests_logger = get_requests_logger()
 
 # Порог медленного запроса в мс (Slow request threshold in ms)
 SLOW_REQUEST_THRESHOLD_MS = 1000
+
+# Секретный ключ для session-cookie (Secret key for session cookies)
+SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
 
 
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -161,6 +166,14 @@ def register_middleware(app: FastAPI) -> None:
     app.add_exception_handler(AppError, app_error_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(Exception, global_exception_handler)
+    
+    # Session middleware для аутентификации (Session middleware for authentication)
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=SECRET_KEY,
+        session_cookie="running_coach_session",
+        max_age=7 * 24 * 60 * 60,  # 7 дней (7 days)
+    )
     
     app.add_middleware(RequestLoggingMiddleware)
     
