@@ -1894,6 +1894,32 @@ def _update_last_health_sync():
     except Exception as e:
         logger.warning("Не удалось обновить last_health_sync_at: %s", e)
 
+# Сохраняет dashboard данные Coros в today's запись DailyMetrics (Save Coros dashboard data to today's DailyMetrics)
+def _save_dashboard_data(client, db):
+    from src.models import DailyMetrics
+    from datetime import date
+    try:
+        dashboard = client.get_dashboard()
+        if not dashboard:
+            logger.debug("Dashboard: пустой ответ")
+            return
+        logger.info("Dashboard данные: %s", dashboard)
+        today = date.today()
+        dm = db.query(DailyMetrics).filter(
+            DailyMetrics.user_id == _current_user_id,
+            DailyMetrics.date == today
+        ).first()
+        if not dm:
+            dm = DailyMetrics(user_id=_current_user_id, date=today)
+            db.add(dm)
+            db.flush()
+        dm.recovery_pct = dashboard.get('recovery') or dashboard.get('recoveryPercent')
+        dm.load_impact = dashboard.get('loadImpact')
+        dm.intensity_trend = dashboard.get('intensityTrend')
+        db.commit()
+    except Exception as e:
+        logger.warning("Ошибка сохранения dashboard: %s", e)
+
 # Синхронизация метрик здоровья (авто, без прогресса) (Auto health metrics sync)
 def _auto_sync_health():
     from datetime import timedelta, date, datetime
@@ -1941,23 +1967,6 @@ def _auto_sync_health_inner() -> int:
         client = CorosClient(us.coros_email, plain_password, timeout=15)
         client.authenticate()
 
-        # Получение данных дашборда — recovery%, load impact, форма (Dashboard data — recovery%, load, form)
-        try:
-            dashboard = client.get_dashboard()
-            if dashboard:
-                today = date.today()
-                dm = db.query(DailyMetrics).filter(
-                    DailyMetrics.user_id == _current_user_id,
-                    DailyMetrics.date == today
-                ).first()
-                if dm:
-                    dm.recovery_pct = dashboard.get('recovery')
-                    dm.load_impact = dashboard.get('loadImpact')
-                    dm.intensity_trend = dashboard.get('intensityTrend')
-                    db.commit()
-        except Exception as e:
-            logger.warning("Автосинхронизация: ошибка получения dashboard: %s", e)
-
         existing_dates = {r[0] for r in db.query(DailyMetrics.date).filter(DailyMetrics.user_id == _current_user_id).all()}
         today = date.today()
         start_day = (today - timedelta(days=120)).strftime("%Y%m%d")
@@ -1966,6 +1975,8 @@ def _auto_sync_health_inner() -> int:
         metrics_list = client.get_daily_metrics(start_day, end_day)
         logger.info("Автосинхронизация здоровья: получено %d записей из Coros", len(metrics_list))
         if not metrics_list:
+            # Всё равно сохраняем dashboard данные (Still save dashboard data even if metrics empty)
+            _save_dashboard_data(client, db)
             return 0
 
         analytics_by_date = {}
@@ -2046,6 +2057,8 @@ def _auto_sync_health_inner() -> int:
             if updated:
                 db.commit()
                 logger.info("Автосинхронизация: обновлено аналитикой %d записей", updated)
+        # Сохраняем dashboard данные после обработки метрик (Save dashboard data after metrics processing)
+        _save_dashboard_data(client, db)
         return synced
     except CorosAuthError as e:
         logger.warning("Автосинхронизация здоровья: ошибка аутентификации: %s", e)

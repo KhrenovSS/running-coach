@@ -28,14 +28,18 @@ All notable changes to this project are tracked here.
 ### Added
 - **Dashboard API (`get_dashboard()`)**: теперь вызывается при авто- и ручной синхронизации. Сохраняет recovery%, load_impact, intensity_trend в DailyMetrics
 - **Новые колонки DailyMetrics**: `recovery_pct` (INTEGER), `form_score`, `load_impact`, `intensity_trend` (FLOAT) + миграция при старте
+- **`_save_dashboard_data()`** — helper для сохранения dashboard данных (создаёт запись today если нет)
 
 ### Changed
 - **`_readiness_label()`**: приоритет recovery_pct → ATI/CTI ratio → performance. Recovery ≥70% → 🟢, ≥30% → 🟡, <30% → 🔴
 - **Web UI блок «Восстановление»**: добавлены поля «Восстановление: 100%», «Нагрузка: 50 / База: 58»
 - **Детальный просмотр тренировки**: добавлены «Восстановление» и «Базовая форма» в recovery-блоке
+- **Порядок сохранения dashboard**: теперь вызывается ПОСЛЕ обработки daily metrics (чтобы today-запись существовала)
+- **Bot sync**: dashboard сохраняется в обоих путях (пустой и непустой ответ metrics)
 
 ### Fixed
 - **«Требуется отдых» на -1**: readiness больше не использует performance как основной источник — данные Coros dashboard (recovery%) имеют приоритет
+- **Dashboard не сохранялся при пустом metrics_list**: исправлено — `_save_dashboard_data` вызывается даже если get_daily_metrics вернул []
   - `main.py`: Telegram notify (httpx.HTTPError), миграции (SAOperationalError), startup (Exception с логом)
   - `src/telegram_bot.py`: delete message (Exception), os.unlink (OSError)
   - `src/crypto.py`: запись ключа в .env (OSError/PermissionError)

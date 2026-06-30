@@ -200,23 +200,6 @@ def _sync_for_user(user: User, chat_id: int, token: str):
         client.authenticate()
         logger.info("Bot sync: Coros auth OK for user %s", user.id)
 
-        # Получение данных дашборда — recovery%, load impact, форма (Dashboard data)
-        try:
-            dashboard = client.get_dashboard()
-            if dashboard:
-                today = date.today()
-                dm = db.query(DailyMetrics).filter(
-                    DailyMetrics.user_id == user.id,
-                    DailyMetrics.date == today
-                ).first()
-                if dm:
-                    dm.recovery_pct = dashboard.get('recovery')
-                    dm.load_impact = dashboard.get('loadImpact')
-                    dm.intensity_trend = dashboard.get('intensityTrend')
-                    db.commit()
-        except Exception as e:
-            logger.warning("Bot sync: dashboard error: %s", e)
-
         synced_health = 0
         synced_acts = 0
         msg_parts = []
@@ -234,6 +217,7 @@ def _sync_for_user(user: User, chat_id: int, token: str):
             if not metrics_list:
                 msg_parts.append("🟡 здоровье: нет данных — проверьте синхронизацию часов с Coros")
                 logger.info("Bot sync health: empty response for user %s — watch may not be synced", user.id)
+                msg_parts.append(f"здоровье: нет данных")
             else:
                 analytics_by_date = {}
                 try:
@@ -304,9 +288,28 @@ def _sync_for_user(user: User, chat_id: int, token: str):
                     if updated:
                         db.commit()
 
-            msg_parts.append(f"здоровье: {synced_health}")
+                msg_parts.append(f"здоровье: {synced_health}")
+
             # Сохраняем время последней синхронизации здоровья (Save last health sync time)
             user.last_health_sync_at = datetime.utcnow()
+            # Сохраняем dashboard данные (Save dashboard data)
+            try:
+                dashboard = client.get_dashboard()
+                if dashboard:
+                    today = date.today()
+                    dm = db.query(DailyMetrics).filter(
+                        DailyMetrics.user_id == user.id,
+                        DailyMetrics.date == today
+                    ).first()
+                    if not dm:
+                        dm = DailyMetrics(user_id=user.id, date=today)
+                        db.add(dm)
+                        db.flush()
+                    dm.recovery_pct = dashboard.get('recovery') or dashboard.get('recoveryPercent')
+                    dm.load_impact = dashboard.get('loadImpact')
+                    dm.intensity_trend = dashboard.get('intensityTrend')
+            except Exception as e:
+                logger.warning("Bot sync: dashboard error: %s", e)
             db.commit()
         except Exception as e:
             logger.error("Bot sync health error: %s", e)
