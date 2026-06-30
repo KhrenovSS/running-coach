@@ -5,6 +5,15 @@ All notable changes to this project are tracked here.
 ## [30.06.2026]
 
 ### Added
+- **pyproject.toml** — манифест зависимостей проекта (зафиксированы версии всех пакетов)
+- **dev-зависимости**: pytest, pytest-asyncio, freezegun, factory-boy
+
+### Changed
+- **Спринт 1 (Фундамент)**: начало устранения технического долга
+
+## [30.06.2026]
+
+### Added
 - **Анализ проекта и аудит технического долга (Project analysis and tech debt audit)**:
   - Проведён комплексный анализ кодовой базы и архитектуры проекта (29.06.2026)
   - Анализ выполнен моделью **Cloud Opus 4.8**
