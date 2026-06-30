@@ -7,6 +7,8 @@ All notable changes to this project are tracked here.
 ### Added
 - **pyproject.toml** — манифест зависимостей проекта (зафиксированы версии всех пакетов)
 - **dev-зависимости**: pytest, pytest-asyncio, freezegun, factory-boy
+- **tests/** — папка с тестами, `conftest.py` (in-memory SQLite), `pytest.ini`
+- **Базовые тесты моделей**: User, TrainingSession, DailyMetrics (3 теста проходят)
 
 ### Changed
 - **Спринт 1 (Фундамент)**: начало устранения технического долга
