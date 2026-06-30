@@ -1,5 +1,5 @@
 # Импорт библиотек SQLAlchemy и стандартных модулей (SQLAlchemy and standard library imports)
-from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, Date, JSON, BigInteger, Boolean, ForeignKey, UniqueConstraint
+from sqlalchemy import create_engine, event, Column, Integer, Float, String, DateTime, Date, JSON, BigInteger, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -164,7 +164,23 @@ class TrainingFeedback(Base):
 # Определение пути к БД и создание подключения (Database path and connection setup)
 DB_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_DIR}/running_coach.db")
-engine = create_engine(DATABASE_URL)
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False, "timeout": 30},
+    pool_pre_ping=True,
+)
+
+
+# Включение WAL-режима для SQLite при подключении (Enable WAL mode for SQLite on connect)
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragma(dbapi_conn, connection_record):
+    cur = dbapi_conn.cursor()
+    cur.execute("PRAGMA journal_mode=WAL")
+    cur.execute("PRAGMA synchronous=NORMAL")
+    cur.execute("PRAGMA busy_timeout=5000")
+    cur.close()
+
+
 SessionLocal = sessionmaker(bind=engine)
 
 

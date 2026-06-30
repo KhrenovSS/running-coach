@@ -11,6 +11,7 @@ All notable changes to this project are tracked here.
 - **Базовые тесты моделей**: User, TrainingSession, DailyMetrics (3 теста проходят)
 
 ### Changed
+- **SQLite WAL**: `check_same_thread=False`, `busy_timeout=5000`, `pool_pre_ping=True`, `PRAGMA journal_mode=WAL`, `PRAGMA synchronous=NORMAL` — устранение блокировок при параллельном доступе
 - **Спринт 1 (Фундамент)**: начало устранения технического долга
 
 ## [30.06.2026]
