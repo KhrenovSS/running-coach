@@ -160,7 +160,7 @@ def calc_avg_pace(...):
   2. **Сделать commit (если есть незакоммиченные изменения) + push** в GitHub. Это «итог дня».
   3. Сообщить пользователю, что изменения сохранены и запушены.
 
-## Текущее состояние (Session — 30.06.2026)
+## Текущее состояние (Session — 30.06.2026, вечер)
 
 **Сервер:** запущен через systemd --user (`running-coach.service`), автозапуск при включении ПК  
 **Команда управления:** `systemctl --user start/stop/status/restart running-coach.service`  
@@ -169,32 +169,24 @@ def calc_avg_pace(...):
 set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/nimda/projects/running-coach && git push "https://KhrenovSS:${GITHUB_TOKEN}@github.com/KhrenovSS/running-coach.git" main
 ```
 
-**БД:** SQLite, файл `running_coach.db`, пустая (очищена 29.06.2026)
+**БД:** SQLite, файл `running_coach.db`, есть данные за 29-30.06.2026
 
-**Что сделано за сессию 30.06.2026 (Project analysis + tech debt documentation):**
-1. Проведён комплексный анализ проекта моделью Cloud Opus 4.8
-2. Обнаружен и задокументирован технический долг (13 проблем)
-3. Создан `TECH_DEBT.md` — руководство по исправлению техдолга (4 спринта)
-4. Создан `decision_module_design.md` — архитектура модуля аналитики и рекомендаций (8 этапов)
-5. Обновлён `CHANGELOG.md` — запись об анализе проекта
-6. Обновлён `README.md` — упоминание анализа Cloud Opus 4.8 в секции техдолга
-7. Закоммичено, пуш не делался
+**Что сделано за сессию 30.06.2026 (Sprint 2 — Alembic + UserSettings removal):**
+1. **Alembic внедрён**: baseline-миграция `c3f51ae84837` (индексы + unique constraint), ALTER TABLE блок удалён из startup, заменён на `alembic upgrade head`
+2. **UserSettings удалён**: модель удалена, таблица `user_settings` дропнута миграцией `0bba2c2badec`. Все обращения переведены на `User`:
+   - `get_settings()` читает из User (прокси `.weight` → `weight_kg`)
+   - `coros_sync`, `coros_sync_health` — UserSettings → User
+   - `_auto_sync_health_inner`, `_auto_sync_activities_inner` — UserSettings → User
+   - Telegram bot регистрация и sync — UserSettings → User
+3. **Чистка**: `SAOperationalError` импорт удалён, мёртвый код миграции из startup убран
+4. **Сервер**: перезапущен через systemd, страницы грузятся (200 OK), тесты проходят
+5. **Коммит f6e9865 + push в GitHub**
 
-**Что сделано за сессию 30.06.2026 (Sprint 1 — Фундамент):**
-1. **pyproject.toml** — манифест зависимостей с зафиксированными версиями
-2. **tests/** — папка с conftest.py (in-memory SQLite), pytest.ini, 3 базовых теста моделей
-3. **SQLite WAL** — `check_same_thread=False`, `busy_timeout=5000`, `pool_pre_ping=True`, `PRAGMA journal_mode=WAL`, `PRAGMA synchronous=NORMAL`
-4. **Чистка `except: pass`** — 11 bare `except: pass` заменены на явные типы с логгированием (SAOperationalError, httpx.HTTPError, OSError, RequestException и др.)
-5. **Логгер** добавлен в `src/parsers/common.py` (раньше отсутствовал)
-6. Все коммиты сделаны, пуш не выполнялся
+**Текущее состояние**: Спринт 2 (Alembic + UserSettings) завершён.
 
-**Текущее состояние**: Спринт 1 завершён. Все 3 пункта выполнены, сервер загружается, тесты проходят.
-
-**Следующие шаги (Спринт 2 — Данные и пользователи):**
-- ⬜ **Alembic** — внедрить миграции (baseline под текущую схему, удалить ALTER TABLE из startup)
-- ⬜ **Удалить UserSettings** — перенести всё на User, миграция DROP TABLE
-- ⬜ **Аутентификация** — убрать `_current_user_id = 1`, добавить логин
+**Следующие шаги (Спринт 2 — остаток):**
 - ⬜ **get_db() через Depends** — централизованное управление сессиями БД
+- ⬜ **Аутентификация** — убрать `_current_user_id = 1`, добавить логин
 
 **Долгосрочные цели (после техдолга):**
 - ⬜ **Модуль аналитики** — 8 этапов из `decision_module_design.md`
