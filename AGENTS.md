@@ -171,7 +171,7 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 
 **БД:** SQLite, файл `running_coach.db`, есть данные за 29-30.06.2026
 
-**Что сделано за сессию 30.06.2026 (Sprint 2 — Alembic + UserSettings removal):**
+**Что сделано за сессию 30.06.2026 (Sprint 2 — Alembic + UserSettings removal + get_db):**
 1. **Alembic внедрён**: baseline-миграция `c3f51ae84837` (индексы + unique constraint), ALTER TABLE блок удалён из startup, заменён на `alembic upgrade head`
 2. **UserSettings удалён**: модель удалена, таблица `user_settings` дропнута миграцией `0bba2c2badec`. Все обращения переведены на `User`:
    - `get_settings()` читает из User (прокси `.weight` → `weight_kg`)
@@ -179,13 +179,14 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
    - `_auto_sync_health_inner`, `_auto_sync_activities_inner` — UserSettings → User
    - Telegram bot регистрация и sync — UserSettings → User
 3. **Чистка**: `SAOperationalError` импорт удалён, мёртвый код миграции из startup убран
-4. **Сервер**: перезапущен через systemd, страницы грузятся (200 OK), тесты проходят
-5. **Коммит f6e9865 + push в GitHub**
+4. **Sprint 2.2 — get_db() via Depends**: `get_db()` зависимость добавлена в `src/models.py`, 9 эндпоинтов переведены на `db: Session = Depends(get_db)` (index, upload_files, confirm_upload, confirm_deleted, session_detail, session_delete, settings_save, coros_sync, coros_sync_health). `render_page(db, ...)` принимает db параметром. Non-endpoint функции оставлены на `SessionLocal()`
+5. **Fix**: `coros_sync()` падал с `Internal Server Error` — отсутствовал `from src.models import User` (коммит 8b4a63d)
+6. **README обновлён**: секция техдолга — решённые пункты помечены ✅, автомиграция заменена на Alembic
+7. **Коммиты**: f6e9865 (Sprint 2.3), 8b4a63d (fix sync), 09b295f (changelog), 5f5d195 (Sprint 2.2). Все запушены в GitHub.
 
-**Текущее состояние**: Спринт 2 (Alembic + UserSettings) завершён.
+**Текущее состояние**: Спринт 2 (Alembic + UserSettings + get_db) завершён. Сервер запущен, тесты проходят, все страницы 200 OK.
 
-**Следующие шаги (Спринт 2 — остаток):**
-- ⬜ **get_db() через Depends** — централизованное управление сессиями БД
+**Следующие шаги (Sprint 2 — остаток):**
 - ⬜ **Аутентификация** — убрать `_current_user_id = 1`, добавить логин
 
 **Долгосрочные цели (после техдолга):**

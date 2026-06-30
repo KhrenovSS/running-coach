@@ -36,7 +36,7 @@
 
 ## 🗄️ Структура базы данных
 
-Проект использует SQLite (`running_coach.db`) с автоматической миграцией (ALTER TABLE при старте сервера).
+Проект использует SQLite (`running_coach.db`) с управлением схемой через **Alembic** (миграции применяются автоматически при старте сервера).
 
 ### Таблицы и схемы
 
@@ -152,13 +152,14 @@ notes VARCHAR(500)                     -- Комментарий
 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 ```
 
-#### **`user_settings`** — **DEPRECATED** (настройки перенесены в `users`)
+### Миграции схемы (Alembic)
 
-### Автомиграция (Auto‑migration)
-При старте сервера (`init_db()` в `models.py`) проверяется наличие таблиц и добавляются отсутствующие колонки через `ALTER TABLE`:
-- `weather_code`, `avg_cadence`, `training_effect`, `vo2max`, `calories` в `training_sessions`
-- `ltsp`, `stamina_level_7d` в `daily_metrics`
-- `user_id` в `training_sessions`, `daily_metrics`, `weight_measurements`, `deleted_trainings`
+Управление схемой БД — через **Alembic**. При старте сервера выполняется `alembic upgrade head`:
+
+- `c3f51ae84837` (baseline) — индексы `ix_*_user_id` на `training_sessions`, `deleted_trainings`, `weight_measurements` + unique constraint `uq_user_date` на `daily_metrics`
+- `0bba2c2badec` — удалена таблица `user_settings` (настройки перенесены в `users`)
+
+Файлы миграций: `alembic/versions/`. Конфигурация: `alembic.ini`, `alembic/env.py` (`render_as_batch=True` для совместимости с SQLite).
 
 ### Отношения (Foreign Keys)
 ```
@@ -353,7 +354,7 @@ python src/telegram_bot.py
 - [x] Проверка данных о сне (10:00 → 18:00 / каждые 2 часа)
 - [x] Шифрование паролей Coros (Fernet)
 - [x] Отслеживание удалённых тренировок (избежание дублирования)
-- [x] Автомиграция БД (ALTER TABLE при старте)
+- [x] Миграции схемы БД через Alembic (автоматически при старте)
 
 ### ⬜ Прочие планы (UI / интеграции)
 - [ ] Фильтр по типу тренировки на главной (Все / Бег / Ходьба)
@@ -422,21 +423,24 @@ python src/telegram_bot.py
 🔴 **Критично — блокирует модуль рекомендаций:**
 - Монолитный `main.py` на 2359 строк (роуты + HTML + логика + бот в одном файле).
 - Веб захардкожен на одного пользователя (`_current_user_id = 1`), без аутентификации.
-- Два источника правды для настроек: `UserSettings` (веб) vs `User` (бот).
-- SQLite без WAL и `check_same_thread=False` → блокировки при параллельном доступе.
 
 🟠 **Серьёзно — мешает развитию:**
-- Ручные `ALTER TABLE` в `startup()` с подавлением ошибок — нужен Alembic.
-- Ручное управление сессиями БД, detached ORM-объекты.
-- Нет тестов и манифеста зависимостей (`pyproject.toml`).
+- Ручное управление сессиями БД в non-endpoint функциях, detached ORM-объекты.
 - Путаница UTC vs локальное время в `DateTime`-полях.
-- 23 места с `except Exception: pass` — ошибки исчезают молча.
 
 🟡 **Средне — техдолг:**
 - Бот запускается как subprocess с подавленным выводом, без рестарта.
 - Inline-HTML на f-строках (~94 места), нужен Jinja2.
 - Coros-клиент на синхронном `requests`, без TTL токена.
 - Конфигурация разбросана; ключ шифрования автогенерируется в `.env`.
+
+✅ **Решено (Sprint 1–2):**
+- ~~Два источника правды для настроек: `UserSettings` (веб) vs `User` (бот).~~ → модель `UserSettings` удалена, всё на `User`
+- ~~SQLite без WAL и `check_same_thread=False`~~ → WAL включён, `busy_timeout=5000`, `pool_pre_ping=True`
+- ~~Ручные `ALTER TABLE` в `startup()`~~ → Alembic внедрён, миграции `c3f51ae84837` (baseline) + `0bba2c2badec` (drop `user_settings`)
+- ~~Нет тестов и манифеста зависимостей~~ → `pyproject.toml`, `tests/` (3 теста моделей)
+- ~~23 места с `except Exception: pass`~~ → заменены на явные типы с логгированием
+- ~~Ручное управление сессиями БД в эндпоинтах~~ → `get_db()` через `Depends` в 9 эндпоинтах
 
 Рекомендуемый порядок исправлений (4 спринта) описан в `TECH_DEBT.md` → раздел «Порядок работ».
 
