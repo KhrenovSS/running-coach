@@ -51,6 +51,7 @@ All notable changes to this project are tracked here.
 
 ### Fixed
 - `get_current_user` и автосинхронизация теперь корректно обрабатывают пользователей с `is_active=NULL` (legacy rows)
+- **Автосинк-уведомление о новой тренировке**: `_telegram_notify` после смены сигнатуры вызывался без `user_id` → `TypeError` → тренировка сохранялась, но `last_coros_sync` не обновлялся и Telegram-уведомление не уходило. Исправлен вызов в `_auto_sync_activities_inner`, уведомление обёрнуто в try/except
 
 ## [30.06.2026]
 
