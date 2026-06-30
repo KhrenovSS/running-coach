@@ -90,6 +90,14 @@ All notable changes to this project are tracked here.
 - **Чистка `startup()`**: удалён мёртвый код миграции из `user_settings`
 - **Синхронизация тренировок падала с `Internal Server Error`**: в `coros_sync()` отсутствовал `from src.models import User` — `NameError` при запросе `/coros/sync`. Фронтенд получал plain text "Internal Server Error" вместо JSON, JS падал с `Unexpected token 'I'`. Импорт добавлен
 
+### Changed (Спринт 2.2 — get_db via Depends)
+- **`get_db()`** зависимость добавлена в `src/models.py` (yield-генератор с `db.close()` в finally)
+- **9 эндпоинтов** переведены на `db: Session = Depends(get_db)` вместо `db = SessionLocal()` + `try/finally db.close()`:
+  - `index`, `upload_files`, `confirm_upload`, `confirm_deleted`, `session_detail`, `session_delete`, `settings_save`, `coros_sync`, `coros_sync_health`
+- **`render_page(db, ...)`** — теперь принимает `db` параметром (раньше создавал свой)
+- Non-endpoint функции (`startup`, `_run()` замыкания в фоновых потоках, `_auto_sync_*_inner`, `_update_last_health_sync`) оставлены на `SessionLocal()` — Depends недоступен вне request scope
+- Удалены лишние `try/finally db.close()` блоки — закрытие сессии теперь управляется Depends
+
 ## [29.06.2026]
 
 ### Added

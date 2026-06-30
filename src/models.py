@@ -176,6 +176,15 @@ def _set_sqlite_pragma(dbapi_conn, connection_record):
 SessionLocal = sessionmaker(bind=engine)
 
 
+# Зависимость для FastAPI: выдаёт сессию БД и закрывает её после запроса (FastAPI DB session dependency)
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 # Инициализация БД: создание таблиц (Initialize DB: create all tables)
 def init_db():
     Base.metadata.create_all(bind=engine)

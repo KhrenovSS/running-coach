@@ -1,8 +1,9 @@
 # Импорт FastAPI и компонентов (FastAPI and component imports)
 from typing import Optional
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
-from src.models import SessionLocal, TrainingSession, WeightMeasurement, DeletedTraining, DailyMetrics, get_settings
+from sqlalchemy.orm import Session
+from src.models import SessionLocal, TrainingSession, WeightMeasurement, DeletedTraining, DailyMetrics, get_settings, get_db
 from src.parsers.tcx_parser import parse_tcx
 from src.parsers.fit_parser import parse_fit
 from src.parsers.common import weather_icon, format_pace, format_duration
@@ -272,14 +273,12 @@ def _load_label(training_load):
         return 'Высокая'
 
 # Основная функция рендеринга главной страницы (Main page render function)
-def render_page(year=None, month=None):
-    db = SessionLocal()
+def render_page(db, year=None, month=None):
     all_sessions = db.query(TrainingSession).filter(TrainingSession.user_id == _current_user_id).order_by(TrainingSession.begin_ts.desc()).all()
     settings = get_settings()
     weight_measurements = db.query(WeightMeasurement).filter(WeightMeasurement.user_id == _current_user_id).order_by(WeightMeasurement.measured_at).all()
     # Последние метрики восстановления (Latest recovery metrics)
     recovery_metrics = db.query(DailyMetrics).filter(DailyMetrics.user_id == _current_user_id).order_by(DailyMetrics.date.desc()).limit(30).all()
-    db.close()
 
     weight_json = json.dumps([{
         'date': wm.measured_at.strftime('%Y-%m-%d'),
@@ -1146,146 +1145,69 @@ def startup():
 
 # Главная страница: список тренировок и статистика (Main page: session list and stats)
 @app.get('/', response_class=HTMLResponse)
-async def index(year: Optional[int] = None, month: Optional[int] = None):
-    return render_page(year=year, month=month)
+async def index(year: Optional[int] = None, month: Optional[int] = None, db: Session = Depends(get_db)):
+    return render_page(db, year=year, month=month)
 
 
 # Загрузка TCX/FIT-файлов (TCX/FIT file upload endpoint)
 @app.post('/upload')
-async def upload_files(files: list[UploadFile] = File(...)):
+async def upload_files(files: list[UploadFile] = File(...), db: Session = Depends(get_db)):
     settings = get_settings()
-    db = SessionLocal()
     saved = 0
     deleted_hit = None
     temp_id = None
-    try:
-        for file in files:
-            ext = os.path.splitext(file.filename or '')[1].lower()
-            suffix = ".fit" if ext == ".fit" else ".tcx"
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                shutil.copyfileobj(file.file, tmp)
-                tmp_path = tmp.name
-            if ext == ".fit":
-                data = parse_fit(tmp_path, max_hr=settings.max_hr,
-                                 max_credible_pace=settings.max_credible_pace,
-                                 max_gps_jump_m=settings.max_gps_jump_m,
-                                 min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
-            else:
-                data = parse_tcx(tmp_path, max_hr=settings.max_hr,
-                                 max_credible_pace=settings.max_credible_pace,
-                                 max_gps_jump_m=settings.max_gps_jump_m,
-                                 min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
-            if data is None:
-                logger.warning("Загрузка: не удалось распарсить %s (Upload: parse failed)", file.filename)
-                os.unlink(tmp_path)
-                continue
-            # Проверка, не было ли эта тренировка удалена ранее (Check if this training was previously deleted)
-            deleted_match = None
-            bt = data['begin_ts']
-            if bt:
-                all_deleted = db.query(DeletedTraining).filter(DeletedTraining.user_id == _current_user_id).all()
-                for d in all_deleted:
-                    if d.begin_ts and abs((d.begin_ts - bt).total_seconds()) < 120:
-                        deleted_match = d
-                        break
-            if deleted_match:
-                # Сохраняем распарсенные данные в _pending для отложенного сохранения (Store parsed data for deferred save)
-                tid = str(uuid.uuid4())
-                _pending[tid] = {'path': tmp_path, 'filename': file.filename, 'data': data}
-                pace_str = format_pace(deleted_match.avg_pace) if deleted_match.avg_pace else '—'
-                deleted_hit = {
-                    'id': deleted_match.id,
-                    'date': deleted_match.begin_ts.strftime('%d.%m.%Y %H:%M'),
-                    'distance': round(deleted_match.total_distance_km, 1) if deleted_match.total_distance_km else '—',
-                    'distance_display': f'{deleted_match.total_distance_km:.1f} км' if deleted_match.total_distance_km else '—',
-                    'pace': pace_str,
-                    'pace_val': round(deleted_match.avg_pace, 2) if deleted_match.avg_pace else None,
-                    'duration': format_duration(deleted_match.duration_minutes) if deleted_match.duration_minutes else '—',
-                    'type': deleted_match.training_type or '—',
-                    'hr': f'{deleted_match.avg_heart_rate}' if deleted_match.avg_heart_rate else '—',
-                    'calories': f'{deleted_match.calories}' if deleted_match.calories else '—',
-                }
-                temp_id = tid
-                os.unlink(tmp_path)  # не удалять tmp — перенесём в _pending
-                break
-            # Проверка, существует ли уже такая тренировка (Check if training already exists)
-            exists = db.query(TrainingSession).filter(
-                TrainingSession.begin_ts == data['begin_ts'],
-                TrainingSession.user_id == _current_user_id
-            ).first()
-            if not exists:
-                cleaning_log_val = data.pop('cleaning_log', None)
-                flags_val = data.pop('suspect_flags', None)
-                session = TrainingSession(**data)
-                session.user_id = _current_user_id
-                if cleaning_log_val:
-                    session.cleaning_log = cleaning_log_val
-                if flags_val:
-                    session.suspect_flags = flags_val
-                db.add(session)
-                db.commit()
-                saved += 1
+    for file in files:
+        ext = os.path.splitext(file.filename or '')[1].lower()
+        suffix = ".fit" if ext == ".fit" else ".tcx"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            shutil.copyfileobj(file.file, tmp)
+            tmp_path = tmp.name
+        if ext == ".fit":
+            data = parse_fit(tmp_path, max_hr=settings.max_hr,
+                             max_credible_pace=settings.max_credible_pace,
+                             max_gps_jump_m=settings.max_gps_jump_m,
+                             min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
+        else:
+            data = parse_tcx(tmp_path, max_hr=settings.max_hr,
+                             max_credible_pace=settings.max_credible_pace,
+                             max_gps_jump_m=settings.max_gps_jump_m,
+                             min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
+        if data is None:
+            logger.warning("Загрузка: не удалось распарсить %s (Upload: parse failed)", file.filename)
             os.unlink(tmp_path)
-    finally:
-        db.close()
-    if deleted_hit:
-        return JSONResponse({'saved': saved, 'deleted_match': deleted_hit, 'temp_id': temp_id})
-    return JSONResponse({'saved': saved})
-
-
-# Подтверждение сомнительных тренировок (Confirm problematic uploads)
-@app.post('/upload/confirm')
-async def confirm_upload(temp_ids: list[str] = Form(...)):
-    db = SessionLocal()
-    confirmed = 0
-    try:
-        for temp_id in temp_ids:
-            pending = _pending.pop(temp_id, None)
-            if not pending:
-                continue
-            data = pending['data']
-            exists = db.query(TrainingSession).filter(
-                TrainingSession.begin_ts == data['begin_ts'],
-                TrainingSession.user_id == _current_user_id
-            ).first()
-            if not exists:
-                cleaning_log_val = data.pop('cleaning_log', None)
-                flags_val = data.pop('suspect_flags', None)
-                session = TrainingSession(**data)
-                session.user_id = _current_user_id
-                if cleaning_log_val:
-                    session.cleaning_log = cleaning_log_val
-                if flags_val:
-                    session.suspect_flags = flags_val
-                db.add(session)
-                db.commit()
-                confirmed += 1
-            Path(pending['path']).unlink(missing_ok=True)
-    finally:
-        db.close()
-    return RedirectResponse(url='/', status_code=303)
-
-
-# Принудительное сохранение ранее удалённой тренировки (Force-save a previously deleted training)
-@app.post('/upload/confirm_deleted')
-async def confirm_deleted(temp_id: str = Form(...)):
-    db = SessionLocal()
-    try:
-        pending = _pending.pop(temp_id, None)
-        if not pending:
-            return JSONResponse({'ok': False, 'error': 'temp_id not found'})
-        data = pending['data']
-        bt = data.get('begin_ts')
-        # Удаляем запись DeletedTraining (Remove DeletedTraining entry)
+            continue
+        # Проверка, не было ли эта тренировка удалена ранее (Check if this training was previously deleted)
+        deleted_match = None
+        bt = data['begin_ts']
         if bt:
             all_deleted = db.query(DeletedTraining).filter(DeletedTraining.user_id == _current_user_id).all()
             for d in all_deleted:
                 if d.begin_ts and abs((d.begin_ts - bt).total_seconds()) < 120:
-                    db.delete(d)
+                    deleted_match = d
                     break
-        # Сохраняем тренировку (Save training)
+        if deleted_match:
+            # Сохраняем распарсенные данные в _pending для отложенного сохранения (Store parsed data for deferred save)
+            tid = str(uuid.uuid4())
+            _pending[tid] = {'path': tmp_path, 'filename': file.filename, 'data': data}
+            pace_str = format_pace(deleted_match.avg_pace) if deleted_match.avg_pace else '—'
+            deleted_hit = {
+                'id': deleted_match.id,
+                'date': deleted_match.begin_ts.strftime('%d.%m.%Y %H:%M'),
+                'distance': round(deleted_match.total_distance_km, 1) if deleted_match.total_distance_km else '—',
+                'distance_display': f'{deleted_match.total_distance_km:.1f} км' if deleted_match.total_distance_km else '—',
+                'pace': pace_str,
+                'pace_val': round(deleted_match.avg_pace, 2) if deleted_match.avg_pace else None,
+                'duration': format_duration(deleted_match.duration_minutes) if deleted_match.duration_minutes else '—',
+                'type': deleted_match.training_type or '—',
+                'hr': f'{deleted_match.avg_heart_rate}' if deleted_match.avg_heart_rate else '—',
+                'calories': f'{deleted_match.calories}' if deleted_match.calories else '—',
+            }
+            temp_id = tid
+            os.unlink(tmp_path)  # не удалять tmp — перенесём в _pending
+            break
+        # Проверка, существует ли уже такая тренировка (Check if training already exists)
         exists = db.query(TrainingSession).filter(
-            TrainingSession.begin_ts == bt,
+            TrainingSession.begin_ts == data['begin_ts'],
             TrainingSession.user_id == _current_user_id
         ).first()
         if not exists:
@@ -1299,20 +1221,83 @@ async def confirm_deleted(temp_id: str = Form(...)):
                 session.suspect_flags = flags_val
             db.add(session)
             db.commit()
-            logger.info("Удалённая тренировка от %s повторно импортирована (Deleted training re-imported)", bt)
-        Path(pending.get('path', '')).unlink(missing_ok=True)
-        return JSONResponse({'ok': True})
-    finally:
-        db.close()
+            saved += 1
+        os.unlink(tmp_path)
+    if deleted_hit:
+        return JSONResponse({'saved': saved, 'deleted_match': deleted_hit, 'temp_id': temp_id})
+    return JSONResponse({'saved': saved})
+
+
+# Подтверждение сомнительных тренировок (Confirm problematic uploads)
+@app.post('/upload/confirm')
+async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(get_db)):
+    confirmed = 0
+    for temp_id in temp_ids:
+        pending = _pending.pop(temp_id, None)
+        if not pending:
+            continue
+        data = pending['data']
+        exists = db.query(TrainingSession).filter(
+            TrainingSession.begin_ts == data['begin_ts'],
+            TrainingSession.user_id == _current_user_id
+        ).first()
+        if not exists:
+            cleaning_log_val = data.pop('cleaning_log', None)
+            flags_val = data.pop('suspect_flags', None)
+            session = TrainingSession(**data)
+            session.user_id = _current_user_id
+            if cleaning_log_val:
+                session.cleaning_log = cleaning_log_val
+            if flags_val:
+                session.suspect_flags = flags_val
+            db.add(session)
+            db.commit()
+            confirmed += 1
+        Path(pending['path']).unlink(missing_ok=True)
+    return RedirectResponse(url='/', status_code=303)
+
+
+# Принудительное сохранение ранее удалённой тренировки (Force-save a previously deleted training)
+@app.post('/upload/confirm_deleted')
+async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db)):
+    pending = _pending.pop(temp_id, None)
+    if not pending:
+        return JSONResponse({'ok': False, 'error': 'temp_id not found'})
+    data = pending['data']
+    bt = data.get('begin_ts')
+    # Удаляем запись DeletedTraining (Remove DeletedTraining entry)
+    if bt:
+        all_deleted = db.query(DeletedTraining).filter(DeletedTraining.user_id == _current_user_id).all()
+        for d in all_deleted:
+            if d.begin_ts and abs((d.begin_ts - bt).total_seconds()) < 120:
+                db.delete(d)
+                break
+    # Сохраняем тренировку (Save training)
+    exists = db.query(TrainingSession).filter(
+        TrainingSession.begin_ts == bt,
+        TrainingSession.user_id == _current_user_id
+    ).first()
+    if not exists:
+        cleaning_log_val = data.pop('cleaning_log', None)
+        flags_val = data.pop('suspect_flags', None)
+        session = TrainingSession(**data)
+        session.user_id = _current_user_id
+        if cleaning_log_val:
+            session.cleaning_log = cleaning_log_val
+        if flags_val:
+            session.suspect_flags = flags_val
+        db.add(session)
+        db.commit()
+        logger.info("Удалённая тренировка от %s повторно импортирована (Deleted training re-imported)", bt)
+    Path(pending.get('path', '')).unlink(missing_ok=True)
+    return JSONResponse({'ok': True})
 
 
 # Детальный просмотр тренировки (Training session detail page)
 @app.get('/session/{session_id}', response_class=HTMLResponse)
-async def session_detail(session_id: int):
-    db = SessionLocal()
+async def session_detail(session_id: int, db: Session = Depends(get_db)):
     s = db.query(TrainingSession).filter(TrainingSession.id == session_id, TrainingSession.user_id == _current_user_id).first()
     if not s:
-        db.close()
         return HTMLResponse("<h2>Тренировка не найдена</h2><a href='/'>Назад</a>", status_code=404)
 
     # Получаем метрики восстановления на день тренировки (Get recovery metrics for training day)
@@ -1339,7 +1324,6 @@ async def session_detail(session_id: int):
                 'recovery_pct': recovery_pct_str,
                 'form_score': form_str,
             }
-    db.close()
 
     seg_rows = ""
     segs = s.segments_json or []
@@ -1458,41 +1442,37 @@ async def settings_page():
 
 # Удаление тренировки с сохранением метаданных (Delete training, save metadata for re-upload confirmation)
 @app.post('/session/{session_id}/delete')
-async def session_delete(session_id: int):
-    db = SessionLocal()
-    try:
-        s = db.query(TrainingSession).filter(TrainingSession.id == session_id, TrainingSession.user_id == _current_user_id).first()
-        if s:
-            segs = s.segments_json or []
-            # Средний темп из сегментов (Compute average pace from segments)
-            pace = None
-            if segs:
-                paces = [seg.get('pace_min_km') for seg in segs if seg.get('pace_min_km')]
-                if paces:
-                    pace = round(sum(paces) / len(paces), 2)
-            # Сохраняем метаданные тренировки перед удалением (Save training metadata before delete)
-            deleted = DeletedTraining(
-                user_id=_current_user_id,
-                begin_ts=s.begin_ts,
-                total_distance_km=s.total_distance_km,
-                avg_heart_rate=s.avg_heart_rate,
-                max_heart_rate=s.max_heart_rate,
-                training_type=s.training_type,
-                duration_minutes=s.duration_minutes,
-                avg_temperature=s.avg_temperature,
-                elevation_gain=s.elevation_gain,
-                avg_cadence=s.avg_cadence,
-                training_effect=s.training_effect,
-                vo2max=s.vo2max,
-                calories=s.calories,
-                avg_pace=pace,
-            )
-            db.add(deleted)
-            db.delete(s)
-            db.commit()
-            logger.info("Тренировка #%s удалена, метаданные сохранены (Session #%s deleted, metadata saved)", session_id, session_id)
-    finally:
-        db.close()
+async def session_delete(session_id: int, db: Session = Depends(get_db)):
+    s = db.query(TrainingSession).filter(TrainingSession.id == session_id, TrainingSession.user_id == _current_user_id).first()
+    if s:
+        segs = s.segments_json or []
+        # Средний темп из сегментов (Compute average pace from segments)
+        pace = None
+        if segs:
+            paces = [seg.get('pace_min_km') for seg in segs if seg.get('pace_min_km')]
+            if paces:
+                pace = round(sum(paces) / len(paces), 2)
+        # Сохраняем метаданные тренировки перед удалением (Save training metadata before delete)
+        deleted = DeletedTraining(
+            user_id=_current_user_id,
+            begin_ts=s.begin_ts,
+            total_distance_km=s.total_distance_km,
+            avg_heart_rate=s.avg_heart_rate,
+            max_heart_rate=s.max_heart_rate,
+            training_type=s.training_type,
+            duration_minutes=s.duration_minutes,
+            avg_temperature=s.avg_temperature,
+            elevation_gain=s.elevation_gain,
+            avg_cadence=s.avg_cadence,
+            training_effect=s.training_effect,
+            vo2max=s.vo2max,
+            calories=s.calories,
+            avg_pace=pace,
+        )
+        db.add(deleted)
+        db.delete(s)
+        db.commit()
+        logger.info("Тренировка #%s удалена, метаданные сохранены (Session #%s deleted, metadata saved)", session_id, session_id)
     return RedirectResponse(url='/', status_code=303)
 
 
@@ -1503,32 +1483,29 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
                         max_gps_jump_m: float = Form(100.0),
                         min_hr_for_fast_pace: int = Form(130),
                         coros_email: str = Form(''),
-                        coros_password: str = Form('')):
+                        coros_password: str = Form(''),
+                        db: Session = Depends(get_db)):
     from src.models import User, WeightMeasurement
     from datetime import datetime
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.id == _current_user_id).first()
-        if not user:
-            user = User(id=_current_user_id)
-            db.add(user)
-        old_weight = user.weight_kg
-        user.max_hr = max_hr
-        user.weight_kg = weight
-        user.max_credible_pace = max_credible_pace
-        user.max_gps_jump_m = max_gps_jump_m
-        user.min_hr_for_fast_pace = min_hr_for_fast_pace
-        user.coros_email = coros_email or None
-        if coros_password and coros_password != '********':
-            user.coros_password = encrypt(coros_password)
-        elif not coros_email:
-            user.coros_password = None
-        if old_weight != weight:
-            wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.utcnow(), user_id=_current_user_id)
-            db.add(wm)
-        db.commit()
-    finally:
-        db.close()
+    user = db.query(User).filter(User.id == _current_user_id).first()
+    if not user:
+        user = User(id=_current_user_id)
+        db.add(user)
+    old_weight = user.weight_kg
+    user.max_hr = max_hr
+    user.weight_kg = weight
+    user.max_credible_pace = max_credible_pace
+    user.max_gps_jump_m = max_gps_jump_m
+    user.min_hr_for_fast_pace = min_hr_for_fast_pace
+    user.coros_email = coros_email or None
+    if coros_password and coros_password != '********':
+        user.coros_password = encrypt(coros_password)
+    elif not coros_email:
+        user.coros_password = None
+    if old_weight != weight:
+        wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.utcnow(), user_id=_current_user_id)
+        db.add(wm)
+    db.commit()
     return RedirectResponse(url='/', status_code=303)
 
 
@@ -1559,19 +1536,15 @@ async def view_logs(lines: int = 100):
 
 # Синхронизация тренировок с Coros — запуск в фоне (Coros sync — background task)
 @app.post('/coros/sync')
-async def coros_sync():
+async def coros_sync(db: Session = Depends(get_db)):
     from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
     from src.parsers.fit_parser import parse_fit
     from src.models import User
     import tempfile
 
-    db = SessionLocal()
-    try:
-        us = db.query(User).filter(User.id == _current_user_id).first()
-        if not us or not us.coros_email or not us.coros_password:
-            return JSONResponse({'status': 'error', 'message': 'Coros credentials not configured.'})
-    finally:
-        db.close()
+    us = db.query(User).filter(User.id == _current_user_id).first()
+    if not us or not us.coros_email or not us.coros_password:
+        return JSONResponse({'status': 'error', 'message': 'Coros credentials not configured.'})
 
     task_id = str(uuid.uuid4())
     progress = {
@@ -2211,17 +2184,13 @@ async def coros_sync_status(task_id: str):
 
 # Синхронизация ежедневных метрик здоровья с Coros (Coros health metrics sync — sleep, HRV, recovery)
 @app.post('/coros/sync/health')
-async def coros_sync_health():
+async def coros_sync_health(db: Session = Depends(get_db)):
     from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
     from src.models import User
 
-    db = SessionLocal()
-    try:
-        us = db.query(User).filter(User.id == _current_user_id).first()
-        if not us or not us.coros_email or not us.coros_password:
-            return JSONResponse({'status': 'error', 'message': 'Coros credentials not configured.'})
-    finally:
-        db.close()
+    us = db.query(User).filter(User.id == _current_user_id).first()
+    if not us or not us.coros_email or not us.coros_password:
+        return JSONResponse({'status': 'error', 'message': 'Coros credentials not configured.'})
 
     task_id = str(uuid.uuid4())
     progress = {
