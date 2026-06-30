@@ -384,9 +384,11 @@ def render_page(year=None, month=None):
         auto_health_last=fmt_sync_time(as_health['last_run']),
         auto_health_next=fmt_next_sync(as_health['next_run']),
         auto_health_status=as_health['status'],
+        auto_health_msg=as_health['message'],
         auto_activity_last=fmt_sync_time(as_activity['last_run']),
         auto_activity_next=fmt_next_sync(as_activity['next_run']),
         auto_activity_status=as_activity['status'],
+        auto_activity_msg=as_activity['message'],
     )
 
 
@@ -627,10 +629,10 @@ MAIN_HTML = '''
     <!-- Статус автосинхронизации Coros (Auto-sync status) -->
     <div class='sync-status' style='font-size:12px;color:#888;margin-bottom:15px;display:flex;gap:20px;flex-wrap:wrap;padding:8px 12px;background:#f9f9f9;border-radius:6px;'>
         <span>🔄 <b>Автосинхронизация:</b></span>
-        <span>Health: <span id='autoHealthStatus'>{auto_health_status}</span>
-              (последняя: {auto_health_last}, след.: {auto_health_next})</span>
-        <span>Activities: <span id='autoActivityStatus'>{auto_activity_status}</span>
-              (последняя: {auto_activity_last}, след.: {auto_activity_next})</span>
+    <span>Health: <span id='autoHealthStatus' title='{auto_health_msg}'>{auto_health_status}</span>
+          (последняя: {auto_health_last}, след.: {auto_health_next})</span>
+    <span>Activities: <span id='autoActivityStatus' title='{auto_activity_msg}'>{auto_activity_status}</span>
+          (последняя: {auto_activity_last}, след.: {auto_activity_next})</span>
     </div>
 
     <script>
@@ -1835,13 +1837,18 @@ def _auto_sync_health():
     from datetime import timedelta, date, datetime
     with _AUTO_SYNC_STATUS_LOCK:
         _auto_sync_status['health']['status'] = 'syncing'
+        _auto_sync_status['health']['message'] = 'Синхронизация...'
     try:
-        _auto_sync_health_inner()
+        result = _auto_sync_health_inner()
         with _AUTO_SYNC_STATUS_LOCK:
             s = _auto_sync_status['health']
             s['status'] = 'ok'
             s['last_run'] = datetime.now()
-            s['message'] = '✓'
+            if result == 0:
+                s['message'] = '🟡 Синхронизация прошла, но данных о сне нет — возможно часы не синхронизированы с приложением'
+                logger.warning("Автосинхронизация здоровья: получен пустой список — часы Coros не синхронизированы с облаком")
+            else:
+                s['message'] = f'✓ Получено: {result}'
             s['next_run'] = s['last_run'] + timedelta(seconds=_HEALTH_SYNC_INTERVAL)
     except Exception as e:
         with _AUTO_SYNC_STATUS_LOCK:
@@ -1851,7 +1858,8 @@ def _auto_sync_health():
             s['message'] = str(e)[:80]
             s['next_run'] = s['last_run'] + timedelta(seconds=_HEALTH_SYNC_INTERVAL)
 
-def _auto_sync_health_inner():
+def _auto_sync_health_inner() -> int:
+    """Возвращает количество новых синхронизированных записей (Return count of new synced records)"""
     from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
     from src.models import UserSettings
     from datetime import timedelta, date, datetime
@@ -1861,7 +1869,7 @@ def _auto_sync_health_inner():
         us = db.query(UserSettings).first()
         if not us or not us.coros_email or not us.coros_password:
             logger.debug("Автосинхронизация здоровья: нет учётных данных Coros")
-            return
+            return -1
         try:
             plain_password = decrypt(us.coros_password)
         except Exception:
@@ -1877,7 +1885,7 @@ def _auto_sync_health_inner():
         metrics_list = client.get_daily_metrics(start_day, end_day)
         logger.info("Автосинхронизация здоровья: получено %d записей из Coros", len(metrics_list))
         if not metrics_list:
-            return
+            return 0
 
         analytics_by_date = {}
         try:
@@ -1957,12 +1965,16 @@ def _auto_sync_health_inner():
             if updated:
                 db.commit()
                 logger.info("Автосинхронизация: обновлено аналитикой %d записей", updated)
+        return synced
     except CorosAuthError as e:
         logger.warning("Автосинхронизация здоровья: ошибка аутентификации: %s", e)
+        return 0
     except CorosAPIError as e:
         logger.warning("Автосинхронизация здоровья: ошибка Coros API: %s", e)
+        return 0
     except Exception:
         logger.exception("Автосинхронизация здоровья: неожиданная ошибка")
+        return 0
     finally:
         db.close()
 
@@ -1971,13 +1983,17 @@ def _auto_sync_activities():
     from datetime import timedelta, datetime
     with _AUTO_SYNC_STATUS_LOCK:
         _auto_sync_status['activity']['status'] = 'syncing'
+        _auto_sync_status['activity']['message'] = 'Синхронизация...'
     try:
-        _auto_sync_activities_inner()
+        result = _auto_sync_activities_inner()
         with _AUTO_SYNC_STATUS_LOCK:
             s = _auto_sync_status['activity']
             s['status'] = 'ok'
             s['last_run'] = datetime.now()
-            s['message'] = '✓'
+            if result == 0:
+                s['message'] = '✓ Новых тренировок нет'
+            elif result > 0:
+                s['message'] = f'✓ Синхронизировано: {result}'
             s['next_run'] = s['last_run'] + timedelta(seconds=_ACTIVITY_SYNC_INTERVAL)
     except Exception as e:
         with _AUTO_SYNC_STATUS_LOCK:
@@ -1987,7 +2003,8 @@ def _auto_sync_activities():
             s['message'] = str(e)[:80]
             s['next_run'] = s['last_run'] + timedelta(seconds=_ACTIVITY_SYNC_INTERVAL)
 
-def _auto_sync_activities_inner():
+def _auto_sync_activities_inner() -> int:
+    """Возвращает количество новых синхронизированных активностей (Return count of new synced activities)"""
     from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
     from src.models import UserSettings, DeletedTraining
     from src.parsers.fit_parser import parse_fit
@@ -1998,7 +2015,7 @@ def _auto_sync_activities_inner():
         us = db.query(UserSettings).first()
         if not us or not us.coros_email or not us.coros_password:
             logger.debug("Автосинхронизация активностей: нет учётных данных Coros")
-            return
+            return -1
         try:
             plain_password = decrypt(us.coros_password)
         except Exception:
@@ -2009,7 +2026,7 @@ def _auto_sync_activities_inner():
         activities = client.list_activities(limit=50, since=us.last_coros_sync)
         logger.info("Автосинхронизация активностей: получено %d активностей", len(activities))
         if not activities:
-            return
+            return 0
 
         existing_times = {r[0] for r in db.query(TrainingSession.begin_ts).filter(TrainingSession.user_id == _current_user_id).all()}
         deleted_times = set()
@@ -2033,7 +2050,7 @@ def _auto_sync_activities_inner():
         new_acts = [a for a in activities if not already_imported(a['start_time'])]
         if not new_acts:
             logger.info("Автосинхронизация активностей: все активности уже в БД")
-            return
+            return 0
 
         synced = 0
         errors = []
@@ -2107,12 +2124,16 @@ def _auto_sync_activities_inner():
             logger.info("Автосинхронизация: last_coros_sync обновлён: %s", max_act_ts)
 
         logger.info("Автосинхронизация активностей: synced=%d, errors=%d", synced, len(errors))
+        return synced
     except CorosAuthError as e:
         logger.warning("Автосинхронизация активностей: ошибка аутентификации: %s", e)
+        return 0
     except CorosAPIError as e:
         logger.warning("Автосинхронизация активностей: ошибка Coros API: %s", e)
+        return 0
     except Exception:
         logger.exception("Автосинхронизация активностей: неожиданная ошибка")
+        return 0
     finally:
         db.close()
 

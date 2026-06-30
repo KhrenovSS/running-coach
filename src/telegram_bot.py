@@ -214,7 +214,10 @@ def _sync_for_user(user: User, chat_id: int, token: str):
             start_day = (today - timedelta(days=120)).strftime("%Y%m%d")
             end_day = today.strftime("%Y%m%d")
             metrics_list = client.get_daily_metrics(start_day, end_day)
-            if metrics_list:
+            if not metrics_list:
+                msg_parts.append("🟡 здоровье: нет данных — проверьте синхронизацию часов с Coros")
+                logger.info("Bot sync health: empty response for user %s — watch may not be synced", user.id)
+            else:
                 analytics_by_date = {}
                 try:
                     analytics_list = client.get_analytics()
@@ -595,12 +598,23 @@ async def daily_recovery_check_job(context: ContextTypes.DEFAULT_TYPE):
 
             if not latest_metrics:
                 any_missing = True
+                # Проверяем, была ли когда-либо синхронизация здоровья (Check if health sync has ever worked)
+                ever_synced = db.query(DailyMetrics).filter(DailyMetrics.user_id == user.id).first() is not None
+                if ever_synced:
+                    msg = ("🌙 *Нет свежих данных о восстановлении*\n\n"
+                           "Ранее данные о сне и HRV приходили, но за последние 12 часов их нет.\n"
+                           "Возможно, часы не синхронизировались с приложением Coros.\n"
+                           "Попробуй открыть Coros app и потянуть экран вниз для синхронизации, "
+                           "затем используй /sync.")
+                else:
+                    msg = ("🌙 *Нет данных о восстановлении*\n\n"
+                           "У тебя ещё нет данных о сне и HRV.\n"
+                           "Убедись, что часы синхронизированы с Coros, "
+                           "и используй /sync для загрузки.")
                 try:
                     await context.bot.send_message(
                         chat_id=user.telegram_chat_id,
-                        text="🌙 *Нет данных о восстановлении*\n\n"
-                             "У тебя нет свежих данных о сне и HRV за последние 12 часов.\n"
-                             "Используй /sync чтобы синхронизировать данные с Coros.",
+                        text=msg,
                         parse_mode="Markdown",
                     )
                     logger.info("Sent recovery reminder to user %s (chat_id=%s)", user.id, user.telegram_chat_id)
