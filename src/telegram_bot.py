@@ -108,8 +108,8 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Удаляем сообщение с паролем из чата (Delete password message from chat)
     try:
         await update.message.delete()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Не удалось удалить сообщение с паролем: %s", e)
 
     db = SessionLocal()
     try:
@@ -336,8 +336,8 @@ def _sync_for_user(user: User, chat_id: int, token: str):
                         logger.error("Bot sync: error processing %s: %s", act['name'], e)
                         try:
                             os.unlink(tmp.name)
-                        except Exception:
-                            pass
+                        except OSError as unlink_err:
+                            logger.debug("Bot sync: не удалось удалить temp-файл %s: %s", tmp.name, unlink_err)
 
                 if synced_acts:
                     user.last_coros_sync = max_act_ts

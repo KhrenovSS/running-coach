@@ -14,6 +14,14 @@ All notable changes to this project are tracked here.
 - **SQLite WAL**: `check_same_thread=False`, `busy_timeout=5000`, `pool_pre_ping=True`, `PRAGMA journal_mode=WAL`, `PRAGMA synchronous=NORMAL` — устранение блокировок при параллельном доступе
 - **Спринт 1 (Фундамент)**: начало устранения технического долга
 
+### Fixed
+- **Чистка `except: pass`** — заменены 11 bare `except: pass` на явные типы с логгированием:
+  - `main.py`: Telegram notify (httpx.HTTPError), миграции (SAOperationalError), startup (Exception с логом)
+  - `src/telegram_bot.py`: delete message (Exception), os.unlink (OSError)
+  - `src/crypto.py`: запись ключа в .env (OSError/PermissionError)
+  - `src/parsers/common.py`: запрос погоды (RequestException/ValueError)
+  - Добавлен логгер `src/parsers/common.py` (раньше не было)
+
 ## [30.06.2026]
 
 ### Added

@@ -8,6 +8,7 @@ from src.parsers.fit_parser import parse_fit
 from src.parsers.common import weather_icon, format_pace, format_duration
 from src.logger import get_logger
 from src.crypto import encrypt, decrypt
+from sqlalchemy.exc import OperationalError as SAOperationalError
 logger = get_logger("app")
 import httpx
 import shutil
@@ -60,8 +61,8 @@ def _telegram_notify(text: str, reply_markup: dict = None):
                     f"https://api.telegram.org/bot{token}/sendMessage",
                     json=payload,
                 )
-        except Exception:
-            pass
+        except httpx.HTTPError as e:
+            logger.warning("Telegram notify error: %s", e)
     finally:
         db.close()
 
@@ -1099,8 +1100,8 @@ def startup():
             for col, col_type in cols_to_add.items():
                 try:
                     conn.execute(text(f"ALTER TABLE training_sessions ADD COLUMN {col} {col_type}"))
-                except Exception:
-                    pass
+                except SAOperationalError:
+                    logger.debug("Migration: колонка %s уже существует в training_sessions", col)
             # Миграция колонок user_settings (Migrate user_settings columns)
             settings_cols = {
                 'max_credible_pace': 'FLOAT DEFAULT 3.0',
@@ -1113,19 +1114,19 @@ def startup():
             for col, col_type in settings_cols.items():
                 try:
                     conn.execute(text(f"ALTER TABLE user_settings ADD COLUMN {col} {col_type}"))
-                except Exception:
-                    pass
+                except SAOperationalError:
+                    logger.debug("Migration: колонка %s уже существует в user_settings", col)
             # Миграция таблицы deleted_trainings (Migrate deleted_trainings table)
             try:
                 DeletedTraining.__table__.create(conn)
-            except Exception:
-                pass
+            except SAOperationalError:
+                logger.debug("Migration: таблица deleted_trainings уже существует")
             # Миграция таблицы daily_metrics (Migrate daily_metrics table)
             try:
                 from src.models import DailyMetrics
                 DailyMetrics.__table__.create(conn)
-            except Exception:
-                pass
+            except SAOperationalError:
+                logger.debug("Migration: таблица daily_metrics уже существует")
             # Миграция колонок daily_metrics (Migrate daily_metrics columns)
             daily_cols = {
                 'ltsp': 'FLOAT',
@@ -1134,14 +1135,14 @@ def startup():
             for col, col_type in daily_cols.items():
                 try:
                     conn.execute(text(f"ALTER TABLE daily_metrics ADD COLUMN {col} {col_type}"))
-                except Exception:
-                    pass
+                except SAOperationalError:
+                    logger.debug("Migration: колонка %s уже существует в daily_metrics", col)
             # === Многопользовательская миграция (Multi-user migration) ===
             # Создание таблицы users (Create users table)
             try:
                 User.__table__.create(conn)
-            except Exception:
-                pass
+            except SAOperationalError:
+                logger.debug("Migration: таблица users уже существует")
             # Добавление колонок user_id в существующие таблицы (Add user_id columns)
             for tbl, col_info in {
                 'training_sessions': ('INTEGER', 'user_id'),
@@ -1151,8 +1152,8 @@ def startup():
             }.items():
                 try:
                     conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN {col_info[1]} {col_info[0]}"))
-                except Exception:
-                    pass
+                except SAOperationalError:
+                    logger.debug("Migration: колонка %s уже существует в %s", col_info[1], tbl)
             # Создание первого пользователя (admin) из UserSettings (Create admin user from UserSettings)
             row = conn.execute(text("SELECT coros_email, coros_password, last_coros_sync FROM user_settings LIMIT 1")).fetchone()
             if row:
@@ -1167,11 +1168,11 @@ def startup():
             for tbl in ('training_sessions', 'daily_metrics', 'deleted_trainings', 'weight_measurements'):
                 try:
                     conn.execute(text(f"UPDATE {tbl} SET user_id = 1 WHERE user_id IS NULL"))
-                except Exception:
-                    pass
+                except SAOperationalError as e:
+                    logger.warning("Migration: не удалось обновить user_id в %s: %s", tbl, e)
             conn.commit()
-    except Exception:
-        pass
+    except SAOperationalError as e:
+        logger.error("Ошибка миграции БД (Database migration error): %s", e)
     settings = get_settings()
     db = SessionLocal()
     try:
@@ -1181,8 +1182,8 @@ def startup():
             wm = WeightMeasurement(weight_kg=settings.weight, measured_at=datetime.utcnow(), user_id=_current_user_id)
             db.add(wm)
             db.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Не удалось создать начальное измерение веса: %s", e)
     finally:
         db.close()
 

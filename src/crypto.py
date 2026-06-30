@@ -1,6 +1,9 @@
 import os
 import re
 from cryptography.fernet import Fernet
+from src.logger import get_logger
+
+logger = get_logger("crypto")
 
 KEY_ENV_VAR = 'COROS_CRED_KEY'
 _fernet_cache = None
@@ -39,8 +42,8 @@ def _get_fernet():
         try:
             with open(env_path, 'a') as f:
                 f.write(f'\n{KEY_ENV_VAR}={key}\n')
-        except Exception:
-            pass
+        except (OSError, PermissionError) as e:
+            logger.warning("Не удалось записать ключ Fernet в .env: %s", e)
         os.environ[KEY_ENV_VAR] = key
     _fernet_cache = Fernet(key.encode())
     return _fernet_cache

@@ -2,8 +2,12 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from timezonefinder import TimezoneFinder
+import json
 import requests
 from math import radians, cos, sin, sqrt, asin
+from src.logger import get_logger
+
+logger = get_logger("parsers.common")
 
 # Глобальные переменные: поиск часового пояса и кэш погоды (Globals: timezone finder and weather cache)
 _tf = TimezoneFinder()
@@ -106,8 +110,8 @@ def fetch_weather(lat, lon, date):
             }
             _weather_cache[key] = result
             return result
-    except Exception:
-        pass
+    except (KeyError, requests.exceptions.RequestException, ValueError) as e:
+        logger.debug("Ошибка получения погоды Open-Meteo: %s", e)
     return None
 
 # Получение WMO кода погоды на ближайший час (Get WMO weather code for nearest hour)
