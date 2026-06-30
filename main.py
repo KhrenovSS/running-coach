@@ -11,6 +11,7 @@ from src.crypto import encrypt, decrypt
 from sqlalchemy.exc import OperationalError as SAOperationalError
 logger = get_logger("app")
 import httpx
+import json
 import shutil
 import os
 import tempfile
@@ -196,13 +197,23 @@ def build_nav_html(all_sessions, sel_year, sel_month):
 
 
 # Классификация метрик здоровья для отображения (Health metrics display helpers)
-def _hrv_status(hrv, baseline, sd):
+def _hrv_status(hrv, baseline, sd, intervals=None):
     """Классификация HRV: Повышенная/Норма/Пониженная/Низкая (Classify HRV level)"""
     if hrv is None:
         return None, ''
+    # Если есть Coros-интервалы [min, low, normal_start, normal_end] — используем их (Use Coros intervals when available)
+    if intervals and len(intervals) >= 4:
+        if hrv < intervals[0]:
+            return 'very_low', f'🔴 Низкая ({hrv:.0f})'
+        elif hrv < intervals[2]:
+            return 'low', f'🟡 Пониженная ({hrv:.0f})'
+        elif hrv <= intervals[3]:
+            return 'normal', f'🟢 Норма ({hrv:.0f})'
+        else:
+            return 'elevated', f'🟣 Повышенная ({hrv:.0f})'
+    # Fallback: SD-based классификация (SD-based classification)
     if baseline is None or baseline == 0:
         return None, f'{hrv:.0f}'
-    # Если SD неизвестен (API не отдаёт), оцениваем как 20% от baseline (If SD unknown, estimate 20% of baseline)
     if sd is None or sd == 0:
         sd = baseline * 0.2
     if hrv > baseline + sd:
@@ -271,7 +282,6 @@ def render_page(year=None, month=None):
     recovery_metrics = db.query(DailyMetrics).filter(DailyMetrics.user_id == _current_user_id).order_by(DailyMetrics.date.desc()).limit(30).all()
     db.close()
 
-    import json
     weight_json = json.dumps([{
         'date': wm.measured_at.strftime('%Y-%m-%d'),
         'weight': wm.weight_kg,
@@ -346,7 +356,8 @@ def render_page(year=None, month=None):
     # Последние метрики для отображения (Latest metrics for display)
     latest_rm = recovery_metrics[0] if recovery_metrics else None
     if latest_rm:
-        _, latest_hrv = _hrv_status(latest_rm.avg_sleep_hrv, latest_rm.sleep_hrv_baseline, latest_rm.sleep_hrv_sd)
+        _, latest_hrv = _hrv_status(latest_rm.avg_sleep_hrv, latest_rm.sleep_hrv_baseline, latest_rm.sleep_hrv_sd,
+            json.loads(latest_rm.sleep_hrv_interval_list) if latest_rm.sleep_hrv_interval_list else None)
         latest_rhr = str(latest_rm.rhr) if latest_rm.rhr is not None else ''
         latest_tired = _tired_label(latest_rm.tired_rate)
         latest_perf = _readiness_label(latest_rm.performance, latest_rm.recovery_pct, latest_rm.training_load_ratio)
@@ -1163,6 +1174,7 @@ def startup():
                 'form_score': 'FLOAT',
                 'load_impact': 'FLOAT',
                 'intensity_trend': 'FLOAT',
+                'sleep_hrv_interval_list': 'TEXT',
             }
             for col, col_type in dashboard_cols.items():
                 try:
@@ -1409,7 +1421,8 @@ async def session_detail(session_id: int):
         training_date = s.begin_ts.date()
         rm = db.query(DailyMetrics).filter(DailyMetrics.user_id == _current_user_id, DailyMetrics.date == training_date).first()
         if rm:
-            _, hrv_label = _hrv_status(rm.avg_sleep_hrv, rm.sleep_hrv_baseline, rm.sleep_hrv_sd)
+            _, hrv_label = _hrv_status(rm.avg_sleep_hrv, rm.sleep_hrv_baseline, rm.sleep_hrv_sd,
+                json.loads(rm.sleep_hrv_interval_list) if rm.sleep_hrv_interval_list else None)
             rhr_str = f"{rm.rhr}" if rm.rhr is not None else "—"
             tired_str = _tired_label(rm.tired_rate) or "—"
             perf_str = _readiness_label(rm.performance, rm.recovery_pct, rm.training_load_ratio) or "—"
@@ -1452,7 +1465,6 @@ async def session_detail(session_id: int):
         temp_display = None
     background_info = temp_display if temp_display else ""
 
-    import json
     chart_json = json.dumps(s.hr_pace_series or [])
 
     suspect_badge = ""
@@ -1924,6 +1936,9 @@ def _save_dashboard_data(client, db):
                 dm.sleep_hrv_baseline = latest.get('sleepHrvBase')
             if dm.sleep_hrv_sd is None:
                 dm.sleep_hrv_sd = latest.get('sleepHrvSd')
+        intervals = sleep_data.get('lastSleepHrvIntervalList')
+        if intervals:
+            dm.sleep_hrv_interval_list = json.dumps(intervals)
         db.commit()
     except Exception as e:
         logger.warning("Ошибка сохранения dashboard: %s", e)

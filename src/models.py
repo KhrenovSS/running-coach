@@ -1,5 +1,5 @@
 # Импорт библиотек SQLAlchemy и стандартных модулей (SQLAlchemy and standard library imports)
-from sqlalchemy import create_engine, event, Column, Integer, Float, String, DateTime, Date, JSON, BigInteger, Boolean, ForeignKey, UniqueConstraint
+from sqlalchemy import create_engine, event, Column, Integer, Float, String, Text, DateTime, Date, JSON, BigInteger, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -137,6 +137,7 @@ class DailyMetrics(Base):
     form_score = Column(Float, nullable=True)  # Coros "Базовая форма"
     load_impact = Column(Float, nullable=True)  # Coros "Влияние нагрузки"
     intensity_trend = Column(Float, nullable=True)  # Coros "Тренд интенсивности"
+    sleep_hrv_interval_list = Column(Text, nullable=True)  # Coros HRV intervals JSON [min, low, normal_start, normal_end]
 
     user = relationship("User", back_populates="daily_metrics")
 

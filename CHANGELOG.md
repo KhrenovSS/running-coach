@@ -4,6 +4,15 @@ All notable changes to this project are tracked here.
 
 ## [30.06.2026]
 
+### Added
+- **`sleep_hrv_interval_list`** (TEXT, JSON) — колонка DailyMetrics для Coros-интервалов HRV (минимальное, низкое, норма start, норма end). Сохраняется из `summaryInfo.sleepHrvData.lastSleepHrvIntervalList` в `_save_dashboard_data()`
+- **Миграция**: `ALTER TABLE daily_metrics ADD COLUMN sleep_hrv_interval_list TEXT`
+
+### Changed
+- **`_hrv_status()`**: добавлен параметр `intervals=[min, low, normal_start, normal_end]`. Если передан — классификация по Coros-зонам: <min → 🔴, <normal_start → 🟡, normal_start…normal_end → 🟢, >normal_end → 🟣. Если intervals нет — fallback на SD-based классификацию (как было)
+- **`render_page()` и `view_training()`**: передают `sleep_hrv_interval_list` (парсинг JSON) в `_hrv_status()`
+- **`import json`** вынесен на уровень модуля (был локально в трёх функциях)
+
 ### Fixed
 - **Dashboard recovery_pct не сохранялся**: `_save_dashboard_data()` искал поля на верхнем уровне, но Coros API возвращает их внутри `summaryInfo`. Исправлено — извлекаем `recoveryPct`, `rhr`, `sleepHrvData` из `dashboard.summaryInfo`
 - **Пустые поля восстановления на главной странице**: при отсутствии данных из daily metrics (часы не синхронизированы) `recovery_pct`, `rhr`, `avg_sleep_hrv` теперь заполняются из dashboard API
