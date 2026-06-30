@@ -4,26 +4,23 @@ All notable changes to this project are tracked here.
 
 ## [30.06.2026]
 
-## [30.06.2026]
-
-### Changed
-- **Health sync (`_auto_sync_health_inner`)**: возвращает количество новых записей (0 = пустой ответ, -1 = нет учётных данных). Статус "ok" с пометкой "🟡" при пустом ответе — теперь UI показывает предупреждение, а не зелёную галочку
-- **Activity sync (`_auto_sync_activities_inner`)**: возвращает количество новых активностей — статус различает "нет новых" и "синхронизировано N"
-- **Web UI**: в `title` блока автосинхронизации показывается полное сообщение статуса (наведение мыши показывает детали)
-- **Telegram bot `_sync_for_user`**: при пустом ответе Coros health добавляет предупреждение "🟡 здоровье: нет данных — проверьте синхронизацию часов с Coros"
-- **Telegram bot `daily_recovery_check_job`**: сообщение зависит от истории синхронизации — если данные когда-либо приходили, советует проверить синхронизацию часов; если никогда — предлагает использовать /sync
-
 ### Added
 - **`pyproject.toml`** — манифест зависимостей проекта (зафиксированы версии всех пакетов)
 - **dev-зависимости**: pytest, pytest-asyncio, freezegun, factory-boy
 - **tests/** — папка с тестами, `conftest.py` (in-memory SQLite), `pytest.ini`
 - **Базовые тесты моделей**: User, TrainingSession, DailyMetrics (3 теста проходят)
+- **`User.last_health_sync_at`** — колонка для отслеживания времени последней попытки синхронизации здоровья (используется в recovery check для выбора сообщения)
+- **`_update_last_health_sync()`** — сохраняет время синхронизации здоровья в БД из auto sync
 
 ### Changed
-- **SQLite WAL**: `check_same_thread=False`, `busy_timeout=5000`, `pool_pre_ping=True`, `PRAGMA journal_mode=WAL`, `PRAGMA synchronous=NORMAL` — устранение блокировок при параллельном доступе
-- **Спринт 1 (Фундамент)**: начало устранения технического долга
+- **Health sync (`_auto_sync_health_inner`)**: возвращает количество новых записей (0 = пустой ответ, -1 = нет учётных данных). Статус "ok" с пометкой "🟡" при пустом ответе
+- **Activity sync (`_auto_sync_activities_inner`)**: возвращает количество новых активностей — статус различает "нет новых" и "синхронизировано N"
+- **Web UI**: в `title` блока автосинхронизации показывается полное сообщение статуса (наведение мыши показывает детали)
+- **Telegram bot `_sync_for_user`**: при пустом ответе Coros health добавляет предупреждение; сохраняет `last_health_sync_at`
+- **Telegram bot `daily_recovery_check_job`**: сообщение зависит от `last_health_sync_at` — если sync был недавно, советует проверить синхронизацию часов; если нет — предлагает /sync
 
 ### Fixed
+- **Цикл "use /sync" → "no new data"**: recovery check теперь различает "sync не запускался" и "sync прошёл, но данных нет"
 - **Чистка `except: pass`** — заменены 11 bare `except: pass` на явные типы с логгированием:
   - `main.py`: Telegram notify (httpx.HTTPError), миграции (SAOperationalError), startup (Exception с логом)
   - `src/telegram_bot.py`: delete message (Exception), os.unlink (OSError)

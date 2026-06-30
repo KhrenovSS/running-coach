@@ -288,6 +288,9 @@ def _sync_for_user(user: User, chat_id: int, token: str):
                         db.commit()
 
             msg_parts.append(f"здоровье: {synced_health}")
+            # Сохраняем время последней синхронизации здоровья (Save last health sync time)
+            user.last_health_sync_at = datetime.utcnow()
+            db.commit()
         except Exception as e:
             logger.error("Bot sync health error: %s", e)
             msg_parts.append(f"здоровье: ошибка")
@@ -598,19 +601,21 @@ async def daily_recovery_check_job(context: ContextTypes.DEFAULT_TYPE):
 
             if not latest_metrics:
                 any_missing = True
-                # Проверяем, была ли когда-либо синхронизация здоровья (Check if health sync has ever worked)
-                ever_synced = db.query(DailyMetrics).filter(DailyMetrics.user_id == user.id).first() is not None
-                if ever_synced:
+                # Проверяем, была ли недавно попытка синхронизации здоровья (Check if health sync was recently attempted)
+                sync_recently = (
+                    user.last_health_sync_at is not None
+                    and (now - user.last_health_sync_at).total_seconds() < 14400  # 4 часа (4 hours)
+                )
+                if sync_recently:
                     msg = ("🌙 *Нет свежих данных о восстановлении*\n\n"
-                           "Ранее данные о сне и HRV приходили, но за последние 12 часов их нет.\n"
-                           "Возможно, часы не синхронизировались с приложением Coros.\n"
-                           "Попробуй открыть Coros app и потянуть экран вниз для синхронизации, "
+                           "Синхронизация с Coros выполнялась недавно, но данные о сне и HRV за последние 12 часов не найдены.\n"
+                           "Возможно, часы не синхронизированы с приложением Coros.\n"
+                           "Попробуй открыть Coros app, потянуть экран вниз для синхронизации, "
                            "затем используй /sync.")
                 else:
                     msg = ("🌙 *Нет данных о восстановлении*\n\n"
-                           "У тебя ещё нет данных о сне и HRV.\n"
-                           "Убедись, что часы синхронизированы с Coros, "
-                           "и используй /sync для загрузки.")
+                           "У тебя нет свежих данных о сне и HRV за последние 12 часов.\n"
+                           "Используй /sync чтобы синхронизировать данные с Coros.")
                 try:
                     await context.bot.send_message(
                         chat_id=user.telegram_chat_id,

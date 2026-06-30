@@ -1172,6 +1172,11 @@ def startup():
                     conn.execute(text(f"UPDATE {tbl} SET user_id = 1 WHERE user_id IS NULL"))
                 except SAOperationalError as e:
                     logger.warning("Migration: не удалось обновить user_id в %s: %s", tbl, e)
+            # Миграция колонки last_health_sync_at в users (Add last_health_sync_at to users table)
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN last_health_sync_at DATETIME"))
+            except SAOperationalError:
+                logger.debug("Migration: колонка last_health_sync_at уже существует в users")
             conn.commit()
     except SAOperationalError as e:
         logger.error("Ошибка миграции БД (Database migration error): %s", e)
@@ -1832,6 +1837,22 @@ _HEALTH_SYNC_INTERVAL = int(os.getenv("COROS_HEALTH_SYNC_INTERVAL", "21600"))  #
 _ACTIVITY_SYNC_INTERVAL = int(os.getenv("COROS_ACTIVITY_SYNC_INTERVAL", "3600"))  # 1 час
 _AUTO_SYNC_LOCK = threading.Lock()
 
+# Сохраняет время последней синхронизации здоровья в БД (Save last health sync attempt time to DB)
+def _update_last_health_sync():
+    from src.models import User
+    from datetime import datetime
+    try:
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.id == _current_user_id).first()
+            if user:
+                user.last_health_sync_at = datetime.now()
+                db.commit()
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning("Не удалось обновить last_health_sync_at: %s", e)
+
 # Синхронизация метрик здоровья (авто, без прогресса) (Auto health metrics sync)
 def _auto_sync_health():
     from datetime import timedelta, date, datetime
@@ -1849,6 +1870,8 @@ def _auto_sync_health():
                 logger.warning("Автосинхронизация здоровья: получен пустой список — часы Coros не синхронизированы с облаком")
             else:
                 s['message'] = f'✓ Получено: {result}'
+            # Сохраняем время последней попытки синхронизации здоровья в БД (Save last health sync attempt time to DB)
+            _update_last_health_sync()
             s['next_run'] = s['last_run'] + timedelta(seconds=_HEALTH_SYNC_INTERVAL)
     except Exception as e:
         with _AUTO_SYNC_STATUS_LOCK:
@@ -1861,7 +1884,7 @@ def _auto_sync_health():
 def _auto_sync_health_inner() -> int:
     """Возвращает количество новых синхронизированных записей (Return count of new synced records)"""
     from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
-    from src.models import UserSettings
+    from src.models import UserSettings, User
     from datetime import timedelta, date, datetime
 
     db = SessionLocal()

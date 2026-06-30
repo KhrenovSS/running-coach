@@ -26,6 +26,7 @@ class User(Base):
     coros_email = Column(String(255), nullable=True)
     coros_password = Column(String(255), nullable=True)  # encrypted
     last_coros_sync = Column(DateTime, nullable=True)
+    last_health_sync_at = Column(DateTime, nullable=True)
     max_hr = Column(Integer, default=177)
     max_credible_pace = Column(Float, default=3.0)
     max_gps_jump_m = Column(Float, default=100.0)
