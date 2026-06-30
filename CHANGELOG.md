@@ -4,6 +4,11 @@ All notable changes to this project are tracked here.
 
 ## [30.06.2026]
 
+### Fixed
+- **Dashboard recovery_pct не сохранялся**: `_save_dashboard_data()` искал поля на верхнем уровне, но Coros API возвращает их внутри `summaryInfo`. Исправлено — извлекаем `recoveryPct`, `rhr`, `sleepHrvData` из `dashboard.summaryInfo`
+- **Пустые поля восстановления на главной странице**: при отсутствии данных из daily metrics (часы не синхронизированы) `recovery_pct`, `rhr`, `avg_sleep_hrv` теперь заполняются из dashboard API
+- **Нагрузка/База (load_impact)**: удалена из блока восстановления, т.к. dashboard API не возвращает этот показатель. Дисплей "Нагрузка: / База: 57" заменён на чистый блок без пустого поля
+
 ### Added
 - **`pyproject.toml`** — манифест зависимостей проекта (зафиксированы версии всех пакетов)
 - **dev-зависимости**: pytest, pytest-asyncio, freezegun, factory-boy

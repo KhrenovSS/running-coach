@@ -351,11 +351,9 @@ def render_page(year=None, month=None):
         latest_tired = _tired_label(latest_rm.tired_rate)
         latest_perf = _readiness_label(latest_rm.performance, latest_rm.recovery_pct, latest_rm.training_load_ratio)
         latest_recovery_pct = f'{latest_rm.recovery_pct}%' if latest_rm.recovery_pct is not None else ''
-        latest_load_impact = f'{latest_rm.load_impact:.0f}' if latest_rm.load_impact is not None else ''
-        latest_form_score = f'{latest_rm.cti:.0f}' if latest_rm.cti is not None else ''
     else:
         latest_hrv = latest_rhr = latest_tired = latest_perf = ''
-        latest_recovery_pct = latest_load_impact = latest_form_score = ''
+        latest_recovery_pct = ''
 
     # Статус автосинхронизации (Auto-sync status)
     from datetime import datetime
@@ -400,8 +398,6 @@ def render_page(year=None, month=None):
         latest_tired=latest_tired,
         latest_perf=latest_perf,
         latest_recovery_pct=latest_recovery_pct,
-        latest_load_impact=latest_load_impact,
-        latest_form_score=latest_form_score,
         auto_health_last=fmt_sync_time(as_health['last_run']),
         auto_health_next=fmt_next_sync(as_health['next_run']),
         auto_health_status=as_health['status'],
@@ -636,7 +632,6 @@ MAIN_HTML = '''
                 <span>Нервная система: <b>{latest_hrv}</b></span>
                 <span>Пульс покоя: <b>{latest_rhr}</b> уд/мин</span>
                 <span>Усталость: <b>{latest_tired}</b></span>
-                <span>Нагрузка: <b>{latest_load_impact}</b> / База: <b>{latest_form_score}</b></span>
                 <span>Состояние: <b>{latest_perf}</b></span>
             </div>
             <div style='font-size:13px;color:#888;margin-top:4px' id='recoveryToggle'>▾ График пульса покоя</div>
@@ -1901,9 +1896,13 @@ def _save_dashboard_data(client, db):
     try:
         dashboard = client.get_dashboard()
         if not dashboard:
-            logger.debug("Dashboard: пустой ответ")
+            logger.warning("Dashboard: пустой ответ (endpoint вернул пустые данные)")
             return
         logger.info("Dashboard данные: %s", dashboard)
+        info = dashboard.get('summaryInfo')
+        if not info:
+            logger.debug("Dashboard: нет summaryInfo")
+            return
         today = date.today()
         dm = db.query(DailyMetrics).filter(
             DailyMetrics.user_id == _current_user_id,
@@ -1913,9 +1912,18 @@ def _save_dashboard_data(client, db):
             dm = DailyMetrics(user_id=_current_user_id, date=today)
             db.add(dm)
             db.flush()
-        dm.recovery_pct = dashboard.get('recovery') or dashboard.get('recoveryPercent')
-        dm.load_impact = dashboard.get('loadImpact')
-        dm.intensity_trend = dashboard.get('intensityTrend')
+        dm.recovery_pct = info.get('recoveryPct')
+        dm.rhr = info.get('rhr')
+        sleep_data = info.get('sleepHrvData', {})
+        hrv_list = sleep_data.get('sleepHrvList', [])
+        if hrv_list:
+            latest = hrv_list[-1]
+            if dm.avg_sleep_hrv is None:
+                dm.avg_sleep_hrv = latest.get('avgSleepHrv')
+            if dm.sleep_hrv_baseline is None:
+                dm.sleep_hrv_baseline = latest.get('sleepHrvBase')
+            if dm.sleep_hrv_sd is None:
+                dm.sleep_hrv_sd = latest.get('sleepHrvSd')
         db.commit()
     except Exception as e:
         logger.warning("Ошибка сохранения dashboard: %s", e)
