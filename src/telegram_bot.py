@@ -22,6 +22,7 @@ from src.crypto import encrypt, decrypt
 from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
 from src.parsers.fit_parser import parse_fit
 from src.logger import get_logger
+from src.services.audit import AuditService
 
 logger = get_logger("telegram_bot")
 
@@ -35,20 +36,36 @@ TRAINING_TYPES_RU = {
 }
 
 
-def _send_message(token: str, chat_id: int, text: str, reply_markup: dict = None):
+def _send_message(token: str, chat_id: int, text: str, reply_markup: dict = None,
+                  db=None, user_id: int = None):
     """Отправляет сообщение через Telegram Bot API напрямую (Send message via Telegram Bot API directly)"""
     import httpx
+    audit = AuditService(db) if db else None
     try:
         payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
         if reply_markup:
             payload["reply_markup"] = reply_markup
         with httpx.Client(timeout=10) as client:
-            client.post(
+            response = client.post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
                 json=payload,
             )
+            response.raise_for_status()
+        if audit:
+            audit.log_telegram_sent(
+                user_id=user_id,
+                chat_id=chat_id,
+                message_preview=text[:100],
+            )
     except Exception as e:
         logger.error("Failed to send Telegram message: %s", e)
+        if audit:
+            audit.log_telegram_failed(
+                user_id=user_id,
+                chat_id=chat_id,
+                error=str(e),
+                message_preview=text[:100],
+            )
 
 
 def get_user(chat_id: int) -> Optional[User]:
@@ -130,12 +147,25 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         user.telegram_username = username
         user.name = name
+        old_coros_email = user.coros_email
         user.coros_email = email
         user.coros_password = encrypt(password)
         user.registered_at = datetime.utcnow()
 
         db.commit()
         logger.info("Пользователь %s (chat_id=%s) привязал Coros: %s", username, chat_id, email)
+        
+        # Аудит изменения настроек (Audit settings change)
+        audit = AuditService(db)
+        changes = {}
+        if old_coros_email != email:
+            changes['coros_email'] = {'old': old_coros_email, 'new': email}
+        if changes:
+            audit.log_settings_changed(
+                user_id=user.id,
+                changes=changes,
+                source="telegram_start",
+            )
     except Exception as e:
         db.rollback()
         logger.error("Ошибка сохранения пользователя: %s", e)
@@ -183,6 +213,12 @@ async def cmd_sync(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def _sync_for_user(user: User, chat_id: int, token: str):
     """Синхронизирует тренировки и метрики здоровья для пользователя (Sync trainings and health metrics for a user)"""
     db = SessionLocal()
+    audit = AuditService(db)
+    audit.log_coros_sync_started(
+        user_id=user.id,
+        email=user.coros_email,
+        source="telegram_sync",
+    )
     try:
         try:
             plain_password = decrypt(user.coros_password)
@@ -375,6 +411,8 @@ def _sync_for_user(user: User, chat_id: int, token: str):
                             f"`0` — вообще легко\n"
                             f"`10` — почти умер",
                             reply_markup={"inline_keyboard": [row1, row2]},
+                            db=db,
+                            user_id=user.id,
                         )
 
             msg_parts.append(f"тренировки: {synced_acts}")
@@ -383,12 +421,32 @@ def _sync_for_user(user: User, chat_id: int, token: str):
             msg_parts.append("тренировки: ошибка")
 
         msg = f"✅ Синхронизация завершена:\n" + "\n".join(f"• {p}" for p in msg_parts)
+        audit.log_coros_sync_completed(
+            user_id=user.id,
+            email=user.coros_email,
+            trainings_synced=synced_acts,
+            health_synced=synced_health,
+            source="telegram_sync",
+        )
 
     except CorosAuthError as e:
+        logger.error("Bot sync auth error: %s", e)
         msg = f"❌ Ошибка аутентификации Coros: {e}\nПроверь логин и пароль через /start"
+        audit.log_coros_sync_failed(
+            user_id=user.id,
+            email=user.coros_email,
+            error=str(e),
+            source="telegram_sync",
+        )
     except Exception as e:
         logger.error("Bot sync error", exc_info=True)
         msg = f"❌ Ошибка: {e}"
+        audit.log_coros_sync_failed(
+            user_id=user.id,
+            email=user.coros_email,
+            error=str(e),
+            source="telegram_sync",
+        )
     finally:
         db.close()
 
@@ -551,6 +609,7 @@ async def cmd_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def daily_weight_job(context: ContextTypes.DEFAULT_TYPE):
     """Ежедневный опрос веса в 9:00 — только если ещё не вводили сегодня (Daily weight prompt at 9:00 — skip if already logged today)"""
     db = SessionLocal()
+    audit = AuditService(db)
     try:
         today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
         users = db.query(User).filter(
@@ -574,8 +633,21 @@ async def daily_weight_job(context: ContextTypes.DEFAULT_TYPE):
                     parse_mode="Markdown",
                 )
                 _awaiting_weight[user.telegram_chat_id] = True
+                audit.log_telegram_sent(
+                    user_id=user.id,
+                    chat_id=user.telegram_chat_id,
+                    message_preview="Daily weight prompt",
+                    source="daily_weight_job",
+                )
             except Exception as e:
                 logger.warning("Failed to send weight prompt to %s: %s", user.telegram_chat_id, e)
+                audit.log_telegram_failed(
+                    user_id=user.id,
+                    chat_id=user.telegram_chat_id,
+                    error=str(e),
+                    message_preview="Daily weight prompt",
+                    source="daily_weight_job",
+                )
     finally:
         db.close()
 
@@ -583,6 +655,7 @@ async def daily_weight_job(context: ContextTypes.DEFAULT_TYPE):
 async def daily_recovery_check_job(context: ContextTypes.DEFAULT_TYPE):
     """Проверка данных сна: старт в 10:00, повтор каждые 2 часа. Если данные есть — следующая проверка вечером (18:00). Если нет — продолжаем каждые 2 часа до 18:00 (Recovery data check: start at 10:00, repeat every 2 hours. If data found — next check at 18:00. If not — continue every 2 hours until 18:00)"""
     db = SessionLocal()
+    audit = AuditService(db)
     try:
         now = datetime.utcnow()
         hour = now.hour
@@ -633,8 +706,21 @@ async def daily_recovery_check_job(context: ContextTypes.DEFAULT_TYPE):
                         parse_mode="Markdown",
                     )
                     logger.info("Sent recovery reminder to user %s (chat_id=%s)", user.id, user.telegram_chat_id)
+                    audit.log_telegram_sent(
+                        user_id=user.id,
+                        chat_id=user.telegram_chat_id,
+                        message_preview="Recovery reminder",
+                        source="daily_recovery_check_job",
+                    )
                 except Exception as e:
                     logger.warning("Failed to send recovery reminder to %s: %s", user.telegram_chat_id, e)
+                    audit.log_telegram_failed(
+                        user_id=user.id,
+                        chat_id=user.telegram_chat_id,
+                        error=str(e),
+                        message_preview="Recovery reminder",
+                        source="daily_recovery_check_job",
+                    )
 
         # Планируем следующую проверку (Schedule next check)
         if any_missing:
@@ -660,6 +746,7 @@ async def cmd_delete_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     db = SessionLocal()
+    audit = AuditService(db)
     try:
         db.query(TrainingSession).filter(TrainingSession.user_id == user.id).delete()
         db.query(DailyMetrics).filter(DailyMetrics.user_id == user.id).delete()
@@ -669,6 +756,11 @@ async def cmd_delete_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user.coros_password = None
         user.telegram_chat_id = None
         db.commit()
+        audit.log_settings_changed(
+            user_id=user.id,
+            changes={"account": {"action": "delete_all_data"}},
+            source="telegram_delete_me",
+        )
         await update.message.reply_text(
             "🗑 Все твои данные удалены.\n"
             "Если захочешь начать заново — используй /start."

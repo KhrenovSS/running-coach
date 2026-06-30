@@ -153,6 +153,22 @@ class TrainingFeedback(Base):
     user = relationship("User")
 
 
+# Модель события аудита (Audit event model)
+class AuditEvent(Base):
+    __tablename__ = 'audit_events'
+    
+    id = Column(Integer, primary_key=True)
+    event_type = Column(String(100), nullable=False, index=True)
+    severity = Column(String(20), nullable=False, default='info')  # info, warning, error, critical
+    message = Column(Text, nullable=False)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+    ip_address = Column(String(45), nullable=True)
+    metadata_json = Column(Text, nullable=True)  # JSON string
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    
+    user = relationship("User")
+
+
 # Определение пути к БД и создание подключения (Database path and connection setup)
 DB_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_DIR}/running_coach.db")

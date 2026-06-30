@@ -5,6 +5,35 @@ All notable changes to this project are tracked here.
 ## [30.06.2026]
 
 ### Added
+- **Logging and audit system (Level 2 observability)**:
+  - `src/utils/logger.py` — structured logging with daily rotation, JSON/text formats
+  - `src/services/audit.py` — `AuditService` writing to DB (`audit_events`) and `logs/audit_*.log`
+  - `src/api/middleware.py` — centralized error handlers + request logging with timing
+  - `src/api/routes/health.py` — health check endpoint at `/health/`
+  - `src/exceptions.py` — typed application exceptions (`AppError`, `NotFoundError`, `CorosAPIError`, etc.)
+  - `src/config/constants.py` — centralized `CONFIG` for constants
+  - Alembic migration `eb50c256201f_add_audit_events_table.py` creating `audit_events` table
+- **Audit event coverage**:
+  - `app.startup` logged on server startup
+  - `training.uploaded` for TCX/FIT uploads, Coros activity sync, and re-import of deleted trainings
+  - `training.deleted` when deleting a training session
+  - `settings.changed` for `/settings`, Telegram `/start`, and Telegram `/delete_me`
+  - `coros.sync.started/completed/failed` for web and Telegram sync paths
+  - `telegram.sent/failed` for Telegram notifications from bot, daily prompts, recovery reminders, and `_telegram_notify`
+- **`.env.example`** with logging variables: `LOG_LEVEL`, `LOG_FORMAT`, `LOGS_DIR`, `SLOW_REQUEST_MS`
+- **Documentation**: `docs/LOGGING.md`, updated `AGENTS.md` with logging/audit file structure
+
+### Changed
+- `src/logger.py` is now a backward-compatible re-export of `src.utils.logger`
+- `/logs` web UI now reads from rotated `logs/app_YYYY-MM-DD.log` with fallback to legacy `app.log`
+- `src/api/__init__.py` simplified to re-export `register_middleware` and `get_db`
+
+### Fixed
+- Duplicate middleware code removed from `src/api/__init__.py` (now lives in `src/api/middleware.py`)
+
+## [30.06.2026]
+
+### Added
 - **`sleep_hrv_interval_list`** (TEXT, JSON) — колонка DailyMetrics для Coros-интервалов HRV (минимальное, низкое, норма start, норма end). Сохраняется из `summaryInfo.sleepHrvData.lastSleepHrvIntervalList` в `_save_dashboard_data()`
 - **Миграция**: `ALTER TABLE daily_metrics ADD COLUMN sleep_hrv_interval_list TEXT`
 

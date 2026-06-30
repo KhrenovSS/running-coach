@@ -7,9 +7,43 @@
 Python + FastAPI + SQLite, написано через ИИ (open code style).  
 Сервер: `uvicorn main:app --host 0.0.0.0 --port 8000`
 
+## Документация для разработки
+
+**Перед написанием кода прочитай соответствующий раздел:**
+
+| Задача | Документация |
+|--------|--------------|
+| Общие правила написания кода | [`docs/CODE_GUIDELINES.md`](docs/CODE_GUIDELINES.md) |
+| Архитектура и структура проекта | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+| Как писать API endpoints | [`docs/API_ROUTES_GUIDE.md`](docs/API_ROUTES_GUIDE.md) |
+| Обработка ошибок | [`docs/ERROR_HANDLING.md`](docs/ERROR_HANDLING.md) |
+| Соглашения об именовании | [`docs/NAMING_CONVENTIONS.md`](docs/NAMING_CONVENTIONS.md) |
+| Как писать тесты | [`docs/TESTING.md`](docs/TESTING.md) |
+| Логирование и аудит | [`docs/LOGGING.md`](docs/LOGGING.md) |
+| Code review / самопроверка | [`docs/CHECKLIST_FEATURE.md`](docs/CHECKLIST_FEATURE.md) |
+| Миграции БД | [`docs/CHECKLIST_MIGRATION.md`](docs/CHECKLIST_MIGRATION.md) |
+
+## Золотые правила (кратко)
+
+1. **Константы** — используй `from src.config import CONFIG`. Никаких magic numbers.
+2. **Ошибки** — используй `src/exceptions.py`. Запрещён `except: pass`.
+3. **API** — тонкие роуты: валидация → сервис → ответ.
+4. **Бизнес-логика** — в `src/services/<domain>/`, не в роуте.
+5. **База данных** — миграции только через Alembic; параметризованные запросы.
+6. **Логирование** — `logger` из `src.utils.logger`, не `print()`.
+7. **Комментарии** — bilingual (RU/EN), сразу.
+8. **Тесты** — unit для логики, integration для endpoint.
+9. **CHANGELOG** — обновляй в том же коммите.
+
 ## Структура файлов
 - `main.py` — FastAPI-роуты, HTML-шаблоны, отображение списка и деталей тренировок
 - `src/models.py` — модель TrainingSession (SQLAlchemy), путь к БД абсолютный
+- `src/config/constants.py` — централизованные константы (`CONFIG`)
+- `src/exceptions.py` — типизированные исключения приложения
+- `src/utils/logger.py` — структурированное логирование с ротацией
+- `src/services/audit.py` — сервис аудита (БД + файл)
+- `src/api/middleware.py` — централизованная обработка ошибок и логирование запросов
+- `src/api/routes/health.py` — health check endpoint
 - `src/parsers/common.py` — общая логика: очистка треков, сегментация, классификация, погода (`process_trackpoints()`)
 - `src/parsers/tcx_parser.py` — парсинг TCX-файлов (XML) → вызов `process_trackpoints()`
 - `src/parsers/fit_parser.py` — парсинг FIT-файлов (бинарный) → вызов `process_trackpoints()`
@@ -107,6 +141,66 @@ def calc_avg_pace(...):
 - `pass`, `return`, простые присваивания, одиночные вызовы — без комментария
 - Комментарий не обязателен, если код тривиален и однозначен (например, `return x + 1`)
 
+## Рекомендации по написанию кода (Code Guidelines)
+
+**ВАЖНО: Перед написанием кода прочитай `docs/CODE_GUIDELINES.md`.**
+
+Ключевые правила (кратко):
+
+### Архитектура
+- **DRY** — не дублируй код, извлекай в переиспользуемые функции
+- **Тонкие роуты** — API endpoint = валидация + вызов сервиса + возврат JSON
+- **Доменная группировка** — код группируй по предметной области (`src/services/training/`, `src/services/coros/`)
+- **Максимальный размер файла** — ~500 строк, больше — выноси
+
+### Константы
+- **Никаких magic numbers** — используй `CONFIG` из `src/config/constants.py`
+- Пример: `CONFIG.HR_ZONES.DEFAULT_MAX_HR` вместо `177`
+- Пример: `CONFIG.TIMING.HTTP_TIMEOUT` вместо `15`
+
+### API
+- **Валидация** — через Pydantic модели (аналог Zod из sample)
+- **Response model** — типизируй ответы через `response_model=`
+- **Статус-коды** — через `status.HTTP_*`
+- **Обработка ошибок** — через `HTTPException` или кастомные исключения из `src/exceptions.py`
+
+### База данных
+- **Миграции** — только через Alembic (`alembic revision --autogenerate`)
+- **Параметризованные запросы** — никогда не конкатенируй SQL строки
+- **Индексы** — добавляй для часто запрашиваемых полей
+
+### Исключения
+- **Никогда** `except: pass` — указывай конкретный тип + логируй
+- **Централизованная обработка** — через `src/api/middleware.py`
+- **User-friendly** сообщения, не stack traces
+
+### Логирование
+- **Структурированный логгер** — `src/utils/logger.py`
+- **Контекст** — `logger.info(f"Sync completed: {count} activities")`
+- **Не логируй** пароли, токены, персональные данные
+
+### Тестирование
+- **Unit** — быстрые, с моками, без БД
+- **Integration** — с реальной БД (in-memory SQLite)
+- **Покрывай** бизнес-логику, edge cases, error paths
+
+### Стиль
+- **Комментарии** — bilingual (RU/EN), сразу при написании кода
+- **Импорты** — порядок: stdlib → third-party → internal → types
+- **Именование** — snake_case для функций/файлов, PascalCase для классов
+
+### Чеклисты
+Перед коммитом проверь:
+- [ ] Константы из `CONFIG`, не hardcoded
+- [ ] Нет `except: pass`
+- [ ] Бизнес-логика в `services/`, не в роуте
+- [ ] Тесты написаны
+- [ ] CHANGELOG.md обновлён
+
+**Полная документация:** `docs/CODE_GUIDELINES.md`
+
+---
+
 ## GitHub
 
 Репозиторий: https://github.com/KhrenovSS/running-coach
@@ -134,7 +228,7 @@ def calc_avg_pace(...):
 
 **ВАЖНО: запись в CHANGELOG.md писать СРАЗУ в том же коммите, что и изменения кода. Не откладывать на потом и не добвлять отдельным коммитом.**
 
-- Файл `CHANGELOG.md` находится в `/home/nimda/projects/running-coach/running-coach/CHANGELOG.md`
+- Файл `CHANGELOG.md` находится в `/home/nimda/projects/running-coach/CHANGELOG.md`
 - Открывать файл, добавлять запись, редактировать код, коммитить — всё в одном шаге
 - После каждого значимого изменения (новый функционал, исправление, рефакторинг) обновлять CHANGELOG.md
 - Секции: `### Added`, `### Changed`, `### Fixed`, `### Removed`
@@ -171,7 +265,7 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 
 **БД:** SQLite, файл `running_coach.db`, есть данные за 29-30.06.2026
 
-**Что сделано за сессию 30.06.2026 (Sprint 2 — Alembic + UserSettings removal + get_db):**
+**Что сделано за сессию 30.06.2026 (Sprint 2 — Alembic + UserSettings removal + get_db + Logging/Audit):**
 1. **Alembic внедрён**: baseline-миграция `c3f51ae84837` (индексы + unique constraint), ALTER TABLE блок удалён из startup, заменён на `alembic upgrade head`
 2. **UserSettings удалён**: модель удалена, таблица `user_settings` дропнута миграцией `0bba2c2badec`. Все обращения переведены на `User`:
    - `get_settings()` читает из User (прокси `.weight` → `weight_kg`)
@@ -182,9 +276,19 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 4. **Sprint 2.2 — get_db() via Depends**: `get_db()` зависимость добавлена в `src/models.py`, 9 эндпоинтов переведены на `db: Session = Depends(get_db)` (index, upload_files, confirm_upload, confirm_deleted, session_detail, session_delete, settings_save, coros_sync, coros_sync_health). `render_page(db, ...)` принимает db параметром. Non-endpoint функции оставлены на `SessionLocal()`
 5. **Fix**: `coros_sync()` падал с `Internal Server Error` — отсутствовал `from src.models import User` (коммит 8b4a63d)
 6. **README обновлён**: секция техдолга — решённые пункты помечены ✅, автомиграция заменена на Alembic
-7. **Коммиты**: f6e9865 (Sprint 2.3), 8b4a63d (fix sync), 09b295f (changelog), 5f5d195 (Sprint 2.2). Все запушены в GitHub.
+7. **Логирование и аудит (Sprint 2.4)**:
+   - `src/utils/logger.py` — структурированные логи, ежедневная ротация, JSON/text форматы
+   - `src/services/audit.py` — `AuditService` с событиями: `training.uploaded`, `training.deleted`, `settings.changed`, `coros.sync.*`, `telegram.*`
+   - `src/api/middleware.py` — централизованная обработка ошибок + логирование запросов с замером времени
+   - `src/api/routes/health.py` — health check endpoint (`/health/`)
+   - `src/exceptions.py` — типизированные исключения (`AppError`, `NotFoundError`, `CorosAPIError`, etc.)
+   - `src/config/constants.py` — централизованный `CONFIG`
+   - Alembic-миграция `eb50c256201f` — таблица `audit_events`
+   - Аудит интегрирован в `main.py` (upload, delete, settings, Coros sync, Telegram notify) и `src/telegram_bot.py`
+   - Документация: `docs/LOGGING.md`, `.env.example`
+8. **Коммиты**: (в процессе) Sprint 2.4 logging/audit. Предыдущие коммиты запушены.
 
-**Текущее состояние**: Спринт 2 (Alembic + UserSettings + get_db) завершён. Сервер запущен, тесты проходят, все страницы 200 OK.
+**Текущее состояние**: Спринт 2 (Alembic + UserSettings + get_db + Logging/Audit) завершён. Сервер запущен, тесты проходят, health check 200 OK.
 
 **Следующие шаги (Sprint 2 — остаток):**
 - ⬜ **Аутентификация** — убрать `_current_user_id = 1`, добавить логин

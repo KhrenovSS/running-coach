@@ -9,6 +9,9 @@ from src.parsers.fit_parser import parse_fit
 from src.parsers.common import weather_icon, format_pace, format_duration
 from src.logger import get_logger
 from src.crypto import encrypt, decrypt
+from src.api.middleware import register_middleware
+from src.api.routes.health import router as health_router
+from src.services.audit import AuditService
 logger = get_logger("app")
 import httpx
 import json
@@ -21,7 +24,9 @@ import time
 from pathlib import Path
 
 # Создание экземпляра FastAPI (Create FastAPI app instance)
-app = FastAPI()
+app = FastAPI(title="AI Running Coach")
+register_middleware(app)
+app.include_router(health_router)
 os.makedirs("uploads", exist_ok=True)
 
 # Хранилище для загруженных TCX, ожидающих подтверждения (Pending uploads awaiting user confirmation)
@@ -48,6 +53,7 @@ def _telegram_notify(text: str, reply_markup: dict = None):
     if not token:
         return
     db = SessionLocal()
+    audit = AuditService(db)
     try:
         from src.models import User
         user = db.query(User).filter(User.id == _current_user_id, User.telegram_chat_id.isnot(None)).first()
@@ -58,12 +64,26 @@ def _telegram_notify(text: str, reply_markup: dict = None):
             if reply_markup:
                 payload["reply_markup"] = reply_markup
             with httpx.Client(timeout=5) as client:
-                client.post(
+                response = client.post(
                     f"https://api.telegram.org/bot{token}/sendMessage",
                     json=payload,
                 )
-        except httpx.HTTPError as e:
+                response.raise_for_status()
+            audit.log_telegram_sent(
+                user_id=user.id,
+                chat_id=user.telegram_chat_id,
+                message_preview=text[:100],
+                source="main_telegram_notify",
+            )
+        except Exception as e:
             logger.warning("Telegram notify error: %s", e)
+            audit.log_telegram_failed(
+                user_id=user.id,
+                chat_id=user.telegram_chat_id,
+                error=str(e),
+                message_preview=text[:100],
+                source="main_telegram_notify",
+            )
     finally:
         db.close()
 
@@ -1118,6 +1138,22 @@ def startup():
         command.upgrade(alembic_cfg, "head")
     except Exception as e:
         logger.error("Ошибка Alembic миграции: %s", e)
+
+    # Логируем запуск приложения (Log application startup)
+    try:
+        db = SessionLocal()
+        try:
+            audit = AuditService(db)
+            audit.log_event(
+                event_type="app.startup",
+                message="Application started",
+                severity="info",
+                user_id=_current_user_id,
+            )
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning("Не удалось записать событие запуска в аудит: %s", e)
     # Очистка старых pending-файлов (Cleanup old pending uploads)
     for f in PENDING_DIR.glob("*.tcx"):
         f.unlink(missing_ok=True)
@@ -1156,9 +1192,14 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
     saved = 0
     deleted_hit = None
     temp_id = None
+    audit = AuditService(db)
+    uploaded_filenames = []
+    parse_errors = []
+    
     for file in files:
         ext = os.path.splitext(file.filename or '')[1].lower()
         suffix = ".fit" if ext == ".fit" else ".tcx"
+        uploaded_filenames.append(file.filename or "unknown")
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             shutil.copyfileobj(file.file, tmp)
             tmp_path = tmp.name
@@ -1174,6 +1215,7 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
                              min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
         if data is None:
             logger.warning("Загрузка: не удалось распарсить %s (Upload: parse failed)", file.filename)
+            parse_errors.append(file.filename or "unknown")
             os.unlink(tmp_path)
             continue
         # Проверка, не было ли эта тренировка удалена ранее (Check if this training was previously deleted)
@@ -1221,8 +1263,27 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
                 session.suspect_flags = flags_val
             db.add(session)
             db.commit()
+            db.refresh(session)
             saved += 1
+            audit.log_training_uploaded(
+                user_id=_current_user_id,
+                training_id=session.id,
+                filename=file.filename or "unknown",
+                distance_km=session.total_distance_km,
+                training_type=session.training_type,
+            )
         os.unlink(tmp_path)
+    
+    # Аудит: сводка по загрузке (Audit: upload summary)
+    if parse_errors:
+        audit.log_event(
+            event_type="training.upload_summary",
+            message=f"Upload finished: {saved} saved, {len(parse_errors)} parse errors",
+            severity="warning" if parse_errors else "info",
+            user_id=_current_user_id,
+            metadata={"saved": saved, "files": uploaded_filenames, "parse_errors": parse_errors, "deleted_match": bool(deleted_hit)},
+        )
+    
     if deleted_hit:
         return JSONResponse({'saved': saved, 'deleted_match': deleted_hit, 'temp_id': temp_id})
     return JSONResponse({'saved': saved})
@@ -1232,6 +1293,7 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
 @app.post('/upload/confirm')
 async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(get_db)):
     confirmed = 0
+    audit = AuditService(db)
     for temp_id in temp_ids:
         pending = _pending.pop(temp_id, None)
         if not pending:
@@ -1252,8 +1314,24 @@ async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(
                 session.suspect_flags = flags_val
             db.add(session)
             db.commit()
+            db.refresh(session)
             confirmed += 1
+            audit.log_training_uploaded(
+                user_id=_current_user_id,
+                training_id=session.id,
+                filename=pending.get('filename', 'unknown'),
+                distance_km=session.total_distance_km,
+                training_type=session.training_type,
+                source="confirm_upload",
+            )
         Path(pending['path']).unlink(missing_ok=True)
+    audit.log_event(
+        event_type="training.confirm_upload",
+        message=f"Confirmed problematic uploads: {confirmed} saved",
+        severity="info",
+        user_id=_current_user_id,
+        metadata={"confirmed": confirmed, "temp_ids": temp_ids},
+    )
     return RedirectResponse(url='/', status_code=303)
 
 
@@ -1261,7 +1339,15 @@ async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(
 @app.post('/upload/confirm_deleted')
 async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db)):
     pending = _pending.pop(temp_id, None)
+    audit = AuditService(db)
     if not pending:
+        audit.log_event(
+            event_type="training.confirm_deleted",
+            message="Confirm deleted failed: temp_id not found",
+            severity="warning",
+            user_id=_current_user_id,
+            metadata={"temp_id": temp_id},
+        )
         return JSONResponse({'ok': False, 'error': 'temp_id not found'})
     data = pending['data']
     bt = data.get('begin_ts')
@@ -1288,8 +1374,24 @@ async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db
             session.suspect_flags = flags_val
         db.add(session)
         db.commit()
+        db.refresh(session)
         logger.info("Удалённая тренировка от %s повторно импортирована (Deleted training re-imported)", bt)
+        audit.log_training_uploaded(
+            user_id=_current_user_id,
+            training_id=session.id,
+            filename=pending.get('filename', 'unknown'),
+            distance_km=session.total_distance_km,
+            training_type=session.training_type,
+            source="confirm_deleted",
+        )
     Path(pending.get('path', '')).unlink(missing_ok=True)
+    audit.log_event(
+        event_type="training.confirm_deleted",
+        message="Previously deleted training re-imported",
+        severity="info",
+        user_id=_current_user_id,
+        metadata={"begin_ts": str(bt) if bt else None},
+    )
     return JSONResponse({'ok': True})
 
 
@@ -1444,6 +1546,7 @@ async def settings_page():
 @app.post('/session/{session_id}/delete')
 async def session_delete(session_id: int, db: Session = Depends(get_db)):
     s = db.query(TrainingSession).filter(TrainingSession.id == session_id, TrainingSession.user_id == _current_user_id).first()
+    audit = AuditService(db)
     if s:
         segs = s.segments_json or []
         # Средний темп из сегментов (Compute average pace from segments)
@@ -1473,6 +1576,21 @@ async def session_delete(session_id: int, db: Session = Depends(get_db)):
         db.delete(s)
         db.commit()
         logger.info("Тренировка #%s удалена, метаданные сохранены (Session #%s deleted, metadata saved)", session_id, session_id)
+        audit.log_training_deleted(
+            user_id=_current_user_id,
+            training_id=session_id,
+            begin_ts=str(s.begin_ts) if s.begin_ts else None,
+            distance_km=s.total_distance_km,
+            training_type=s.training_type,
+        )
+    else:
+        audit.log_event(
+            event_type="training.delete_failed",
+            message=f"Delete training failed: id={session_id} not found",
+            severity="warning",
+            user_id=_current_user_id,
+            metadata={"training_id": session_id},
+        )
     return RedirectResponse(url='/', status_code=303)
 
 
@@ -1488,10 +1606,13 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
     from src.models import User, WeightMeasurement
     from datetime import datetime
     user = db.query(User).filter(User.id == _current_user_id).first()
+    audit = AuditService(db)
     if not user:
         user = User(id=_current_user_id)
         db.add(user)
     old_weight = user.weight_kg
+    old_max_hr = user.max_hr
+    old_coros_email = user.coros_email
     user.max_hr = max_hr
     user.weight_kg = weight
     user.max_credible_pace = max_credible_pace
@@ -1506,29 +1627,58 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
         wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.utcnow(), user_id=_current_user_id)
         db.add(wm)
     db.commit()
+    
+    # Логируем изменения настроек (Log settings changes)
+    changes = {}
+    if old_max_hr != max_hr:
+        changes['max_hr'] = {'old': old_max_hr, 'new': max_hr}
+    if old_weight != weight:
+        changes['weight_kg'] = {'old': old_weight, 'new': weight}
+    if old_coros_email != (coros_email or None):
+        changes['coros_email'] = {'old': old_coros_email, 'new': coros_email or None}
+    if changes:
+        audit.log_settings_changed(
+            user_id=_current_user_id,
+            changes=changes,
+        )
+    
     return RedirectResponse(url='/', status_code=303)
 
 
 # Просмотр лога операций (View operation log)
 @app.get('/logs')
 async def view_logs(lines: int = 100):
-    log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.log")
-    if not os.path.exists(log_path):
+    from datetime import date
+    from src.config import CONFIG
+    log_filename = f"app_{date.today().isoformat()}.log"
+    log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG.LOG_FILE)
+    # Fallback на сегодняшний ротированный файл (Fallback to today's rotated file)
+    rotated_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", log_filename)
+    
+    # Ищем самый свежий лог-файл (Find most recent log file)
+    chosen_path = None
+    for path in [rotated_path, log_path]:
+        if os.path.exists(path):
+            chosen_path = path
+            break
+    
+    if not chosen_path:
         return HTMLResponse("<html><body><h2>Лог пуст</h2></body></html>")
-    with open(log_path, "r", encoding="utf-8") as f:
+    
+    with open(chosen_path, "r", encoding="utf-8") as f:
         all_lines = f.readlines()
     tail = all_lines[-lines:]
     html = "<html><head><meta charset='utf-8'><title>Лог операций</title>"
     html += "<style>body{font-family:monospace;font-size:13px;background:#1e1e1e;color:#d4d4d4;padding:20px}"
     html += ".INFO{color:#4ec9b0}.WARNING{color:#ce9178}.ERROR{color:#f44747}.DEBUG{color:#808080}"
     html += "a{color:#569cd6;text-decoration:none;margin-right:10px}</style></head><body>"
-    html += "<h2>📋 Лог операций</h2>"
+    html += f"<h2>📋 Лог операций ({os.path.basename(chosen_path)})</h2>"
     html += f"<p>Последние {len(tail)} строк (<a href='/logs?lines=50'>50</a> "
     html += f"<a href='/logs?lines=200'>200</a> <a href='/logs?lines=1000'>все</a>)</p>"
     html += "<pre>"
     for line in tail:
-        level = "INFO" if " [INFO] " in line else ("WARNING" if " [WARNING] " in line else
-                ("ERROR" if " [ERROR] " in line else "DEBUG"))
+        level = "INFO" if "INFO" in line else ("WARNING" if "WARNING" in line else
+                ("ERROR" if "ERROR" in line else "DEBUG"))
         html += f"<span class='{level}'>{line.strip()}</span>\n"
     html += "</pre></body></html>"
     return HTMLResponse(html)
@@ -1557,11 +1707,17 @@ async def coros_sync(db: Session = Depends(get_db)):
     # Фоновая синхронизация Coros (Background Coros sync)
     def _run():
         db = SessionLocal()
+        audit = AuditService(db)
         try:
             us = db.query(User).filter(User.id == _current_user_id).first()
             progress['step'] = 'auth'
             progress['message'] = 'Подключение к Coros...'
             logger.info("Запуск синхронизации Coros (Coros sync started)")
+            audit.log_coros_sync_started(
+                user_id=us.id,
+                email=us.coros_email,
+                source="web_coros_sync",
+            )
             try:
                 plain_password = decrypt(us.coros_password)
             except Exception:
@@ -1683,9 +1839,18 @@ async def coros_sync(db: Session = Depends(get_db)):
                         session.suspect_flags = flags_val
                     db.add(session)
                     db.commit()
+                    db.refresh(session)
                     synced += 1
                     progress['synced'] = synced
                     logger.info("Активность сохранена: %s (%s)", act['name'], act['start_time'])
+                    audit.log_training_uploaded(
+                        user_id=us.id,
+                        training_id=session.id,
+                        filename=act['name'],
+                        distance_km=session.total_distance_km,
+                        training_type=session.training_type,
+                        source="coros_sync",
+                    )
                     if latest_ts is None or act['start_time'] > latest_ts:
                         latest_ts = act['start_time']
                 except Exception as e:
@@ -1706,16 +1871,35 @@ async def coros_sync(db: Session = Depends(get_db)):
             progress['step'] = 'done'
             progress['message'] = f'Синхронизировано: {synced}'
             progress['done'] = True
+            audit.log_coros_sync_completed(
+                user_id=us.id,
+                email=us.coros_email,
+                trainings_synced=synced,
+                health_synced=0,
+                source="web_coros_sync",
+            )
         except CorosAuthError as e:
             progress['step'] = 'error'
             progress['message'] = f'Ошибка аутентификации Coros: {e}'
             progress['done'] = True
             logger.error("Coros auth error: %s", e)
+            audit.log_coros_sync_failed(
+                user_id=us.id,
+                email=us.coros_email,
+                error=str(e),
+                source="web_coros_sync",
+            )
         except CorosAPIError as e:
             progress['step'] = 'error'
             progress['message'] = f'Ошибка Coros API: {e}'
             progress['done'] = True
             logger.error("Coros API error: %s", e)
+            audit.log_coros_sync_failed(
+                user_id=us.id,
+                email=us.coros_email,
+                error=str(e),
+                source="web_coros_sync",
+            )
         except Exception as e:
             if 'Timeout' in type(e).__name__:
                 progress['message'] = 'Таймаут подключения к Coros'
@@ -1726,6 +1910,12 @@ async def coros_sync(db: Session = Depends(get_db)):
             progress['step'] = 'error'
             progress['done'] = True
             logger.error("Coros sync error", exc_info=True)
+            audit.log_coros_sync_failed(
+                user_id=us.id,
+                email=us.coros_email,
+                error=str(e),
+                source="web_coros_sync",
+            )
         finally:
             db.close()
     thread = threading.Thread(target=_run, daemon=True)
@@ -2203,11 +2393,17 @@ async def coros_sync_health(db: Session = Depends(get_db)):
     # Фоновая синхронизация метрик здоровья (Background health metrics sync)
     def _run():
         db = SessionLocal()
+        audit = AuditService(db)
         try:
             us = db.query(User).filter(User.id == _current_user_id).first()
             progress['step'] = 'auth'
             progress['message'] = 'Подключение к Coros...'
             logger.info("Запуск синхронизации метрик здоровья Coros (Coros health sync started)")
+            audit.log_coros_sync_started(
+                user_id=us.id,
+                email=us.coros_email,
+                source="web_coros_sync_health",
+            )
             try:
                 plain_password = decrypt(us.coros_password)
             except Exception:
@@ -2331,22 +2527,47 @@ async def coros_sync_health(db: Session = Depends(get_db)):
             progress['step'] = 'done'
             progress['message'] = f'Синхронизировано: {synced}'
             progress['done'] = True
+            audit.log_coros_sync_completed(
+                user_id=us.id,
+                email=us.coros_email,
+                trainings_synced=0,
+                health_synced=synced,
+                source="web_coros_sync_health",
+            )
 
         except CorosAuthError as e:
             progress['step'] = 'error'
             progress['message'] = f'Ошибка аутентификации Coros: {e}'
             progress['done'] = True
             logger.error("Coros auth error: %s", e)
+            audit.log_coros_sync_failed(
+                user_id=us.id,
+                email=us.coros_email,
+                error=str(e),
+                source="web_coros_sync_health",
+            )
         except CorosAPIError as e:
             progress['step'] = 'error'
             progress['message'] = f'Ошибка Coros API: {e}'
             progress['done'] = True
             logger.error("Coros API error: %s", e)
+            audit.log_coros_sync_failed(
+                user_id=us.id,
+                email=us.coros_email,
+                error=str(e),
+                source="web_coros_sync_health",
+            )
         except Exception as e:
             progress['step'] = 'error'
             progress['message'] = f'Ошибка: {type(e).__name__}: {e}'
             progress['done'] = True
             logger.error("Coros health sync error", exc_info=True)
+            audit.log_coros_sync_failed(
+                user_id=us.id,
+                email=us.coros_email,
+                error=str(e),
+                source="web_coros_sync_health",
+            )
         finally:
             db.close()
 
