@@ -225,8 +225,22 @@ def _tired_label(tired_rate):
     else:
         return '🔴 Высокая'
 
-def _readiness_label(performance):
-    """Классификация готовности к нагрузкам (Classify readiness)"""
+def _readiness_label(performance, recovery_pct=None, training_load_ratio=None):
+    """Классификация готовности к нагрузкам: приоритет recovery%, затем ATI/CTI ratio, затем performance (Classify readiness)"""
+    if recovery_pct is not None:
+        if recovery_pct >= 70:
+            return '🟢 Готов к тренировкам'
+        elif recovery_pct >= 30:
+            return '🟡 Умеренная готовность'
+        else:
+            return '🔴 Требуется отдых'
+    if training_load_ratio is not None:
+        if training_load_ratio < 0.8:
+            return '🟢 Низкая нагрузка'
+        elif training_load_ratio <= 1.2:
+            return '🟡 Оптимальная нагрузка'
+        else:
+            return '🔴 Перегрузка'
     if performance is None:
         return ''
     if performance > 0.5:
@@ -335,9 +349,13 @@ def render_page(year=None, month=None):
         _, latest_hrv = _hrv_status(latest_rm.avg_sleep_hrv, latest_rm.sleep_hrv_baseline, latest_rm.sleep_hrv_sd)
         latest_rhr = str(latest_rm.rhr) if latest_rm.rhr is not None else ''
         latest_tired = _tired_label(latest_rm.tired_rate)
-        latest_perf = _readiness_label(latest_rm.performance)
+        latest_perf = _readiness_label(latest_rm.performance, latest_rm.recovery_pct, latest_rm.training_load_ratio)
+        latest_recovery_pct = f'{latest_rm.recovery_pct}%' if latest_rm.recovery_pct is not None else ''
+        latest_load_impact = f'{latest_rm.load_impact:.0f}' if latest_rm.load_impact is not None else ''
+        latest_form_score = f'{latest_rm.cti:.0f}' if latest_rm.cti is not None else ''
     else:
         latest_hrv = latest_rhr = latest_tired = latest_perf = ''
+        latest_recovery_pct = latest_load_impact = latest_form_score = ''
 
     # Статус автосинхронизации (Auto-sync status)
     from datetime import datetime
@@ -381,6 +399,9 @@ def render_page(year=None, month=None):
         latest_rhr=latest_rhr,
         latest_tired=latest_tired,
         latest_perf=latest_perf,
+        latest_recovery_pct=latest_recovery_pct,
+        latest_load_impact=latest_load_impact,
+        latest_form_score=latest_form_score,
         auto_health_last=fmt_sync_time(as_health['last_run']),
         auto_health_next=fmt_next_sync(as_health['next_run']),
         auto_health_status=as_health['status'],
@@ -611,9 +632,11 @@ MAIN_HTML = '''
         <div class='stats-card' id='recoveryCard' onclick='toggleRecoveryChart()' style='cursor:pointer'>
             <h4>❤️ Восстановление</h4>
             <div class='stats-summary'>
+                <span>Восстановление: <b>{latest_recovery_pct}</b></span>
                 <span>Нервная система: <b>{latest_hrv}</b></span>
                 <span>Пульс покоя: <b>{latest_rhr}</b> уд/мин</span>
                 <span>Усталость: <b>{latest_tired}</b></span>
+                <span>Нагрузка: <b>{latest_load_impact}</b> / База: <b>{latest_form_score}</b></span>
                 <span>Состояние: <b>{latest_perf}</b></span>
             </div>
             <div style='font-size:13px;color:#888;margin-top:4px' id='recoveryToggle'>▾ График пульса покоя</div>
@@ -1139,6 +1162,18 @@ def startup():
                     conn.execute(text(f"ALTER TABLE daily_metrics ADD COLUMN {col} {col_type}"))
                 except SAOperationalError:
                     logger.debug("Migration: колонка %s уже существует в daily_metrics", col)
+            # Миграция dashboard-колонок daily_metrics (Migrate daily_metrics dashboard columns)
+            dashboard_cols = {
+                'recovery_pct': 'INTEGER',
+                'form_score': 'FLOAT',
+                'load_impact': 'FLOAT',
+                'intensity_trend': 'FLOAT',
+            }
+            for col, col_type in dashboard_cols.items():
+                try:
+                    conn.execute(text(f"ALTER TABLE daily_metrics ADD COLUMN {col} {col_type}"))
+                except SAOperationalError:
+                    logger.debug("Migration: колонка %s уже существует в daily_metrics", col)
             # === Многопользовательская миграция (Multi-user migration) ===
             # Создание таблицы users (Create users table)
             try:
@@ -1382,14 +1417,18 @@ async def session_detail(session_id: int):
             _, hrv_label = _hrv_status(rm.avg_sleep_hrv, rm.sleep_hrv_baseline, rm.sleep_hrv_sd)
             rhr_str = f"{rm.rhr}" if rm.rhr is not None else "—"
             tired_str = _tired_label(rm.tired_rate) or "—"
-            perf_str = _readiness_label(rm.performance) or "—"
+            perf_str = _readiness_label(rm.performance, rm.recovery_pct, rm.training_load_ratio) or "—"
             load_str = _load_label(rm.training_load) or "—"
+            recovery_pct_str = f"{rm.recovery_pct}%" if rm.recovery_pct is not None else "—"
+            form_str = f"{rm.cti:.0f}" if rm.cti is not None else "—"
             recovery_info = {
                 'hrv': hrv_label or "—",
                 'rhr': rhr_str,
                 'tired_rate': tired_str,
                 'performance': perf_str,
                 'training_load': load_str,
+                'recovery_pct': recovery_pct_str,
+                'form_score': form_str,
             }
     db.close()
 
@@ -1460,9 +1499,11 @@ async def session_detail(session_id: int):
         <div class='card' style='background:#f3e5f5;border-color:#ce93d8'>
             <h4 style='margin:0 0 10px 0;color:#7B1FA2'>❤️ Восстановление перед тренировкой</h4>
             <div class='info'>
+                <div class='info-item'><span class='info-label'>Восстановление</span><b>{recovery_info["recovery_pct"]}</b></div>
                 <div class='info-item'><span class='info-label'>Нервная система</span><b>{recovery_info["hrv"]}</b></div>
                 <div class='info-item'><span class='info-label'>Пульс покоя</span><b>{recovery_info["rhr"]}</b><span class='info-unit'>уд/мин</span></div>
                 <div class='info-item'><span class='info-label'>Усталость</span><b>{recovery_info["tired_rate"]}</b></div>
+                <div class='info-item'><span class='info-label'>Базовая форма</span><b>{recovery_info["form_score"]}</b></div>
                 <div class='info-item'><span class='info-label'>Состояние</span><b>{recovery_info["performance"]}</b></div>
                 <div class='info-item'><span class='info-label'>Нагрузка</span><b>{recovery_info["training_load"]}</b></div>
             </div>
@@ -1899,6 +1940,23 @@ def _auto_sync_health_inner() -> int:
             plain_password = us.coros_password
         client = CorosClient(us.coros_email, plain_password, timeout=15)
         client.authenticate()
+
+        # Получение данных дашборда — recovery%, load impact, форма (Dashboard data — recovery%, load, form)
+        try:
+            dashboard = client.get_dashboard()
+            if dashboard:
+                today = date.today()
+                dm = db.query(DailyMetrics).filter(
+                    DailyMetrics.user_id == _current_user_id,
+                    DailyMetrics.date == today
+                ).first()
+                if dm:
+                    dm.recovery_pct = dashboard.get('recovery')
+                    dm.load_impact = dashboard.get('loadImpact')
+                    dm.intensity_trend = dashboard.get('intensityTrend')
+                    db.commit()
+        except Exception as e:
+            logger.warning("Автосинхронизация: ошибка получения dashboard: %s", e)
 
         existing_dates = {r[0] for r in db.query(DailyMetrics.date).filter(DailyMetrics.user_id == _current_user_id).all()}
         today = date.today()

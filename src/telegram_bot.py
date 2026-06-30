@@ -200,6 +200,23 @@ def _sync_for_user(user: User, chat_id: int, token: str):
         client.authenticate()
         logger.info("Bot sync: Coros auth OK for user %s", user.id)
 
+        # Получение данных дашборда — recovery%, load impact, форма (Dashboard data)
+        try:
+            dashboard = client.get_dashboard()
+            if dashboard:
+                today = date.today()
+                dm = db.query(DailyMetrics).filter(
+                    DailyMetrics.user_id == user.id,
+                    DailyMetrics.date == today
+                ).first()
+                if dm:
+                    dm.recovery_pct = dashboard.get('recovery')
+                    dm.load_impact = dashboard.get('loadImpact')
+                    dm.intensity_trend = dashboard.get('intensityTrend')
+                    db.commit()
+        except Exception as e:
+            logger.warning("Bot sync: dashboard error: %s", e)
+
         synced_health = 0
         synced_acts = 0
         msg_parts = []

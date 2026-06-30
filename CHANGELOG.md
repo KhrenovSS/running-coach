@@ -22,6 +22,20 @@ All notable changes to this project are tracked here.
 ### Fixed
 - **Цикл "use /sync" → "no new data"**: recovery check теперь различает "sync не запускался" и "sync прошёл, но данных нет"
 - **Чистка `except: pass`** — заменены 11 bare `except: pass` на явные типы с логгированием:
+
+## [30.06.2026]
+
+### Added
+- **Dashboard API (`get_dashboard()`)**: теперь вызывается при авто- и ручной синхронизации. Сохраняет recovery%, load_impact, intensity_trend в DailyMetrics
+- **Новые колонки DailyMetrics**: `recovery_pct` (INTEGER), `form_score`, `load_impact`, `intensity_trend` (FLOAT) + миграция при старте
+
+### Changed
+- **`_readiness_label()`**: приоритет recovery_pct → ATI/CTI ratio → performance. Recovery ≥70% → 🟢, ≥30% → 🟡, <30% → 🔴
+- **Web UI блок «Восстановление»**: добавлены поля «Восстановление: 100%», «Нагрузка: 50 / База: 58»
+- **Детальный просмотр тренировки**: добавлены «Восстановление» и «Базовая форма» в recovery-блоке
+
+### Fixed
+- **«Требуется отдых» на -1**: readiness больше не использует performance как основной источник — данные Coros dashboard (recovery%) имеют приоритет
   - `main.py`: Telegram notify (httpx.HTTPError), миграции (SAOperationalError), startup (Exception с логом)
   - `src/telegram_bot.py`: delete message (Exception), os.unlink (OSError)
   - `src/crypto.py`: запись ключа в .env (OSError/PermissionError)

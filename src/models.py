@@ -133,6 +133,10 @@ class DailyMetrics(Base):
     ltsp = Column(Float, nullable=True)
     stamina_level_7d = Column(Float, nullable=True)
     synced_at = Column(DateTime, default=datetime.utcnow)
+    recovery_pct = Column(Integer, nullable=True)  # Coros recovery % (0-100)
+    form_score = Column(Float, nullable=True)  # Coros "Базовая форма"
+    load_impact = Column(Float, nullable=True)  # Coros "Влияние нагрузки"
+    intensity_trend = Column(Float, nullable=True)  # Coros "Тренд интенсивности"
 
     user = relationship("User", back_populates="daily_metrics")
 
