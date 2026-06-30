@@ -1562,6 +1562,7 @@ async def view_logs(lines: int = 100):
 async def coros_sync():
     from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
     from src.parsers.fit_parser import parse_fit
+    from src.models import User
     import tempfile
 
     db = SessionLocal()
