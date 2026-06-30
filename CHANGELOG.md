@@ -88,6 +88,7 @@ All notable changes to this project are tracked here.
 - **`_hrv_status()`**: классификация по Coros-зонам (интервалы `[5,30,38,56]`). HRV=38 → 🟢 Норма (было 🟡 Пониженная)
 - **`_save_dashboard_data()`**: чтение из `dashboard.summaryInfo` вместо верхнего уровня; только NULL-поля перезаписываются
 - **Чистка `startup()`**: удалён мёртвый код миграции из `user_settings`
+- **Синхронизация тренировок падала с `Internal Server Error`**: в `coros_sync()` отсутствовал `from src.models import User` — `NameError` при запросе `/coros/sync`. Фронтенд получал plain text "Internal Server Error" вместо JSON, JS падал с `Unexpected token 'I'`. Импорт добавлен
 
 ## [29.06.2026]
 
