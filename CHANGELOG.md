@@ -72,6 +72,23 @@ All notable changes to this project are tracked here.
   - Решение: перед разработкой модуля аналитики необходимо устранить техдолг (4 спринта)
   - Рекомендация: начинать со Спринта 1 (pyproject.toml, тесты, WAL, чистка except)
 
+### Added (Спринт 2 — продолжение)
+- **Alembic baseline**: миграция `c3f51ae84837` — индексы `ix_*_user_id` на 3 таблицах + `uq_user_date`. ALTER TABLE блок удалён из `startup()`, заменён на `alembic upgrade head`
+- **Миграция `0bba2c2badec`**: удалена таблица `user_settings` (DROP TABLE)
+- **Модель `UserSettings` удалена** — все обращения перенесены на `User`:
+  - `get_settings()` — читает из `User` (id=1), прокси `.weight` → `weight_kg`
+  - `coros_sync` — `UserSettings` → `User`
+  - `coros_sync_health` — `UserSettings` → `User`
+  - `_auto_sync_health_inner` — `UserSettings` → `User`
+  - `_auto_sync_activities_inner` — `UserSettings` → `User`
+  - Telegram bot регистрация и синхронизация — `UserSettings` → `User`
+- **`SAOperationalError`** импорт удалён из main.py (больше не используется)
+
+### Fixed
+- **`_hrv_status()`**: классификация по Coros-зонам (интервалы `[5,30,38,56]`). HRV=38 → 🟢 Норма (было 🟡 Пониженная)
+- **`_save_dashboard_data()`**: чтение из `dashboard.summaryInfo` вместо верхнего уровня; только NULL-поля перезаписываются
+- **Чистка `startup()`**: удалён мёртвый код миграции из `user_settings`
+
 ## [29.06.2026]
 
 ### Added

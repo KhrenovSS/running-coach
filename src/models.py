@@ -71,20 +71,6 @@ class TrainingSession(Base):
     user = relationship("User", back_populates="training_sessions")
 
 
-# Модель настроек пользователя — DEPRECATED, заменена на User (User settings — replaced by User model)
-class UserSettings(Base):
-    __tablename__ = 'user_settings'
-    id = Column(Integer, primary_key=True)
-    max_hr = Column(Integer, default=177)
-    weight = Column(Float, default=85.0)
-    max_credible_pace = Column(Float, default=3.0)
-    max_gps_jump_m = Column(Float, default=100.0)
-    min_hr_for_fast_pace = Column(Integer, default=130)
-    coros_email = Column(String(255), nullable=True)
-    coros_password = Column(String(255), nullable=True)
-    last_coros_sync = Column(DateTime, nullable=True)
-
-
 # Модель удалённой тренировки (Deleted training model)
 class DeletedTraining(Base):
     __tablename__ = 'deleted_trainings'
@@ -195,17 +181,23 @@ def init_db():
     Base.metadata.create_all(bind=engine)
 
 
-# Получение настроек пользователя из БД — DEPRECATED (Use get_user or get_or_create_user instead)
+# Получение настроек пользователя из User (Get user settings from User model)
 def get_settings():
     db = SessionLocal()
     try:
-        settings = db.query(UserSettings).first()
-        if not settings:
-            settings = UserSettings(max_hr=177, weight=85.0, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130)
-            db.add(settings)
+        user = db.query(User).filter(User.id == 1).first()
+        if not user:
+            # Создаём пользователя со значениями по умолчанию (Create user with defaults)
+            user = User(
+                id=1, max_hr=177, weight_kg=85.0,
+                max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130,
+            )
+            db.add(user)
             db.commit()
-            db.refresh(settings)
-        return settings
+            db.refresh(user)
+        # Прокси для совместимости — User.weight_kg маппится на .weight (Proxy for backward compat)
+        user.weight = user.weight_kg
+        return user
     finally:
         db.close()
 

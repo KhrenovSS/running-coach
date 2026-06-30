@@ -14,7 +14,7 @@ from telegram.ext import (
 )
 
 from src.models import (
-    SessionLocal, User, UserSettings, TrainingSession,
+    SessionLocal, User, TrainingSession,
     DailyMetrics, WeightMeasurement, DeletedTraining, TrainingFeedback,
     get_user_by_telegram,
 )
@@ -133,13 +133,6 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user.coros_email = email
         user.coros_password = encrypt(password)
         user.registered_at = datetime.utcnow()
-
-        us = db.query(UserSettings).first()
-        if not us:
-            us = UserSettings()
-            db.add(us)
-        us.coros_email = email
-        us.coros_password = encrypt(password)
 
         db.commit()
         logger.info("Пользователь %s (chat_id=%s) привязал Coros: %s", username, chat_id, email)
@@ -367,9 +360,6 @@ def _sync_for_user(user: User, chat_id: int, token: str):
 
                 if synced_acts:
                     user.last_coros_sync = max_act_ts
-                    us = db.query(UserSettings).first()
-                    if us:
-                        us.last_coros_sync = max_act_ts
                     db.commit()
                     # Уведомление + запрос оценки для каждой новой тренировки (Notify + rating prompt)
                     token_bot = os.getenv("TELEGRAM_BOT_TOKEN", "")

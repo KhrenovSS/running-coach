@@ -8,7 +8,6 @@ from src.parsers.fit_parser import parse_fit
 from src.parsers.common import weather_icon, format_pace, format_duration
 from src.logger import get_logger
 from src.crypto import encrypt, decrypt
-from sqlalchemy.exc import OperationalError as SAOperationalError
 logger = get_logger("app")
 import httpx
 import json
@@ -1109,119 +1108,21 @@ SETTINGS_PAGE = '''
 # Событие при запуске сервера: инициализация БД и миграции (Startup event: DB init and migrations)
 @app.on_event("startup")
 def startup():
-    from src.models import init_db, engine, DeletedTraining, User
+    from src.models import init_db, engine, User
     from datetime import datetime
     init_db()
+    # Применяем Alembic миграции (Apply Alembic migrations for schema changes)
+    try:
+        from alembic.config import Config as AlembicConfig
+        from alembic import command
+        alembic_cfg = AlembicConfig("alembic.ini")
+        command.upgrade(alembic_cfg, "head")
+    except Exception as e:
+        logger.error("Ошибка Alembic миграции: %s", e)
     # Очистка старых pending-файлов (Cleanup old pending uploads)
     for f in PENDING_DIR.glob("*.tcx"):
         f.unlink(missing_ok=True)
     _pending.clear()
-    try:
-        from sqlalchemy import text, JSON as SA_JSON
-        with engine.connect() as conn:
-            # Миграция колонок training_sessions (Migrate training_sessions columns)
-            cols_to_add = {
-                'weather_code': 'INTEGER',
-                'hr_pace_series': 'JSON',
-                'suspect_flags': 'JSON',
-                'cleaning_log': 'JSON',
-                'avg_cadence': 'INTEGER',
-                'calories': 'INTEGER',
-            }
-            for col, col_type in cols_to_add.items():
-                try:
-                    conn.execute(text(f"ALTER TABLE training_sessions ADD COLUMN {col} {col_type}"))
-                except SAOperationalError:
-                    logger.debug("Migration: колонка %s уже существует в training_sessions", col)
-            # Миграция колонок user_settings (Migrate user_settings columns)
-            settings_cols = {
-                'max_credible_pace': 'FLOAT DEFAULT 3.0',
-                'max_gps_jump_m': 'FLOAT DEFAULT 100.0',
-                'min_hr_for_fast_pace': 'INTEGER DEFAULT 130',
-                'coros_email': 'VARCHAR(255)',
-                'coros_password': 'VARCHAR(255)',
-                'last_coros_sync': 'DATETIME',
-            }
-            for col, col_type in settings_cols.items():
-                try:
-                    conn.execute(text(f"ALTER TABLE user_settings ADD COLUMN {col} {col_type}"))
-                except SAOperationalError:
-                    logger.debug("Migration: колонка %s уже существует в user_settings", col)
-            # Миграция таблицы deleted_trainings (Migrate deleted_trainings table)
-            try:
-                DeletedTraining.__table__.create(conn)
-            except SAOperationalError:
-                logger.debug("Migration: таблица deleted_trainings уже существует")
-            # Миграция таблицы daily_metrics (Migrate daily_metrics table)
-            try:
-                from src.models import DailyMetrics
-                DailyMetrics.__table__.create(conn)
-            except SAOperationalError:
-                logger.debug("Migration: таблица daily_metrics уже существует")
-            # Миграция колонок daily_metrics (Migrate daily_metrics columns)
-            daily_cols = {
-                'ltsp': 'FLOAT',
-                'stamina_level_7d': 'FLOAT',
-            }
-            for col, col_type in daily_cols.items():
-                try:
-                    conn.execute(text(f"ALTER TABLE daily_metrics ADD COLUMN {col} {col_type}"))
-                except SAOperationalError:
-                    logger.debug("Migration: колонка %s уже существует в daily_metrics", col)
-            # Миграция dashboard-колонок daily_metrics (Migrate daily_metrics dashboard columns)
-            dashboard_cols = {
-                'recovery_pct': 'INTEGER',
-                'form_score': 'FLOAT',
-                'load_impact': 'FLOAT',
-                'intensity_trend': 'FLOAT',
-                'sleep_hrv_interval_list': 'TEXT',
-            }
-            for col, col_type in dashboard_cols.items():
-                try:
-                    conn.execute(text(f"ALTER TABLE daily_metrics ADD COLUMN {col} {col_type}"))
-                except SAOperationalError:
-                    logger.debug("Migration: колонка %s уже существует в daily_metrics", col)
-            # === Многопользовательская миграция (Multi-user migration) ===
-            # Создание таблицы users (Create users table)
-            try:
-                User.__table__.create(conn)
-            except SAOperationalError:
-                logger.debug("Migration: таблица users уже существует")
-            # Добавление колонок user_id в существующие таблицы (Add user_id columns)
-            for tbl, col_info in {
-                'training_sessions': ('INTEGER', 'user_id'),
-                'daily_metrics': ('INTEGER', 'user_id'),
-                'deleted_trainings': ('INTEGER', 'user_id'),
-                'weight_measurements': ('INTEGER', 'user_id'),
-            }.items():
-                try:
-                    conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN {col_info[1]} {col_info[0]}"))
-                except SAOperationalError:
-                    logger.debug("Migration: колонка %s уже существует в %s", col_info[1], tbl)
-            # Создание первого пользователя (admin) из UserSettings (Create admin user from UserSettings)
-            row = conn.execute(text("SELECT coros_email, coros_password, last_coros_sync FROM user_settings LIMIT 1")).fetchone()
-            if row:
-                existing_admin = conn.execute(text("SELECT id FROM users WHERE id = 1")).fetchone()
-                if not existing_admin:
-                    conn.execute(
-                        text("INSERT INTO users (id, coros_email, coros_password, last_coros_sync) VALUES (1, :email, :pwd, :sync)"),
-                        {"email": row[0], "pwd": row[1], "sync": row[2]}
-                    )
-                    conn.commit()
-            # Проставить user_id=1 для всех существующих записей (Set user_id=1 for existing records)
-            for tbl in ('training_sessions', 'daily_metrics', 'deleted_trainings', 'weight_measurements'):
-                try:
-                    conn.execute(text(f"UPDATE {tbl} SET user_id = 1 WHERE user_id IS NULL"))
-                except SAOperationalError as e:
-                    logger.warning("Migration: не удалось обновить user_id в %s: %s", tbl, e)
-            # Миграция колонки last_health_sync_at в users (Add last_health_sync_at to users table)
-            try:
-                conn.execute(text("ALTER TABLE users ADD COLUMN last_health_sync_at DATETIME"))
-            except SAOperationalError:
-                logger.debug("Migration: колонка last_health_sync_at уже существует в users")
-            conn.commit()
-    except SAOperationalError as e:
-        logger.error("Ошибка миграции БД (Database migration error): %s", e)
     settings = get_settings()
     db = SessionLocal()
     try:
@@ -1603,37 +1504,25 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
                         min_hr_for_fast_pace: int = Form(130),
                         coros_email: str = Form(''),
                         coros_password: str = Form('')):
-    from src.models import UserSettings, User, WeightMeasurement
+    from src.models import User, WeightMeasurement
     from datetime import datetime
     db = SessionLocal()
     try:
-        s = db.query(UserSettings).first()
-        old_weight = None
-        if s:
-            old_weight = s.weight
-            s.max_hr = max_hr
-            s.weight = weight
-            s.max_credible_pace = max_credible_pace
-            s.max_gps_jump_m = max_gps_jump_m
-            s.min_hr_for_fast_pace = min_hr_for_fast_pace
-            s.coros_email = coros_email or None
-            if coros_password and coros_password != '********':
-                s.coros_password = encrypt(coros_password)
-            elif not coros_email:
-                s.coros_password = None
-        # Также сохраняем в User модель (Also save to User model)
         user = db.query(User).filter(User.id == _current_user_id).first()
-        if user:
-            user.max_hr = max_hr
-            user.weight_kg = weight
-            user.max_credible_pace = max_credible_pace
-            user.max_gps_jump_m = max_gps_jump_m
-            user.min_hr_for_fast_pace = min_hr_for_fast_pace
-            user.coros_email = coros_email or None
-            if coros_password and coros_password != '********':
-                user.coros_password = encrypt(coros_password)
-            elif not coros_email:
-                user.coros_password = None
+        if not user:
+            user = User(id=_current_user_id)
+            db.add(user)
+        old_weight = user.weight_kg
+        user.max_hr = max_hr
+        user.weight_kg = weight
+        user.max_credible_pace = max_credible_pace
+        user.max_gps_jump_m = max_gps_jump_m
+        user.min_hr_for_fast_pace = min_hr_for_fast_pace
+        user.coros_email = coros_email or None
+        if coros_password and coros_password != '********':
+            user.coros_password = encrypt(coros_password)
+        elif not coros_email:
+            user.coros_password = None
         if old_weight != weight:
             wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.utcnow(), user_id=_current_user_id)
             db.add(wm)
@@ -1673,12 +1562,11 @@ async def view_logs(lines: int = 100):
 async def coros_sync():
     from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
     from src.parsers.fit_parser import parse_fit
-    from src.models import UserSettings
     import tempfile
 
     db = SessionLocal()
     try:
-        us = db.query(UserSettings).first()
+        us = db.query(User).filter(User.id == _current_user_id).first()
         if not us or not us.coros_email or not us.coros_password:
             return JSONResponse({'status': 'error', 'message': 'Coros credentials not configured.'})
     finally:
@@ -1696,7 +1584,7 @@ async def coros_sync():
     def _run():
         db = SessionLocal()
         try:
-            us = db.query(UserSettings).first()
+            us = db.query(User).filter(User.id == _current_user_id).first()
             progress['step'] = 'auth'
             progress['message'] = 'Подключение к Coros...'
             logger.info("Запуск синхронизации Coros (Coros sync started)")
@@ -1974,12 +1862,12 @@ def _auto_sync_health():
 def _auto_sync_health_inner() -> int:
     """Возвращает количество новых синхронизированных записей (Return count of new synced records)"""
     from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
-    from src.models import UserSettings, User
+    from src.models import User
     from datetime import timedelta, date, datetime
 
     db = SessionLocal()
     try:
-        us = db.query(UserSettings).first()
+        us = db.query(User).filter(User.id == _current_user_id).first()
         if not us or not us.coros_email or not us.coros_password:
             logger.debug("Автосинхронизация здоровья: нет учётных данных Coros")
             return -1
@@ -2121,15 +2009,14 @@ def _auto_sync_activities():
             s['next_run'] = s['last_run'] + timedelta(seconds=_ACTIVITY_SYNC_INTERVAL)
 
 def _auto_sync_activities_inner() -> int:
-    """Возвращает количество новых синхронизированных активностей (Return count of new synced activities)"""
     from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
-    from src.models import UserSettings, DeletedTraining
+    from src.models import DeletedTraining
     from src.parsers.fit_parser import parse_fit
     import tempfile
 
     db = SessionLocal()
     try:
-        us = db.query(UserSettings).first()
+        us = db.query(User).filter(User.id == _current_user_id).first()
         if not us or not us.coros_email or not us.coros_password:
             logger.debug("Автосинхронизация активностей: нет учётных данных Coros")
             return -1
@@ -2325,11 +2212,11 @@ async def coros_sync_status(task_id: str):
 @app.post('/coros/sync/health')
 async def coros_sync_health():
     from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
-    from src.models import UserSettings
+    from src.models import User
 
     db = SessionLocal()
     try:
-        us = db.query(UserSettings).first()
+        us = db.query(User).filter(User.id == _current_user_id).first()
         if not us or not us.coros_email or not us.coros_password:
             return JSONResponse({'status': 'error', 'message': 'Coros credentials not configured.'})
     finally:
@@ -2347,7 +2234,7 @@ async def coros_sync_health():
     def _run():
         db = SessionLocal()
         try:
-            us = db.query(UserSettings).first()
+            us = db.query(User).filter(User.id == _current_user_id).first()
             progress['step'] = 'auth'
             progress['message'] = 'Подключение к Coros...'
             logger.info("Запуск синхронизации метрик здоровья Coros (Coros health sync started)")
