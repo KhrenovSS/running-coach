@@ -180,14 +180,21 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 6. Обновлён `README.md` — упоминание анализа Cloud Opus 4.8 в секции техдолга
 7. Закоммичено, пуш не делался
 
-**Текущее состояние**: анализ завершён, документация подготовлена, техдолг зафиксирован.
-Пользователь выбрал начинать со **Спринта 1** (Фундамент): pyproject.toml + pytest, SQLite WAL, чистка `except: pass`.
+**Что сделано за сессию 30.06.2026 (Sprint 1 — Фундамент):**
+1. **pyproject.toml** — манифест зависимостей с зафиксированными версиями
+2. **tests/** — папка с conftest.py (in-memory SQLite), pytest.ini, 3 базовых теста моделей
+3. **SQLite WAL** — `check_same_thread=False`, `busy_timeout=5000`, `pool_pre_ping=True`, `PRAGMA journal_mode=WAL`, `PRAGMA synchronous=NORMAL`
+4. **Чистка `except: pass`** — 11 bare `except: pass` заменены на явные типы с логгированием (SAOperationalError, httpx.HTTPError, OSError, RequestException и др.)
+5. **Логгер** добавлен в `src/parsers/common.py` (раньше отсутствовал)
+6. Все коммиты сделаны, пуш не выполнялся
 
-**Следующие шаги (Спринт 1 — Фундамент):**
-- ⬜ **pyproject.toml** — зафиксировать зависимости, dev-зависимости (pytest)
-- ⬜ **tests/** — папка с conftest.py, тесты-заглушки
-- ⬜ **SQLite WAL** — `check_same_thread=False`, `PRAGMA journal_mode=WAL`, `busy_timeout`
-- ⬜ **Чистка `except: pass`** — заменить на явные типы с логированием (23 места)
+**Текущее состояние**: Спринт 1 завершён. Все 3 пункта выполнены, сервер загружается, тесты проходят.
+
+**Следующие шаги (Спринт 2 — Данные и пользователи):**
+- ⬜ **Alembic** — внедрить миграции (baseline под текущую схему, удалить ALTER TABLE из startup)
+- ⬜ **Удалить UserSettings** — перенести всё на User, миграция DROP TABLE
+- ⬜ **Аутентификация** — убрать `_current_user_id = 1`, добавить логин
+- ⬜ **get_db() через Depends** — централизованное управление сессиями БД
 
 **Долгосрочные цели (после техдолга):**
 - ⬜ **Модуль аналитики** — 8 этапов из `decision_module_design.md`
