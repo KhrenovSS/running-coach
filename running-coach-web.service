@@ -1,0 +1,13 @@
+[Unit]
+Description=Running Coach FastAPI Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/nimda/projects/running-coach
+ExecStart=/bin/bash -c 'set -a && source /home/nimda/projects/running-coach/.env && set +a && exec /home/nimda/projects/running-coach/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

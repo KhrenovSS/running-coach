@@ -1195,9 +1195,6 @@ def startup():
     # Запуск фоновой автосинхронизации Coros (Start background auto-sync)
     _start_auto_sync()
 
-    # Запуск Telegram-бота (Start Telegram bot)
-    _start_telegram_bot()
-
 
 # Главная страница: список тренировок и статистика (Main page: session list and stats)
 @app.get('/', response_class=HTMLResponse)
@@ -2437,19 +2434,6 @@ def _start_auto_sync():
     thread.start()
     logger.info("Автосинхронизация Coros: фоновый поток запущен")
 
-
-# Запуск Telegram-бота (Start Telegram bot)
-def _start_telegram_bot():
-    try:
-        import subprocess
-        import sys
-        bot_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_telegram_bot.py")
-        proc = subprocess.Popen(
-            [sys.executable, bot_script],
-        )
-        logger.info("Telegram-бот: процесс запущен (pid=%s)", proc.pid)
-    except Exception as e:
-        logger.error("Telegram-бот: ошибка запуска: %s", e)
 
 
 # Статус фоновой синхронизации Coros (Background Coros sync status)

@@ -256,10 +256,12 @@ def calc_avg_pace(...):
   2. **Сделать commit (если есть незакоммиченные изменения) + push** в GitHub. Это «итог дня».
   3. Сообщить пользователю, что изменения сохранены и запушены.
 
-## Текущее состояние (Session — 01.07.2026, утро)
+## Текущее состояние (Session — 01.07.2026, день)
 
 **Сервер:** запущен через systemd --user (`running-coach.service`), автозапуск при включении ПК  
+**Telegram-бот:** отдельный systemd-юнит (`running-coach-bot.service`), `Restart=on-failure`  
 **Команда управления:** `systemctl --user start/stop/status/restart running-coach.service`  
+**Команда бота:** `systemctl --user start/stop/status/restart running-coach-bot.service`  
 **Команда пуша (из любой папки):**
 ```bash
 set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/nimda/projects/running-coach && git push "https://KhrenovSS:${GITHUB_TOKEN}@github.com/KhrenovSS/running-coach.git" main
@@ -269,19 +271,13 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 
 **Спринт 2 завершён.** Sprint 2.4 (logging/audit) + Sprint 2.5 (Telegram auth) реализованы, работает вход через Telegram, аудит событий, структурированные логи.
 
-**Что сделано за сессию 01.07.2026 (debugging Sprint 2.4–2.5 + фиксы):**
-1. **Fix: `last_coros_sync` оставался NULL** — ранний `return` в `_auto_sync_activities_inner` и `coros_sync()` при `new_acts = []` никогда не обновлял `last_coros_sync`. Исправлено: перед ранним возвратом `last_coros_sync` обновляется до последней активности из ответа API. (коммит `b7b5595`)
-2. **Fix: логгер молчал в автосинке** — Python 3.13: uvicorn вызывает `dictConfig(LOGGING_CONFIG)` при старте → `logging.shutdown()` закрывает все хендлеры, `_handle_existing_loggers()` ставит `logger.disabled = True`. Добавлена `fix_logger_after_uvicorn()` в `src/utils/logger.py`, вызывается из `startup()` перед `_start_auto_sync()`. (коммит `53ebb0e`)
-3. **Fix: `_telegram_notify` TypeError** — передавался без `user_id`, вызов обёрнут в try/except. (коммит `d9a8e14`)
-4. **Fix: бот не отвечал на `/start`** — `subprocess.DEVNULL` прятал stdout/stderr; Markdown/HTML эмодзи в `[text](url)` ломали парсер Telegram; `log_coros_sync_completed` TypeError (found/processed). (коммит `fe64276`)
-5. **README обновлён** — структура, стек, таблицы БД, миграции, tech debt, переменные окружения приведены в соответствие Sprint 2.4–2.5. (коммит `b7b5595`)
-6. **`.gitignore`** — добавлен `logs/` в исключения. (коммит `b7b5595`)
-7. **CHANGELOG обновлён** — запись о фиксе `last_coros_sync`. (коммит `b7b5595`)
-
-**Все коммиты запушены** (`53ebb0e`, `fe64276`, `d9a8e14`, `b7b5595`).
+**Что сделано за сессию 01.07.2026 (вечерний фикс — вынос бота в systemd):**
+1. **Telegram-бот вынесен в отдельный systemd-юнит** (`running-coach-bot.service`): больше не запускается как `subprocess.Popen` из `main.py`. Бот живёт независимо, `Restart=on-failure` — при падении перезапускается через 5 секунд.
+2. **Из `main.py` удалён `_start_telegram_bot()`** — и вызов в `startup()`, и сама функция. Ботом управляет systemd.
+3. **README/AGENTS.md/CHANGELOG обновлены.**
 
 **Известные проблемы:**
-- `last_coros_sync` может оставаться NULL ещё один цикл, пока не появится новая активность (либо можно перезапустить сервер и подождать)
+- После перезагрузки сервера нужно убедиться, что `running-coach-bot.service` включён (`systemctl --user enable running-coach-bot.service`)
 
 **Следующие шаги:**
 - ⬜ **Модуль аналитики** — 8 этапов из `decision_module_design.md`

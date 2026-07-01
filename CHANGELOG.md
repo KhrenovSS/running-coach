@@ -4,6 +4,9 @@ All notable changes to this project are tracked here.
 
 ## [01.07.2026]
 
+### Changed
+- **Telegram-бот вынесен в отдельный systemd-юнит** (`running-coach-bot.service`): больше не запускается как `subprocess.Popen` из `main.py`. Бот работает независимо, автоматически перезапускается при падении (`Restart=on-failure`). Убран `_start_telegram_bot()` из `main.py`.
+
 ### Fixed
 - **`last_coros_sync` оставался `NULL` когда все активности уже импортированы**: ранний `return` при `new_acts = []` никогда не обновлял `last_coros_sync`, поэтому каждый цикл автосинхронизации запрашивал все активности с `since=None`. Исправлено: перед ранним возвратом `last_coros_sync` обновляется до последней активности из ответа API — и в автосинке, и в ручной синхронизации.
 - **Telegram-бот не отвечал на `/start`**: stdout/stderr бота уходили в `/dev/null` через `subprocess.DEVNULL` — любые ошибки были невидимы. Исправлено: убраны `stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL`

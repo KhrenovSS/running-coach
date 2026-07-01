@@ -1,0 +1,14 @@
+[Unit]
+Description=Running Coach Telegram Bot
+After=network.target
+PartOf=running-coach-web.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/nimda/projects/running-coach
+ExecStart=/bin/bash -c 'set -a && source /home/nimda/projects/running-coach/.env && set +a && exec /home/nimda/projects/running-coach/.venv/bin/python /home/nimda/projects/running-coach/run_telegram_bot.py'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

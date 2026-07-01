@@ -249,6 +249,8 @@ training_sessions.id                     │
 ├── pytest.ini                       # Конфигурация pytest
 ├── .env                             # Переменные окружения (в .gitignore)
 ├── .env.example                     # Шаблон переменных окружения
+├── running-coach-web.service        # systemd-юнит веб-сервера
+├── running-coach-bot.service        # systemd-юнит Telegram-бота
 ├── CHANGELOG.md                     # История изменений (датированная)
 ├── AGENTS.md                        # Контекст для ИИ‑агента
 ├── TECH_DEBT.md                     # Технический долг и план исправления
@@ -371,31 +373,40 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### Запуск как служба systemd (рекомендуется)
-```bash
-# Копируем конфиг
-cp running-coach.service ~/.config/systemd/user/
+Сервер и Telegram-бот работают как отдельные systemd-сервисы с автоматическим перезапуском.
 
-# Включаем автозагрузку и запускаем
+Файлы юнитов лежат в корне проекта и копируются в `~/.config/systemd/user/`:
+
+```bash
+cp running-coach-web.service ~/.config/systemd/user/running-coach.service
+cp running-coach-bot.service ~/.config/systemd/user/
+
+systemctl --user daemon-reload
+
+# Веб-сервер
 systemctl --user enable running-coach.service
 systemctl --user start running-coach.service
 
-# Проверяем статус
-systemctl --user status running-coach.service
+# Telegram-бот (отдельный процесс, Restart=on-failure)
+systemctl --user enable running-coach-bot.service
+systemctl --user start running-coach-bot.service
 ```
 
 ### Команды управления
 ```bash
-systemctl --user start running-coach.service
-systemctl --user stop running-coach.service
-systemctl --user restart running-coach.service
-systemctl --user status running-coach.service
+systemctl --user start/stop/status/restart running-coach.service      # веб-сервер
+systemctl --user start/stop/status/restart running-coach-bot.service  # Telegram-бот
 ```
 
-### Запуск Telegram‑бота
-Бот запускается автоматически при старте сервера (через `subprocess` в `main.py`, вывод идёт в journal/systemd). Вручную:
+### Запуск вручную (без systemd)
 ```bash
 cd /home/nimda/projects/running-coach
-python src/telegram_bot.py
+
+# Веб-сервер
+uvicorn main:app --host 0.0.0.0 --port 8000
+
+# Telegram-бот (отдельный терминал)
+python run_telegram_bot.py
 ```
 
 ---
@@ -493,7 +504,8 @@ python src/telegram_bot.py
 - Coros-клиент на синхронном `requests`, без TTL токена.
 - Конфигурация разбросана; ключ шифрования автогенерируется в `.env`.
 
-✅ **Решено (Sprint 1–2 + Sprint 2.4–2.5):**
+✅ **Решено (Sprint 1–2 + Sprint 2.4–2.5 + hotfix):**
+- ~~Telegram-бот запускался через `subprocess.Popen` из `main.py` — при падении не перезапускался, а перезапуск веба убивал бота.~~ → Вынесен в отдельный systemd-юнит `running-coach-bot.service` с `Restart=on-failure`
 - ~~Два источника правды для настроек: `UserSettings` (веб) vs `User` (бот).~~ → модель `UserSettings` удалена, всё на `User`
 - ~~SQLite без WAL и `check_same_thread=False`~~ → WAL включён, `busy_timeout=5000`, `pool_pre_ping=True`
 - ~~Ручные `ALTER TABLE` в `startup()`~~ → Alembic внедрён, 4 миграции
