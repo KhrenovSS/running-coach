@@ -68,6 +68,13 @@ def _telegram_notify(user_id: int, text: str, reply_markup: dict = None):
                     f"https://api.telegram.org/bot{token}/sendMessage",
                     json=payload,
                 )
+                if response.status_code == 400:
+                    logger.warning("Telegram notify retry without Markdown (400 error)")
+                    payload.pop("parse_mode")
+                    response = client.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json=payload,
+                    )
                 response.raise_for_status()
             audit.log_telegram_sent(
                 user_id=user.id,
@@ -2419,7 +2426,6 @@ def _start_telegram_bot():
         bot_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_telegram_bot.py")
         proc = subprocess.Popen(
             [sys.executable, bot_script],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         logger.info("Telegram-бот: процесс запущен (pid=%s)", proc.pid)
     except Exception as e:

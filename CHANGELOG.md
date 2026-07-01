@@ -2,6 +2,18 @@
 
 All notable changes to this project are tracked here.
 
+## [01.07.2026]
+
+### Fixed
+- **Telegram-бот не отвечал на `/start`**: stdout/stderr бота уходили в `/dev/null` через `subprocess.DEVNULL` — любые ошибки были невидимы. Исправлено: убраны `stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL`
+- **Markdown в сообщении `/start` ломал парсер Telegram**: эмодзи `🔗` внутри `[text](url)` в legacy Markdown вызывал `BadRequest: Can't parse entities`. Переведено на plain text (Telegram сам делает URL кликабельными)
+- **HTML parse_mode не работал**: `<a href="...">` c `parse_mode="HTML"` не отрисовывался как ссылка в Telegram (возможно, из-за `localhost` в URL). Заменено на plain text
+- **AuditService.log_coros_sync_completed() TypeError**: сигнатура изменилась на `(user_id, found, processed)`, но вызовы в `main.py` и `telegram_bot.py` передавали только keyword-аргументы. Сделано `found=0, processed=0` для обратной совместимости, пока не будут передаваться реальные значения
+- **`_send_message()` и `_telegram_notify()` падали на Markdown 400**: при ошибке парсинга Markdown сообщение не доставлялось. Добавлен fallback — повторная отправка без `parse_mode` при статусе 400
+
+### Changed
+- **`WEB_APP_URL`**: `http://localhost:8000` → `http://192.168.1.101:8000` для доступа с телефона и других устройств в локальной сети
+
 ## [30.06.2026]
 
 ### Added

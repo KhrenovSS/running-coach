@@ -151,14 +151,15 @@ class AuditService:
             metadata=extra,
         )
     
-    def log_coros_sync_completed(self, user_id: int, found: int, processed: int, **extra) -> None:
+    def log_coros_sync_completed(self, user_id: int, found: int = 0, processed: int = 0, **extra) -> None:
         """Аудит: синхронизация Coros завершена (Audit: Coros sync completed)"""
+        metadata = {"found": found, "processed": processed, **extra}
         self.log_event(
             event_type=self.COROS_SYNC_COMPLETED,
             message=f"Coros sync completed: found={found}, processed={processed}",
             severity="info",
             user_id=user_id,
-            metadata={"found": found, "processed": processed, **extra},
+            metadata=metadata,
         )
     
     def log_coros_sync_failed(self, user_id: int, error: str, **extra) -> None:

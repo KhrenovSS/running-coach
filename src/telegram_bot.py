@@ -62,6 +62,14 @@ def _send_message(token: str, chat_id: int, text: str, reply_markup: dict = None
                 f"https://api.telegram.org/bot{token}/sendMessage",
                 json=payload,
             )
+            if response.status_code == 400:
+                # Markdown parsing error — retry without parse_mode (Markdown parsing error — retry without parse_mode)
+                logger.warning("Retry sendMessage without Markdown (400 error)")
+                payload.pop("parse_mode")
+                response = client.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json=payload,
+                )
             response.raise_for_status()
         if audit:
             audit.log_telegram_sent(
@@ -98,13 +106,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"👋 Привет, {user.name or username or 'бегун'}!\n"
             f"Твой Coros аккаунт уже привязан: {user.coros_email}\n\n"
-            f"[🔗 Открыть веб-интерфейс]({login_link})\n\n"
+            f"🔗 Ссылка для входа в веб-интерфейс:\n"
+            f"{login_link}\n\n"
             f"/sync — синхронизировать тренировки\n"
             f"/stats — статистика\n"
             f"/trainings — последние тренировки\n"
             f"/weight — ввести вес (или /weight 75.5)\n"
             f"/delete_me — удалить мои данные",
-            parse_mode="Markdown",
             disable_web_page_preview=True,
         )
         return ConversationHandler.END
@@ -199,14 +207,14 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
     await update.message.reply_text(
-        f"✅ *Готово!* Аккаунт Coros привязан.\n\n"
-        f"Email: `{email}`\n"
+        f"✅ Готово! Аккаунт Coros привязан.\n\n"
+        f"Email: {email}\n"
         f"Пароль: 🔒 получен (сообщение удалено из чата)\n\n"
-        f"[🔗 Открыть веб-интерфейс]({login_link})\n\n"
+        f"🔗 Ссылка для входа в веб-интерфейс:\n"
+        f"{login_link}\n\n"
         f"/sync — синхронизировать тренировки\n"
         f"/stats — статистика\n"
         f"/trainings — последние тренировки",
-        parse_mode="Markdown",
         disable_web_page_preview=True,
     )
     return ConversationHandler.END
