@@ -21,6 +21,8 @@
 - **📊 Корректное удаление** – отслеживание удалённых тренировок с подтверждением перед повторной загрузкой
 - **🔐 Шифрование** – пароли Coros шифруются Fernet‑ключом перед сохранением в БД
 - **🔔 Автоматическая синхронизация** – фоновая проверка новых данных каждые 1 час (тренировки) и 6 часов (метрики здоровья)
+- **🔑 Telegram‑аутентификация** – одноразовые токены входа через бота, session-cookie в веб-интерфейсе
+- **📝 Структурированное логирование и аудит** – ежедневная ротация, JSON/text формат, запись событий аудита в БД и файл
 
 ---
 
@@ -29,16 +31,25 @@
 ### Стек
 - **Backend**: Python + FastAPI + SQLAlchemy + SQLite
 - **Frontend**: HTML/CSS/JS (Vanilla) + Chart.js
-- **Парсеры**: `tcx_parser.py` (XML), `fit_parser.py` (бинарный), `common.py` (общая обработка)
+- **Парсеры**: `parsers/tcx_parser.py` (XML), `parsers/fit_parser.py` (бинарный), `parsers/common.py` (общая обработка)
 - **Интеграции**: Coros Training Hub (неофициальное API), Open‑Meteo (погода), Telegram Bot API
-- **Планировщик**: APScheduler (фоновые задачи, автосинхронизация)
+- **Аутентификация**: одноразовые токены (`itsdangerous`), session-cookie (`SessionMiddleware`)
+- **Логирование**: структурированное, ежедневная ротация (`TimedRotatingFileHandler`), JSON/text
+- **Аудит**: события в БД (`audit_events`) + файл (`logs/audit_*.log`)
+- **Планировщик**: `threading.Thread` с jitter (фоновые задачи, автосинхронизация)
 - **Шифрование**: Fernet (ключ из окружения)
 
 ## 🗄️ Структура базы данных
 
 Проект использует SQLite (`running_coach.db`) с управлением схемой через **Alembic** (миграции применяются автоматически при старте сервера).
 
-### Таблицы и схемы
+### Таблицы и схемы (дополнительные)
+
+Помимо перечисленных ниже, в БД есть таблицы:
+- **`auth_tokens`** — одноразовые токены входа (Telegram → web). Поля: `id`, `user_id`, `token` (UUID), `expires_at`, `used` (boolean), `created_at`.
+- **`audit_events`** — события аудита. Поля: `id`, `user_id`, `event_type`, `details` (JSON), `ip_address`, `created_at`.
+
+Также в `daily_metrics` добавлена колонка `sleep_hrv_interval_list` (TEXT, JSON) — интервалы HRV из Coros (минимальное, низкое, норма start, норма end).
 
 #### **`users`** — основной профиль пользователя
 ```sql
@@ -156,8 +167,10 @@ created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 
 Управление схемой БД — через **Alembic**. При старте сервера выполняется `alembic upgrade head`:
 
-- `c3f51ae84837` (baseline) — индексы `ix_*_user_id` на `training_sessions`, `deleted_trainings`, `weight_measurements` + unique constraint `uq_user_date` на `daily_metrics`
+- `c3f51ae84837` (baseline) — индексы `ix_*_user_id` + unique constraint `uq_user_date` на `daily_metrics`
 - `0bba2c2badec` — удалена таблица `user_settings` (настройки перенесены в `users`)
+- `eb50c256201f` — добавлена таблица `audit_events`
+- `69f28e182276` — добавлена таблица `auth_tokens`
 
 Файлы миграций: `alembic/versions/`. Конфигурация: `alembic.ini`, `alembic/env.py` (`render_as_batch=True` для совместимости с SQLite).
 
@@ -180,26 +193,66 @@ training_sessions.id                     │
 ## 📂 Структура проекта
 
 ```
-/home/nimda/projects/running-coach/running-coach/
-├── main.py                          # FastAPI‑роуты, HTML‑шаблоны
+/home/nimda/projects/running-coach/
+├── main.py                          # FastAPI‑роуты, HTML‑шаблоны, планировщик автосинхронизации
 ├── src/
 │   ├── telegram_bot.py              # Telegram‑бот (регистрация, sync, stats, daily weight)
-│   ├── models.py                    # SQLAlchemy‑модели (TrainingSession, DailyMetrics, User, …)
-│   ├── coros_client.py              # Клиент для неофициального Coros API (логин, список активностей, скачивание FIT)
+│   ├── models.py                    # SQLAlchemy‑модели (User, TrainingSession, DailyMetrics, …)
+│   ├── coros_client.py              # Клиент для неофициального Coros API
+│   ├── crypto.py                    # Шифрование паролей Coros (Fernet)
+│   ├── exceptions.py                # Типизированные исключения приложения
+│   ├── logger.py                    # re-export → src.utils.logger (обратная совместимость)
+│   ├── api/
+│   │   ├── __init__.py              # re-export: register_middleware, get_db
+│   │   ├── deps.py                  # get_current_user dependency (session-cookie)
+│   │   ├── middleware.py            # SessionMiddleware, error handlers, request logging
+│   │   └── routes/
+│   │       ├── auth.py              # /auth/telegram, /auth/logout
+│   │       └── health.py            # /health/ endpoint
+│   ├── config/
+│   │   ├── __init__.py
+│   │   └── constants.py             # Централизованный CONFIG
 │   ├── parsers/
-│   │   ├── common.py                # Общая логика: очистка треков, сегментация, классификация, погода
-│   │   ├── tcx_parser.py            # Парсинг TCX‑файлов
-│   │   └── fit_parser.py            # Парсинг FIT‑файлов (Coros, Garmin, Polar, Suunto)
-│   ├── logger.py                    # Ротация логов (5×1 MB)
-│   └── crypto.py                    # Шифрование паролей Coros (Fernet)
+│   │   ├── common.py                # Очистка треков, сегментация, классификация, погода
+│   │   ├── tcx_parser.py            # Парсинг TCX‑файлов (XML)
+│   │   └── fit_parser.py            # Парсинг FIT‑файлов (бинарный)
+│   ├── services/
+│   │   ├── audit.py                 # AuditService (события в БД + файл)
+│   │   └── auth.py                  # Генерация/верификация токенов входа
+│   └── utils/
+│       └── logger.py                # Структурированное логирование, ежедневная ротация
+├── alembic/
+│   ├── env.py
+│   ├── script.py.mako
+│   └── versions/                    # Миграции (c3f51ae8, 0bba2c2b, eb50c256, 69f28e18)
 ├── docs/
-│   └── coros_health_metrics.md      # Теоретическая база метрик здоровья Coros (HRV, RHR, tiredness, readiness, ATI/CTI, stamina)
+│   ├── ARCHITECTURE.md
+│   ├── CODE_GUIDELINES.md
+│   ├── API_ROUTES_GUIDE.md
+│   ├── ERROR_HANDLING.md
+│   ├── NAMING_CONVENTIONS.md
+│   ├── TESTING.md
+│   ├── LOGGING.md
+│   ├── CHECKLIST_API.md
+│   ├── CHECKLIST_FEATURE.md
+│   ├── CHECKLIST_MIGRATION.md
+│   ├── coros_health_metrics.md
+│   └── DEVELOPMENT_GUIDELINES.md
+├── tests/                           # Pytest‑тесты
 ├── uploads/                         # Временные загруженные файлы (.tcx, .fit)
+├── logs/                            # Ротируемые лог-файлы
+│   ├── app_YYYY-MM-DD.log
+│   └── audit_YYYY-MM-DD.log
 ├── running_coach.db                 # SQLite‑база данных
+├── pyproject.toml                   # Манифест зависимостей
+├── alembic.ini                      # Конфигурация Alembic
+├── pytest.ini                       # Конфигурация pytest
+├── .env                             # Переменные окружения (в .gitignore)
+├── .env.example                     # Шаблон переменных окружения
 ├── CHANGELOG.md                     # История изменений (датированная)
-├── AGENTS.md                        # Контекст для ИИ‑агента (правила работы, текущее состояние)
-├── README.md                        # (этот файл)
-└── run_telegram_bot.py             # Запуск бота как отдельного процесса (subprocess)
+├── AGENTS.md                        # Контекст для ИИ‑агента
+├── TECH_DEBT.md                     # Технический долг и план исправления
+└── decision_module_design.md        # Архитектура модуля аналитики
 ```
 
 ---
@@ -298,16 +351,22 @@ pip install fastapi uvicorn sqlalchemy python-telegram-bot[job-queue] fitdecode 
 
 ### Переменные окружения (`.env`)
 ```
-TELEGRAM_BOT_TOKEN=      # Токен бота от @BotFather
-COROS_CRED_KEY=          # Ключ шифрования паролей Coros (32‑байтовый base64)
-COROS_HEALTH_SYNC_INTERVAL=360   # Интервал синхронизации метрик здоровья (секунды)
-COROS_ACTIVITY_SYNC_INTERVAL=60  # Интервал синхронизации тренировок (секунды)
-GITHUB_TOKEN=            # Токен для пуша в GitHub
+TELEGRAM_BOT_TOKEN=              # Токен бота от @BotFather
+SECRET_KEY=                      # Ключ для session-cookie (itsdangerous)
+WEB_APP_URL=http://192.168.1.101:8000  # URL веб-приложения для ссылок из бота
+COROS_CRED_KEY=                  # Ключ шифрования паролей Coros (32‑байтовый base64)
+LOG_LEVEL=info                   # Уровень логирования
+LOG_FORMAT=text                  # Формат: text или json
+LOGS_DIR=logs                    # Папка логов
+SLOW_REQUEST_MS=1000            # Порог медленного запроса для лога
+GITHUB_TOKEN=                    # Токен для пуша в GitHub
+COROS_HEALTH_SYNC_INTERVAL=360  # Интервал синхронизации метрик здоровья (мин)
+COROS_ACTIVITY_SYNC_INTERVAL=60 # Интервал синхронизации тренировок (мин)
 ```
 
 ### Запуск сервера
 ```bash
-cd /home/nimda/projects/running-coach/running-coach
+cd /home/nimda/projects/running-coach
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
@@ -333,9 +392,9 @@ systemctl --user status running-coach.service
 ```
 
 ### Запуск Telegram‑бота
-Бот запускается автоматически при старте сервера (через `subprocess` в `main.py`). Вручную:
+Бот запускается автоматически при старте сервера (через `subprocess` в `main.py`, вывод идёт в journal/systemd). Вручную:
 ```bash
-cd /home/nimda/projects/running-coach/running-coach
+cd /home/nimda/projects/running-coach
 python src/telegram_bot.py
 ```
 
@@ -423,26 +482,27 @@ python src/telegram_bot.py
 **Краткий список (по приоритету):**
 
 🔴 **Критично — блокирует модуль рекомендаций:**
-- Монолитный `main.py` на 2359 строк (роуты + HTML + логика + бот в одном файле).
-- Веб захардкожен на одного пользователя (`_current_user_id = 1`), без аутентификации.
+- Монолитный `main.py` на ~2650 строк (роуты + HTML + логика + планировщик в одном файле).
+- ~~Веб захардкожен на одного пользователя (`_current_user_id = 1`), без аутентификации.~~ → ✅ решено: Telegram-аутентификация, session-cookie, `get_current_user` Depends
 
 🟠 **Серьёзно — мешает развитию:**
-- Ручное управление сессиями БД в non-endpoint функциях, detached ORM-объекты.
 - Путаница UTC vs локальное время в `DateTime`-полях.
 
 🟡 **Средне — техдолг:**
-- Бот запускается как subprocess с подавленным выводом, без рестарта.
 - Inline-HTML на f-строках (~94 места), нужен Jinja2.
 - Coros-клиент на синхронном `requests`, без TTL токена.
 - Конфигурация разбросана; ключ шифрования автогенерируется в `.env`.
 
-✅ **Решено (Sprint 1–2):**
+✅ **Решено (Sprint 1–2 + Sprint 2.4–2.5):**
 - ~~Два источника правды для настроек: `UserSettings` (веб) vs `User` (бот).~~ → модель `UserSettings` удалена, всё на `User`
 - ~~SQLite без WAL и `check_same_thread=False`~~ → WAL включён, `busy_timeout=5000`, `pool_pre_ping=True`
-- ~~Ручные `ALTER TABLE` в `startup()`~~ → Alembic внедрён, миграции `c3f51ae84837` (baseline) + `0bba2c2badec` (drop `user_settings`)
+- ~~Ручные `ALTER TABLE` в `startup()`~~ → Alembic внедрён, 4 миграции
 - ~~Нет тестов и манифеста зависимостей~~ → `pyproject.toml`, `tests/` (3 теста моделей)
 - ~~23 места с `except Exception: pass`~~ → заменены на явные типы с логгированием
 - ~~Ручное управление сессиями БД в эндпоинтах~~ → `get_db()` через `Depends` в 9 эндпоинтах
+- ~~Бот запускается как subprocess с подавленным выводом~~ → `DEVNULL` убран, вывод в journal
+- ~~Нет структурированного логирования~~ → `src/utils/logger.py` с ежедневной ротацией, JSON/text
+- ~~Нет аудита событий~~ → `AuditService`, таблица `audit_events`, покрытие всех ключевых операций
 
 Рекомендуемый порядок исправлений (4 спринта) описан в `TECH_DEBT.md` → раздел «Порядок работ».
 
@@ -457,12 +517,20 @@ python src/telegram_bot.py
 ## 🐛 Отладка
 
 ### Логи
-Логи ротируются в `app.log` (5 файлов × 1 MB). Просмотр последних 100 строк:
+Структурированные логи с ежедневной ротацией (`logs/app_YYYY-MM-DD.log`, `logs/audit_YYYY-MM-DD.log`).
+Просмотр последних 100 строк:
 ```bash
-tail -n 100 app.log
+tail -n 100 logs/app_$(date +%F).log
 ```
 
 Через веб‑интерфейс: `/logs?lines=100`
+
+Формат (text/json) и уровень логирования настраиваются через `.env`:
+```
+LOG_LEVEL=info
+LOG_FORMAT=text     # или json
+LOGS_DIR=logs
+```
 
 ### Остановка сервера
 ```bash
@@ -491,4 +559,4 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 ---
 
-*Последнее обновление: 29.06.2026*
+*Последнее обновление: 01.07.2026*

@@ -5,6 +5,7 @@ All notable changes to this project are tracked here.
 ## [01.07.2026]
 
 ### Fixed
+- **`last_coros_sync` оставался `NULL` когда все активности уже импортированы**: ранний `return` при `new_acts = []` никогда не обновлял `last_coros_sync`, поэтому каждый цикл автосинхронизации запрашивал все активности с `since=None`. Исправлено: перед ранним возвратом `last_coros_sync` обновляется до последней активности из ответа API — и в автосинке, и в ручной синхронизации.
 - **Telegram-бот не отвечал на `/start`**: stdout/stderr бота уходили в `/dev/null` через `subprocess.DEVNULL` — любые ошибки были невидимы. Исправлено: убраны `stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL`
 - **Markdown в сообщении `/start` ломал парсер Telegram**: эмодзи `🔗` внутри `[text](url)` в legacy Markdown вызывал `BadRequest: Can't parse entities`. Переведено на plain text (Telegram сам делает URL кликабельными)
 - **HTML parse_mode не работал**: `<a href="...">` c `parse_mode="HTML"` не отрисовывался как ссылка в Telegram (возможно, из-за `localhost` в URL). Заменено на plain text

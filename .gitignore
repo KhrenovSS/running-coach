@@ -28,6 +28,7 @@ Thumbs.db
 .env.local
 
 # Logs
+logs/
 *.log
 
 # Discussion files

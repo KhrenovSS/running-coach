@@ -1787,6 +1787,15 @@ async def coros_sync(db: Session = Depends(get_db),
 
             new_acts = [a for a in activities if not already_imported(a['start_time'])]
             if not new_acts:
+                # Даже если ничего не импортировано, обновляем last_coros_sync
+                # на последнюю активность из ответа API (Even if nothing imported,
+                # advance last_coros_sync to latest activity from API response)
+                for a in activities:
+                    if us.last_coros_sync is None or a['start_time'] > us.last_coros_sync:
+                        us.last_coros_sync = a['start_time']
+                if us.last_coros_sync:
+                    db.commit()
+                    logger.info("Синхронизация Coros: last_coros_sync обновлён: %s", us.last_coros_sync)
                 progress['step'] = 'done'
                 progress['message'] = 'Все активности уже импортированы'
                 progress['total'] = 0
@@ -2288,6 +2297,13 @@ def _auto_sync_activities_inner(user_id: int) -> int:
 
         new_acts = [a for a in activities if not already_imported(a['start_time'])]
         if not new_acts:
+            # Даже если ничего не импортировано, обновляем last_coros_sync
+            for a in activities:
+                if us.last_coros_sync is None or a['start_time'] > us.last_coros_sync:
+                    us.last_coros_sync = a['start_time']
+            if us.last_coros_sync:
+                db.commit()
+                logger.info("Автосинхронизация: last_coros_sync обновлён: %s", us.last_coros_sync)
             logger.info("Автосинхронизация активностей: все активности уже в БД")
             return 0
 
