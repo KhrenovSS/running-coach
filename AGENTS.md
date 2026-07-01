@@ -256,7 +256,7 @@ def calc_avg_pace(...):
   2. **Сделать commit (если есть незакоммиченные изменения) + push** в GitHub. Это «итог дня».
   3. Сообщить пользователю, что изменения сохранены и запушены.
 
-## Текущее состояние (Session — 30.06.2026, вечер)
+## Текущее состояние (Session — 01.07.2026, утро)
 
 **Сервер:** запущен через systemd --user (`running-coach.service`), автозапуск при включении ПК  
 **Команда управления:** `systemctl --user start/stop/status/restart running-coach.service`  
@@ -265,50 +265,28 @@ def calc_avg_pace(...):
 set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/nimda/projects/running-coach && git push "https://KhrenovSS:${GITHUB_TOKEN}@github.com/KhrenovSS/running-coach.git" main
 ```
 
-**БД:** SQLite, файл `running_coach.db`, есть данные за 29-30.06.2026
+**БД:** SQLite, файл `running_coach.db`, данные за 30.06–01.07.2026. `last_coros_sync` был NULL → после фикса должен обновиться при следующем цикле автосинхронизации
 
-**Что сделано за сессию 30.06.2026 (Sprint 2 — Alembic + UserSettings removal + get_db + Logging/Audit):**
-1. **Alembic внедрён**: baseline-миграция `c3f51ae84837` (индексы + unique constraint), ALTER TABLE блок удалён из startup, заменён на `alembic upgrade head`
-2. **UserSettings удалён**: модель удалена, таблица `user_settings` дропнута миграцией `0bba2c2badec`. Все обращения переведены на `User`:
-   - `get_settings()` читает из User (прокси `.weight` → `weight_kg`)
-   - `coros_sync`, `coros_sync_health` — UserSettings → User
-   - `_auto_sync_health_inner`, `_auto_sync_activities_inner` — UserSettings → User
-   - Telegram bot регистрация и sync — UserSettings → User
-3. **Чистка**: `SAOperationalError` импорт удалён, мёртвый код миграции из startup убран
-4. **Sprint 2.2 — get_db() via Depends**: `get_db()` зависимость добавлена в `src/models.py`, 9 эндпоинтов переведены на `db: Session = Depends(get_db)` (index, upload_files, confirm_upload, confirm_deleted, session_detail, session_delete, settings_save, coros_sync, coros_sync_health). `render_page(db, ...)` принимает db параметром. Non-endpoint функции оставлены на `SessionLocal()`
-5. **Fix**: `coros_sync()` падал с `Internal Server Error` — отсутствовал `from src.models import User` (коммит 8b4a63d)
-6. **README обновлён**: секция техдолга — решённые пункты помечены ✅, автомиграция заменена на Alembic
-7. **Логирование и аудит (Sprint 2.4)**:
-   - `src/utils/logger.py` — структурированные логи, ежедневная ротация, JSON/text форматы
-   - `src/services/audit.py` — `AuditService` с событиями: `training.uploaded`, `training.deleted`, `settings.changed`, `coros.sync.*`, `telegram.*`
-   - `src/api/middleware.py` — централизованная обработка ошибок + логирование запросов с замером времени
-   - `src/api/routes/health.py` — health check endpoint (`/health/`)
-   - `src/exceptions.py` — типизированные исключения (`AppError`, `NotFoundError`, `CorosAPIError`, etc.)
-   - `src/config/constants.py` — централизованный `CONFIG`
-   - Alembic-миграция `eb50c256201f` — таблица `audit_events`
-   - Аудит интегрирован в `main.py` (upload, delete, settings, Coros sync, Telegram notify) и `src/telegram_bot.py`
-   - Документация: `docs/LOGGING.md`, `.env.example`
-8. **Аутентификация через Telegram (Sprint 2.5)**:
-   - Убран `_current_user_id = 1`; все endpoints используют `current_user: User = Depends(get_current_user)`
-   - `src/services/auth.py` — генерация и проверка одноразовых токенов для входа
-   - `src/api/routes/auth.py` — `/auth/telegram?token=...` и `/auth/logout`
-   - `src/api/deps.py` — `get_current_user` из session-cookie
-   - `SessionMiddleware` в `src/api/middleware.py` (требует `SECRET_KEY`)
-   - Telegram-бот при `/start` и после регистрации отправляет ссылку для входа в веб
-   - Alembic-миграция `69f28e182276` — таблица `auth_tokens`
-   - Web UI: имя пользователя и кнопка «Выйти» на главной, деталях тренировки и настройках
-   - Автосинхронизация Coros теперь обходит всех активных пользователей с учётными данными Coros
-9. **Коммиты**: `aec48aa` (Sprint 2.4 logging/audit), (в процессе) Sprint 2.5 Telegram auth
+**Спринт 2 завершён.** Sprint 2.4 (logging/audit) + Sprint 2.5 (Telegram auth) реализованы, работает вход через Telegram, аудит событий, структурированные логи.
 
-**Текущее состояние**: Спринт 2 завершён (Alembic + UserSettings + get_db + Logging/Audit + Telegram auth). Сервер запущен, тесты проходят, вход через Telegram-ссылку работает.
+**Что сделано за сессию 01.07.2026 (debugging Sprint 2.4–2.5 + фиксы):**
+1. **Fix: `last_coros_sync` оставался NULL** — ранний `return` в `_auto_sync_activities_inner` и `coros_sync()` при `new_acts = []` никогда не обновлял `last_coros_sync`. Исправлено: перед ранним возвратом `last_coros_sync` обновляется до последней активности из ответа API. (коммит `b7b5595`)
+2. **Fix: логгер молчал в автосинке** — Python 3.13: uvicorn вызывает `dictConfig(LOGGING_CONFIG)` при старте → `logging.shutdown()` закрывает все хендлеры, `_handle_existing_loggers()` ставит `logger.disabled = True`. Добавлена `fix_logger_after_uvicorn()` в `src/utils/logger.py`, вызывается из `startup()` перед `_start_auto_sync()`. (коммит `53ebb0e`)
+3. **Fix: `_telegram_notify` TypeError** — передавался без `user_id`, вызов обёрнут в try/except. (коммит `d9a8e14`)
+4. **Fix: бот не отвечал на `/start`** — `subprocess.DEVNULL` прятал stdout/stderr; Markdown/HTML эмодзи в `[text](url)` ломали парсер Telegram; `log_coros_sync_completed` TypeError (found/processed). (коммит `fe64276`)
+5. **README обновлён** — структура, стек, таблицы БД, миграции, tech debt, переменные окружения приведены в соответствие Sprint 2.4–2.5. (коммит `b7b5595`)
+6. **`.gitignore`** — добавлен `logs/` в исключения. (коммит `b7b5595`)
+7. **CHANGELOG обновлён** — запись о фиксе `last_coros_sync`. (коммит `b7b5595`)
+
+**Все коммиты запушены** (`53ebb0e`, `fe64276`, `d9a8e14`, `b7b5595`).
+
+**Известные проблемы:**
+- `last_coros_sync` может оставаться NULL ещё один цикл, пока не появится новая активность (либо можно перезапустить сервер и подождать)
 
 **Следующие шаги:**
-- ⬜ Доработки UI/UX по необходимости
-
-**Долгосрочные цели (после техдолга):**
 - ⬜ **Модуль аналитики** — 8 этапов из `decision_module_design.md`
-- ⬜ **Запуск бота** — добавить токен Telegram, протестировать
+- ⬜ **Устранить техдолг** (см. `TECH_DEBT.md`): вынести роуты из main.py, Jinja2, async coros_client и др.
 - ⬜ **Фильтр по типу** тренировки на главной
 - ⬜ **Общая дистанция и время** за неделю/месяц
 
-**Важно:** при продолжении работы сначала прочитать `AGENTS.md` до конца, чтобы восстановить контекст проекта.
+**Важно:** при продолжении работы сначала прочитать `AGENTS.md` и `README.md` — они содержат актуальную структуру проекта, правила написания кода и текущее состояние. Чтобы не тратить токены на повторное исследование кода, просто скажи: «продолжим с того же места» или сошлиcь на эту сессию.
