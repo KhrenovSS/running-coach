@@ -271,10 +271,11 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 
 **Спринт 2 завершён.** Sprint 2.4 (logging/audit) + Sprint 2.5 (Telegram auth) реализованы, работает вход через Telegram, аудит событий, структурированные логи.
 
-**Что сделано за сессию 01.07.2026 (вечерний фикс — вынос бота в systemd):**
+**Что сделано за сессию 01.07.2026 (вечерний фикс — вынос бота в systemd + починка опроса веса):**
 1. **Telegram-бот вынесен в отдельный systemd-юнит** (`running-coach-bot.service`): больше не запускается как `subprocess.Popen` из `main.py`. Бот живёт независимо, `Restart=on-failure` — при падении перезапускается через 5 секунд.
 2. **Из `main.py` удалён `_start_telegram_bot()`** — и вызов в `startup()`, и сама функция. Ботом управляет systemd.
-3. **README/AGENTS.md/CHANGELOG обновлены.**
+3. **Починен ежедневный опрос веса**: добавлено расписание 9/12/15/18 часов (вместо одного в 9:00), немедленный запуск при старте бота после 9:00. Исправлен баг с `is_active=NULL` в БД (фильтр не находил пользователя). Исправлен `run_once` (переведён на `datetime + timedelta`).
+4. **README/AGENTS.md/CHANGELOG обновлены.**
 
 **Известные проблемы:**
 - После перезагрузки сервера нужно убедиться, что `running-coach-bot.service` включён (`systemctl --user enable running-coach-bot.service`)
