@@ -29,7 +29,7 @@
 ## 🏗️ Архитектура
 
 ### Стек
-- **Backend**: Python + FastAPI + SQLAlchemy + SQLite
+- **Backend**: Python + FastAPI + SQLAlchemy + PostgreSQL 16 (через Docker Compose)
 - **Frontend**: HTML/CSS/JS (Vanilla) + Chart.js
 - **Парсеры**: `parsers/tcx_parser.py` (XML), `parsers/fit_parser.py` (бинарный), `parsers/common.py` (общая обработка)
 - **Интеграции**: Coros Training Hub (неофициальное API), Open‑Meteo (погода), Telegram Bot API
@@ -38,10 +38,11 @@
 - **Аудит**: события в БД (`audit_events`) + файл (`logs/audit_*.log`)
 - **Планировщик**: `threading.Thread` с jitter (фоновые задачи, автосинхронизация)
 - **Шифрование**: Fernet (ключ из окружения)
+- **Развёртывание**: Docker Compose — 3 контейнера: `db` (postgres:16-alpine), `app` (uvicorn), `bot` (run_telegram_bot.py)
 
 ## 🗄️ Структура базы данных
 
-Проект использует SQLite (`running_coach.db`) с управлением схемой через **Alembic** (миграции применяются автоматически при старте сервера).
+Проект использует **PostgreSQL 16** (через Docker Compose, контейнер `db`) с управлением схемой через **Alembic** (миграции применяются автоматически при старте контейнера `app`). Для локальной разработки поддерживается fallback на SQLite (`DATABASE_URL` не задан → `running_coach.db`).
 
 ### Таблицы и схемы (дополнительные)
 
@@ -54,6 +55,8 @@
 #### **`users`** — основной профиль пользователя
 ```sql
 id INTEGER PRIMARY KEY
+email VARCHAR(255) UNIQUE             -- Email для входа (login)
+password_hash VARCHAR(255)            -- bcrypt-хеш пароля
 telegram_chat_id BIGINT UNIQUE          -- ID чата Telegram (для бота)
 telegram_username VARCHAR(255)          -- @username пользователя
 name VARCHAR(255)                       -- Имя
@@ -65,7 +68,8 @@ goal_type VARCHAR(50)                   -- Цель (lose_weight/10k/half_marath
 goal_target VARCHAR(255)                -- Конкретная цель («sub 60 min 10k»)
 coros_email VARCHAR(255)                -- Email для Coros Training Hub
 coros_password VARCHAR(255)             -- Пароль Coros (шифрованный Fernet)
-last_coros_sync DATETIME                -- Время последней синхронизации с Coros
+last_coros_sync DATETIME                -- Время последней синхронизации тренировок с Coros
+last_health_sync_at DATETIME            -- Время последней синхронизации метрик здоровья
 max_hr INTEGER DEFAULT 177              -- Максимальный пульс (уд/мин)
 max_credible_pace FLOAT DEFAULT 3.0     -- Максимально правдоподобный темп (мин/км)
 max_gps_jump_m FLOAT DEFAULT 100.0      -- Макс. скачок GPS между точками (м)
@@ -165,14 +169,11 @@ created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 
 ### Миграции схемы (Alembic)
 
-Управление схемой БД — через **Alembic**. При старте сервера выполняется `alembic upgrade head`:
+Управление схемой БД — через **Alembic**. При старте контейнера `app` выполняется `alembic upgrade head`:
 
-- `c3f51ae84837` (baseline) — индексы `ix_*_user_id` + unique constraint `uq_user_date` на `daily_metrics`
-- `0bba2c2badec` — удалена таблица `user_settings` (настройки перенесены в `users`)
-- `eb50c256201f` — добавлена таблица `audit_events`
-- `69f28e182276` — добавлена таблица `auth_tokens`
+- `f75d2362cf9f` (fresh baseline) — единая database-agnostic миграция: все таблицы (users, training_sessions, daily_metrics, deleted_trainings, weight_measurements, training_feedback, audit_events, auth_tokens) с индексами и ограничениями. Заменены 4 старые SQLite-only миграции.
 
-Файлы миграций: `alembic/versions/`. Конфигурация: `alembic.ini`, `alembic/env.py` (`render_as_batch=True` для совместимости с SQLite).
+Файлы миграций: `alembic/versions/`. Конфигурация: `alembic.ini`, `alembic/env.py` (`DATABASE_URL` из env, `render_as_batch=True` только для SQLite).
 
 ### Отношения (Foreign Keys)
 ```
@@ -218,13 +219,13 @@ training_sessions.id                     │
 │   │   └── fit_parser.py            # Парсинг FIT‑файлов (бинарный)
 │   ├── services/
 │   │   ├── audit.py                 # AuditService (события в БД + файл)
-│   │   └── auth.py                  # Генерация/верификация токенов входа
+│   │   └── auth.py                  # Генерация/верификация токенов входа, bcrypt
 │   └── utils/
 │       └── logger.py                # Структурированное логирование, ежедневная ротация
 ├── alembic/
 │   ├── env.py
 │   ├── script.py.mako
-│   └── versions/                    # Миграции (c3f51ae8, 0bba2c2b, eb50c256, 69f28e18)
+│   └── versions/                    # Миграции (fresh baseline f75d2362cf9f)
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   ├── CODE_GUIDELINES.md
@@ -243,17 +244,17 @@ training_sessions.id                     │
 ├── logs/                            # Ротируемые лог-файлы
 │   ├── app_YYYY-MM-DD.log
 │   └── audit_YYYY-MM-DD.log
-├── running_coach.db                 # SQLite‑база данных
-├── pyproject.toml                   # Манифест зависимостей
+├── Dockerfile                       # Python 3.13-slim, зависимости, копирование кода
+├── docker-compose.yml               # 3 сервиса: db, app, bot
+├── .dockerignore                    # Исключения для Docker-образа
+├── pyproject.toml                   # Манифест зависимостей (version 2.0.0)
 ├── alembic.ini                      # Конфигурация Alembic
 ├── pytest.ini                       # Конфигурация pytest
 ├── .env                             # Переменные окружения (в .gitignore)
 ├── .env.example                     # Шаблон переменных окружения
-├── running-coach-web.service        # systemd-юнит веб-сервера
-├── running-coach-bot.service        # systemd-юнит Telegram-бота
 ├── CHANGELOG.md                     # История изменений (датированная)
 ├── AGENTS.md                        # Контекст для ИИ‑агента
-├── TECH_DEBT.md                     # Технический долг и план исправления
+├── TECH_DEBT.md                     # Технический долг и план исправления (спринты 1–6)
 └── decision_module_design.md        # Архитектура модуля аналитики
 ```
 
@@ -274,14 +275,16 @@ training_sessions.id                     │
 
 ## 📱 Telegram‑бот
 
-Бот управляется через `/src/telegram_bot.py`. Запускается как отдельный процесс при старте сервера.
+Бот управляется через `/src/telegram_bot.py`. Запускается в отдельном Docker-контейнере `bot` (см. `docker-compose.yml`). Для локальной разработки — `python run_telegram_bot.py`.
 
 ### Доступные команды
-- `/start` – регистрация (Coros email + пароль, пароль удаляется после ввода)
+- `/start` – регистрация (Coros email + пароль, пароль удаляется после ввода) или вход (если уже зарегистрирован)
 - `/sync` – полная синхронизация с Coros (тренировки + метрики здоровья)
 - `/stats` – статистика за всё время и за 7 дней
 - `/trainings` – последние 5 тренировок с деталями
 - `/weight <кг>` – ручной ввод веса (например, `/weight 75.5`)
+- `/login_info` – показать email для входа в веб-интерфейс
+- `/reset_password` – сменить пароль (бот показывает 2 сек и удаляет)
 - `/delete_me` – удалить все данные пользователя (тренировки, метрики, настройки)
 
 ### Обратная связь по тренировкам
@@ -346,64 +349,62 @@ training_sessions.id                     │
 
 ## 🚀 Запуск
 
-### Предварительные требования
-```bash
-pip install fastapi uvicorn sqlalchemy python-telegram-bot[job-queue] fitdecode timezonefinder openmeteo-requests requests fernet
-```
-
 ### Переменные окружения (`.env`)
 ```
 TELEGRAM_BOT_TOKEN=              # Токен бота от @BotFather
 SECRET_KEY=                      # Ключ для session-cookie (itsdangerous)
 WEB_APP_URL=http://192.168.1.101:8000  # URL веб-приложения для ссылок из бота
 COROS_CRED_KEY=                  # Ключ шифрования паролей Coros (32‑байтовый base64)
+POSTGRES_PASSWORD=               # Пароль PostgreSQL (для Docker Compose)
+DATABASE_URL=                    # postgresql://running_coach:...@db:5432/running_coach
 LOG_LEVEL=info                   # Уровень логирования
 LOG_FORMAT=text                  # Формат: text или json
 LOGS_DIR=logs                    # Папка логов
 SLOW_REQUEST_MS=1000            # Порог медленного запроса для лога
 GITHUB_TOKEN=                    # Токен для пуша в GitHub
-COROS_HEALTH_SYNC_INTERVAL=360  # Интервал синхронизации метрик здоровья (мин)
-COROS_ACTIVITY_SYNC_INTERVAL=60 # Интервал синхронизации тренировок (мин)
+COROS_HEALTH_SYNC_INTERVAL=360  # Интервал синхронизации метрик здоровья (мин) — глобальный, будет заменён per-user в Sprint 6
+COROS_ACTIVITY_SYNC_INTERVAL=60 # Интервал синхронизации тренировок (мин) — глобальный, будет заменён per-user в Sprint 6
 ```
 
-### Запуск сервера
+### Запуск через Docker Compose (рекомендуется)
+
+3 контейнера: `db` (PostgreSQL 16), `app` (FastAPI/uvicorn), `bot` (Telegram-бот).
+
+```bash
+# Запуск (нужен sudo для docker)
+sudo bash -c 'cd /home/nimda/projects/running-coach && set -a && source .env && set +a && export POSTGRES_PASSWORD && docker compose up -d'
+
+# Остановка
+sudo bash -c 'cd /home/nimda/projects/running-coach && docker compose down'
+
+# Статус
+sudo docker compose -f /home/nimda/projects/running-coach/docker-compose.yml ps
+
+# Логи
+sudo docker logs running-coach-app-1 --tail 50
+sudo docker logs running-coach-bot-1 --tail 50
+sudo docker logs running-coach-db-1 --tail 50
+```
+
+Архитектура:
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   db        │     │   app       │     │   bot       │
+│ postgres:16 │◄────│ uvicorn     │     │ python      │
+│ alpine      │◄────│ main:app    │     │ run_bot()   │
+│ port 5432   │     │ port 8000   │     │             │
+└─────────────┘     └─────────────┘     └─────────────┘
+     │                   │                   │
+     ▼                   │                   │
+volume: pgdata      uploads/ logs/      (нет volumes)
+```
+
+### Запуск для локальной разработки (без Docker)
 ```bash
 cd /home/nimda/projects/running-coach
+
+# Веб-сервер (используется SQLite, если DATABASE_URL не задан)
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### Запуск как служба systemd (рекомендуется)
-Сервер и Telegram-бот работают как отдельные systemd-сервисы с автоматическим перезапуском.
-
-Файлы юнитов лежат в корне проекта и копируются в `~/.config/systemd/user/`:
-
-```bash
-cp running-coach-web.service ~/.config/systemd/user/running-coach.service
-cp running-coach-bot.service ~/.config/systemd/user/
-
-systemctl --user daemon-reload
-
-# Веб-сервер
-systemctl --user enable running-coach.service
-systemctl --user start running-coach.service
-
-# Telegram-бот (отдельный процесс, Restart=on-failure)
-systemctl --user enable running-coach-bot.service
-systemctl --user start running-coach-bot.service
-```
-
-### Команды управления
-```bash
-systemctl --user start/stop/status/restart running-coach.service      # веб-сервер
-systemctl --user start/stop/status/restart running-coach-bot.service  # Telegram-бот
-```
-
-### Запуск вручную (без systemd)
-```bash
-cd /home/nimda/projects/running-coach
-
-# Веб-сервер
-uvicorn main:app --host 0.0.0.0 --port 8000
 
 # Telegram-бот (отдельный терминал)
 python run_telegram_bot.py
@@ -426,9 +427,14 @@ python run_telegram_bot.py
 - [x] Отслеживание удалённых тренировок (избежание дублирования)
 - [x] Миграции схемы БД через Alembic (автоматически при старте)
 - [x] Структурированное логирование и аудит (Level 2 observability)
-- [x] Аутентификация через Telegram-бота для веб-интерфейса
+- [x] Аутентификация: email+пароль (bcrypt), Telegram-токены, session-cookie
+- [x] PostgreSQL + Docker Compose (3 контейнера: db, app, bot) — Sprint 5
 
-### ⬜ Прочие планы (UI / интеграции)
+### ⬜ В работе / запланировано
+- [ ] **Sprint 6** (TECH_DEBT.md): настраиваемая частота синхронизации Coros per-user, баннер для новых пользователей, ручная первая синхронизация
+- [ ] **Sprint 3** (TECH_DEBT.md): декомпозиция main.py, Jinja2, pydantic-settings
+- [ ] **Sprint 4** (TECH_DEBT.md): стандартизация времени (UTC), Coros-клиент на httpx.AsyncClient
+- [ ] **Модуль аналитики** — 8 этапов из `decision_module_design.md`
 - [ ] Фильтр по типу тренировки на главной (Все / Бег / Ходьба)
 - [ ] Общая дистанция и время за неделю/месяц
 - [ ] Мобильное PWA (Progressive Web App)
@@ -504,19 +510,19 @@ python run_telegram_bot.py
 - Coros-клиент на синхронном `requests`, без TTL токена.
 - Конфигурация разбросана; ключ шифрования автогенерируется в `.env`.
 
-✅ **Решено (Sprint 1–2 + Sprint 2.4–2.5 + hotfix):**
-- ~~Telegram-бот запускался через `subprocess.Popen` из `main.py` — при падении не перезапускался, а перезапуск веба убивал бота.~~ → Вынесен в отдельный systemd-юнит `running-coach-bot.service` с `Restart=on-failure`
-- ~~Два источника правды для настроек: `UserSettings` (веб) vs `User` (бот).~~ → модель `UserSettings` удалена, всё на `User`
-- ~~SQLite без WAL и `check_same_thread=False`~~ → WAL включён, `busy_timeout=5000`, `pool_pre_ping=True`
-- ~~Ручные `ALTER TABLE` в `startup()`~~ → Alembic внедрён, 4 миграции
+✅ **Решено (Sprint 1–2 + Sprint 5):**
+- ~~Telegram-бот запускался через `subprocess.Popen` из `main.py`~~ → Вынесен в отдельный процесс (Docker-контейнер `bot`)
+- ~~Два источника правды для настроек: `UserSettings` (веб) vs `User` (бот)~~ → модель `UserSettings` удалена, всё на `User`
+- ~~SQLite без WAL~~ → PostgreSQL 16 в Docker (SQLite — fallback для локальной разработки с WAL)
+- ~~Ручные `ALTER TABLE` в `startup()`~~ → Alembic, fresh baseline `f75d2362cf9f`
 - ~~Нет тестов и манифеста зависимостей~~ → `pyproject.toml`, `tests/` (3 теста моделей)
 - ~~23 места с `except Exception: pass`~~ → заменены на явные типы с логгированием
 - ~~Ручное управление сессиями БД в эндпоинтах~~ → `get_db()` через `Depends` в 9 эндпоинтах
-- ~~Бот запускается как subprocess с подавленным выводом~~ → `DEVNULL` убран, вывод в journal
 - ~~Нет структурированного логирования~~ → `src/utils/logger.py` с ежедневной ротацией, JSON/text
 - ~~Нет аудита событий~~ → `AuditService`, таблица `audit_events`, покрытие всех ключевых операций
+- ~~Веб захардкожен на одного пользователя~~ → email+пароль (bcrypt), session-cookie, `get_current_user` Depends
 
-Рекомендуемый порядок исправлений (4 спринта) описан в `TECH_DEBT.md` → раздел «Порядок работ».
+Рекомендуемый порядок исправлений (6 спринтов) описан в `TECH_DEBT.md` → раздел «Порядок работ».
 
 ---
 
@@ -544,21 +550,16 @@ LOG_FORMAT=text     # или json
 LOGS_DIR=logs
 ```
 
-### Остановка сервера
+### Очистка БД (PostgreSQL в Docker)
 ```bash
-pkill -9 -f "uvicorn main"
-```
+# Остановить контейнеры
+sudo bash -c 'cd /home/nimda/projects/running-coach && docker compose down'
 
-### Очистка БД
-```bash
-# 1. Остановить сервер
-pkill -9 -f "uvicorn main"
+# Удалить volume с данными PostgreSQL
+sudo docker volume rm running-coach_pgdata
 
-# 2. Удалить файл БД
-rm running_coach.db
-
-# 3. Запустить сервер заново
-uvicorn main:app --host 0.0.0.0 --port 8000
+# Запустить заново (БД создастся с нуля)
+sudo bash -c 'cd /home/nimda/projects/running-coach && set -a && source .env && set +a && export POSTGRES_PASSWORD && docker compose up -d'
 ```
 
 ---
@@ -571,4 +572,4 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 ---
 
-*Последнее обновление: 01.07.2026*
+*Последнее обновление: 01.07.2026 (вечер)*

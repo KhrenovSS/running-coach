@@ -4,8 +4,9 @@
 Персональный AI-тренер для бега. Парсит TCX-файлы (любые часы: Garmin, Coros, Polar, Suunto), анализирует тренировки, определяет тип (интервальная/темповая/long/recovery), разбивает на сегменты, считает пульсовые зоны, очищает GPS-ошибки.
 
 ## Стек
-Python + FastAPI + SQLite, написано через ИИ (open code style).  
-Сервер: `uvicorn main:app --host 0.0.0.0 --port 8000`
+Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через ИИ (open code style).  
+Сервер: Docker Compose — 3 контейнера (`db`, `app`, `bot`).  
+Локальная разработка: `uvicorn main:app --host 0.0.0.0 --port 8000` (SQLite fallback).
 
 ## Документация для разработки
 
@@ -256,7 +257,7 @@ def calc_avg_pace(...):
   2. **Сделать commit (если есть незакоммиченные изменения) + push** в GitHub. Это «итог дня».
   3. Сообщить пользователю, что изменения сохранены и запушены.
 
-## Текущее состояние (Session — 01.07.2026, ночь)
+## Текущее состояние (Session — 01.07.2026, вечер)
 
 **Развёртывание:** Docker Compose, 3 контейнера (`db` + `app` + `bot`)  
 **Команды управления:**
@@ -280,11 +281,12 @@ sudo docker logs running-coach-db-1 --tail 50
 set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/nimda/projects/running-coach && git push "https://KhrenovSS:${GITHUB_TOKEN}@github.com/KhrenovSS/running-coach.git" main
 ```
 
-**БД:** PostgreSQL 16 (контейнер `running-coach-db-1`), volume `pgdata`. Данных нет — нужно создать пользователя через Telegram `/start`.
+**БД:** PostgreSQL 16 (контейнер `running-coach-db-1`), volume `pgdata`.
+**Пользователь зарегистрирован:** user id=1, email=khrenov.ss@gmail.com, coros_email=khrenov.ss@gmail.com, 0 тренировок (первая синхронизация — вручную через 🔄 Coros Sync).
 
 **Systemd-юниты удалены.** Раньше использовались `running-coach.service` и `running-coach-bot.service` — теперь Docker управляет запуском.
 
-**Спринты 1-2, 4-5 завершены.** Sprint 5 (PostgreSQL + Docker) реализован.
+**Спринты 1-2, 4-5 завершены.** Sprint 6 (per-user частота синхронизации Coros) — план в `TECH_DEBT.md`, не реализован.
 
 **Что сделано за сессию 01.07.2026 (ночь — PostgreSQL + Docker):**
 1. **PostgreSQL + Docker (3 контейнера)**: `db` (postgres:16-alpine), `app` (uvicorn), `bot` (run_telegram_bot.py)
@@ -297,9 +299,11 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 8. **Systemd-юниты удалены** — Docker управляет запуском
 9. **DNS**: `/etc/resolv.conf` переключён на 8.8.8.8 (роутер 192.168.1.1 не резолвит CloudFront)
 
-**Что сделано за сессию 01.07.2026 (вечер — password auth):**
+**Что сделано за сессию 01.07.2026 (вечер — password auth + Sprint 6 план):**
 1. **Email+password аутентификация**: bcrypt, `/login`, `/register`, `/reset_password` в боте
 2. **Telegram-бот**: `/login_info`, `/reset_password`
+3. **Пользователь зарегистрирован**: user id=1, email=khrenov.ss@gmail.com, Coros привязан
+4. **Sprint 6 план** добавлен в `TECH_DEBT.md`: per-user настраиваемая частота синхронизации Coros (10 задач 6.1–6.10), ручная первая синхронизация, баннер для новых пользователей
 
 **Что сделано за сессию 01.07.2026 (день — вынос бота в systemd + опрос веса):**
 1. **Telegram-бот вынесен в отдельный systemd-юнит** (теперь заменён на Docker)
@@ -308,12 +312,14 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 **Известные проблемы:**
 - Docker требует `sudo` (пользователь `nimda` в группе `docker`, но может потребоваться перелогин)
 - DNS: `/etc/resolv.conf` перезаписывается на 8.8.8.8 — после перезагрузки может вернуться 192.168.1.1
-- Существующие данные SQLite не перенесены — нужно создать пользователя через Telegram `/start`
+- Существующие данные SQLite не перенесены — пользователь создан заново через Telegram `/start`
 
 **Следующие шаги:**
-- ⬜ Создать пользователя: /start в Telegram → ссылка на /register → установить email+пароль
-- ⬜ Настроить автозапуск Docker при включении ПК (`sudo systemctl enable docker` — уже сделано)
+- ✅ Создать пользователя: /start в Telegram → ссылка на /register → установить email+пароль — **выполнено**
+- ⬜ Первая синхронизация: пользователь нажимает 🔄 Coros Sync в веб-интерфейсе
+- ⬜ **Спринт 6** (TECH_DEBT.md): per-user частота синхронизации, баннер, настройки
 - ⬜ **Спринт 3** (TECH_DEBT.md): декомпозиция main.py, Jinja2, pydantic-settings
+- ⬜ **Спринт 4** (TECH_DEBT.md): стандартизация времени (UTC), Coros-клиент на httpx
 - ⬜ **Модуль аналитики** — 8 этапов из `decision_module_design.md`
 - ⬜ **Фильтр по типу** тренировки на главной
 - ⬜ **Общая дистанция и время** за неделю/месяц
