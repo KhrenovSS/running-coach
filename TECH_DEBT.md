@@ -600,15 +600,15 @@ running-coach-worker.service  # APScheduler для синков/напомина
 Это **Этап -1** перед разработкой модуля аналитики (`decision_module_design.md`, Этап 0).
 
 1. **Спринт 1 — фундамент окружения** (1–2 дня)
-   - [ ] п.7: `pyproject.toml` + `pytest` + папка `tests/`.
-   - [ ] п.4: SQLite WAL + `check_same_thread=False` (быстрый фикс).
-   - [ ] п.9: убрать `except: pass` в миграциях и автосинке.
+   - [x] п.7: `pyproject.toml` + `pytest` + папка `tests/`.
+   - [x] п.4: SQLite WAL + `check_same_thread=False` (быстрый фикс).
+   - [x] п.9: убрать `except: pass` в миграциях и автосинке.
 
 2. **Спринт 2 — данные и пользователи** (2–4 дня)
-   - [ ] п.5: внедрить Alembic, baseline-миграцию.
-   - [ ] п.3: убрать `UserSettings`, всё на `User`.
-   - [ ] п.2: убрать `_current_user_id = 1`, добавить аутентификацию.
-   - [ ] п.6: ввести `get_db()` через `Depends`, починить detached-объекты.
+   - [x] п.5: внедрить Alembic, baseline-миграцию.
+   - [x] п.3: убрать `UserSettings`, всё на `User`.
+   - [x] п.2: убрать `_current_user_id = 1`, добавить аутентификацию (email+password, bcrypt, `/login`, `/register`, `/reset_password` в боте).
+   - [x] п.6: ввести `get_db()` через `Depends`, починить detached-объекты.
 
 3. **Спринт 3 — структура и UI** (3–5 дней)
    - [ ] п.1: декомпозиция `main.py` на `web/routes`, `services`, `scheduler`.
@@ -616,9 +616,39 @@ running-coach-worker.service  # APScheduler для синков/напомина
    - [ ] п.13: единая конфигурация через `pydantic-settings`.
 
 4. **Спринт 4 — процессы и интеграции** (1–2 дня)
-   - [ ] п.10: разделить на systemd-юниты web/bot/worker.
+   - [x] п.10: разделить на systemd-юниты web/bot (выполнено: `running-coach-web.service` + `running-coach-bot.service`).
    - [ ] п.8: стандартизировать время (UTC + `User.timezone`).
    - [ ] п.12: переписать Coros-клиент на `httpx.AsyncClient` + TTL токена.
+
+5. **Спринт 5 — PostgreSQL + Docker (3 контейнера)** (2–3 дня)
+   - [x] **5.1** Добавить `psycopg2-binary==2.9.10` в `pyproject.toml`.
+   - [ ] **5.2** `src/models.py` — убрать SQLite-only код, сделать engine database-agnostic (условное создание: PostgreSQL → `pool_size=10, max_overflow=20`; SQLite → `check_same_thread`, `PRAGMA WAL`).
+   - [ ] **5.3** `alembic/env.py` — читать `DATABASE_URL` из env вместо хардкода в `alembic.ini`.
+   - [ ] **5.4** Fresh Alembic baseline: удалить 4 старые миграции (`c3f51ae84837`, `0bba2c2badec`, `69f28e182276`, `eb50c256201f`, `eb448386be71`), создать один новый baseline через `alembic revision --autogenerate` (database-agnostic, `op.create_table` без `AUTOINCREMENT`).
+   - [ ] **5.5** `main.py` — `PENDING_DIR` сделать configurable через env (`PENDING_DIR`).
+   - [ ] **5.6** `src/crypto.py` — безопасный fallback если `.env` не найден (warning вместо crash).
+   - [ ] **5.7** `Dockerfile` — Python 3.13-slim, установка зависимостей, копирование кода.
+   - [ ] **5.8** `docker-compose.yml` — 3 сервиса: `db` (postgres:16-alpine), `app` (uvicorn), `bot` (run_telegram_bot.py). Healthcheck на db, `depends_on: condition: service_healthy`, `restart: on-failure`, volumes для pgdata/uploads/logs.
+   - [ ] **5.9** `.dockerignore` — исключить `.venv/`, `__pycache__/`, `.git/`, `*.db*`, `logs/`, `uploads/`, `.env`.
+   - [ ] **5.10** `.env` / `.env.example` — добавить `POSTGRES_PASSWORD`, `DATABASE_URL` (postgresql://...).
+   - [ ] **5.11** Локальная проверка: `docker compose build && docker compose up`, `curl /health`, `/login` → 200, Telegram `/start` → `/register` → вход.
+   - [ ] **5.12** Удалить systemd-юниты после успешного тестирования Docker.
+   - [ ] **5.13** Обновить `CHANGELOG.md`, `AGENTS.md`, `README.md`.
+
+   **Архитектура:**
+   ```
+   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+   │   db        │     │   app       │     │   bot       │
+   │ postgres:16 │◄────│ uvicorn     │     │ python      │
+   │ alpine      │◄────│ main:app    │     │ run_bot()   │
+   │ port 5432   │     │ port 8000   │     │             │
+   └─────────────┘     └─────────────┘     └─────────────┘
+        │                   │                   │
+        ▼                   │                   │
+   volume: pgdata      uploads/ logs/      (нет volumes)
+   ```
+
+   **Примечание:** данные SQLite не переносятся. Пользователь создаётся заново через Telegram `/start`, тренировки синхронизируются с Coros автоматически.
 
 После этих спринтов можно с чистой совестью начинать **Этап 0** модуля аналитики
 (см. `decision_module_design.md`, раздел 12).
