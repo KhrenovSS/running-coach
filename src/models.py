@@ -188,21 +188,33 @@ class AuthToken(Base):
 # Определение пути к БД и создание подключения (Database path and connection setup)
 DB_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_DIR}/running_coach.db")
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False, "timeout": 30},
-    pool_pre_ping=True,
-)
 
+# Database-agnostic engine: PostgreSQL для production, SQLite для локальной разработки и тестов
+# Database-agnostic engine: PostgreSQL for production, SQLite for local dev and tests
+if DATABASE_URL.startswith("postgresql"):
+    # PostgreSQL — полноценный connection pool (PostgreSQL — proper connection pool)
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_size=10,
+        max_overflow=20,
+    )
+else:
+    # SQLite — check_same_thread + WAL для конкурентного доступа (SQLite — check_same_thread + WAL for concurrent access)
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False, "timeout": 30},
+        pool_pre_ping=True,
+    )
 
-# Включение WAL-режима для SQLite при подключении (Enable WAL mode for SQLite on connect)
-@event.listens_for(engine, "connect")
-def _set_sqlite_pragma(dbapi_conn, connection_record):
-    cur = dbapi_conn.cursor()
-    cur.execute("PRAGMA journal_mode=WAL")
-    cur.execute("PRAGMA synchronous=NORMAL")
-    cur.execute("PRAGMA busy_timeout=5000")
-    cur.close()
+    # Включение WAL-режима для SQLite при подключении (Enable WAL mode for SQLite on connect)
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_conn, connection_record):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA synchronous=NORMAL")
+        cur.execute("PRAGMA busy_timeout=5000")
+        cur.close()
 
 
 SessionLocal = sessionmaker(bind=engine)
