@@ -256,46 +256,65 @@ def calc_avg_pace(...):
   2. **Сделать commit (если есть незакоммиченные изменения) + push** в GitHub. Это «итог дня».
   3. Сообщить пользователю, что изменения сохранены и запушены.
 
-## Текущее состояние (Session — 01.07.2026, вечер)
+## Текущее состояние (Session — 01.07.2026, ночь)
 
-**Сервер:** запущен через systemd --user (`running-coach.service`), автозапуск при включении ПК  
-**Telegram-бот:** отдельный systemd-юнит (`running-coach-bot.service`), `Restart=on-failure`  
-**Команда управления:** `systemctl --user start/stop/status/restart running-coach.service`  
-**Команда бота:** `systemctl --user start/stop/status/restart running-coach-bot.service`  
+**Развёртывание:** Docker Compose, 3 контейнера (`db` + `app` + `bot`)  
+**Команды управления:**
+```bash
+# Запуск (из директории проекта, нужен sudo для docker)
+sudo bash -c 'cd /home/nimda/projects/running-coach && set -a && source .env && set +a && export POSTGRES_PASSWORD && docker compose up -d'
+
+# Остановка
+sudo bash -c 'cd /home/nimda/projects/running-coach && docker compose down'
+
+# Статус
+sudo docker compose -f /home/nimda/projects/running-coach/docker-compose.yml ps
+
+# Логи
+sudo docker logs running-coach-app-1 --tail 50
+sudo docker logs running-coach-bot-1 --tail 50
+sudo docker logs running-coach-db-1 --tail 50
+```
 **Команда пуша (из любой папки):**
 ```bash
 set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/nimda/projects/running-coach && git push "https://KhrenovSS:${GITHUB_TOKEN}@github.com/KhrenovSS/running-coach.git" main
 ```
 
-**БД:** SQLite, файл `running_coach.db`, данные за 30.06–01.07.2026. Добавлены колонки `email` и `password_hash` (миграция `eb448386be71`).
+**БД:** PostgreSQL 16 (контейнер `running-coach-db-1`), volume `pgdata`. Данных нет — нужно создать пользователя через Telegram `/start`.
 
-**Спринт 2 завершён.** Sprint 2.4 (logging/audit) + Sprint 2.5 (Telegram auth) + Sprint 2.6 (password auth) реализованы.
+**Systemd-юниты удалены.** Раньше использовались `running-coach.service` и `running-coach-bot.service` — теперь Docker управляет запуском.
+
+**Спринты 1-2, 4-5 завершены.** Sprint 5 (PostgreSQL + Docker) реализован.
+
+**Что сделано за сессию 01.07.2026 (ночь — PostgreSQL + Docker):**
+1. **PostgreSQL + Docker (3 контейнера)**: `db` (postgres:16-alpine), `app` (uvicorn), `bot` (run_telegram_bot.py)
+2. **`src/models.py`**: engine database-agnostic — PostgreSQL или SQLite в зависимости от `DATABASE_URL`
+3. **`alembic/env.py`**: `DATABASE_URL` из env, `render_as_batch` только для SQLite
+4. **Fresh Alembic baseline** (`f75d2362cf9f`): заменены 4 старые миграции, database-agnostic
+5. **`Dockerfile`**, **`docker-compose.yml`**, **`.dockerignore`** созданы
+6. **`PENDING_DIR`** configurable через env
+7. **`src/crypto.py`**: предупреждение если `COROS_CRED_KEY` не задан
+8. **Systemd-юниты удалены** — Docker управляет запуском
+9. **DNS**: `/etc/resolv.conf` переключён на 8.8.8.8 (роутер 192.168.1.1 не резолвит CloudFront)
 
 **Что сделано за сессию 01.07.2026 (вечер — password auth):**
-1. **Email+password аутентификация**: колонки `email` + `password_hash` в `users` (миграция Alembic `eb448386be71`)
-2. **bcrypt**: `hash_password()`, `verify_password()`, `authenticate_user()` в `src/services/auth.py`
-3. **Страница `/login`**: HTML-форма входа по email+паролю
-4. **Страница `/register`**: регистрация по одноразовому токену из Telegram (/start)
-5. **POST `/auth/login` и `/auth/register`**: обработка форм в `src/api/routes/auth.py`
-6. **Telegram-бот**: `/login_info` (показать email), `/reset_password` (сменить пароль — 2 сек показ + удаление)
-7. **Автоматический редирект**: неавторизованные → `/login` (303), middleware возвращает `RedirectResponse` для 3xx
-8. **`AuthConfig`**: `TOKEN_TTL_MINUTES=30`, `PASSWORD_MIN_LENGTH=6`, `SESSION_TTL_DAYS=7`
-9. **Logout**: редирект на `/login` вместо `/`
+1. **Email+password аутентификация**: bcrypt, `/login`, `/register`, `/reset_password` в боте
+2. **Telegram-бот**: `/login_info`, `/reset_password`
 
 **Что сделано за сессию 01.07.2026 (день — вынос бота в systemd + опрос веса):**
-1. **Telegram-бот вынесен в отдельный systemd-юнит** (`running-coach-bot.service`)
-2. **Из `main.py` удалён `_start_telegram_bot()`** — ботом управляет systemd
-3. **Починен ежедневный опрос веса**: расписание 9/12/15/18, немедленный запуск при старте после 9:00
-4. **README/AGENTS.md/CHANGELOG обновлены.**
+1. **Telegram-бот вынесен в отдельный systemd-юнит** (теперь заменён на Docker)
+2. **Починен ежедневный опрос веса**: расписание 9/12/15/18
 
 **Известные проблемы:**
-- После перезагрузки сервера нужно убедиться, что `running-coach-bot.service` включён (`systemctl --user enable running-coach-bot.service`)
-- Существующему пользователю (id=1) нужно установить пароль через `/reset_password` в Telegram
+- Docker требует `sudo` (пользователь `nimda` в группе `docker`, но может потребоваться перелогин)
+- DNS: `/etc/resolv.conf` перезаписывается на 8.8.8.8 — после перезагрузки может вернуться 192.168.1.1
+- Существующие данные SQLite не перенесены — нужно создать пользователя через Telegram `/start`
 
 **Следующие шаги:**
-- ⬜ Пользователь должен зарегистрироваться: /start в Telegram → ссылка на /register → установить email+пароль
+- ⬜ Создать пользователя: /start в Telegram → ссылка на /register → установить email+пароль
+- ⬜ Настроить автозапуск Docker при включении ПК (`sudo systemctl enable docker` — уже сделано)
+- ⬜ **Спринт 3** (TECH_DEBT.md): декомпозиция main.py, Jinja2, pydantic-settings
 - ⬜ **Модуль аналитики** — 8 этапов из `decision_module_design.md`
-- ⬜ **Устранить техдолг** (см. `TECH_DEBT.md`): вынести роуты из main.py, Jinja2, async coros_client и др.
 - ⬜ **Фильтр по типу** тренировки на главной
 - ⬜ **Общая дистанция и время** за неделю/месяц
 

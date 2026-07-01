@@ -5,6 +5,25 @@ All notable changes to this project are tracked here.
 ## [01.07.2026]
 
 ### Added
+- **PostgreSQL + Docker (3 контейнера)**:
+  - `Dockerfile` — Python 3.13-slim, установка зависимостей, копирование кода
+  - `docker-compose.yml` — 3 сервиса: `db` (postgres:16-alpine), `app` (uvicorn), `bot` (run_telegram_bot.py)
+  - Healthcheck на db, `depends_on: condition: service_healthy`, `restart: on-failure`
+  - Volumes: `pgdata` (named volume), `uploads/`, `logs/` (bind mounts)
+  - `.dockerignore` — исключение `.venv/`, `__pycache__/`, `.git/`, `*.db*`, `logs/`, `uploads/`, `.env`
+  - `psycopg2-binary==2.9.10` и `alembic==1.18.5` добавлены в `pyproject.toml`
+  - `POSTGRES_PASSWORD` в `.env` / `.env.example`
+
+### Changed
+- **`src/models.py`**: engine database-agnostic — PostgreSQL (`pool_size=10, max_overflow=20`) или SQLite (`check_same_thread`, `PRAGMA WAL`) в зависимости от `DATABASE_URL`
+- **`alembic/env.py`**: `DATABASE_URL` читается из env, `render_as_batch` только для SQLite
+- **Alembic миграции**: 4 старых миграции заменены одним fresh baseline (`f75d2362cf9f`) — database-agnostic, без `AUTOINCREMENT`
+- **`main.py`**: `PENDING_DIR` configurable через env (по умолчанию `/tmp/running_coach_uploads`)
+- **`src/crypto.py`**: предупреждение если `COROS_CRED_KEY` не задан (важно для Docker)
+- **`pyproject.toml`**: добавлен `version = "2.0.0"` (требуется для pip install в Docker)
+- **Systemd-юниты удалены**: `running-coach.service` и `running-coach-bot.service` — теперь Docker управляет запуском
+
+### Added (ранее в этот день)
 - **Email+password аутентификация (полноценная)**:
   - Колонки `email` и `password_hash` в таблице `users` (миграция `eb448386be71`)
   - `bcrypt` для хеширования паролей (`hash_password()`, `verify_password()`, `authenticate_user()` в `src/services/auth.py`)

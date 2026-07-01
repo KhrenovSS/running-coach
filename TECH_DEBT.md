@@ -632,8 +632,8 @@ running-coach-worker.service  # APScheduler для синков/напомина
    - [x] **5.9** `.dockerignore` — исключить `.venv/`, `__pycache__/`, `.git/`, `*.db*`, `logs/`, `uploads/`, `.env`.
    - [x] **5.10** `.env` / `.env.example` — добавить `POSTGRES_PASSWORD`, `DATABASE_URL` (postgresql://...).
    - [x] **5.11** Локальная проверка: `docker compose build && docker compose up`, `curl /health`, `/login` → 200, Telegram `/start` → `/register` → вход.
-   - [ ] **5.12** Удалить systemd-юниты после успешного тестирования Docker.
-   - [ ] **5.13** Обновить `CHANGELOG.md`, `AGENTS.md`, `README.md`.
+   - [x] **5.12** Удалить systemd-юниты после успешного тестирования Docker.
+   - [x] **5.13** Обновить `CHANGELOG.md`, `AGENTS.md`, `README.md`.
 
    **Архитектура:**
    ```
