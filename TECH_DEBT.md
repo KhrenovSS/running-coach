@@ -627,10 +627,10 @@ running-coach-worker.service  # APScheduler для синков/напомина
    - [x] **5.4** Fresh Alembic baseline: удалить 4 старые миграции (`c3f51ae84837`, `0bba2c2badec`, `69f28e182276`, `eb50c256201f`, `eb448386be71`), создать один новый baseline через `alembic revision --autogenerate` (database-agnostic, `op.create_table` без `AUTOINCREMENT`).
    - [x] **5.5** `main.py` — `PENDING_DIR` сделать configurable через env (`PENDING_DIR`).
    - [x] **5.6** `src/crypto.py` — безопасный fallback если `.env` не найден (warning вместо crash).
-   - [ ] **5.7** `Dockerfile` — Python 3.13-slim, установка зависимостей, копирование кода.
-   - [ ] **5.8** `docker-compose.yml` — 3 сервиса: `db` (postgres:16-alpine), `app` (uvicorn), `bot` (run_telegram_bot.py). Healthcheck на db, `depends_on: condition: service_healthy`, `restart: on-failure`, volumes для pgdata/uploads/logs.
-   - [ ] **5.9** `.dockerignore` — исключить `.venv/`, `__pycache__/`, `.git/`, `*.db*`, `logs/`, `uploads/`, `.env`.
-   - [ ] **5.10** `.env` / `.env.example` — добавить `POSTGRES_PASSWORD`, `DATABASE_URL` (postgresql://...).
+   - [x] **5.7** `Dockerfile` — Python 3.13-slim, установка зависимостей, копирование кода.
+   - [x] **5.8** `docker-compose.yml` — 3 сервиса: `db` (postgres:16-alpine), `app` (uvicorn), `bot` (run_telegram_bot.py). Healthcheck на db, `depends_on: condition: service_healthy`, `restart: on-failure`, volumes для pgdata/uploads/logs.
+   - [x] **5.9** `.dockerignore` — исключить `.venv/`, `__pycache__/`, `.git/`, `*.db*`, `logs/`, `uploads/`, `.env`.
+   - [x] **5.10** `.env` / `.env.example` — добавить `POSTGRES_PASSWORD`, `DATABASE_URL` (postgresql://...).
    - [ ] **5.11** Локальная проверка: `docker compose build && docker compose up`, `curl /health`, `/login` → 200, Telegram `/start` → `/register` → вход.
    - [ ] **5.12** Удалить systemd-юниты после успешного тестирования Docker.
    - [ ] **5.13** Обновить `CHANGELOG.md`, `AGENTS.md`, `README.md`.
