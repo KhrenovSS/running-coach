@@ -23,7 +23,7 @@ from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
 from src.parsers.fit_parser import parse_fit
 from src.logger import get_logger
 from src.services.audit import AuditService
-from src.services.auth import generate_telegram_login_token
+from src.services.auth import generate_telegram_login_token, hash_password
 
 logger = get_logger("telegram_bot")
 
@@ -34,11 +34,20 @@ def _get_web_app_url() -> str:
 
 
 def _generate_login_link(db, user: User) -> str:
-    """Сгенерировать одноразовую ссылку для входа в веб (Generate single-use web login link)"""
+    """
+    Сгенерировать одноразовую ссылку для входа/регистрации
+    Generate single-use link for login or registration
+
+    Если у пользователя нет password_hash — ссылка ведёт на /register.
+    If user has no password_hash — link goes to /register.
+    """
     token = generate_telegram_login_token(db, user)
-    return f"{_get_web_app_url()}/auth/telegram?token={token}"
+    if user.password_hash:
+        return f"{_get_web_app_url()}/auth/telegram?token={token}"
+    return f"{_get_web_app_url()}/register?token={token}"
 
 EMAIL, PASSWORD = range(2)
+NEW_PASSWORD = 10  # состояние для /reset_password (state for /reset_password conversation)
 
 TRAINING_TYPES_RU = {
     'interval': 'Интервальная',
@@ -112,6 +121,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"/stats — статистика\n"
             f"/trainings — последние тренировки\n"
             f"/weight — ввести вес (или /weight 75.5)\n"
+            f"/login_info — показать email для входа\n"
+            f"/reset_password — сменить пароль\n"
             f"/delete_me — удалить мои данные",
             disable_web_page_preview=True,
         )
@@ -214,7 +225,9 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{login_link}\n\n"
         f"/sync — синхронизировать тренировки\n"
         f"/stats — статистика\n"
-        f"/trainings — последние тренировки",
+        f"/trainings — последние тренировки\n"
+        f"/login_info — показать email для входа\n"
+        f"/reset_password — сменить пароль",
         disable_web_page_preview=True,
     )
     return ConversationHandler.END
@@ -814,6 +827,110 @@ async def cmd_delete_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
+# === Команды управления аккаунтом (Account management commands) ===
+
+async def cmd_login_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать email для входа в веб (Show login email)"""
+    chat_id = update.effective_chat.id
+    user = get_user(chat_id)
+    if not user:
+        await update.message.reply_text("❌ Сначала используй /start чтобы зарегистрироваться.")
+        return
+    if not user.email:
+        await update.message.reply_text(
+            "У вас ещё не установлен email для входа.\n"
+            "Используйте /start чтобы получить ссылку на регистрацию."
+        )
+        return
+    await update.message.reply_text(
+        f"📧 Ваш email для входа: {user.email}\n\n"
+        f"Форма входа: {_get_web_app_url()}/login\n"
+        f"Сменить пароль: /reset_password"
+    )
+
+
+async def cmd_reset_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сброс пароля — запросить новый пароль (Reset password — prompt for new password)"""
+    chat_id = update.effective_chat.id
+    user = get_user(chat_id)
+    if not user:
+        await update.message.reply_text("❌ Сначала используй /start чтобы зарегистрироваться.")
+        return
+    if not user.email:
+        await update.message.reply_text(
+            "❌ У вас ещё не установлен email. Сначала зарегистрируйтесь через /start."
+        )
+        return ConversationHandler.END
+    from src.config import CONFIG
+    await update.message.reply_text(
+        f"🔑 Введите новый пароль (минимум {CONFIG.AUTH.PASSWORD_MIN_LENGTH} символов).\n"
+        f"🔒 Пароль будет показан 2 секунды, затем сообщение удалится (как при вводе пароля Coros)."
+    )
+    return NEW_PASSWORD
+
+
+async def get_new_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получить новый пароль, сохранить хеш, показать и удалить (Receive new password, save hash, show and delete)"""
+    from src.config import CONFIG
+    chat_id = update.effective_chat.id
+    user = get_user(chat_id)
+    if not user:
+        await update.message.reply_text("❌ Пользователь не найден.")
+        return ConversationHandler.END
+
+    password = update.message.text.strip()
+    if len(password) < CONFIG.AUTH.PASSWORD_MIN_LENGTH:
+        await update.message.reply_text(
+            f"Слишком короткий пароль (минимум {CONFIG.AUTH.PASSWORD_MIN_LENGTH} символов). Попробуйте ещё раз:"
+        )
+        return NEW_PASSWORD
+
+    # Сохраняем хеш пароля (Save password hash)
+    db = SessionLocal()
+    audit = AuditService(db)
+    try:
+        user_db = db.query(User).filter(User.id == user.id).first()
+        user_db.password_hash = hash_password(password)
+        db.commit()
+        # Удаляем сообщение с паролем (Delete password message)
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+        # Показываем пароль 2 секунды затем удаляем (Show password for 2 sec then delete)
+        # Используем reply_text, ждём 2 сек, затем удаляем (Reply, wait 2s, then delete)
+        confirmation = await update.message.reply_text(
+            f"✅ Пароль установлен: {password}\n"
+            f"🔒 Это сообщение будет удалено через 2 секунды."
+        )
+        await asyncio.sleep(2)
+        try:
+            await confirmation.delete()
+        except Exception:
+            pass
+        audit.log_settings_changed(
+            user_id=user.id,
+            changes={"password": {"action": "reset"}},
+            source="telegram_reset_password",
+        )
+        await update.message.reply_text(
+            "✅ Пароль изменён. Теперь вы можете войти через /login_info или /start."
+        )
+    except Exception as e:
+        db.rollback()
+        logger.error("Password reset error: %s", e)
+        await update.message.reply_text("😔 Ошибка при смене пароля.")
+    finally:
+        db.close()
+    return ConversationHandler.END
+
+
+async def cancel_reset_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отмена сброса пароля (Cancel password reset)"""
+    await update.message.reply_text("Смена пароля отменена.")
+    return ConversationHandler.END
+
+
 # === Обратная связь по тренировке (Training feedback) ===
 
 async def feedback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -904,6 +1021,18 @@ def run_bot():
     application.add_handler(CommandHandler("trainings", cmd_trainings))
     application.add_handler(CommandHandler("weight", cmd_weight))
     application.add_handler(CommandHandler("delete_me", cmd_delete_me))
+    application.add_handler(CommandHandler("login_info", cmd_login_info))
+
+    # Обработчик сброса пароля — отдельная conversation (Password reset conversation handler)
+    reset_pw_handler = ConversationHandler(
+        entry_points=[CommandHandler("reset_password", cmd_reset_password)],
+        states={
+            NEW_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_new_password)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_reset_password)],
+    )
+    application.add_handler(reset_pw_handler)
+
     application.add_handler(CallbackQueryHandler(feedback_callback, pattern="^feedback:"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_weight_message))
 

@@ -92,6 +92,14 @@ class DisplayConfig:
 
 
 @dataclass(frozen=True)
+class AuthConfig:
+    """Настройки аутентификации (Authentication settings)"""
+    TOKEN_TTL_MINUTES: Final[int] = 30                     # время жизни регистрационного токена (reg token TTL)
+    PASSWORD_MIN_LENGTH: Final[int] = 6                    # мин. длина пароля (min password length)
+    SESSION_TTL_DAYS: Final[int] = 7                       # срок жизни сессии (session lifetime)
+
+
+@dataclass(frozen=True)
 class CONFIG:
     """
     Все настройки проекта (All project settings)
@@ -108,6 +116,7 @@ class CONFIG:
     COROS: Final[CorosAPIConfig] = CorosAPIConfig()
     WEATHER: Final[WeatherConfig] = WeatherConfig()
     DISPLAY: Final[DisplayConfig] = DisplayConfig()
+    AUTH: Final[AuthConfig] = AuthConfig()
     
     # Пути (Paths)
     DB_PATH: Final[str] = "running_coach.db"

@@ -1,6 +1,6 @@
 # Импорт FastAPI и компонентов (FastAPI and component imports)
 from typing import Optional
-from fastapi import FastAPI, UploadFile, File, Form, Depends
+from fastapi import FastAPI, UploadFile, File, Form, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from sqlalchemy.orm import Session
 from src.models import SessionLocal, User, TrainingSession, WeightMeasurement, DeletedTraining, DailyMetrics, get_settings, get_db
@@ -13,6 +13,8 @@ from src.api.middleware import register_middleware
 from src.api.routes.health import router as health_router
 from src.api.routes.auth import router as auth_router
 from src.api.deps import get_current_user
+from src.config import CONFIG
+from src.services.auth import verify_telegram_login_token, check_telegram_login_token
 from src.services.audit import AuditService
 logger = get_logger("app")
 import httpx
@@ -1194,6 +1196,129 @@ def startup():
 
     # Запуск фоновой автосинхронизации Coros (Start background auto-sync)
     _start_auto_sync()
+
+
+# === Страницы аутентификации (Auth pages) ===
+
+# Сообщения об ошибках для форм (Error messages for auth forms)
+_AUTH_ERRORS = {
+    "invalid_token": "Ссылка устарела или недействительна. Запросите новую через /start в Telegram.",
+    "invalid_credentials": "Неверный email или пароль.",
+    "short_password": "Пароль слишком короткий (минимум 6 символов).",
+    "password_mismatch": "Пароли не совпадают.",
+    "email_taken": "Этот email уже используется.",
+}
+
+
+@app.get('/login', response_class=HTMLResponse)
+async def login_page(request: Request, error: Optional[str] = None):
+    """Страница входа по email и паролю (Login page — email + password)"""
+    # Если уже авторизован — редирект на главную (If already logged in — redirect to home)
+    if request.session.get("user_id"):
+        return RedirectResponse(url="/", status_code=303)
+    err_msg = _AUTH_ERRORS.get(error, "")
+    err_html = f'<div class="auth-error">{err_msg}</div>' if err_msg else ''
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Running Coach — Вход</title>
+<style>
+  body {{ font-family: -apple-system, system-ui, sans-serif; background: #f5f5f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }}
+  .auth-card {{ background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); padding: 40px; max-width: 380px; width: 100%; }}
+  .auth-title {{ font-size: 24px; font-weight: 600; margin: 0 0 8px; }}
+  .auth-subtitle {{ color: #888; font-size: 14px; margin: 0 0 24px; }}
+  .auth-field {{ margin-bottom: 16px; }}
+  .auth-field label {{ display: block; font-size: 14px; font-weight: 500; margin-bottom: 4px; }}
+  .auth-field input {{ width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; box-sizing: border-box; }}
+  .auth-field input:focus {{ outline: none; border-color: #4caf50; }}
+  .auth-btn {{ width: 100%; padding: 12px; background: #4caf50; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; }}
+  .auth-btn:hover {{ background: #43a047; }}
+  .auth-error {{ background: #ffebee; color: #c62828; padding: 10px 12px; border-radius: 8px; font-size: 14px; margin-bottom: 16px; }}
+  .auth-hint {{ text-align: center; margin-top: 16px; font-size: 13px; color: #aaa; }}
+</style>
+</head>
+<body>
+<div class="auth-card">
+  <h1 class="auth-title">🏃 Running Coach</h1>
+  <p class="auth-subtitle">Вход в личный кабинет</p>
+  {err_html}
+  <form method="post" action="/auth/login">
+    <div class="auth-field">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" required autocomplete="email" autofocus>
+    </div>
+    <div class="auth-field">
+      <label for="password">Пароль</label>
+      <input type="password" id="password" name="password" required autocomplete="current-password">
+    </div>
+    <button type="submit" class="auth-btn">Войти</button>
+  </form>
+  <p class="auth-hint">Нет аккаунта? Напишите боту в Telegram /start</p>
+</div>
+</body>
+</html>""")
+
+
+@app.get('/register', response_class=HTMLResponse)
+async def register_page(token: str = "", error: Optional[str] = None, db: Session = Depends(get_db)):
+    """Страница регистрации — установка email и пароля (Registration page — set email and password)"""
+    if not token:
+        return RedirectResponse(url="/login?error=invalid_token", status_code=303)
+    # Проверяем, валиден ли токен без потребления (Check token validity without consuming)
+    user = check_telegram_login_token(db, token)
+    if not user:
+        return RedirectResponse(url="/login?error=invalid_token", status_code=303)
+    # Если у пользователя уже есть пароль — редирект на логин (If user already has password — redirect to login)
+    if user.password_hash:
+        return RedirectResponse(url="/login?error=invalid_token", status_code=303)
+    err_msg = _AUTH_ERRORS.get(error, "")
+    err_html = f'<div class="auth-error">{err_msg}</div>' if err_msg else ''
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Running Coach — Регистрация</title>
+<style>
+  body {{ font-family: -apple-system, system-ui, sans-serif; background: #f5f5f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }}
+  .auth-card {{ background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); padding: 40px; max-width: 380px; width: 100%; }}
+  .auth-title {{ font-size: 24px; font-weight: 600; margin: 0 0 8px; }}
+  .auth-subtitle {{ color: #888; font-size: 14px; margin: 0 0 24px; }}
+  .auth-field {{ margin-bottom: 16px; }}
+  .auth-field label {{ display: block; font-size: 14px; font-weight: 500; margin-bottom: 4px; }}
+  .auth-field input {{ width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; box-sizing: border-box; }}
+  .auth-field input:focus {{ outline: none; border-color: #4caf50; }}
+  .auth-btn {{ width: 100%; padding: 12px; background: #4caf50; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; }}
+  .auth-btn:hover {{ background: #43a047; }}
+  .auth-error {{ background: #ffebee; color: #c62828; padding: 10px 12px; border-radius: 8px; font-size: 14px; margin-bottom: 16px; }}
+</style>
+</head>
+<body>
+<div class="auth-card">
+  <h1 class="auth-title">🏃 Регистрация</h1>
+  <p class="auth-subtitle">Установите email и пароль для входа</p>
+  {err_html}
+  <form method="post" action="/auth/register">
+    <input type="hidden" name="token" value="{token}">
+    <div class="auth-field">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" required autocomplete="email" autofocus>
+    </div>
+    <div class="auth-field">
+      <label for="password">Пароль (мин. {CONFIG.AUTH.PASSWORD_MIN_LENGTH} символов)</label>
+      <input type="password" id="password" name="password" required autocomplete="new-password">
+    </div>
+    <div class="auth-field">
+      <label for="password_confirm">Повторите пароль</label>
+      <input type="password" id="password_confirm" name="password_confirm" required autocomplete="new-password">
+    </div>
+    <button type="submit" class="auth-btn">Зарегистрироваться</button>
+  </form>
+</div>
+</body>
+</html>""")
 
 
 # Главная страница: список тренировок и статистика (Main page: session list and stats)

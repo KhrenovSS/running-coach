@@ -63,16 +63,16 @@ async def get_current_user(request: Request, db: Session = Depends(get_db)) -> U
     """
     Получить текущего пользователя из сессии (Get current user from session)
     
-    Если пользователь не авторизован — перенаправляет на главную с ошибкой.
-    If user is not authenticated — redirects to home with error.
+    Если пользователь не авторизован — редирект на /login.
+    If user is not authenticated — redirects to /login.
     """
     user_id = request.session.get("user_id")
     if not user_id:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise HTTPException(status_code=303, headers={"Location": "/login"})
     
     user = db.query(User).filter(User.id == user_id).filter((User.is_active == True) | (User.is_active.is_(None))).first()
     if not user:
         request.session.clear()
-        raise HTTPException(status_code=401, detail="User not found")
+        raise HTTPException(status_code=303, headers={"Location": "/login"})
     
     return user

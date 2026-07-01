@@ -21,7 +21,7 @@
 - **📊 Корректное удаление** – отслеживание удалённых тренировок с подтверждением перед повторной загрузкой
 - **🔐 Шифрование** – пароли Coros шифруются Fernet‑ключом перед сохранением в БД
 - **🔔 Автоматическая синхронизация** – фоновая проверка новых данных каждые 1 час (тренировки) и 6 часов (метрики здоровья)
-- **🔑 Telegram‑аутентификация** – одноразовые токены входа через бота, session-cookie в веб-интерфейсе
+- **🔑 Telegram‑аутентификация** – одноразовые токены для регистрации, bcrypt-хеширование паролей, вход по email+паролю, session-cookie в веб-интерфейсе
 - **📝 Структурированное логирование и аудит** – ежедневная ротация, JSON/text формат, запись событий аудита в БД и файл
 
 ---
@@ -33,7 +33,7 @@
 - **Frontend**: HTML/CSS/JS (Vanilla) + Chart.js
 - **Парсеры**: `parsers/tcx_parser.py` (XML), `parsers/fit_parser.py` (бинарный), `parsers/common.py` (общая обработка)
 - **Интеграции**: Coros Training Hub (неофициальное API), Open‑Meteo (погода), Telegram Bot API
-- **Аутентификация**: одноразовые токены (`itsdangerous`), session-cookie (`SessionMiddleware`)
+- **Аутентификация**: email+пароль (bcrypt), одноразовые токены регистрации (`secrets`), session-cookie (`SessionMiddleware`)
 - **Логирование**: структурированное, ежедневная ротация (`TimedRotatingFileHandler`), JSON/text
 - **Аудит**: события в БД (`audit_events`) + файл (`logs/audit_*.log`)
 - **Планировщик**: `threading.Thread` с jitter (фоновые задачи, автосинхронизация)
@@ -207,7 +207,7 @@ training_sessions.id                     │
 │   │   ├── deps.py                  # get_current_user dependency (session-cookie)
 │   │   ├── middleware.py            # SessionMiddleware, error handlers, request logging
 │   │   └── routes/
-│   │       ├── auth.py              # /auth/telegram, /auth/logout
+│   │       ├── auth.py              # /auth/telegram, /auth/login, /auth/register, /auth/logout
 │   │       └── health.py            # /health/ endpoint
 │   ├── config/
 │   │   ├── __init__.py

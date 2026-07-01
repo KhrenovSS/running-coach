@@ -11,7 +11,7 @@ import os
 import time
 import logging
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from src.exceptions import AppError
@@ -69,7 +69,12 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     """
     Обработчик HTTP исключений FastAPI
     Handler for FastAPI HTTP exceptions
+
+    Для редиректов (3xx) возвращает RedirectResponse вместо JSON.
+    For redirects (3xx) returns RedirectResponse instead of JSON.
     """
+    if 300 <= exc.status_code < 400 and exc.headers and "Location" in exc.headers:
+        return RedirectResponse(url=exc.headers["Location"], status_code=exc.status_code)
     return JSONResponse(
         status_code=exc.status_code,
         content={"message": exc.detail},

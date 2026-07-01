@@ -42,10 +42,10 @@ Python + FastAPI + SQLite, написано через ИИ (open code style).
 - `src/exceptions.py` — типизированные исключения приложения
 - `src/utils/logger.py` — структурированное логирование с ротацией
 - `src/services/audit.py` — сервис аудита (БД + файл)
-- `src/services/auth.py` — генерация и проверка токенов Telegram-авторизации
+- `src/services/auth.py` — генерация и проверка токенов Telegram-авторизации, bcrypt-хеширование паролей (`hash_password`, `verify_password`, `authenticate_user`)
 - `src/api/middleware.py` — централизованная обработка ошибок, логирование запросов и session middleware
 - `src/api/routes/health.py` — health check endpoint
-- `src/api/routes/auth.py` — маршруты аутентификации (`/auth/telegram`, `/auth/logout`)
+- `src/api/routes/auth.py` — маршруты аутентификации (`/auth/telegram`, `/auth/login`, `/auth/register`, `/auth/logout`)
 - `src/parsers/common.py` — общая логика: очистка треков, сегментация, классификация, погода (`process_trackpoints()`)
 - `src/parsers/tcx_parser.py` — парсинг TCX-файлов (XML) → вызов `process_trackpoints()`
 - `src/parsers/fit_parser.py` — парсинг FIT-файлов (бинарный) → вызов `process_trackpoints()`
@@ -256,7 +256,7 @@ def calc_avg_pace(...):
   2. **Сделать commit (если есть незакоммиченные изменения) + push** в GitHub. Это «итог дня».
   3. Сообщить пользователю, что изменения сохранены и запушены.
 
-## Текущее состояние (Session — 01.07.2026, день)
+## Текущее состояние (Session — 01.07.2026, вечер)
 
 **Сервер:** запущен через systemd --user (`running-coach.service`), автозапуск при включении ПК  
 **Telegram-бот:** отдельный systemd-юнит (`running-coach-bot.service`), `Restart=on-failure`  
@@ -267,20 +267,33 @@ def calc_avg_pace(...):
 set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/nimda/projects/running-coach && git push "https://KhrenovSS:${GITHUB_TOKEN}@github.com/KhrenovSS/running-coach.git" main
 ```
 
-**БД:** SQLite, файл `running_coach.db`, данные за 30.06–01.07.2026. `last_coros_sync` был NULL → после фикса должен обновиться при следующем цикле автосинхронизации
+**БД:** SQLite, файл `running_coach.db`, данные за 30.06–01.07.2026. Добавлены колонки `email` и `password_hash` (миграция `eb448386be71`).
 
-**Спринт 2 завершён.** Sprint 2.4 (logging/audit) + Sprint 2.5 (Telegram auth) реализованы, работает вход через Telegram, аудит событий, структурированные логи.
+**Спринт 2 завершён.** Sprint 2.4 (logging/audit) + Sprint 2.5 (Telegram auth) + Sprint 2.6 (password auth) реализованы.
 
-**Что сделано за сессию 01.07.2026 (вечерний фикс — вынос бота в systemd + починка опроса веса):**
-1. **Telegram-бот вынесен в отдельный systemd-юнит** (`running-coach-bot.service`): больше не запускается как `subprocess.Popen` из `main.py`. Бот живёт независимо, `Restart=on-failure` — при падении перезапускается через 5 секунд.
-2. **Из `main.py` удалён `_start_telegram_bot()`** — и вызов в `startup()`, и сама функция. Ботом управляет systemd.
-3. **Починен ежедневный опрос веса**: добавлено расписание 9/12/15/18 часов (вместо одного в 9:00), немедленный запуск при старте бота после 9:00. Исправлен баг с `is_active=NULL` в БД (фильтр не находил пользователя). Исправлен `run_once` (переведён на `datetime + timedelta`).
+**Что сделано за сессию 01.07.2026 (вечер — password auth):**
+1. **Email+password аутентификация**: колонки `email` + `password_hash` в `users` (миграция Alembic `eb448386be71`)
+2. **bcrypt**: `hash_password()`, `verify_password()`, `authenticate_user()` в `src/services/auth.py`
+3. **Страница `/login`**: HTML-форма входа по email+паролю
+4. **Страница `/register`**: регистрация по одноразовому токену из Telegram (/start)
+5. **POST `/auth/login` и `/auth/register`**: обработка форм в `src/api/routes/auth.py`
+6. **Telegram-бот**: `/login_info` (показать email), `/reset_password` (сменить пароль — 2 сек показ + удаление)
+7. **Автоматический редирект**: неавторизованные → `/login` (303), middleware возвращает `RedirectResponse` для 3xx
+8. **`AuthConfig`**: `TOKEN_TTL_MINUTES=30`, `PASSWORD_MIN_LENGTH=6`, `SESSION_TTL_DAYS=7`
+9. **Logout**: редирект на `/login` вместо `/`
+
+**Что сделано за сессию 01.07.2026 (день — вынос бота в systemd + опрос веса):**
+1. **Telegram-бот вынесен в отдельный systemd-юнит** (`running-coach-bot.service`)
+2. **Из `main.py` удалён `_start_telegram_bot()`** — ботом управляет systemd
+3. **Починен ежедневный опрос веса**: расписание 9/12/15/18, немедленный запуск при старте после 9:00
 4. **README/AGENTS.md/CHANGELOG обновлены.**
 
 **Известные проблемы:**
 - После перезагрузки сервера нужно убедиться, что `running-coach-bot.service` включён (`systemctl --user enable running-coach-bot.service`)
+- Существующему пользователю (id=1) нужно установить пароль через `/reset_password` в Telegram
 
 **Следующие шаги:**
+- ⬜ Пользователь должен зарегистрироваться: /start в Telegram → ссылка на /register → установить email+пароль
 - ⬜ **Модуль аналитики** — 8 этапов из `decision_module_design.md`
 - ⬜ **Устранить техдолг** (см. `TECH_DEBT.md`): вынести роуты из main.py, Jinja2, async coros_client и др.
 - ⬜ **Фильтр по типу** тренировки на главной

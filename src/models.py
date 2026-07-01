@@ -14,6 +14,8 @@ class User(Base):
     __tablename__ = 'users'
 
     id = Column(Integer, primary_key=True)
+    email = Column(String(255), unique=True, nullable=True)   # email для входа (login email)
+    password_hash = Column(String(255), nullable=True)        # bcrypt-хеш пароля (bcrypt password hash)
     telegram_chat_id = Column(BigInteger, unique=True, nullable=True)
     telegram_username = Column(String(255), nullable=True)
     name = Column(String(255), nullable=True)

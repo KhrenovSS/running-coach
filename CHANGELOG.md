@@ -4,9 +4,24 @@ All notable changes to this project are tracked here.
 
 ## [01.07.2026]
 
+### Added
+- **Email+password аутентификация (полноценная)**:
+  - Колонки `email` и `password_hash` в таблице `users` (миграция `eb448386be71`)
+  - `bcrypt` для хеширования паролей (`hash_password()`, `verify_password()`, `authenticate_user()` в `src/services/auth.py`)
+  - Страница `/login` — вход по email+паролю, HTML-форма
+  - Страница `/register` — регистрация по одноразовому токену из Telegram (/start), установка email+пароля
+  - POST `/auth/login` и POST `/auth/register` — обработка форм
+  - Команды Telegram-бота: `/login_info` (показать email), `/reset_password` (сменить пароль — бот показывает 2 сек и удаляет)
+  - `AuthConfig` в `CONFIG`: `TOKEN_TTL_MINUTES=30`, `PASSWORD_MIN_LENGTH=6`, `SESSION_TTL_DAYS=7`
+  - Неавторизованные пользователи автоматически перенаправляются на `/login` (303 redirect)
+  - `http_exception_handler` в middleware теперь возвращает `RedirectResponse` для 3xx статус-кодов
+
 ### Changed
 - **Telegram-бот вынесен в отдельный systemd-юнит** (`running-coach-bot.service`): больше не запускается как `subprocess.Popen` из `main.py`. Бот работает независимо, автоматически перезапускается при падении (`Restart=on-failure`). Убран `_start_telegram_bot()` из `main.py`.
 - **Расписание опроса веса**: теперь в 9:00, 12:00, 15:00, 18:00 (вместо одного в 9:00). При старте бота после 9:00 — немедленное напоминание, если вес ещё не введён.
+- **`_generate_login_link`**: если у пользователя нет `password_hash` — ссылка ведёт на `/register`, иначе на `/auth/telegram` (быстрый вход)
+- **TTL токена**: 5 мин → 30 мин (из `CONFIG.AUTH.TOKEN_TTL_MINUTES`)
+- **Logout**: теперь редиректит на `/login` вместо `/`
 
 ### Fixed
 - **Ежедневный опрос веса не находил пользователя**: `is_active` в БД был `NULL` (None), а не `True`, из-за чего фильтр `is_active == True` исключал единственного пользователя.

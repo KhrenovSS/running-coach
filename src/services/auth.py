@@ -1,23 +1,27 @@
 """
-Сервис аутентификации через Telegram (Telegram authentication service)
+Сервис аутентификации (Authentication service)
 
 Генерирует одноразовые токены для входа в веб-интерфейс из Telegram-бота.
+Хеширует и проверяет пароли через bcrypt.
 Generates single-use tokens for web login from Telegram bot.
+Hashes and verifies passwords via bcrypt.
 """
 
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
+import bcrypt
 from sqlalchemy.orm import Session
 
 from src.models import User, AuthToken
+from src.config import CONFIG
 from src.utils.logger import get_logger
 
 logger = get_logger("auth")
 
-# Время жизни токена в минутах (Token lifetime in minutes)
-TOKEN_TTL_MINUTES = 5
+# Время жизни токена — из конфига (Token lifetime from config)
+TOKEN_TTL_MINUTES = CONFIG.AUTH.TOKEN_TTL_MINUTES
 
 
 def generate_telegram_login_token(db: Session, user: User) -> str:
@@ -82,6 +86,28 @@ def verify_telegram_login_token(db: Session, token: str) -> Optional[User]:
     return auth_token.user
 
 
+def check_telegram_login_token(db: Session, token: str) -> Optional[User]:
+    """
+    Проверить токен без пометки использованным
+    Check token validity without marking it used
+    
+    Используется для GET /register — показывает форму, но не потребляет токен.
+    Used for GET /register — shows form without consuming the token.
+    """
+    auth_token = (
+        db.query(AuthToken)
+        .filter(
+            AuthToken.token == token,
+            AuthToken.used_at.is_(None),
+            AuthToken.expires_at > datetime.utcnow(),
+        )
+        .first()
+    )
+    if not auth_token:
+        return None
+    return auth_token.user
+
+
 def cleanup_expired_tokens(db: Session) -> int:
     """
     Удалить просроченные использованные токены
@@ -98,3 +124,49 @@ def cleanup_expired_tokens(db: Session) -> int:
     )
     db.commit()
     return deleted
+
+
+# === Функции для работы с паролями (Password functions) ===
+
+def hash_password(plain_password: str) -> str:
+    """
+    Захешировать пароль через bcrypt
+    Hash a password via bcrypt
+    
+    Возвращает строку вида $2b$..., пригодную для хранения в БД.
+    Returns a $2b$... string suitable for DB storage.
+    """
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(plain_password.encode("utf-8"), salt)
+    return hashed.decode("utf-8")
+
+
+def verify_password(plain_password: str, password_hash: str) -> bool:
+    """
+    Проверить парольagainst сохранённый bcrypt-хеш
+    Verify a password against stored bcrypt hash
+    """
+    if not password_hash:
+        return False
+    return bcrypt.checkpw(plain_password.encode("utf-8"), password_hash.encode("utf-8"))
+
+
+def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
+    """
+    Найти пользователя по email и проверить пароль
+    Find user by email and verify password
+    
+    Returns: User если успех, None если не найден или пароль неверный.
+    Returns: User on success, None if not found or password mismatch.
+    """
+    user = db.query(User).filter(User.email == email.lower().strip()).first()
+    if not user or not user.password_hash:
+        return None
+    if not verify_password(password, user.password_hash):
+        logger.warning(
+            "Failed password login for email %s",
+            email,
+            extra={"context": "Auth"},
+        )
+        return None
+    return user
