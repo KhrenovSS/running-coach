@@ -1188,6 +1188,10 @@ def startup():
     finally:
         db.close()
 
+    # Восстановление логгера после uvicorn dictConfig (Restore logger after uvicorn dictConfig)
+    from src.utils.logger import fix_logger_after_uvicorn
+    fix_logger_after_uvicorn()
+
     # Запуск фоновой автосинхронизации Coros (Start background auto-sync)
     _start_auto_sync()
 
