@@ -641,11 +641,13 @@ async def cmd_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def daily_weight_job(context: ContextTypes.DEFAULT_TYPE):
-    """Ежедневный опрос веса в 9:00 — только если ещё не вводили сегодня (Daily weight prompt at 9:00 — skip if already logged today)"""
+    """Ежедневный опрос/напоминание о весе (Daily weight prompt/reminder — runs at 9:00, 12:00, 15:00, 18:00 if no weight logged today)"""
+    logger.info("daily_weight_job fired at %s", datetime.utcnow().isoformat())
     db = SessionLocal()
     audit = AuditService(db)
     try:
         today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        hour = datetime.utcnow().hour
         users = db.query(User).filter(
             User.telegram_chat_id.isnot(None),
             User.is_active == True,
@@ -659,11 +661,16 @@ async def daily_weight_job(context: ContextTypes.DEFAULT_TYPE):
             if existing:
                 continue
 
+            # Выбираем текст в зависимости от времени (Pick message text by hour)
+            if hour < 10:
+                text = "⏰ *Доброе утро!* Введи свой сегодняшний вес (в кг):\nнапример: 75.5"
+            else:
+                text = "🔔 *Напоминание:* вес за сегодня ещё не введён.\nВведи свой вес (в кг):\nнапример: 75.5"
+
             try:
                 await context.bot.send_message(
                     chat_id=user.telegram_chat_id,
-                    text="⏰ *Доброе утро!* Введи свой сегодняшний вес (в кг):\n"
-                         "например: 75.5",
+                    text=text,
                     parse_mode="Markdown",
                 )
                 _awaiting_weight[user.telegram_chat_id] = True
@@ -900,9 +907,25 @@ def run_bot():
     application.add_handler(CallbackQueryHandler(feedback_callback, pattern="^feedback:"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_weight_message))
 
-    # Планировщик ежедневного опроса веса в 9:00 (Daily weight prompt at 9:00)
-    application.job_queue.run_daily(daily_weight_job, time=dt_time(hour=9, minute=0))
-    logger.info("Ежедневный опрос веса запланирован на 9:00")
+    # Планировщик опроса веса: 9:00, 12:00, 15:00, 18:00 (Weight prompt schedule: 9:00, 12:00, 15:00, 18:00)
+    for hour in [9, 12, 15, 18]:
+        application.job_queue.run_daily(daily_weight_job, time=dt_time(hour=hour, minute=0))
+    logger.info("Ежедневный опрос веса запланирован на 9:00, 12:00, 15:00, 18:00")
+
+    # Если текущее время после 9:00 — запускаем проверку веса сразу (If past 9:00 — run weight check immediately)
+    now = datetime.utcnow()
+    if now.hour >= 9 and not (now.hour == 9 and now.minute == 0 and now.second < 5):
+        db = SessionLocal()
+        try:
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            any_weight_today = db.query(WeightMeasurement).filter(
+                WeightMeasurement.measured_at >= today_start,
+            ).first()
+            if not any_weight_today:
+                logger.info("Вес ещё не введён сегодня — запускаем напоминание через 30 секунд")
+                application.job_queue.run_once(daily_weight_job, when=datetime.utcnow() + timedelta(seconds=30))
+        finally:
+            db.close()
 
     # Проверка данных сна — старт в 10:00, дальше функция сама планирует (Recovery check starts at 10:00, then schedules itself)
     application.job_queue.run_daily(daily_recovery_check_job, time=dt_time(hour=10, minute=0))
