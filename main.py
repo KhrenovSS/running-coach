@@ -35,7 +35,7 @@ app.include_router(auth_router)
 os.makedirs("uploads", exist_ok=True)
 
 # Хранилище для загруженных TCX, ожидающих подтверждения (Pending uploads awaiting user confirmation)
-PENDING_DIR = Path("/tmp/opencode/uploads")
+PENDING_DIR = Path(os.getenv("PENDING_DIR", "/tmp/running_coach_uploads"))
 PENDING_DIR.mkdir(parents=True, exist_ok=True)
 _pending = {}  # temp_id -> dict with 'path', 'filename', 'data'
 _sync_tasks = {}  # task_id -> dict with progress info

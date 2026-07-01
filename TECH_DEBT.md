@@ -625,8 +625,8 @@ running-coach-worker.service  # APScheduler для синков/напомина
    - [x] **5.2** `src/models.py` — убрать SQLite-only код, сделать engine database-agnostic (условное создание: PostgreSQL → `pool_size=10, max_overflow=20`; SQLite → `check_same_thread`, `PRAGMA WAL`).
    - [x] **5.3** `alembic/env.py` — читать `DATABASE_URL` из env вместо хардкода в `alembic.ini`.
    - [x] **5.4** Fresh Alembic baseline: удалить 4 старые миграции (`c3f51ae84837`, `0bba2c2badec`, `69f28e182276`, `eb50c256201f`, `eb448386be71`), создать один новый baseline через `alembic revision --autogenerate` (database-agnostic, `op.create_table` без `AUTOINCREMENT`).
-   - [ ] **5.5** `main.py` — `PENDING_DIR` сделать configurable через env (`PENDING_DIR`).
-   - [ ] **5.6** `src/crypto.py` — безопасный fallback если `.env` не найден (warning вместо crash).
+   - [x] **5.5** `main.py` — `PENDING_DIR` сделать configurable через env (`PENDING_DIR`).
+   - [x] **5.6** `src/crypto.py` — безопасный fallback если `.env` не найден (warning вместо crash).
    - [ ] **5.7** `Dockerfile` — Python 3.13-slim, установка зависимостей, копирование кода.
    - [ ] **5.8** `docker-compose.yml` — 3 сервиса: `db` (postgres:16-alpine), `app` (uvicorn), `bot` (run_telegram_bot.py). Healthcheck на db, `depends_on: condition: service_healthy`, `restart: on-failure`, volumes для pgdata/uploads/logs.
    - [ ] **5.9** `.dockerignore` — исключить `.venv/`, `__pycache__/`, `.git/`, `*.db*`, `logs/`, `uploads/`, `.env`.
