@@ -432,6 +432,7 @@ python run_telegram_bot.py
 
 ### ⬜ В работе / запланировано
 - [ ] **Sprint 6** (TECH_DEBT.md): настраиваемая частота синхронизации Coros per-user, баннер для новых пользователей, ручная первая синхронизация
+- [ ] **Sprint 7** (TECH_DEBT.md): панель администрирования — дашборд, управление пользователями, просмотр аудита, принудительный sync
 - [ ] **Sprint 3** (TECH_DEBT.md): декомпозиция main.py, Jinja2, pydantic-settings
 - [ ] **Sprint 4** (TECH_DEBT.md): стандартизация времени (UTC), Coros-клиент на httpx.AsyncClient
 - [ ] **Модуль аналитики** — 8 этапов из `decision_module_design.md`
@@ -522,7 +523,7 @@ python run_telegram_bot.py
 - ~~Нет аудита событий~~ → `AuditService`, таблица `audit_events`, покрытие всех ключевых операций
 - ~~Веб захардкожен на одного пользователя~~ → email+пароль (bcrypt), session-cookie, `get_current_user` Depends
 
-Рекомендуемый порядок исправлений (6 спринтов) описан в `TECH_DEBT.md` → раздел «Порядок работ».
+Рекомендуемый порядок исправлений (7 спринтов) описан в `TECH_DEBT.md` → раздел «Порядок работ».
 
 ---
 

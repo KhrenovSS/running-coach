@@ -626,6 +626,9 @@ running-coach-worker.service  # APScheduler для синков/напомина
 6. **Спринт 6 — Настраиваемая частота синхронизации Coros (per-user)** (1–2 дня)
    — *см. подробное описание ниже.*
 
+7. **Спринт 7 — Панель администрирования (Admin panel)** (2–3 дня)
+   — *см. подробное описание ниже.*
+
 ---
 
 ### Детальное описание Спринта 5 (завершён)
@@ -702,9 +705,40 @@ running-coach-worker.service  # APScheduler для синков/напомина
    - Существующие эндпоинты `POST /coros/sync` и `POST /coros/sync/health` без изменений.
    - Глобальные переменные окружения `COROS_HEALTH_SYNC_INTERVAL` и `COROS_ACTIVITY_SYNC_INTERVAL` — удалить или оставить как fallback для случая `user.activity_sync_interval IS NULL` (решить при реализации).
 
+---
+
+### Детальное описание Спринта 7
+
+7. **Спринт 7 — Панель администрирования (Admin panel)** (2–3 дня)
+   - [ ] **7.1** `src/models.py` — колонка `role` (String(20), default='user', значения: 'user', 'admin') в модель User + Alembic миграция. Установить `role='admin'` для user id=1.
+   - [ ] **7.2** `src/api/deps.py` — зависимость `get_admin_user`: проверяет `role == 'admin'`, иначе 403. Параллельно с `get_current_user`.
+   - [ ] **7.3** `src/api/routes/admin.py` — роутер с префиксом `/admin`, все эндпоинты под `Depends(get_admin_user)`.
+   - [ ] **7.4** `/admin` — дашборд: количество пользователей, тренировок, синхронизаций за день (агрегатные запросы по audit_events и таблицам).
+   - [ ] **7.5** `/admin/users` — список пользователей (id, email, telegram, дата регистрации, last_sync, is_active, role).
+   - [ ] **7.6** `/admin/audit` — просмотр audit_events с фильтром по пользователю/типу/дате (таблица уже есть, нужны только запросы + UI).
+   - [ ] **7.7** `/admin/sync` — глобальный статус синхронизаций + принудительный sync для конкретного пользователя.
+   - [ ] **7.8** `/admin/users/{id}` — управление пользователем: ban/unban (is_active toggle), сброс пароля, просмотр тренировок и метрик.
+   - [ ] **7.9** Очистка старых данных: audit_events старше N дней, удалённые лог-файлы.
+   - [ ] **7.10** `CHANGELOG.md` — обновить.
+
+   **Что уже есть (не нужно делать заново):**
+   - `AuditEvent` модель + `AuditService` — все ключевые события пишутся в БД
+   - `is_active` на User — базовый ban/unban
+   - `get_current_user` (session-cookie) — основа для auth admin-панели
+   - `_auto_sync_status` (health/activity) — статус синхронизации
+   - `/health/` endpoint, `/logs` endpoint
+   - Per-user data isolation (`user_id` везде) — можно смотреть данные конкретного пользователя
+   - Индексы на `audit_events.created_at` и `audit_events.event_type`
+
+   **Дизайн-решения:**
+   - Встроенная HTML-страница `/admin` (как `/settings`, `/logs`), не отдельный фронтенд
+   - Доступ через `get_admin_user` dependency (проверка `role == 'admin'`)
+   - Минимум стилей, таблицы + фильтры
+   - user id=1 получает `role='admin'` при миграции
+
 После этих спринтов можно с чистой совестью начинать **Этап 0** модуля аналитики
 (см. `decision_module_design.md`, раздел 12).
 
 ---
 
-*Версия: 1.1 · Дата: 01.07.2026 · Проект: AI Running Coach*
+*Версия: 1.2 · Дата: 01.07.2026 · Проект: AI Running Coach*
