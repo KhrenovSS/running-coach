@@ -2,13 +2,22 @@
 
 All notable changes to this project are tracked here.
 
-## [02.07.2026] — Sprint 4.5, Phase 1: infra (expose PostgreSQL, .env.example)
+## [02.07.2026] — Sprint 4.5, Phase 1-2: infra + remove SQLite from code
+
+### Added
+- **Port 5432 exposed** on db container for local dev access
+- **Lazy engine** in models.py: `get_engine()` / `SessionLocal` — engine not created at import time
 
 ### Changed
-- **docker-compose.yml**: exposed port 5432 for local dev access to the db container
-- **.env.example**: `DATABASE_URL` now defaults to `postgresql://...@localhost:5432/...` instead of SQLite
-- **README.md**: local dev section updated — requires PostgreSQL via Docker
-- **AGENTS.md**: local dev command updated
+- **docker-compose.yml**: db container now exposes port 5432
+- **.env.example / .env**: `DATABASE_URL` defaults to PostgreSQL on localhost
+- **src/models.py**: removed SQLite branch, WAL pragmas, auto-fallback; `DATABASE_URL` is now required
+- **alembic/env.py**: removed `_RENDER_AS_BATCH` and `render_as_batch`
+- **alembic.ini**: removed `sqlalchemy.url = sqlite:///running_coach.db`
+- **tests/conftest.py**: sets `DATABASE_URL=sqlite:///:memory:` before importing models
+- **README.md, AGENTS.md**: updated local dev instructions
+
+## [02.07.2026] — Sprint 4.5, Phase 1: infra (expose PostgreSQL, .env.example)
 
 ## [02.07.2026] — Sprint 4, п.8: стандартизация времени (UTC)
 

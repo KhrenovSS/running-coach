@@ -1,5 +1,5 @@
 # Импорт библиотек SQLAlchemy и стандартных модулей (SQLAlchemy and standard library imports)
-from sqlalchemy import create_engine, event, Column, Integer, Float, String, Text, DateTime, Date, JSON, BigInteger, Boolean, ForeignKey, UniqueConstraint
+from sqlalchemy import create_engine, Column, Integer, Float, String, Text, DateTime, Date, JSON, BigInteger, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime, timezone
@@ -193,37 +193,66 @@ class AuthToken(Base):
 
 # Определение пути к БД и создание подключения (Database path and connection setup)
 DB_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_DIR}/running_coach.db")
-
-# Database-agnostic engine: PostgreSQL для production, SQLite для локальной разработки и тестов
-# Database-agnostic engine: PostgreSQL for production, SQLite for local dev and tests
-if DATABASE_URL.startswith("postgresql"):
-    # PostgreSQL — полноценный connection pool (PostgreSQL — proper connection pool)
-    engine = create_engine(
-        DATABASE_URL,
-        pool_pre_ping=True,
-        pool_size=10,
-        max_overflow=20,
-    )
-else:
-    # SQLite — check_same_thread + WAL для конкурентного доступа (SQLite — check_same_thread + WAL for concurrent access)
-    engine = create_engine(
-        DATABASE_URL,
-        connect_args={"check_same_thread": False, "timeout": 30},
-        pool_pre_ping=True,
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError(
+        "DATABASE_URL environment variable is required. "
+        "Set it to a PostgreSQL connection string, e.g. "
+        "postgresql://running_coach:PASSWORD@localhost:5432/running_coach"
     )
 
-    # Включение WAL-режима для SQLite при подключении (Enable WAL mode for SQLite on connect)
-    @event.listens_for(engine, "connect")
-    def _set_sqlite_pragma(dbapi_conn, connection_record):
-        cur = dbapi_conn.cursor()
-        cur.execute("PRAGMA journal_mode=WAL")
-        cur.execute("PRAGMA synchronous=NORMAL")
-        cur.execute("PRAGMA busy_timeout=5000")
-        cur.close()
+
+# Lazy engine creation — engine is built on first access, not at module import time.
+# This allows tests to override DATABASE_URL before any code calls get_db()/init_db().
+_engine = None
 
 
-SessionLocal = sessionmaker(bind=engine)
+def get_engine():
+    global _engine
+    if _engine is not None:
+        return _engine
+    if DATABASE_URL.startswith("postgresql"):
+        _engine = create_engine(
+            DATABASE_URL,
+            pool_pre_ping=True,
+            pool_size=10,
+            max_overflow=20,
+        )
+    elif DATABASE_URL.startswith("sqlite"):
+        _engine = create_engine(
+            DATABASE_URL,
+            connect_args={"check_same_thread": False, "timeout": 30},
+            pool_pre_ping=True,
+        )
+    else:
+        raise ValueError(f"Unsupported DATABASE_URL scheme: {DATABASE_URL.split(':')[0]}")
+    return _engine
+
+
+# Alias for backward compatibility
+
+
+# Lazy SessionLocal — creates sessionmaker on first call, bound to lazy engine
+class _SessionLocal:
+    """Lazy sessionmaker: engine is resolved via get_engine() on first call, not at import time."""
+    _maker = None
+
+    def __call__(self):
+        if self._maker is None:
+            self._maker = sessionmaker(bind=get_engine())
+        return self._maker()
+
+    def __init__(self):
+        pass
+
+    def configure(self, **kwargs):
+        if self._maker is None:
+            self._maker = sessionmaker(bind=get_engine(), **kwargs)
+        else:
+            self._maker.configure(**kwargs)
+
+
+SessionLocal = _SessionLocal()
 
 
 # Зависимость для FastAPI: выдаёт сессию БД и закрывает её после запроса (FastAPI DB session dependency)
@@ -237,7 +266,7 @@ def get_db():
 
 # Инициализация БД: создание таблиц (Initialize DB: create all tables)
 def init_db():
-    Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(bind=get_engine())
 
 
 # Получение настроек пользователя из User (Get user settings from User model)

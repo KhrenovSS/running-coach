@@ -807,22 +807,24 @@ running-coach-worker.service  # APScheduler для синков/напомина
 
    #### Фаза 2 — Убрать SQLite из кода
 
-   - [ ] **4.5.4** `src/models.py`:
-     - Убрать ветку `if database_url.startswith("sqlite")`.
-     - Всегда создавать engine для PostgreSQL (`pool_size=10, max_overflow=20`).
-     - Убрать `check_same_thread=False`, `PRAGMA journal_mode=WAL`, `PRAGMA synchronous=NORMAL`.
-     - Убрать fallback на SQLite при отсутствии `DATABASE_URL` (теперь URL обязателен).
-   - [ ] **4.5.5** `alembic/env.py`:
-     - Убрать `_RENDER_AS_BATCH` и `render_as_batch`.
-     - Убрать условие `db_url is None or db_url.startswith("sqlite")`.
-     - Всегда использовать `render_as_batch=False`.
-   - [ ] **4.5.6** `alembic.ini`:
-     - Убрать `sqlalchemy.url = sqlite:///running_coach.db`.
-     - Оставить пустым или прокомментировать: `# set via DATABASE_URL env variable`.
+   - [x] **4.5.4** `src/models.py`:
+      - Убрать ветку `if database_url.startswith("sqlite")`.
+      - Всегда создавать engine для PostgreSQL (`pool_size=10, max_overflow=20`).
+      - Убрать `check_same_thread=False`, `PRAGMA journal_mode=WAL`, `PRAGMA synchronous=NORMAL`.
+      - Убрать fallback на SQLite при отсутствии `DATABASE_URL` (теперь URL обязателен).
+      - Engine создаётся лениво (get_engine()), SessionLocal — ленивый враппер.
+   - [x] **4.5.5** `alembic/env.py`:
+      - Убрать `_RENDER_AS_BATCH` и `render_as_batch`.
+      - Убрать условие `db_url is None or db_url.startswith("sqlite")`.
+      - Всегда использовать `render_as_batch=False`.
+   - [x] **4.5.6** `alembic.ini`:
+      - Убрать `sqlalchemy.url = sqlite:///running_coach.db`.
+      - Оставить пустым или прокомментировать: `# set via DATABASE_URL env variable`.
 
    **Как проверить:**
-   - `python3 -c "from src.models import engine; print(engine.url)"` → `postgresql://...`.
-   - `alembic current` подключается к PostgreSQL, не падает.
+   - [x] `python3 -c "from src.models import engine; print(engine.url)"` → `postgresql://...`.
+   - [x] `alembic current` подключается к PostgreSQL, не падает.
+   - [x] Тесты (in-memory SQLite) проходят: `pytest tests/ -v` → 3 passed.
 
    ---
 
