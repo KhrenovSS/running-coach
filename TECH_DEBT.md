@@ -619,7 +619,7 @@ running-coach-worker.service  # APScheduler для синков/напомина
    - [ ] п.15: исправить часовой пояс daily weight reminder (бот присылает в 12:00 MSK вместо 9:00).
 
 5. **Спринт 4 — процессы, интеграции, мульти-брендовая архитектура** (3–4 дня)
-   - [ ] п.8: стандартизировать время (UTC + `User.timezone`).
+   - [x] п.8: стандартизировать время (UTC + `User.timezone`).
    - [ ] п.12+14: переписать Coros-клиент на `httpx.AsyncClient` сразу как `CorosWatchClient(BaseWatchClient)`, внедрить мульти-брендовую архитектуру.
    — *см. подробное описание ниже.*
 
@@ -666,9 +666,6 @@ running-coach-worker.service  # APScheduler для синков/напомина
    - [x] **8.2** Добавить поле `User.timezone` (String(50), nullable) — определяется по GPS первой тренировки.
    - [x] **8.3** Парсер `src/parsers/common.py`: сохранять UTC-время, таймзону писать в `User.timezone` и `TrainingSession.timezone`.
    - [x] **8.4** Миграция Alembic: конвертировать старые naive-local `begin_ts` в UTC (используя таймзону первой GPS-точки каждой тренировки).
-      - [x] **8.4.1** Написать Alembic data migration: для каждой TrainingSession с `timezone IS NULL` определить таймзону по GPS из `segments_json` (или fallback Europe/Moscow), конвертировать `begin_ts` из local→UTC.
-      - [x] **8.4.2** Применить миграцию на локальной SQLite и проверить корректность конвертации.
-      - [x] **8.4.3** Применить миграцию на Docker PostgreSQL (через `docker compose exec app alembic upgrade head`).
    - [x] **8.5** Шаблоны Jinja2: конвертировать UTC → локальное время пользователя через хелпер `local_dt(dt, user)`.
    - [x] **8.6** `grep -rn "datetime.utcnow" src/ main.py` → 0 совпадений.
 
