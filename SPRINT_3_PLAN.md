@@ -36,16 +36,16 @@
   - [x] 2.6 Проверить: `telegram_notify`, статистика, автосинхронизация работают (импорты без ошибок)
   - [x] 2.7 COMMIT: "Шаг 2: бизнес-логика вынесена в src/services/"
 
-- [ ] **Шаг 3 — Выделение роутов (API endpoints из main.py)**
-  - [ ] 3.1 Создать `src/web/routes/__init__.py` — `web_router = APIRouter()`
-  - [ ] 3.2 Создать `src/web/routes/pages.py` — `GET /`, `GET /session/{id}`, `GET /settings`, `POST /session/{id}/delete`, `POST /settings` + `render_page()` (её логика)
-  - [ ] 3.3 Создать `src/web/routes/uploads.py` — `POST /upload`, `POST /upload/confirm`, `POST /upload/confirm_deleted`
-  - [ ] 3.4 Создать `src/web/routes/coros.py` — `POST /coros/sync`, `POST /coros/sync/health`, `GET /coros/sync/status/{task_id}`
-  - [ ] 3.5 Создать `src/web/routes/logs.py` — `GET /logs`
-  - [ ] 3.6 В main.py: `app.include_router(web_router)` вместо декораторов
-  - [ ] 3.7 Перенести глобальное состояние `_pending`, `_sync_tasks`, `_auto_sync_status`, `TRAINING_TYPES_RU` в `src/web/state.py`
-  - [ ] 3.8 Проверить: все эндпоинты работают (загрузка, синхронизация, логи, удаление)
-  - [ ] 3.9 COMMIT: "Шаг 3: роуты вынесены в src/web/routes/"
+- [x] **Шаг 3 — Выделение роутов (API endpoints из main.py)**
+  - [x] 3.1 Создать `src/web/routes/__init__.py` — `web_router = APIRouter()`
+  - [x] 3.2 Создать `src/web/routes/pages.py` — `GET /`, `GET /session/{id}`, `GET /settings`, `POST /session/{id}/delete`, `POST /settings` + `render_page()` (её логика)
+  - [x] 3.3 Создать `src/web/routes/uploads.py` — `POST /upload`, `POST /upload/confirm`, `POST /upload/confirm_deleted`
+  - [x] 3.4 Создать `src/web/routes/coros.py` — `POST /coros/sync`, `POST /coros/sync/health`, `GET /coros/sync/status/{task_id}`
+  - [x] 3.5 Создать `src/web/routes/logs.py` — `GET /logs`
+  - [x] 3.6 В main.py: `app.include_router(web_router)` вместо декораторов
+  - [x] 3.7 Перенести глобальное состояние `_pending`, `_sync_tasks`, `_AUTO_SYNC_LOCK`, `TRAINING_TYPES_RU` в `src/web/state.py`; `templates` в `src/deps.py`
+  - [x] 3.8 Проверить: все 14 роутов загружаются (7 pages + 3 uploads + 3 coros + 1 logs)
+  - [x] 3.9 COMMIT: "Шаг 3: роуты вынесены в src/web/routes/"
 
 - [ ] **Шаг 4 — Выделение scheduler + startup**
   - [ ] 4.1 Создать `src/scheduler.py` — `AutoSyncScheduler` (класс-одиночка с `_loop`, `start/stop`)

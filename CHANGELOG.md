@@ -2,6 +2,24 @@
 
 All notable changes to this project are tracked here.
 
+## [02.07.2026] — Sprint 3, шаг 3: роуты вынесены в src/web/routes/
+
+### Added
+- **`src/web/state.py`**: глобальное состояние (`_pending`, `_sync_tasks`, `_sync_tasks_lock`, `_AUTO_SYNC_LOCK`, `TRAINING_TYPES_RU`, `PENDING_DIR`)
+- **`src/deps.py`**: общие зависимости (`templates = Jinja2Templates(directory="src/web/templates")`)
+- **`src/web/routes/__init__.py`**: сборка 4 sub-routers в `web_router`
+- **`src/web/routes/pages.py`**: 7 роутов (login, register, index, session_detail, settings_page, session_delete, settings_save) + `render_page()` + `_AUTH_ERRORS`
+- **`src/web/routes/uploads.py`**: 3 роута (upload_files, confirm_upload, confirm_deleted)
+- **`src/web/routes/coros.py`**: 3 роута (coros_sync, coros_sync_status, coros_sync_health)
+- **`src/web/routes/logs.py`**: 1 роут (view_logs)
+
+### Changed
+- **main.py**: все роуты удалены, заменены на `app.include_router(web_router)`. `templates` вынесен в `src.deps`. main.py: 1338 → 118 строк.
+- **Импорты**: все роуты импортируют `templates` из `src.deps`, глобальное состояние из `src.web.state`
+
+### Removed
+- **~1220 строк** из main.py (13 декораторов роутов, render_page(), _AUTH_ERRORS, глобальные переменные)
+
 ## [02.07.2026] — Sprint 3, шаг 2: сервисы выделены в src/services/
 
 ### Added
