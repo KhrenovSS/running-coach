@@ -11,6 +11,7 @@ from src.logger import get_logger
 from src.services.audit import AuditService
 from src.crypto import decrypt
 from src.models import SessionLocal, User, DailyMetrics, TrainingSession, DeletedTraining, WatchCredential
+from src.services.telegram_notify import telegram_notify
 from src.watch import get_watch_client, BaseWatchClient
 
 logger = get_logger("app")
@@ -286,6 +287,13 @@ async def sync_activities_for_user(cred: WatchCredential, brand: str) -> int:
             db.commit()
             logger.info("Activity sync: brand=%s user=%s — синхронизировано %d новых тренировок (skipped_existing=%d, skipped_deleted=%d)",
                          brand, cred.user_id, synced, skipped_existing, skipped_deleted)
+            # Уведомление в Telegram (Notify user in Telegram about new training)
+            telegram_notify(
+                user_id=cred.user_id,
+                text=f"🏃 Новая тренировка синхронизирована!\n"
+                     f"Всего добавлено: {synced}\n"
+                     f"Зайди в веб-интерфейс для деталей."
+            )
         else:
             logger.info("Activity sync: brand=%s user=%s — новых тренировок нет (всего=%d, already_exist=%d, deleted=%d)",
                          brand, cred.user_id, len(activities), skipped_existing, skipped_deleted)

@@ -2,6 +2,11 @@
 
 All notable changes to this project are tracked here.
 
+## [02.07.2026] — Исправлено: уведомления в Telegram при автосинхронизации
+
+### Fixed
+- **`src/services/sync_service.py`**: при автосинхронизации тренировок не отправлялось уведомление в Telegram. Добавлен вызов `telegram_notify()` после успешной синхронизации новых активностей.
+
 ## [02.07.2026] — Добавлено подробное логирование синхронизации + исправлен баг NameError в settings
 
 ### Added
