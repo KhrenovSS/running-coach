@@ -321,11 +321,10 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 10. **Старые файлы удалены**: `coros_client.py`, `coros_sync_auto.py`, `web/routes/coros.py`
 
 ### Что сделано за сессию 02.07.2026 (ночь):
-1. **🐛 Обнаружен критический баг**: потеря тренировок при задержке Coros API — `list_activities(since=last_activity_sync_at)`.
-2. **Health sync проверен**: не подвержен багу (использует окно 120 дней).
-3. **TECH_DEBT.md**: добавлен раздел с описанием бага, примером, планом исправления.
-4. **AGENTS.md**: баг добавлен в «Известные проблемы» и «Следующие шаги».
-5. **CHANGELOG.md**: запись о баге.
+1. **🐛 Исправлен критический баг**: lookback-буфер 2ч в `sync_activities_for_user()` (`src/services/sync_service.py:212`) и `telegram_bot.py:460`.
+2. **Интервал синхронизации уменьшен**: 60→30 мин (`src/services/sync_service.py:27`).
+3. **Sprint 4.5 Фаза 7**: пересобран Docker образ `app`, миграции `b6c7d8e9f0a1` + `c9d8e7f6a0b2` применены. Alembic downgrade/upgrade — чистый цикл. Health check — OK. Восстановлена колонка `source_brand` в `daily_metrics`.
+4. **CHANGELOG.md, TECH_DEBT.md, AGENTS.md**: обновлены, чекбоксы Sprint 4.5 Фаза 7 проставлены.
 
 ### Что запланировано на следующие сессии (план работ от 02.07.2026):
 

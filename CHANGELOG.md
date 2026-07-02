@@ -2,6 +2,21 @@
 
 All notable changes to this project are tracked here.
 
+## [02.07.2026] — Шаг 3: Sprint 4.5 Фаза 7 — проверка миграций, alembic downgrade/upgrade
+
+### Fixed
+- **`watch_credentials` / `source_brand`**: исправлено частичное применение миграции `b6c7d8e9f0a1` (таблица была создана, alembic_version не обновлён). Ручное восстановление: `UPDATE alembic_version`, добавлена колонка `source_brand` в `daily_metrics`.
+
+### Changed
+- **Docker образ `app`**: пересобран, миграции включены. Контейнер перезапущен.
+
+### Infrastructure
+- **Alembic downgrade/upgrade**: `downgrade -1` + `upgrade head` — чистый цикл без ошибок.
+- **Health check**: `GET /health/` — `database.status=ok`, `migrations.status=ok`, `current_revision=c9d8e7f6a0b2`.
+- **Все контейнеры Up** (db, app, bot).
+
+---
+
 ## [02.07.2026] — Шаг 2: Уменьшен интервал автосинхронизации тренировок 60→30 мин
 
 ### Changed
