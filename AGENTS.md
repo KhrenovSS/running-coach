@@ -383,8 +383,9 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
    - `local_dt()` simplified: `dt.astimezone(tz)` with naive fallback
    - `common.py`: `start_time_utc` normalized to aware UTC at function entry
    - `coros_sync_auto.py`: `bt` parsing produces aware UTC for DB comparisons
-5. **Docker**: all 3 containers (`db`, `app`, `bot`) Up and healthy
-6. **Tests**: 3/3 pass with in-memory SQLite
+5. **Hotfix (02.07.2026)**: `UnboundLocalError` in `pages.py:73` — Python 3.13+ scoping issue with inner `import` shadowing module-level `timezone`
+6. **Docker**: all 3 containers (`db`, `app`, `bot`) Up and healthy
+7. **Tests**: 3/3 pass with in-memory SQLite
 
 ### Следующие шаги (из TECH_DEBT.md):
 1. **Sprint 4 п.12+14** — httpx Coros-клиент + мульти-брендовая архитектура (BaseWatchClient, WatchCredential, sync_service)

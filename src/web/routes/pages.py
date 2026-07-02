@@ -116,7 +116,7 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
     else:
         latest_hrv = latest_rhr = latest_tired = latest_perf = latest_recovery_pct = ''
 
-    from datetime import datetime, timezone
+    from datetime import datetime
     now = datetime.now(timezone.utc)
     with _auto_sync_status_lock:
         as_health = dict(_auto_sync_status['health'])

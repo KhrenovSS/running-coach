@@ -2,6 +2,11 @@
 
 All notable changes to this project are tracked here.
 
+## [02.07.2026] — Hotfix: UnboundLocalError в pages.py (Python 3.13+)
+
+### Fixed
+- **`src/web/routes/pages.py`**: `UnboundLocalError: cannot access local variable 'timezone'` — внутренний `from datetime import datetime, timezone` (строка 119) затенял module-level `timezone` (строка 22). Python 3.13+ считает `timezone` локальной переменной с начала функции `render_page()`, но на строке 73 она ещё не инициализирована. Исправлено: убран `timezone` из внутреннего импорта, оставлен только `from datetime import datetime`.
+
 ## [02.07.2026] — Sprint 4.5 завершён: PostgreSQL-only + TIMESTAMPTZ
 
 ### Changed
