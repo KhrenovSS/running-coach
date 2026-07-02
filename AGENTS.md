@@ -384,16 +384,16 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 7. **Отображение** index и session_detail: даты конвертируются в локальное время через `ZoneInfo`
 8. **Callers** (uploads.py, coros.py, coros_sync_auto.py, telegram_bot.py): сохраняют `timezone` в `TrainingSession.timezone` и `User.timezone`
 9. **catch-up в daily_weight_job**: использует MSK время для определения приветствия (утро/день/вечер)
+10. **Data migration (п.8.4)**: Alembic migration `a1b2c3d4e5f6` конвертирует старые naive-local `begin_ts` → naive UTC, проставляет `timezone` в `training_sessions` и `users`. Применена на Docker PostgreSQL (27 sessions) и локальной SQLite
+11. **pyproject.toml**: добавлен `jinja2==3.1.5` (неявная зависимость стала явной)
 
 ### Ещё не сделано в п.8:
-- ⬜ Data migration: конвертировать старые naive-local `begin_ts` → naive UTC (по GPS из segments_json, fallback Europe/Moscow)
 - ⬜ `fmt_sync_time` в pages.py — использует UTC для сравнения с _auto_sync_status (работает, но сообщения типа "5 ч назад" могут быть неточны в первые часы дня)
 - ⬜ Фильтрация по году/месяцу в index использует UTC даты вместо локальных
 - ⬜ `daily_recovery_check_job` использует MSK (Europe/Moscow) hardcoded вместо User.timezone
 
 **Следующие шаги (из TECH_DEBT.md):**
 - Sprint 4: п.12+14 (httpx Coros-клиент + мульти-брендовая архитектура: BaseWatchClient, WatchCredential, sync_service)
-- Sprint 4: data migration для старых `begin_ts`
 - Sprint 6: per-user частота синхронизации (бренд-независимая), баннеры, настройки
 - Модуль аналитики (8 этапов из decision_module_design.md)
 - Фильтр по типу тренировки на главной
