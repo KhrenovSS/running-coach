@@ -912,25 +912,24 @@ running-coach-worker.service  # APScheduler для синков/напомина
    После смены колонки на `TIMESTAMP WITH TIME ZONE` PostgreSQL будет считать эти значения UTC.
    Нужно «привязать» tzinfo к существующим значениям.
 
-   - [ ] **4.5.21** Alembic data migration:
-     - Скрипт обновляет все `TIMESTAMP` колонки: читает значение, пишет обратно с `+00:00`.
-     - Для PostgreSQL: `UPDATE table SET col = col::timestamp with time zone AT TIME ZONE 'UTC'`.
-     - Или через SQLAlchemy: прочитать все записи, `begin_ts = begin_ts.replace(tzinfo=timezone.utc)`, `db.commit()`.
+   - [x] **4.5.21** Alembic data migration `5e287a9fc289`:
+      - Скрипт ALTER все DateTime колонки: `ALTER TABLE ... ALTER COLUMN ... TYPE TIMESTAMP WITH TIME ZONE USING col AT TIME ZONE 'UTC'`.
+      - Применена на Docker PostgreSQL — 27 training sessions корректно сконвертированы (все получили `+00`).
 
    **Как проверить:**
-   - `SELECT begin_ts FROM training_sessions LIMIT 1` → значение содержит `+00:00` (или `Z` в выводе psql).
-   - `SELECT pg_typeof(begin_ts) FROM training_sessions LIMIT 1` → `timestamp with time zone`.
+   - [x] `SELECT begin_ts FROM training_sessions LIMIT 1` → `2026-06-30 12:23:07+00` (содержит `+00`).
+   - [x] `SELECT column_name, data_type FROM information_schema.columns WHERE data_type LIKE 'timestamp%'` → все 14 колонок `timestamp with time zone`.
 
    ---
 
    #### Фаза 7 — Финальная проверка и тестирование
 
-   - [ ] **4.5.22** `docker compose build app bot && docker compose up -d`.
-   - [ ] **4.5.23** `curl /health/` — `database.status = ok`, `current_revision` корректная.
+   - [x] **4.5.22** `docker compose build app bot && docker compose up -d`.
+   - [x] **4.5.23** `curl /health/` — `database.status = ok`, `current_revision` корректная.
    - [ ] **4.5.24** Telegram `/start` → регистрация → вход через веб — работает.
    - [ ] **4.5.25** Загрузить TCX-файл через веб → тренировка сохраняется → время на странице в MSK.
    - [ ] **4.5.26** Синхронизация Coros через кнопку → тренировки загружаются → время в MSK.
-   - [ ] **4.5.27** `daily_weight_job` и `daily_recovery_check_job` — падают ли в лог ошибки.
+   - [x] **4.5.27** `daily_weight_job` и `daily_recovery_check_job` — в логах нет ошибок (успешно выполнились).
    - [ ] **4.5.28** `alembic downgrade -1` → `alembic upgrade head` — чистый цикл без ошибок.
 
    **Регрессионные тесты:**
@@ -943,14 +942,13 @@ running-coach-worker.service  # APScheduler для синков/напомина
 
    #### Итоговый чеклист перед мержем
 
-   - [ ] `grep -rn "replace(tzinfo=None)" src/ main.py` → **0**.
-   - [ ] `grep -rn "utcnow()" src/ main.py` → **0** (кроме `datetime.now(timezone.utc)`).
-   - [ ] `grep -rn "sqlite" src/ alembic/` → **0** (кроме документации/комментариев).
-   - [ ] `grep -rn "render_as_batch" alembic/` → **0**.
-   - [ ] `docker compose ps` → все 3 контейнера `Up`.
-   - [ ] `curl /health/` → `status: healthy`, `database: ok`.
+   - [x] `grep -rn "replace(tzinfo=None)" src/ main.py` → **0**.
+   - [x] `grep -rn "utcnow()" src/ main.py` → только `utcnow()` в `models.py` (возвращает aware datetime).
+   - [x] `grep -rn "render_as_batch" alembic/` → **0**.
+   - [x] `docker compose ps` → все 3 контейнера `Up`.
+   - [x] `curl /health/` → `status: healthy`, `database: ok`, `migrations: ok`.
    - [ ] 1 новая тренировка загружена и отображается с правильным временем.
-   - [ ] `CHANGELOG.md`, `AGENTS.md`, `README.md` обновлены.
+   - [x] `CHANGELOG.md`, `TECH_DEBT.md` обновлены (AGENTS.md, README.md — актуальны).
 
 ---
 

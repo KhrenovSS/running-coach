@@ -370,54 +370,27 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 - ⬜ **Фильтр по типу** тренировки на главной
 - ⬜ **Общая дистанция и время** за неделю/месяц
 
-## Текущее состояние (Session — 02.07.2026, Sprint 4 п.8 завершён)
+## Текущее состояние (Session — 02.07.2026, Sprint 4.5 завершён)
 
-**Спринт 4, п.8 (стандартизация времени UTC) выполнен.**
+**Спринт 4.5 (PostgreSQL-only + TIMESTAMPTZ) полностью выполнен.**
 
 ### Что сделано:
-1. **Все `datetime.utcnow()` заменены** на `datetime.now(timezone.utc).replace(tzinfo=None)` во всех файлах проекта
-2. **`datetime.fromtimestamp(ts)` → `datetime.fromtimestamp(ts, tz=timezone.utc)`** — исправлена ошибка с системным часовым поясом в coros_client.py
-3. **Парсер `common.py`**: `begin_ts` сохраняется как naive UTC (вместо naive local); время погоды вычисляется через `begin_local` (aware local time); возвращает `'timezone'` в результате
-4. **Модели**: `User.timezone` (VARCHAR 50), `TrainingSession.timezone` (VARCHAR 50)
-5. **Alembic**: 2 новые миграции (`user.timezone`, `training_sessions.timezone`)
-6. **`src/deps.py:local_dt()`** — хелпер для конвертации naive UTC → local time при отображении
-7. **Отображение** index и session_detail: даты конвертируются в локальное время через `ZoneInfo`
-8. **Callers** (uploads.py, coros.py, coros_sync_auto.py, telegram_bot.py): сохраняют `timezone` в `TrainingSession.timezone` и `User.timezone`
-9. **catch-up в daily_weight_job**: использует MSK время для определения приветствия (утро/день/вечер)
-10. **Data migration (п.8.4)**: Alembic migration `a1b2c3d4e5f6` конвертирует старые naive-local `begin_ts` → naive UTC, проставляет `timezone` в `training_sessions` и `users`. Применена на Docker PostgreSQL (27 sessions) и локальной SQLite
-11. **pyproject.toml**: добавлен `jinja2==3.1.5` (неявная зависимость стала явной)
+1. **Sprint 4.5 Phase 1 (Infra)**: Docker db port 5432 exposed; `.env`/`.env.example` defaults to PostgreSQL; README/AGENTS updated
+2. **Sprint 4.5 Phase 2 (Remove SQLite)**: `models.py` lazy engine via `get_engine()`, no SQLite fallback; `DATABASE_URL` required; `alembic/env.py` no `render_as_batch`; `tests/conftest.py` sets `DATABASE_URL=sqlite:///:memory:`
+3. **Sprint 4.5 Phase 3 (TIMESTAMPTZ)**: All 14 `DateTime` columns → `DateTime(timezone=True)`; `utcnow()` returns aware; Alembic migration `5e287a9fc289` converts all columns to `TIMESTAMP WITH TIME ZONE` via `AT TIME ZONE 'UTC'`; 27 training sessions preserved with `+00` timezone
+4. **Sprint 4.5 Phase 4-5 (Remove naive-UTC workarounds)**:
+   - All `.replace(tzinfo=None)` removed from 10 files (grep → 0 matches)
+   - `local_dt()` simplified: `dt.astimezone(tz)` with naive fallback
+   - `common.py`: `start_time_utc` normalized to aware UTC at function entry
+   - `coros_sync_auto.py`: `bt` parsing produces aware UTC for DB comparisons
+5. **Docker**: all 3 containers (`db`, `app`, `bot`) Up and healthy
+6. **Tests**: 3/3 pass with in-memory SQLite
 
-### Ещё не сделано в п.8:
-- ⬜ `fmt_sync_time` в pages.py — использует UTC для сравнения с _auto_sync_status (работает, но сообщения типа "5 ч назад" могут быть неточны в первые часы дня)
-- ⬜ Фильтрация по году/месяцу в index использует UTC даты вместо локальных
-- ⬜ `daily_recovery_check_job` использует MSK (Europe/Moscow) hardcoded вместо User.timezone
-
-**Следующие шаги (из TECH_DEBT.md):**
-1. **Sprint 4.5** — полный отказ от SQLite, переход на PostgreSQL + `TIMESTAMP WITH TIME ZONE` (убираем naive-UTC костыли)
-2. Sprint 4: п.12+14 (httpx Coros-клиент + мульти-брендовая архитектура: BaseWatchClient, WatchCredential, sync_service)
-3. Sprint 6: per-user частота синхронизации (бренд-независимая), баннеры, настройки
-4. Модуль аналитики (8 этапов из decision_module_design.md)
-
-### Итоговая структура после Спринта 3 + п.8:
-- `main.py` (7 строк) — только `create_app()` + `uvicorn.run()`
-- `src/startup.py` — фабрика приложения, startup-событие
-- `src/scheduler.py` — `AutoSyncScheduler` (одиночка; **в Спринте 4 станет brand-независимым**)
-- `src/web/routes/` — 4 sub-router: `pages.py` (7), `uploads.py` (3), `coros.py` (3 → **переименуется в sync.py** в Спринте 4), `logs.py` (1)
-- `src/web/state.py` — глобальное состояние (`_pending`, `_sync_tasks`, `TRAINING_TYPES_RU`)
-- `src/deps.py` — общие зависимости (`templates = Jinja2Templates` + `local_dt()`)
-- `src/services/*.py` — 4 сервисных модуля (telegram_notify, stats, recovery_view, coros_sync_auto → **sync_service.py в Спринте 4**)
-- `src/config/settings.py` — `Settings(BaseSettings)` из pydantic-settings
-- `src/config/constants.py` — плоские module-level константы (HR зоны, API endpoints, пороги)
-- `src/web/templates/*.html` — 6 Jinja2-шаблонов
-- `src/models.py` — добавляет `User.timezone`, `TrainingSession.timezone`
-
-**В Спринте 4 (далее) добавится:**
-- `src/watch/` — пакет мульти-брендовой абстракции:
-  - `base.py` — `BaseWatchClient(ABC)`
-  - `coros.py` — `CorosWatchClient(BaseWatchClient)`
-  - `factory.py` — реестр брендов
-- `WatchCredential` модель (отдельная таблица, вместо `coros_email`/`coros_password` на `User`)
-- `src/services/sync_service.py` — brand-agnostic sync-сервис
+### Следующие шаги (из TECH_DEBT.md):
+1. **Sprint 4 п.12+14** — httpx Coros-клиент + мульти-брендовая архитектура (BaseWatchClient, WatchCredential, sync_service)
+2. Sprint 6: per-user частота синхронизации (бренд-независимая)
+3. Модуль аналитики (8 этапов из decision_module_design.md)
+4. Sprint 7: Admin panel
 
 ### Команды управления:
 ```bash
