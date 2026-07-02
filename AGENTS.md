@@ -303,12 +303,16 @@ def calc_avg_pace(...):
   2. **Сделать commit (если есть незакоммиченные изменения) + push** в GitHub. Это «итог дня».
   3. Сообщить пользователю, что изменения сохранены и запушены.
 
-## Текущее состояние (Session — 01.07.2026, вечер)
+## Текущее состояние (Session — 02.07.2026, Sprint 4 п.12+14 завершён)
 
-**Развёртывание:** Docker Compose, 3 контейнера (`db` + `app` + `bot`)  
+**Спринт 4 п.12+14 (Multi-brand architecture) полностью выполнен.**
+
+### Развёртывание
+Docker Compose, 3 контейнера (`db` + `app` + `bot`).
+
 **Команды управления:**
 ```bash
-# Запуск (из директории проекта, нужен sudo для docker)
+# Запуск
 sudo bash -c 'cd /home/nimda/projects/running-coach && set -a && source .env && set +a && export POSTGRES_PASSWORD && docker compose up -d'
 
 # Остановка
@@ -322,75 +326,37 @@ sudo docker logs running-coach-app-1 --tail 50
 sudo docker logs running-coach-bot-1 --tail 50
 sudo docker logs running-coach-db-1 --tail 50
 ```
-**Команда пуша (из любой папки):**
+
+**Команда пуша:**
 ```bash
 set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/nimda/projects/running-coach && git push "https://KhrenovSS:${GITHUB_TOKEN}@github.com/KhrenovSS/running-coach.git" main
 ```
 
 **БД:** PostgreSQL 16 (контейнер `running-coach-db-1`), volume `pgdata`.
-**Пользователь зарегистрирован:** user id=1, email=khrenov.ss@gmail.com, coros_email=khrenov.ss@gmail.com, 0 тренировок (первая синхронизация — вручную через 🔄 Coros Sync).
+**Пользователь:** id=1, email=khrenov.ss@gmail.com, Coros привязан (WatchCredential).
 
-**Systemd-юниты удалены.** Раньше использовались `running-coach.service` и `running-coach-bot.service` — теперь Docker управляет запуском.
+### Что сделано за сессию 02.07.2026:
+1. **`src/watch/`** — новый пакет мульти-брендовой абстракции: `BaseWatchClient(ABC)`, `CorosWatchClient` на `httpx.AsyncClient`, `factory.py`
+2. **`WatchCredential`** — новая модель в `src/models.py` (таблица `watch_credentials`), Alembic migration `b6c7d8e9f0a1`
+3. **`DailyMetrics.source_brand`** — колонка источника метрик
+4. **`src/services/sync_service.py`** — brand-agnostic sync (замена `coros_sync_auto.py`)
+5. **`src/web/routes/sync.py`** — `/sync/{brand}/run`, `/sync/{brand}/health` (замена `coros.py`)
+6. **`src/scheduler.py`** — brand-agnostic
+7. **`src/services/audit.py`** — `sync.{brand}.*` события
+8. **`src/crypto.py`** — `CRED_KEY` с fallback на `COROS_CRED_KEY`
+9. **`src/telegram_bot.py`** — обновлён на `CorosWatchClient` + `WatchCredential`
+10. **Старые файлы удалены**: `coros_client.py`, `coros_sync_auto.py`, `web/routes/coros.py`
 
-**Спринты 1-2, 4-5 завершены.** Sprint 6 (per-user частота синхронизации Coros) — план в `TECH_DEBT.md`, не реализован.
-
-**Что сделано за сессию 01.07.2026 (ночь — PostgreSQL + Docker):**
-1. **PostgreSQL + Docker (3 контейнера)**: `db` (postgres:16-alpine), `app` (uvicorn), `bot` (run_telegram_bot.py)
-2. **`src/models.py`**: engine database-agnostic — PostgreSQL или SQLite в зависимости от `DATABASE_URL`
-3. **`alembic/env.py`**: `DATABASE_URL` из env, `render_as_batch` только для SQLite
-4. **Fresh Alembic baseline** (`f75d2362cf9f`): заменены 4 старые миграции, database-agnostic
-5. **`Dockerfile`**, **`docker-compose.yml`**, **`.dockerignore`** созданы
-6. **`PENDING_DIR`** configurable через env
-7. **`src/crypto.py`**: предупреждение если `COROS_CRED_KEY` не задан
-8. **Systemd-юниты удалены** — Docker управляет запуском
-9. **DNS**: `/etc/resolv.conf` переключён на 8.8.8.8 (роутер 192.168.1.1 не резолвит CloudFront)
-
-**Что сделано за сессию 01.07.2026 (вечер — password auth + Sprint 6 план):**
-1. **Email+password аутентификация**: bcrypt, `/login`, `/register`, `/reset_password` в боте
-2. **Telegram-бот**: `/login_info`, `/reset_password`
-3. **Пользователь зарегистрирован**: user id=1, email=khrenov.ss@gmail.com, Coros привязан
-4. **Sprint 6 план** добавлен в `TECH_DEBT.md`: per-user настраиваемая частота синхронизации Coros (10 задач 6.1–6.10), ручная первая синхронизация, баннер для новых пользователей
-
-**Что сделано за сессию 01.07.2026 (день — вынос бота в systemd + опрос веса):**
-1. **Telegram-бот вынесен в отдельный systemd-юнит** (теперь заменён на Docker)
-2. **Починен ежедневный опрос веса**: расписание 9/12/15/18
-
-**Известные проблемы:**
-- Docker требует `sudo` (пользователь `nimda` в группе `docker`, но может потребоваться перелогин)
-- DNS: `/etc/resolv.conf` перезаписывается на 8.8.8.8 — после перезагрузки может вернуться 192.168.1.1
-- Существующие данные SQLite не перенесены — пользователь создан заново через Telegram `/start`
-
-**Следующие шаги:**
-- ✅ Создать пользователя: /start в Telegram → ссылка на /register → установить email+пароль — **выполнено**
-- ⬜ Первая синхронизация: пользователь нажимает синхронизацию в веб-интерфейсе
-- ⬜ **Спринт 6** (TECH_DEBT.md): per-user частота синхронизации, баннер, настройки
-- ✅ **Спринт 3** (TECH_DEBT.md): декомпозиция main.py, Jinja2, pydantic-settings — **завершён**
-- ⬜ **Спринт 4** (TECH_DEBT.md): стандартизация времени (UTC), мульти-брендовая архитектура, httpx Coros-клиент
-- ⬜ **Модуль аналитики** — 8 этапов из `decision_module_design.md`
-- ⬜ **Фильтр по типу** тренировки на главной
-- ⬜ **Общая дистанция и время** за неделю/месяц
-
-## Текущее состояние (Session — 02.07.2026, Sprint 4 п.12+14 завершён)
-
-**Спринт 4 п.12+14 (Multi-brand architecture) полностью выполнен.**
-
-### Что сделано:
-1. **`src/watch/`** — новый пакет мульти-брендовой абстракции: `base.py` (BaseWatchClient ABC), `coros.py` (CorosWatchClient на httpx.AsyncClient), `factory.py` (реестр брендов)
-2. **`WatchCredential`** — новая модель в `src/models.py` (таблица `watch_credentials`)
-3. **`DailyMetrics.source_brand`** — колонка для указания источника метрик
-4. **Alembic migration** `b6c7d8e9f0a1` — таблица + миграция данных
-5. **`src/services/sync_service.py`** — brand-agnostic sync (замена `coros_sync_auto.py`)
-6. **`src/web/routes/sync.py`** — `/sync/{brand}/run`, `/sync/{brand}/health` (замена `coros.py`)
-7. **`src/scheduler.py`** — brand-agnostic
-8. **`src/services/audit.py`** — `sync.{brand}.*` события
-9. **`src/crypto.py`** — `CRED_KEY` с fallback на `COROS_CRED_KEY`
-10. **`src/telegram_bot.py`** — обновлён на CorosWatchClient + WatchCredential
-11. **Старые файлы удалены**: `coros_client.py`, `coros_sync_auto.py`, `web/routes/coros.py`
+### Известные проблемы:
+- Docker требует `sudo` (пользователь `nimda` в группе `docker`)
+- DNS: `/etc/resolv.conf` может вернуться на 192.168.1.1 после перезагрузки
 
 ### Следующие шаги:
-1. Sprint 6: per-user частота синхронизации (бренд-независимая)
-2. Модуль аналитики (8 этапов из decision_module_design.md)
-3. Sprint 7: Admin panel
+1. **Sprint 6**: per-user частота синхронизации (бренд-независимая), баннер для новых пользователей
+2. **Модуль аналитики** — 8 этапов из `decision_module_design.md`
+3. **Sprint 7**: Admin panel
+4. Фильтр по типу тренировки на главной
+5. Общая дистанция и время за неделю/месяц
 
 ### Команды управления:
 ```bash

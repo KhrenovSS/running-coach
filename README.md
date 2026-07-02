@@ -458,9 +458,9 @@ python run_telegram_bot.py
 - [x] PostgreSQL + Docker Compose (3 контейнера: db, app, bot)
 - [x] **Sprint 3**: декомпозиция main.py (2776 → 7 строк), Jinja2‑шаблонизация (6 шаблонов), pydantic‑settings
 - [x] **Sprint 4.5** (TECH_DEBT.md): полный отказ от SQLite, переход на PostgreSQL + `TIMESTAMP WITH TIME ZONE`
+- [x] **Sprint 4** (TECH_DEBT.md) — п.12+14: мульти-брендовая архитектура (`BaseWatchClient`, `WatchCredential`, `sync_service`), Coros-клиент на httpx
 
 ### ⬜ В работе / запланировано
-- [ ] **Sprint 4** (TECH_DEBT.md) — п.12+14: мульти-брендовая архитектура (`BaseWatchClient`, `WatchCredential`), Coros-клиент на httpx
 - [ ] **Sprint 6** (TECH_DEBT.md): настраиваемая частота синхронизации per-user, баннер для новых пользователей, ручная первая синхронизация
 - [ ] **Модуль аналитики** — 8 этапов из `decision_module_design.md`
 - [ ] **Sprint 7** (TECH_DEBT.md): панель администрирования — дашборд, управление пользователями, просмотр аудита, принудительный sync
