@@ -28,6 +28,13 @@ import threading
 import time
 from pathlib import Path
 
+from src.services.telegram_notify import telegram_notify
+from src.services.stats import fmt_duration, calc_stats, zone_ranges, render_zone_bars, render_type_row, build_nav_html, MONTHS_RU, MONTHS_RU_SHORT, ZONE_COLORS
+from src.services.recovery_view import hrv_status, tired_label, readiness_label, load_label
+from src.services.coros_sync_auto import (_auto_sync_status, _auto_sync_status_lock, health_sync_interval,
+    activity_sync_interval, update_last_health_sync, save_dashboard_data,
+    auto_sync_health, auto_sync_health_inner, auto_sync_activities, auto_sync_activities_inner)
+
 # Создание экземпляра FastAPI (Create FastAPI app instance)
 app = FastAPI(title="AI Running Coach")
 register_middleware(app)
@@ -50,258 +57,6 @@ TRAINING_TYPES_RU = {
     'recovery': 'Восстановительная',
     'tempo': 'Темповая',
 }
-
-# Отправить уведомление пользователю в Telegram (Send notification to user via Telegram)
-def _telegram_notify(user_id: int, text: str, reply_markup: dict = None):
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not token:
-        return
-    db = SessionLocal()
-    audit = AuditService(db)
-    try:
-        from src.models import User
-        user = db.query(User).filter(User.id == user_id, User.telegram_chat_id.isnot(None)).first()
-        if not user:
-            return
-        try:
-            payload = {"chat_id": user.telegram_chat_id, "text": text, "parse_mode": "Markdown"}
-            if reply_markup:
-                payload["reply_markup"] = reply_markup
-            with httpx.Client(timeout=5) as client:
-                response = client.post(
-                    f"https://api.telegram.org/bot{token}/sendMessage",
-                    json=payload,
-                )
-                if response.status_code == 400:
-                    logger.warning("Telegram notify retry without Markdown (400 error)")
-                    payload.pop("parse_mode")
-                    response = client.post(
-                        f"https://api.telegram.org/bot{token}/sendMessage",
-                        json=payload,
-                    )
-                response.raise_for_status()
-            audit.log_telegram_sent(
-                user_id=user.id,
-                chat_id=user.telegram_chat_id,
-                message_preview=text[:100],
-                source="main_telegram_notify",
-            )
-        except Exception as e:
-            logger.warning("Telegram notify error: %s", e)
-            audit.log_telegram_failed(
-                user_id=user.id,
-                chat_id=user.telegram_chat_id,
-                error=str(e),
-                message_preview=text[:100],
-                source="main_telegram_notify",
-            )
-    finally:
-        db.close()
-
-# Цвета для пульсовых зон (Heart rate zone colors)
-ZONE_COLORS = ['', '#e8f5e9', '#c8e6c9', '#fff3e0', '#ffccbc', '#ffcdd2']
-
-# Форматирование длительности в человекочитаемый вид (Format duration for display)
-def fmt_duration(minutes):
-    if not minutes:
-        return ""
-    m = int(minutes)
-    if m >= 60:
-        h = m // 60
-        rest = m % 60
-        return f"{h}ч {rest}мин" if rest else f"{h}ч"
-    return f"{m}мин"
-
-# Расчёт статистики по списку тренировок (Calculate statistics for a list of sessions)
-def calc_stats(sessions):
-    total_km = 0.0
-    total_duration_min = 0.0
-    zone_min = {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0}
-    type_count = {}
-    for s in sessions:
-        total_km += s.total_distance_km or 0
-        total_duration_min += s.duration_minutes or 0
-        t = s.training_type
-        type_count[t] = type_count.get(t, 0) + 1
-        for seg in (s.segments_json or []):
-            z = seg.get('zone')
-            d = seg.get('duration_min', 0)
-            if z and d:
-                zone_min[z] = zone_min.get(z, 0) + d
-    return {
-        'total_km': round(total_km, 1),
-        'total_dur': fmt_duration(total_duration_min),
-        'total_min': round(total_duration_min),
-        'zone_min': zone_min,
-        'type_count': type_count,
-    }
-
-# Расчёт диапазонов пульсовых зон (Calculate heart rate zone ranges)
-def zone_ranges(max_hr):
-    r = {}
-    r[1] = f"≤{round(0.70 * max_hr)}"
-    r[2] = f"{round(0.70 * max_hr) + 1}–{round(0.80 * max_hr)}"
-    r[3] = f"{round(0.80 * max_hr) + 1}–{round(0.87 * max_hr)}"
-    r[4] = f"{round(0.87 * max_hr) + 1}–{round(0.93 * max_hr)}"
-    r[5] = f"{round(0.93 * max_hr) + 1}–{max_hr}"
-    return r
-
-# Рендер HTML-полосок пульсовых зон (Render zone bar HTML)
-def render_zone_bars(zone_min, total_min, max_hr):
-    if not total_min:
-        return ""
-    bars = ""
-    colors = {1: '#e8f5e9', 2: '#c8e6c9', 3: '#fff3e0', 4: '#ffccbc', 5: '#ffcdd2'}
-    zr = zone_ranges(max_hr)
-    for z in range(1, 6):
-        val = zone_min.get(z, 0)
-        pct = round(val / total_min * 100) if total_min else 0
-        bars += f"<div style='display:flex;align-items:center;gap:6px;margin:3px 0;white-space:nowrap'><div style='width:90px;font-size:12px'>{zr[z]} уд/мин</div><div style='height:20px;width:{pct}%;background:{colors[z]};border-radius:4px;min-width:4px'></div><div style='font-size:12px;color:#666;margin-left:4px'>{fmt_duration(val)}</div></div>"
-    return bars
-
-# Рендер строки с количеством тренировок по типам (Render training type count row)
-def render_type_row(type_count):
-    labels = {'interval': 'Интервальная', 'tempo': 'Темповая', 'long': 'Длинная', 'recovery': 'Восстановительная'}
-    parts = []
-    for key, label in labels.items():
-        c = type_count.get(key, 0)
-        if c:
-            parts.append(f"{label}: {c}")
-    return ", ".join(parts) if parts else "—"
-
-# Названия месяцев (Month names in Russian)
-MONTHS_RU = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
-             'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
-MONTHS_RU_SHORT = ['', 'Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн',
-                   'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
-
-# Построить навигацию по годам/месяцам (Build year/month navigation)
-def build_nav_html(all_sessions, sel_year, sel_month):
-    # Собираем уникальные (год, месяц) из всех тренировок
-    years = {}
-    for s in all_sessions:
-        if s.begin_ts is None:
-            continue
-        y, m = s.begin_ts.year, s.begin_ts.month
-        if y not in years:
-            years[y] = set()
-        years[y].add(m)
-
-    if not years:
-        return ""
-
-    sorted_years = sorted(years.keys(), reverse=True)
-
-    # Если год/месяц не указаны — выбираем последний месяц с данными
-    if sel_year is None or sel_year not in years:
-        sel_year = sorted_years[0]
-    if sel_month is None or sel_month not in years[sel_year]:
-        sel_month = max(years[sel_year])
-
-    html = '<div class="ym-nav">'
-
-    # Строка годов (Year row)
-    html += '<div class="year-row">'
-    for y in sorted_years:
-        cls = 'ym-pill active-year' if y == sel_year else 'ym-pill'
-        html += f'<a href="/?year={y}" class="{cls}">{y}</a>'
-    html += '</div>'
-
-    # Строка месяцев (Month row)
-    html += '<div class="month-row">'
-    for m in sorted(years[sel_year]):
-        cls = 'ym-pill active-month' if m == sel_month else 'ym-pill'
-        html += f'<a href="/?year={sel_year}&month={m}" class="{cls}">{MONTHS_RU_SHORT[m]}</a>'
-    html += '</div>'
-
-    # Заголовок (Title)
-    if sel_year and sel_month:
-        title = f'Тренировки за {MONTHS_RU[sel_month]} {sel_year}'
-    elif sel_year:
-        title = f'Тренировки за {sel_year} год'
-    else:
-        title = 'Все тренировки'
-    html += f'<div class="ym-title">{title}</div>'
-    html += '</div>'
-
-    return html, sel_year, sel_month
-
-
-# Классификация метрик здоровья для отображения (Health metrics display helpers)
-def _hrv_status(hrv, baseline, sd, intervals=None):
-    """Классификация HRV: Повышенная/Норма/Пониженная/Низкая (Classify HRV level)"""
-    if hrv is None:
-        return None, ''
-    # Если есть Coros-интервалы [min, low, normal_start, normal_end] — используем их (Use Coros intervals when available)
-    if intervals and len(intervals) >= 4:
-        if hrv < intervals[0]:
-            return 'very_low', f'🔴 Низкая ({hrv:.0f})'
-        elif hrv < intervals[2]:
-            return 'low', f'🟡 Пониженная ({hrv:.0f})'
-        elif hrv <= intervals[3]:
-            return 'normal', f'🟢 Норма ({hrv:.0f})'
-        else:
-            return 'elevated', f'🟣 Повышенная ({hrv:.0f})'
-    # Fallback: SD-based классификация (SD-based classification)
-    if baseline is None or baseline == 0:
-        return None, f'{hrv:.0f}'
-    if sd is None or sd == 0:
-        sd = baseline * 0.2
-    if hrv > baseline + sd:
-        return 'elevated', f'🟣 Повышенная ({hrv:.0f})'
-    elif hrv >= baseline - sd:
-        return 'normal', f'🟢 Норма ({hrv:.0f})'
-    elif hrv >= baseline - 2 * sd:
-        return 'low', f'🟡 Пониженная ({hrv:.0f})'
-    else:
-        return 'very_low', f'🔴 Низкая ({hrv:.0f})'
-
-def _tired_label(tired_rate):
-    """Классификация уровня усталости (Classify tiredness level)"""
-    if tired_rate is None:
-        return ''
-    if tired_rate <= -5:
-        return '🟢 Низкая'
-    elif tired_rate <= 0:
-        return '🟡 Умеренная'
-    else:
-        return '🔴 Высокая'
-
-def _readiness_label(performance, recovery_pct=None, training_load_ratio=None):
-    """Классификация готовности к нагрузкам: приоритет recovery%, затем ATI/CTI ratio, затем performance (Classify readiness)"""
-    if recovery_pct is not None:
-        if recovery_pct >= 70:
-            return '🟢 Готов к тренировкам'
-        elif recovery_pct >= 30:
-            return '🟡 Умеренная готовность'
-        else:
-            return '🔴 Требуется отдых'
-    if training_load_ratio is not None:
-        if training_load_ratio < 0.8:
-            return '🟢 Низкая нагрузка'
-        elif training_load_ratio <= 1.2:
-            return '🟡 Оптимальная нагрузка'
-        else:
-            return '🔴 Перегрузка'
-    if performance is None:
-        return ''
-    if performance > 0.5:
-        return '🟢 Готов к тренировкам'
-    elif performance > -0.5:
-        return '🟡 Умеренная готовность'
-    else:
-        return '🔴 Требуется отдых'
-
-def _load_label(training_load):
-    """Классификация тренировочной нагрузки (Classify training load)"""
-    if training_load is None:
-        return ''
-    if training_load < 50:
-        return 'Лёгкая'
-    elif training_load < 150:
-        return 'Средняя'
-    else:
-        return 'Высокая'
 
 # Основная функция рендеринга главной страницы (Main page render function)
 def render_page(db, user_id: int, user_name: str = "Бегун", year=None, month=None):
@@ -385,11 +140,11 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
     # Последние метрики для отображения (Latest metrics for display)
     latest_rm = recovery_metrics[0] if recovery_metrics else None
     if latest_rm:
-        _, latest_hrv = _hrv_status(latest_rm.avg_sleep_hrv, latest_rm.sleep_hrv_baseline, latest_rm.sleep_hrv_sd,
+        _, latest_hrv = hrv_status(latest_rm.avg_sleep_hrv, latest_rm.sleep_hrv_baseline, latest_rm.sleep_hrv_sd,
             json.loads(latest_rm.sleep_hrv_interval_list) if latest_rm.sleep_hrv_interval_list else None)
         latest_rhr = str(latest_rm.rhr) if latest_rm.rhr is not None else ''
-        latest_tired = _tired_label(latest_rm.tired_rate)
-        latest_perf = _readiness_label(latest_rm.performance, latest_rm.recovery_pct, latest_rm.training_load_ratio)
+        latest_tired = tired_label(latest_rm.tired_rate)
+        latest_perf = readiness_label(latest_rm.performance, latest_rm.recovery_pct, latest_rm.training_load_ratio)
         latest_recovery_pct = f'{latest_rm.recovery_pct}%' if latest_rm.recovery_pct is not None else ''
     else:
         latest_hrv = latest_rhr = latest_tired = latest_perf = ''
@@ -398,7 +153,7 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
     # Статус автосинхронизации (Auto-sync status)
     from datetime import datetime
     now = datetime.now()
-    with _AUTO_SYNC_STATUS_LOCK:
+    with _auto_sync_status_lock:
         as_health = dict(_auto_sync_status['health'])
         as_activity = dict(_auto_sync_status['activity'])
     def fmt_sync_time(t):
@@ -792,12 +547,12 @@ async def session_detail(request: Request, session_id: int, db: Session = Depend
         training_date = s.begin_ts.date()
         rm = db.query(DailyMetrics).filter(DailyMetrics.user_id == current_user.id, DailyMetrics.date == training_date).first()
         if rm:
-            _, hrv_label = _hrv_status(rm.avg_sleep_hrv, rm.sleep_hrv_baseline, rm.sleep_hrv_sd,
+            _, hrv_label = hrv_status(rm.avg_sleep_hrv, rm.sleep_hrv_baseline, rm.sleep_hrv_sd,
                 json.loads(rm.sleep_hrv_interval_list) if rm.sleep_hrv_interval_list else None)
             rhr_str = f"{rm.rhr}" if rm.rhr is not None else "—"
-            tired_str = _tired_label(rm.tired_rate) or "—"
-            perf_str = _readiness_label(rm.performance, rm.recovery_pct, rm.training_load_ratio) or "—"
-            load_str = _load_label(rm.training_load) or "—"
+            tired_str = tired_label(rm.tired_rate) or "—"
+            perf_str = readiness_label(rm.performance, rm.recovery_pct, rm.training_load_ratio) or "—"
+            load_str = load_label(rm.training_load) or "—"
             recovery_pct_str = f"{rm.recovery_pct}%" if rm.recovery_pct is not None else "—"
             form_str = f"{rm.cti:.0f}" if rm.cti is not None else "—"
             recovery_info = {
@@ -1324,435 +1079,7 @@ async def coros_sync(db: Session = Depends(get_db),
     thread.start()
     return JSONResponse({'task_id': task_id, 'status': 'started'})
 
-
-# === Фоновая автоматическая синхронизация Coros (Auto background sync) ===
-
-# Статус автосинхронизации (Auto-sync status tracking)
-_auto_sync_status = {
-    'health': {'last_run': None, 'status': 'idle', 'message': '', 'next_run': None},
-    'activity': {'last_run': None, 'status': 'idle', 'message': '', 'next_run': None},
-}
-_AUTO_SYNC_STATUS_LOCK = threading.Lock()
-
-# Интервалы синхронизации из переменных окружения (с квотер-джиттером)
-_HEALTH_SYNC_INTERVAL = int(os.getenv("COROS_HEALTH_SYNC_INTERVAL", "21600"))  # 6 часов
-_ACTIVITY_SYNC_INTERVAL = int(os.getenv("COROS_ACTIVITY_SYNC_INTERVAL", "3600"))  # 1 час
 _AUTO_SYNC_LOCK = threading.Lock()
-
-# Сохраняет время последней синхронизации здоровья в БД (Save last health sync attempt time to DB)
-def _update_last_health_sync(user_id: int):
-    from src.models import User
-    from datetime import datetime
-    try:
-        db = SessionLocal()
-        try:
-            user = db.query(User).filter(User.id == user_id).first()
-            if user:
-                user.last_health_sync_at = datetime.now()
-                db.commit()
-        finally:
-            db.close()
-    except Exception as e:
-        logger.warning("Не удалось обновить last_health_sync_at: %s", e)
-
-# Сохраняет dashboard данные Coros в today's запись DailyMetrics (Save Coros dashboard data to today's DailyMetrics)
-def _save_dashboard_data(client, db, user_id: int):
-    from src.models import DailyMetrics
-    from datetime import date
-    try:
-        dashboard = client.get_dashboard()
-        if not dashboard:
-            logger.warning("Dashboard: пустой ответ (endpoint вернул пустые данные)")
-            return
-        logger.info("Dashboard данные: %s", dashboard)
-        info = dashboard.get('summaryInfo')
-        if not info:
-            logger.debug("Dashboard: нет summaryInfo")
-            return
-        today = date.today()
-        dm = db.query(DailyMetrics).filter(
-            DailyMetrics.user_id == user_id,
-            DailyMetrics.date == today
-        ).first()
-        if not dm:
-            dm = DailyMetrics(user_id=user_id, date=today)
-            db.add(dm)
-            db.flush()
-        dm.recovery_pct = info.get('recoveryPct')
-        dm.rhr = info.get('rhr')
-        sleep_data = info.get('sleepHrvData', {})
-        hrv_list = sleep_data.get('sleepHrvList', [])
-        if hrv_list:
-            latest = hrv_list[-1]
-            if dm.avg_sleep_hrv is None:
-                dm.avg_sleep_hrv = latest.get('avgSleepHrv')
-            if dm.sleep_hrv_baseline is None:
-                dm.sleep_hrv_baseline = latest.get('sleepHrvBase')
-            if dm.sleep_hrv_sd is None:
-                dm.sleep_hrv_sd = latest.get('sleepHrvSd')
-        intervals = sleep_data.get('lastSleepHrvIntervalList')
-        if intervals:
-            dm.sleep_hrv_interval_list = json.dumps(intervals)
-        db.commit()
-    except Exception as e:
-        logger.warning("Ошибка сохранения dashboard: %s", e)
-
-# Синхронизация метрик здоровья (авто, без прогресса) (Auto health metrics sync)
-def _auto_sync_health():
-    from datetime import timedelta, datetime
-    from src.models import User
-    with _AUTO_SYNC_STATUS_LOCK:
-        _auto_sync_status['health']['status'] = 'syncing'
-        _auto_sync_status['health']['message'] = 'Синхронизация...'
-    try:
-        db = SessionLocal()
-        try:
-            users = db.query(User).filter(
-                User.coros_email.isnot(None),
-                User.coros_password.isnot(None),
-                (User.is_active == True) | (User.is_active.is_(None)),
-            ).all()
-        finally:
-            db.close()
-
-        total_synced = 0
-        total_empty = 0
-        for user in users:
-            result = _auto_sync_health_inner(user.id)
-            _update_last_health_sync(user.id)
-            if result > 0:
-                total_synced += result
-            elif result == 0:
-                total_empty += 1
-
-        with _AUTO_SYNC_STATUS_LOCK:
-            s = _auto_sync_status['health']
-            s['status'] = 'ok'
-            s['last_run'] = datetime.now()
-            if total_synced > 0:
-                s['message'] = f'✓ Синхронизировано: {total_synced}'
-            elif total_empty > 0:
-                s['message'] = '🟡 Синхронизация прошла, но данных о сне нет — возможно часы не синхронизированы с приложением'
-            else:
-                s['message'] = 'Нет учётных данных Coros'
-            s['next_run'] = s['last_run'] + timedelta(seconds=_HEALTH_SYNC_INTERVAL)
-    except Exception as e:
-        with _AUTO_SYNC_STATUS_LOCK:
-            s = _auto_sync_status['health']
-            s['status'] = 'error'
-            s['last_run'] = datetime.now()
-            s['message'] = str(e)[:80]
-            s['next_run'] = s['last_run'] + timedelta(seconds=_HEALTH_SYNC_INTERVAL)
-
-def _auto_sync_health_inner(user_id: int) -> int:
-    """Возвращает количество новых синхронизированных записей (Return count of new synced records)"""
-    from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
-    from src.models import User
-    from datetime import timedelta, date, datetime
-
-    db = SessionLocal()
-    try:
-        us = db.query(User).filter(User.id == user_id).first()
-        if not us or not us.coros_email or not us.coros_password:
-            logger.debug("Автосинхронизация здоровья: нет учётных данных Coros")
-            return -1
-        try:
-            plain_password = decrypt(us.coros_password)
-        except Exception:
-            plain_password = us.coros_password
-        client = CorosClient(us.coros_email, plain_password, timeout=15)
-        client.authenticate()
-
-        existing_dates = {r[0] for r in db.query(DailyMetrics.date).filter(DailyMetrics.user_id == user_id).all()}
-        today = date.today()
-        start_day = (today - timedelta(days=120)).strftime("%Y%m%d")
-        end_day = today.strftime("%Y%m%d")
-
-        metrics_list = client.get_daily_metrics(start_day, end_day)
-        logger.info("Автосинхронизация здоровья: получено %d записей из Coros", len(metrics_list))
-        if not metrics_list:
-            # Всё равно сохраняем dashboard данные (Still save dashboard data even if metrics empty)
-            _save_dashboard_data(client, db, user_id)
-            return 0
-
-        analytics_by_date = {}
-        try:
-            analytics_list = client.get_analytics()
-            for a in analytics_list:
-                ad = a.get('happenDay')
-                if ad:
-                    try:
-                        d = datetime.strptime(str(ad), "%Y%m%d").date()
-                        analytics_by_date[d] = a
-                    except (ValueError, TypeError):
-                        pass
-        except Exception as e:
-            logger.warning("Автосинхронизация: не удалось получить аналитику Coros: %s", e)
-
-        synced = 0
-        for entry in metrics_list:
-            happen_day = entry.get('happenDay')
-            if not happen_day:
-                continue
-            happen_day = str(happen_day)
-            try:
-                entry_date = datetime.strptime(happen_day, "%Y%m%d").date()
-            except (ValueError, TypeError):
-                continue
-            if entry_date in existing_dates:
-                continue
-
-            ana = analytics_by_date.get(entry_date, {})
-            dm = DailyMetrics(
-                user_id=user_id,
-                date=entry_date,
-                avg_sleep_hrv=entry.get('avgSleepHrv'),
-                sleep_hrv_baseline=entry.get('sleepHrvBase'),
-                sleep_hrv_sd=entry.get('sleepHrvSd'),
-                rhr=entry.get('rhr'),
-                tired_rate=entry.get('tiredRateNew'),
-                training_load=entry.get('trainingLoad'),
-                training_load_ratio=entry.get('trainingLoadRatio'),
-                performance=entry.get('performance'),
-                ati=entry.get('ati'),
-                cti=entry.get('cti'),
-                vo2max=entry.get('vo2max') or ana.get('vo2max'),
-                lthr=entry.get('lthr') or ana.get('lthr'),
-                stamina_level=entry.get('staminaLevel') or ana.get('staminaLevel'),
-                ltsp=ana.get('ltsp'),
-                stamina_level_7d=ana.get('staminaLevel7d'),
-            )
-            db.add(dm)
-            synced += 1
-
-        if synced:
-            db.commit()
-            logger.info("Автосинхронизация здоровья: synced=%d", synced)
-        else:
-            logger.info("Автосинхронизация здоровья: новых записей нет")
-
-        if analytics_by_date:
-            updated = 0
-            for entry_date, ana in analytics_by_date.items():
-                existing = db.query(DailyMetrics).filter(DailyMetrics.user_id == user_id, DailyMetrics.date == entry_date).first()
-                if not existing:
-                    continue
-                changed = False
-                if existing.vo2max is None and ana.get('vo2max') is not None:
-                    existing.vo2max = ana.get('vo2max'); changed = True
-                if existing.lthr is None and ana.get('lthr') is not None:
-                    existing.lthr = ana.get('lthr'); changed = True
-                if existing.stamina_level is None and ana.get('staminaLevel') is not None:
-                    existing.stamina_level = ana.get('staminaLevel'); changed = True
-                if existing.ltsp is None and ana.get('ltsp') is not None:
-                    existing.ltsp = ana.get('ltsp'); changed = True
-                if existing.stamina_level_7d is None and ana.get('staminaLevel7d') is not None:
-                    existing.stamina_level_7d = ana.get('staminaLevel7d'); changed = True
-                if changed:
-                    updated += 1
-            if updated:
-                db.commit()
-                logger.info("Автосинхронизация: обновлено аналитикой %d записей", updated)
-        # Сохраняем dashboard данные после обработки метрик (Save dashboard data after metrics processing)
-        _save_dashboard_data(client, db, user_id)
-        return synced
-    except CorosAuthError as e:
-        logger.warning("Автосинхронизация здоровья: ошибка аутентификации: %s", e)
-        return 0
-    except CorosAPIError as e:
-        logger.warning("Автосинхронизация здоровья: ошибка Coros API: %s", e)
-        return 0
-    except Exception:
-        logger.exception("Автосинхронизация здоровья: неожиданная ошибка")
-        return 0
-    finally:
-        db.close()
-
-# Синхронизация активностей (авто, без прогресса) (Auto activity sync)
-def _auto_sync_activities():
-    from datetime import timedelta, datetime
-    from src.models import User
-    with _AUTO_SYNC_STATUS_LOCK:
-        _auto_sync_status['activity']['status'] = 'syncing'
-        _auto_sync_status['activity']['message'] = 'Синхронизация...'
-    try:
-        db = SessionLocal()
-        try:
-            users = db.query(User).filter(
-                User.coros_email.isnot(None),
-                User.coros_password.isnot(None),
-                (User.is_active == True) | (User.is_active.is_(None)),
-            ).all()
-        finally:
-            db.close()
-
-        total_synced = 0
-        for user in users:
-            result = _auto_sync_activities_inner(user.id)
-            if result > 0:
-                total_synced += result
-
-        with _AUTO_SYNC_STATUS_LOCK:
-            s = _auto_sync_status['activity']
-            s['status'] = 'ok'
-            s['last_run'] = datetime.now()
-            if total_synced == 0:
-                s['message'] = '✓ Новых тренировок нет'
-            else:
-                s['message'] = f'✓ Синхронизировано: {total_synced}'
-            s['next_run'] = s['last_run'] + timedelta(seconds=_ACTIVITY_SYNC_INTERVAL)
-    except Exception as e:
-        with _AUTO_SYNC_STATUS_LOCK:
-            s = _auto_sync_status['activity']
-            s['status'] = 'error'
-            s['last_run'] = datetime.now()
-            s['message'] = str(e)[:80]
-            s['next_run'] = s['last_run'] + timedelta(seconds=_ACTIVITY_SYNC_INTERVAL)
-
-def _auto_sync_activities_inner(user_id: int) -> int:
-    from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
-    from src.models import DeletedTraining
-    from src.parsers.fit_parser import parse_fit
-    import tempfile
-
-    db = SessionLocal()
-    try:
-        us = db.query(User).filter(User.id == user_id).first()
-        if not us or not us.coros_email or not us.coros_password:
-            logger.debug("Автосинхронизация активностей: нет учётных данных Coros")
-            return -1
-        try:
-            plain_password = decrypt(us.coros_password)
-        except Exception:
-            plain_password = us.coros_password
-        client = CorosClient(us.coros_email, plain_password, timeout=15)
-        client.authenticate()
-
-        activities = client.list_activities(limit=50, since=us.last_coros_sync)
-        logger.info("Автосинхронизация активностей: получено %d активностей", len(activities))
-        if not activities:
-            return 0
-
-        existing_times = {r[0] for r in db.query(TrainingSession.begin_ts).filter(TrainingSession.user_id == user_id).all()}
-        deleted_times = set()
-        all_deleted = db.query(DeletedTraining).filter(DeletedTraining.user_id == user_id).all()
-        for d in all_deleted:
-            if d.begin_ts:
-                deleted_times.add(d.begin_ts)
-
-        def already_imported(ts):
-            for et in existing_times:
-                if et is not None and abs((et - ts).total_seconds()) < 120:
-                    return True
-            return False
-
-        def was_deleted(ts):
-            for dt in deleted_times:
-                if abs((dt - ts).total_seconds()) < 120:
-                    return True
-            return False
-
-        new_acts = [a for a in activities if not already_imported(a['start_time'])]
-        if not new_acts:
-            # Даже если ничего не импортировано, обновляем last_coros_sync
-            for a in activities:
-                if us.last_coros_sync is None or a['start_time'] > us.last_coros_sync:
-                    us.last_coros_sync = a['start_time']
-            if us.last_coros_sync:
-                db.commit()
-                logger.info("Автосинхронизация: last_coros_sync обновлён: %s", us.last_coros_sync)
-            logger.info("Автосинхронизация активностей: все активности уже в БД")
-            return 0
-
-        synced = 0
-        errors = []
-        max_act_ts = us.last_coros_sync
-        for act in new_acts:
-            if was_deleted(act['start_time']):
-                logger.info("Автосинхронизация: пропуск ранее удалённой %s (%s)", act['name'], act['start_time'])
-                continue
-            logger.info("Автосинхронизация: загрузка %s (%s)", act['name'], act['start_time'])
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.fit')
-            tmp.close()
-            try:
-                ok = client.download_fit(act['id'], act['sport_type'], tmp.name)
-                if not ok:
-                    logger.warning("Автосинхронизация: не удалось скачать %s", act['name'])
-                    errors.append(f"{act['name']}: download failed")
-                    continue
-
-                data = parse_fit(tmp.name, max_hr=us.max_hr,
-                                 max_credible_pace=us.max_credible_pace,
-                                 max_gps_jump_m=us.max_gps_jump_m,
-                                 min_hr_for_fast_pace=us.min_hr_for_fast_pace)
-                if not data:
-                    logger.warning("Автосинхронизация: не удалось распарсить %s", act['name'])
-                    errors.append(f"{act['name']}: parse failed")
-                    continue
-
-                cleaning_log = data.pop('cleaning_log', None)
-                flags_val = data.pop('suspect_flags', None)
-                if data.get('training_type') in ('invalid', None):
-                    logger.warning("Автосинхронизация: некорректные данные %s", act['name'])
-                    errors.append(f"{act['name']}: invalid data")
-                    continue
-
-                session = TrainingSession(**data)
-                if cleaning_log:
-                    session.cleaning_log = cleaning_log
-                if flags_val:
-                    session.suspect_flags = flags_val
-                session.user_id = user_id
-                db.add(session)
-                db.flush()
-                session_id = session.id
-                db.commit()
-                synced += 1
-                logger.info("Автосинхронизация: сохранена %s (%s)", act['name'], act['start_time'])
-                # Уведомление + запрос оценки в Telegram (Notification + rating request)
-                row1 = [{"text": str(i), "callback_data": f"feedback:{session_id}:{i}"} for i in range(0, 6)]
-                row2 = [{"text": str(i), "callback_data": f"feedback:{session_id}:{i}"} for i in range(6, 11)]
-                try:
-                    _telegram_notify(
-                        user_id,
-                        f"🏃 *Новая тренировка!*\n"
-                        f"▫️ {act['name']}\n"
-                        f"▫️ {data.get('total_distance_km', 0):.1f} км\n\n"
-                        f"Насколько тяжёлой была тренировка?\n"
-                        f"`0` — вообще легко\n"
-                        f"`10` — почти умер",
-                        reply_markup={"inline_keyboard": [row1, row2]},
-                    )
-                except Exception as notify_err:
-                    logger.warning("Не удалось отправить Telegram-уведомление о новой тренировке: %s", notify_err)
-                if max_act_ts is None or act['start_time'] > max_act_ts:
-                    max_act_ts = act['start_time']
-            except Exception as e:
-                logger.exception("Ошибка при обработке %s", act['name'])
-                errors.append(f"{act['name']}: {str(e)}")
-            finally:
-                if os.path.exists(tmp.name):
-                    os.unlink(tmp.name)
-
-        if max_act_ts is not None and (us.last_coros_sync is None or max_act_ts > us.last_coros_sync):
-            us.last_coros_sync = max_act_ts
-            db.commit()
-            logger.info("Автосинхронизация: last_coros_sync обновлён: %s", max_act_ts)
-
-        logger.info("Автосинхронизация активностей: synced=%d, errors=%d", synced, len(errors))
-        return synced
-    except CorosAuthError as e:
-        logger.warning("Автосинхронизация активностей: ошибка аутентификации: %s", e)
-        return 0
-    except CorosAPIError as e:
-        logger.warning("Автосинхронизация активностей: ошибка Coros API: %s", e)
-        return 0
-    except Exception:
-        logger.exception("Автосинхронизация активностей: неожиданная ошибка")
-        return 0
-    finally:
-        db.close()
-
 # Фоновый планировщик автосинхронизации (Background auto-sync scheduler)
 def _start_auto_sync():
     import random
@@ -1764,7 +1091,7 @@ def _start_auto_sync():
 
     def _loop():
         logger.info("Автосинхронизация: запуск планировщика (health=%dс, activities=%dс)",
-                     _HEALTH_SYNC_INTERVAL, _ACTIVITY_SYNC_INTERVAL)
+                     health_sync_interval, activity_sync_interval)
         time.sleep(30)
 
         last_health = 0.0
@@ -1773,17 +1100,17 @@ def _start_auto_sync():
         while True:
             now = time.time()
             try:
-                if now - last_health >= _HEALTH_SYNC_INTERVAL * random.uniform(0.8, 1.2):
+                if now - last_health >= health_sync_interval * random.uniform(0.8, 1.2):
                     logger.info("Автосинхронизация: health sync")
-                    _auto_sync_health()
+                    auto_sync_health()
                     last_health = time.time()
             except Exception:
                 logger.exception("Автосинхронизация: ошибка health sync")
 
             try:
-                if now - last_activity >= _ACTIVITY_SYNC_INTERVAL * random.uniform(0.8, 1.2):
+                if now - last_activity >= activity_sync_interval * random.uniform(0.8, 1.2):
                     logger.info("Автосинхронизация: activity sync")
-                    _auto_sync_activities()
+                    auto_sync_activities()
                     last_activity = time.time()
             except Exception:
                 logger.exception("Автосинхронизация: ошибка activity sync")
