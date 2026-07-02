@@ -1093,6 +1093,20 @@ running-coach-worker.service  # APScheduler для синков/напомина
 - [ ] Фильтр по типу тренировки на главной (Все / Бег / Ходьба).
 - [ ] Общая дистанция и время за неделю/месяц.
 
+#### Фаза 3Б — inline-клавиатура оценки тренировки + отображение в веб (1 день)
+
+**Цель:** чтобы при любой синхронизации (авто, ручной через веб, через бот) приходило уведомление с кнопками оценки 0–10, и оценка отображалась на странице тренировки в веб.
+
+**Проблема:** сейчас кнопки оценки приходят только при ручном `/sync` в Telegram-боте. Автосинк и веб-загрузка шлют просто текст. Оценка хранится в `TrainingFeedback`, но нигде не показывается в веб-интерфейсе.
+
+**Задачи:**
+- [ ] **3Б.1** `src/services/sync_service.py` — в `sync_activities_for_user()` собирать данные каждой новой тренировки `(session_id, begin_ts, distance_km, training_type)`, после `db.commit()` отправлять отдельное сообщение с inline-клавиатурой `0–10` (как в боте).
+- [ ] **3Б.2** `src/web/routes/uploads.py` — в вызов `telegram_notify()` добавить `reply_markup` с inline-клавиатурой `0–10`.
+- [ ] **3Б.3** `src/web/routes/pages.py` — на странице `/session/{id}` прочитать `TrainingFeedback` для этой тренировки и передать `rating` в шаблон. В списке тренировок на главной — джойн с `TrainingFeedback`.
+- [ ] **3Б.4** `src/web/templates/session.html` — добавить строку `⭐ Оценка: X/10` рядом с типом/пульсом/каденсом.
+- [ ] **3Б.5** `src/web/templates/index.html` — добавить колонку или иконку `Оценка` в таблицу тренировок.
+- [ ] **3Б.6** Миграция БД не требуется — таблица `training_feedback` уже существует с FK на `training_sessions`.
+
 #### Фаза 4 — Выбор бренда часов при регистрации (Multi-brand onboarding)
 - [ ] **4.1** Telegram `/start` — после ввода email спрашивать «Какие у вас часы?» (Coros / Polar / Garmin / Suunto / Другие).
 - [ ] **4.2** Для Coros — существующий флоу (email + пароль Coros Training Hub).
@@ -1116,4 +1130,34 @@ running-coach-worker.service  # APScheduler для синков/напомина
 
 ---
 
-*Версия: 1.3 · Дата: 02.07.2026 · Проект: AI Running Coach*
+---
+
+## 🔴 16. `save_dashboard_data()` вызывает async корутину без `await`
+
+**Где:** `src/services/sync_service.py:49-86`
+
+**В чём проблема.** Функция `save_dashboard_data()` (синхронная) вызывает `client.get_dashboard()` — async метод `CorosWatchClient`. Без `await` возвращается `coroutine` object. При попытке `dashboard.get('summaryInfo')` падает: `'coroutine' object has no attribute 'get'`. Ошибка логируется как `"Dashboard save error"`, но **данные восстановления (recovery%, HRV, RHR) не сохраняются** в `DailyMetrics` текущего дня.
+
+**Почему это плохо.**
+- recovery_pct, avg_sleep_hrv, sleep_hrv_baseline, sleep_hrv_sd, rhr — никогда не заполняются в сегодняшней записи.
+- На странице тренировки блок восстановления пустой или показывает некорректные данные.
+- Модуль аналитики будет опираться на метрики восстановления — без них формулы готовности будут неверны.
+
+**Корневая причина:** в `src/services/sync_service.py` используется `asyncio.run()` для запуска async-функций из синхронного треда (scheduler). Но `save_dashboard_data()` не помечена `async` и вызывается без `await` внутри `sync_health_for_user()`.
+
+**Как исправить.**
+1. Сделать `save_dashboard_data()` async:
+   ```python
+   async def save_dashboard_data(client, db, user_id, brand):
+       dashboard = await client.get_dashboard()
+       ...
+   ```
+2. Обновить вызовы в `sync_health_for_user()` (строки 106 и 191) → `await save_dashboard_data(...)`.
+
+**Как проверить.**
+- [ ] В Docker логе нет `"Dashboard save error: 'coroutine' object has no attribute 'get'"`.
+- [ ] После health sync поле `recovery_pct` в `daily_metrics` за сегодня заполнено.
+
+---
+
+*Версия: 1.4 · Дата: 02.07.2026 · Проект: AI Running Coach*

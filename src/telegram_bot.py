@@ -517,12 +517,16 @@ def _sync_for_user(user: User, chat_id: int, token: str):
                         db.commit()
                         token_bot = os.getenv("TELEGRAM_BOT_TOKEN", "")
                         for act, sid, data in new_session_ids:
+                            start = act['start_time']
+                            date_str = start.strftime("%d.%m.%Y")
+                            time_str = start.strftime("%H:%M")
                             row1 = [{"text": str(i), "callback_data": f"feedback:{sid}:{i}"} for i in range(0, 6)]
                             row2 = [{"text": str(i), "callback_data": f"feedback:{sid}:{i}"} for i in range(6, 11)]
                             _send_message(
                                 token_bot, chat_id,
                                 f"🏃 *Новая тренировка!*\n"
                                 f"▫️ {act['name']}\n"
+                                f"▫️ {date_str} в {time_str}\n"
                                 f"▫️ {data.get('total_distance_km', 0):.1f} км\n\n"
                                 f"Насколько тяжёлой была тренировка?\n"
                                 f"`0` — вообще легко\n"

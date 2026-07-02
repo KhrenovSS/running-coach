@@ -17,6 +17,7 @@ from src.parsers.common import format_pace, format_duration
 from src.logger import get_logger
 from src.api.deps import get_current_user
 from src.services.audit import AuditService
+from src.services.telegram_notify import telegram_notify
 from src.web.state import _pending, PENDING_DIR
 
 logger = get_logger("app")
@@ -105,6 +106,14 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
             db.commit()
             db.refresh(session)
             saved += 1
+            telegram_notify(
+                user_id=current_user.id,
+                text=f"🏃 Тренировка загружена!\n"
+                     f"📅 {session.begin_ts.strftime('%d.%m.%Y %H:%M')}\n"
+                     f"▫️ {session.total_distance_km:.1f} км\n"
+                     f"▫️ {session.training_type or '—'}\n"
+                     f"📂 {file.filename or 'unknown'}"
+            )
             audit.log_training_uploaded(
                 user_id=current_user.id,
                 training_id=session.id,
@@ -155,6 +164,13 @@ async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(
             db.commit()
             db.refresh(session)
             confirmed += 1
+            telegram_notify(
+                user_id=current_user.id,
+                text=f"🏃 Тренировка восстановлена!\n"
+                     f"📅 {session.begin_ts.strftime('%d.%m.%Y %H:%M')}\n"
+                     f"▫️ {session.total_distance_km:.1f} км\n"
+                     f"📂 {pending.get('filename', 'unknown')}"
+            )
             audit.log_training_uploaded(
                 user_id=current_user.id,
                 training_id=session.id,
@@ -212,6 +228,12 @@ async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db
         db.add(session)
         db.commit()
         db.refresh(session)
+        telegram_notify(
+            user_id=current_user.id,
+            text=f"🏃 Ранее удалённая тренировка восстановлена!\n"
+                 f"📅 {session.begin_ts.strftime('%d.%m.%Y %H:%M')}\n"
+                 f"▫️ {session.total_distance_km:.1f} км"
+        )
         logger.info("Удалённая тренировка от %s повторно импортирована (Deleted training re-imported)", bt)
         audit.log_training_uploaded(
             user_id=current_user.id,

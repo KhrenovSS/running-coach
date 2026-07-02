@@ -46,9 +46,9 @@ async def _make_client(cred: WatchCredential) -> Optional[BaseWatchClient]:
 
 
 # Сохранить dashboard данные в today's запись DailyMetrics (Save dashboard data to today's DailyMetrics)
-def save_dashboard_data(client: BaseWatchClient, db, user_id: int, brand: str):
+async def save_dashboard_data(client: BaseWatchClient, db, user_id: int, brand: str):
     try:
-        dashboard = client.get_dashboard()
+        dashboard = await client.get_dashboard()
         if not dashboard:
             return
         info = dashboard.get('summaryInfo')
@@ -103,7 +103,7 @@ async def sync_health_for_user(cred: WatchCredential, brand: str) -> int:
         metrics_list = await client.get_daily_metrics(start_day, end_day)
         logger.info("Health sync for brand=%s user=%s: got %d records from API", brand, cred.user_id, len(metrics_list))
         if not metrics_list:
-            save_dashboard_data(client, db, cred.user_id, brand)
+            await save_dashboard_data(client, db, cred.user_id, brand)
             logger.info("Health sync: brand=%s user=%s — API вернул пустой список (нет данных)", brand, cred.user_id)
             return 0
 
@@ -188,7 +188,7 @@ async def sync_health_for_user(cred: WatchCredential, brand: str) -> int:
                 db.commit()
                 logger.info("Health sync: brand=%s user=%s — заполнено аналитикой %d записей", brand, cred.user_id, updated)
 
-        save_dashboard_data(client, db, cred.user_id, brand)
+        await save_dashboard_data(client, db, cred.user_id, brand)
         return synced
     except Exception as e:
         logger.exception("Health sync error for brand=%s user=%s", brand, cred.user_id)
@@ -291,6 +291,7 @@ async def sync_activities_for_user(cred: WatchCredential, brand: str) -> int:
             telegram_notify(
                 user_id=cred.user_id,
                 text=f"🏃 Новая тренировка синхронизирована!\n"
+                     f"📅 {datetime.now(timezone.utc).strftime('%d.%m.%Y %H:%M')} UTC\n"
                      f"Всего добавлено: {synced}\n"
                      f"Зайди в веб-интерфейс для деталей."
             )

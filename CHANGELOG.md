@@ -2,7 +2,22 @@
 
 All notable changes to this project are tracked here.
 
-## [02.07.2026] — Исправлено: уведомления в Telegram при автосинхронизации
+## [02.07.2026] — Исправлен баг save_dashboard_data + уведомления Telegram при веб-загрузке
+
+### Fixed
+- **`src/services/sync_service.py:51`**: `save_dashboard_data()` вызывала async `client.get_dashboard()` без `await` → `'coroutine' object has no attribute 'get'`. Данные восстановления (recovery%, HRV, RHR) никогда не сохранялись. Функция сделана `async`, добавлен `await`.
+
+### Added
+- **`src/web/routes/uploads.py`**: при загрузке TCX/FIT через веб теперь отправляется уведомление в Telegram с датой, дистанцией, типом тренировки и именем файла. Также добавлены уведомления для `/upload/confirm` и `/upload/confirm_deleted`.
+- **`src/telegram_bot.py`**: в карточку новой тренировки добавлены дата и время тренировки (`▫️ 02.07.2026 в 09:00`).
+- **`src/services/sync_service.py`**: в уведомление автосинка добавлена метка времени синхронизации.
+- **TECH_DEBT.md**: добавлен 🔴 16 (баг save_dashboard_data) и Фаза 3Б (inline-клавиатура оценки + отображение в веб).
+
+### Infrastructure
+- **Убиты старые процессы**: 2 локальных uvicorn (порты 8005, 8006) на старом монолитном `main.py` остановлены.
+- **Docker**: пересобраны и перезапущены `app` и `bot`. Текущие контейнеры: `app` (uvecorn, порт 8000), `bot` (polling), `db` (postgres:16-alpine, healthy).
+
+---
 
 ### Fixed
 - **`src/services/sync_service.py`**: при автосинхронизации тренировок не отправлялось уведомление в Telegram. Добавлен вызов `telegram_notify()` после успешной синхронизации новых активностей.
