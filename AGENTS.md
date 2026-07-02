@@ -370,29 +370,27 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 - ⬜ **Фильтр по типу** тренировки на главной
 - ⬜ **Общая дистанция и время** за неделю/месяц
 
-## Текущее состояние (Session — 02.07.2026, Sprint 4.5 завершён)
+## Текущее состояние (Session — 02.07.2026, Sprint 4 п.12+14 завершён)
 
-**Спринт 4.5 (PostgreSQL-only + TIMESTAMPTZ) полностью выполнен.**
+**Спринт 4 п.12+14 (Multi-brand architecture) полностью выполнен.**
 
 ### Что сделано:
-1. **Sprint 4.5 Phase 1 (Infra)**: Docker db port 5432 exposed; `.env`/`.env.example` defaults to PostgreSQL; README/AGENTS updated
-2. **Sprint 4.5 Phase 2 (Remove SQLite)**: `models.py` lazy engine via `get_engine()`, no SQLite fallback; `DATABASE_URL` required; `alembic/env.py` no `render_as_batch`; `tests/conftest.py` sets `DATABASE_URL=sqlite:///:memory:`
-3. **Sprint 4.5 Phase 3 (TIMESTAMPTZ)**: All 14 `DateTime` columns → `DateTime(timezone=True)`; `utcnow()` returns aware; Alembic migration `5e287a9fc289` converts all columns to `TIMESTAMP WITH TIME ZONE` via `AT TIME ZONE 'UTC'`; 27 training sessions preserved with `+00` timezone
-4. **Sprint 4.5 Phase 4-5 (Remove naive-UTC workarounds)**:
-   - All `.replace(tzinfo=None)` removed from 10 files (grep → 0 matches)
-   - `local_dt()` simplified: `dt.astimezone(tz)` with naive fallback
-   - `common.py`: `start_time_utc` normalized to aware UTC at function entry
-   - `coros_sync_auto.py`: `bt` parsing produces aware UTC for DB comparisons
-5. **Hotfix (02.07.2026)**: `UnboundLocalError` in `pages.py:73` — Python 3.13+ scoping issue with inner `import` shadowing module-level `timezone`
-6. **Hotfix (02.07.2026)**: Jinja2 autoescaping breaks JSON in `<script>` tags — `{{ recovery_json|safe }}`, `{{ weight_json|safe }}`, `{{ chart_json|safe }}` added to templates. All charts (RHR, weight, HR/pace) were broken since Sprint 3 template migration.
-7. **Docker**: all 3 containers (`db`, `app`, `bot`) Up and healthy
-8. **Tests**: 3/3 pass with in-memory SQLite
+1. **`src/watch/`** — новый пакет мульти-брендовой абстракции: `base.py` (BaseWatchClient ABC), `coros.py` (CorosWatchClient на httpx.AsyncClient), `factory.py` (реестр брендов)
+2. **`WatchCredential`** — новая модель в `src/models.py` (таблица `watch_credentials`)
+3. **`DailyMetrics.source_brand`** — колонка для указания источника метрик
+4. **Alembic migration** `b6c7d8e9f0a1` — таблица + миграция данных
+5. **`src/services/sync_service.py`** — brand-agnostic sync (замена `coros_sync_auto.py`)
+6. **`src/web/routes/sync.py`** — `/sync/{brand}/run`, `/sync/{brand}/health` (замена `coros.py`)
+7. **`src/scheduler.py`** — brand-agnostic
+8. **`src/services/audit.py`** — `sync.{brand}.*` события
+9. **`src/crypto.py`** — `CRED_KEY` с fallback на `COROS_CRED_KEY`
+10. **`src/telegram_bot.py`** — обновлён на CorosWatchClient + WatchCredential
+11. **Старые файлы удалены**: `coros_client.py`, `coros_sync_auto.py`, `web/routes/coros.py`
 
-### Следующие шаги (из TECH_DEBT.md):
-1. **Sprint 4 п.12+14** — httpx Coros-клиент + мульти-брендовая архитектура (BaseWatchClient, WatchCredential, sync_service)
-2. Sprint 6: per-user частота синхронизации (бренд-независимая)
-3. Модуль аналитики (8 этапов из decision_module_design.md)
-4. Sprint 7: Admin panel
+### Следующие шаги:
+1. Sprint 6: per-user частота синхронизации (бренд-независимая)
+2. Модуль аналитики (8 этапов из decision_module_design.md)
+3. Sprint 7: Admin panel
 
 ### Команды управления:
 ```bash

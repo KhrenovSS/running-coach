@@ -14,7 +14,7 @@ from src.services.audit import AuditService
 from src.parsers.common import weather_icon, format_pace, format_duration
 from src.services.stats import fmt_duration, calc_stats, render_zone_bars, render_type_row, build_nav_html, MONTHS_RU, MONTHS_RU_SHORT
 from src.services.recovery_view import hrv_status, tired_label, readiness_label, load_label
-from src.services.coros_sync_auto import _auto_sync_status, _auto_sync_status_lock
+from src.services.sync_service import _auto_sync_status, _auto_sync_status_lock
 from src.web.state import _pending, TRAINING_TYPES_RU
 from src.crypto import encrypt
 import json
@@ -341,7 +341,8 @@ async def session_detail(request: Request, session_id: int, db: Session = Depend
 
 
 @router.get('/settings', response_class=HTMLResponse)
-async def settings_page(request: Request, current_user: User = Depends(get_current_user)):
+async def settings_page(request: Request, current_user: User = Depends(get_current_user),
+                        db: Session = Depends(get_db)):
     settings = get_settings()
     m = settings.max_hr
     z1 = f"{round(m * 0.5)}-{round(m * 0.6)}"
@@ -349,7 +350,13 @@ async def settings_page(request: Request, current_user: User = Depends(get_curre
     z3 = f"{round(m * 0.7)}-{round(m * 0.8)}"
     z4 = f"{round(m * 0.8)}-{round(m * 0.9)}"
     z5 = f"{round(m * 0.9)}-{round(m)}"
-    pw_placeholder = '********' if settings.coros_password else ''
+    # Читаем email из WatchCredential (Read email from WatchCredential)
+    cred = db.query(WatchCredential).filter(
+        WatchCredential.user_id == current_user.id,
+        WatchCredential.brand == 'coros',
+    ).first()
+    coros_email = cred.encrypted_user if cred else ''
+    pw_placeholder = '********' if cred and cred.encrypted_password else ''
     user_name = current_user.name or current_user.telegram_username or "Бегун"
     user_header = f"👤 {user_name} | <a href='/auth/logout'>Выйти</a>"
     return templates.TemplateResponse(request, "settings.html", {
@@ -358,7 +365,7 @@ async def settings_page(request: Request, current_user: User = Depends(get_curre
         "max_credible_pace": settings.max_credible_pace,
         "max_gps_jump_m": settings.max_gps_jump_m,
         "min_hr_for_fast_pace": settings.min_hr_for_fast_pace,
-        "coros_email": settings.coros_email or '',
+        "coros_email": coros_email,
         "coros_password": pw_placeholder,
     })
 
@@ -422,7 +429,7 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
                         coros_password: str = Form(''),
                         db: Session = Depends(get_db),
                         current_user: User = Depends(get_current_user)):
-    from src.models import User, WeightMeasurement
+    from src.models import User, WeightMeasurement, WatchCredential
     from datetime import datetime, timezone
     user = db.query(User).filter(User.id == current_user.id).first()
     audit = AuditService(db)
@@ -442,6 +449,31 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
         user.coros_password = encrypt(coros_password)
     elif not coros_email:
         user.coros_password = None
+
+    # Сохраняем также в WatchCredential (Save to WatchCredential as well)
+    if coros_email:
+        cred = db.query(WatchCredential).filter(
+            WatchCredential.user_id == current_user.id,
+            WatchCredential.brand == 'coros',
+        ).first()
+        if not cred:
+            cred = WatchCredential(
+                user_id=current_user.id,
+                brand='coros',
+                encrypted_user=coros_email,
+            )
+            db.add(cred)
+        cred.encrypted_user = coros_email
+        if coros_password and coros_password != '********':
+            cred.encrypted_password = encrypt(coros_password)
+    else:
+        # Remove credential if email is cleared
+        cred = db.query(WatchCredential).filter(
+            WatchCredential.user_id == current_user.id,
+            WatchCredential.brand == 'coros',
+        ).first()
+        if cred:
+            db.delete(cred)
     if old_weight != weight:
         wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.now(timezone.utc), user_id=current_user.id)
         db.add(wm)

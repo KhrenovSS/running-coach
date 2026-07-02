@@ -16,11 +16,11 @@ from telegram.ext import (
 
 from src.models import (
     SessionLocal, User, TrainingSession,
-    DailyMetrics, WeightMeasurement, DeletedTraining, TrainingFeedback,
+    DailyMetrics, WeightMeasurement, DeletedTraining, TrainingFeedback, WatchCredential,
     get_user_by_telegram,
 )
 from src.crypto import encrypt, decrypt
-from src.coros_client import CorosClient, CorosAuthError, CorosAPIError
+from src.watch.coros import CorosWatchClient, CorosAuthError, CorosAPIError
 from src.parsers.fit_parser import parse_fit
 from src.logger import get_logger
 from src.services.audit import AuditService
@@ -106,16 +106,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     username = update.effective_user.username
     user = get_user(chat_id)
-    if user and user.coros_email:
+    db_check = SessionLocal()
+    try:
+        has_cred = False
+        if user:
+            has_cred = db_check.query(WatchCredential).filter(
+                WatchCredential.user_id == user.id,
+                WatchCredential.brand == 'coros',
+                WatchCredential.encrypted_password.isnot(None),
+            ).first() is not None
+    finally:
+        db_check.close()
+
+    if user and has_cred:
         # Генерируем ссылку для входа в веб (Generate web login link)
         db = SessionLocal()
         try:
             login_link = _generate_login_link(db, user)
         finally:
             db.close()
+        cred_email = user.coros_email or ''
         await update.message.reply_text(
             f"👋 Привет, {user.name or username or 'бегун'}!\n"
-            f"Твой Coros аккаунт уже привязан: {user.coros_email}\n\n"
+            f"Твой Coros аккаунт уже привязан: {cred_email}\n\n"
             f"🔗 Ссылка для входа в веб-интерфейс:\n"
             f"{login_link}\n\n"
             f"/sync — синхронизировать тренировки\n"
@@ -193,6 +206,23 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user.coros_password = encrypt(password)
         user.registered_at = datetime.now(timezone.utc)
 
+        # Сохраняем также в WatchCredential (Save to WatchCredential as well)
+        cred = db.query(WatchCredential).filter(
+            WatchCredential.user_id == user.id,
+            WatchCredential.brand == 'coros',
+        ).first()
+        if not cred:
+            cred = WatchCredential(
+                user_id=user.id,
+                brand='coros',
+                encrypted_user=email,
+                encrypted_password=encrypt(password),
+            )
+            db.add(cred)
+        else:
+            cred.encrypted_user = email
+            cred.encrypted_password = encrypt(password)
+
         db.commit()
         logger.info("Пользователь %s (chat_id=%s) привязал Coros: %s", username, chat_id, email)
         
@@ -262,242 +292,269 @@ def _sync_for_user(user: User, chat_id: int, token: str):
     """Синхронизирует тренировки и метрики здоровья для пользователя (Sync trainings and health metrics for a user)"""
     db = SessionLocal()
     audit = AuditService(db)
-    audit.log_coros_sync_started(
+    cred = db.query(WatchCredential).filter(
+        WatchCredential.user_id == user.id,
+        WatchCredential.brand == 'coros',
+    ).first()
+    if not cred or not cred.encrypted_password:
+        _send_message(token, chat_id, "❌ Coros аккаунт не привязан. Используй /start чтобы настроить.", db=db, user_id=user.id)
+        db.close()
+        return
+
+    audit.log_sync_started(
+        brand='coros',
         user_id=user.id,
-        email=user.coros_email,
+        email=cred.encrypted_user,
         source="telegram_sync",
     )
-    try:
+
+    import asyncio
+
+    async def _sync_all():
+        nonlocal db, token, chat_id, cred, user, audit
         try:
-            plain_password = decrypt(user.coros_password)
-        except Exception:
-            plain_password = user.coros_password
+            try:
+                plain_password = decrypt(cred.encrypted_password)
+            except Exception:
+                plain_password = cred.encrypted_password
 
-        client = CorosClient(user.coros_email, plain_password, timeout=15)
-        client.authenticate()
-        logger.info("Bot sync: Coros auth OK for user %s", user.id)
+            client = CorosWatchClient(cred.encrypted_user, plain_password, timeout=15)
+            await client.authenticate()
+            logger.info("Bot sync: Coros auth OK for user %s", user.id)
 
-        synced_health = 0
-        synced_acts = 0
-        msg_parts = []
+            synced_health = 0
+            synced_acts = 0
+            msg_parts = []
 
-        # === Health sync ===
-        try:
-            existing_dates = {
-                r[0] for r in db.query(DailyMetrics.date)
-                .filter(DailyMetrics.user_id == user.id).all()
-            }
-            today = date.today()
-            start_day = (today - timedelta(days=120)).strftime("%Y%m%d")
-            end_day = today.strftime("%Y%m%d")
-            metrics_list = client.get_daily_metrics(start_day, end_day)
-            if not metrics_list:
-                msg_parts.append("🟡 здоровье: нет данных — проверьте синхронизацию часов с Coros")
-                logger.info("Bot sync health: empty response for user %s — watch may not be synced", user.id)
-                msg_parts.append(f"здоровье: нет данных")
-            else:
-                analytics_by_date = {}
-                try:
-                    analytics_list = client.get_analytics()
-                    for a in analytics_list:
-                        ad = a.get('happenDay')
-                        if ad:
-                            try:
-                                d = datetime.strptime(str(ad), "%Y%m%d").date()
-                                analytics_by_date[d] = a
-                            except (ValueError, TypeError):
-                                pass
-                except Exception as e:
-                    logger.warning("Bot sync: analytics fetch error: %s", e)
-
-                for entry in metrics_list:
-                    happen_day = entry.get('happenDay')
-                    if not happen_day:
-                        continue
+            # === Health sync ===
+            try:
+                existing_dates = {
+                    r[0] for r in db.query(DailyMetrics.date)
+                    .filter(DailyMetrics.user_id == user.id).all()
+                }
+                today = date.today()
+                start_day = (today - timedelta(days=120)).strftime("%Y%m%d")
+                end_day = today.strftime("%Y%m%d")
+                metrics_list = await client.get_daily_metrics(start_day, end_day)
+                if not metrics_list:
+                    msg_parts.append("🟡 здоровье: нет данных — проверьте синхронизацию часов с Coros")
+                    msg_parts.append(f"здоровье: нет данных")
+                else:
+                    analytics_by_date = {}
                     try:
-                        entry_date = datetime.strptime(str(happen_day), "%Y%m%d").date()
-                    except (ValueError, TypeError):
-                        continue
-                    if entry_date in existing_dates:
-                        continue
-                    ana = analytics_by_date.get(entry_date, {})
-                    dm = DailyMetrics(
-                        user_id=user.id,
-                        date=entry_date,
-                        avg_sleep_hrv=entry.get('avgSleepHrv'),
-                        sleep_hrv_baseline=entry.get('sleepHrvBase'),
-                        sleep_hrv_sd=entry.get('sleepHrvSd'),
-                        rhr=entry.get('rhr'),
-                        tired_rate=entry.get('tiredRateNew'),
-                        training_load=entry.get('trainingLoad'),
-                        training_load_ratio=entry.get('trainingLoadRatio'),
-                        performance=entry.get('performance'),
-                        ati=entry.get('ati'),
-                        cti=entry.get('cti'),
-                        vo2max=entry.get('vo2max') or ana.get('vo2max'),
-                        lthr=entry.get('lthr') or ana.get('lthr'),
-                        stamina_level=entry.get('staminaLevel') or ana.get('staminaLevel'),
-                        ltsp=ana.get('ltsp'),
-                        stamina_level_7d=ana.get('staminaLevel7d'),
-                    )
-                    db.add(dm)
-                    synced_health += 1
+                        analytics_list = await client.get_analytics()
+                        for a in analytics_list:
+                            ad = a.get('happenDay')
+                            if ad:
+                                try:
+                                    d = datetime.strptime(str(ad), "%Y%m%d").date()
+                                    analytics_by_date[d] = a
+                                except (ValueError, TypeError):
+                                    pass
+                    except Exception as e:
+                        logger.warning("Bot sync: analytics fetch error: %s", e)
 
-                if synced_health:
-                    db.commit()
-
-                if analytics_by_date:
-                    updated = 0
-                    for entry_date, ana in analytics_by_date.items():
-                        existing = db.query(DailyMetrics).filter(
-                            DailyMetrics.user_id == user.id,
-                            DailyMetrics.date == entry_date,
-                        ).first()
-                        if not existing:
+                    for entry in metrics_list:
+                        happen_day = entry.get('happenDay')
+                        if not happen_day:
                             continue
-                        changed = False
-                        for field in ('vo2max', 'lthr', 'stamina_level', 'ltsp', 'stamina_level_7d'):
-                            if getattr(existing, field) is None and ana.get(field) is not None:
-                                setattr(existing, field, ana.get(field))
-                                changed = True
-                        if changed:
-                            updated += 1
-                    if updated:
+                        try:
+                            entry_date = datetime.strptime(str(happen_day), "%Y%m%d").date()
+                        except (ValueError, TypeError):
+                            continue
+                        if entry_date in existing_dates:
+                            continue
+                        ana = analytics_by_date.get(entry_date, {})
+                        dm = DailyMetrics(
+                            user_id=user.id,
+                            date=entry_date,
+                            avg_sleep_hrv=entry.get('avgSleepHrv'),
+                            sleep_hrv_baseline=entry.get('sleepHrvBase'),
+                            sleep_hrv_sd=entry.get('sleepHrvSd'),
+                            rhr=entry.get('rhr'),
+                            tired_rate=entry.get('tiredRateNew'),
+                            training_load=entry.get('trainingLoad'),
+                            training_load_ratio=entry.get('trainingLoadRatio'),
+                            performance=entry.get('performance'),
+                            ati=entry.get('ati'),
+                            cti=entry.get('cti'),
+                            vo2max=entry.get('vo2max') or ana.get('vo2max'),
+                            lthr=entry.get('lthr') or ana.get('lthr'),
+                            stamina_level=entry.get('staminaLevel') or ana.get('staminaLevel'),
+                            ltsp=ana.get('ltsp'),
+                            stamina_level_7d=ana.get('staminaLevel7d'),
+                        )
+                        db.add(dm)
+                        synced_health += 1
+
+                    if synced_health:
                         db.commit()
 
-                msg_parts.append(f"здоровье: {synced_health}")
+                    if analytics_by_date:
+                        updated = 0
+                        for entry_date, ana in analytics_by_date.items():
+                            existing = db.query(DailyMetrics).filter(
+                                DailyMetrics.user_id == user.id,
+                                DailyMetrics.date == entry_date,
+                            ).first()
+                            if not existing:
+                                continue
+                            changed = False
+                            for field in ('vo2max', 'lthr', 'stamina_level', 'ltsp', 'stamina_level_7d'):
+                                if getattr(existing, field) is None and ana.get(field) is not None:
+                                    setattr(existing, field, ana.get(field))
+                                    changed = True
+                            if changed:
+                                updated += 1
+                        if updated:
+                            db.commit()
 
-            # Сохраняем время последней синхронизации здоровья (Save last health sync time)
-            user.last_health_sync_at = datetime.now(timezone.utc)
-            # Сохраняем dashboard данные (Save dashboard data)
-            try:
-                dashboard = client.get_dashboard()
-                if dashboard:
-                    today = date.today()
-                    dm = db.query(DailyMetrics).filter(
-                        DailyMetrics.user_id == user.id,
-                        DailyMetrics.date == today
-                    ).first()
-                    if not dm:
-                        dm = DailyMetrics(user_id=user.id, date=today)
-                        db.add(dm)
-                        db.flush()
-                    dm.recovery_pct = dashboard.get('recovery') or dashboard.get('recoveryPercent')
-                    dm.load_impact = dashboard.get('loadImpact')
-                    dm.intensity_trend = dashboard.get('intensityTrend')
-            except Exception as e:
-                logger.warning("Bot sync: dashboard error: %s", e)
-            db.commit()
-        except Exception as e:
-            logger.error("Bot sync health error: %s", e)
-            msg_parts.append(f"здоровье: ошибка")
+                    msg_parts.append(f"здоровье: {synced_health}")
 
-        # === Activity sync ===
-        try:
-            activities = client.list_activities(limit=50, since=user.last_coros_sync)
-            if activities:
-                existing_times = {
-                    r[0] for r in db.query(TrainingSession.begin_ts)
-                    .filter(TrainingSession.user_id == user.id).all()
-                }
+                cred.last_health_sync_at = datetime.now(timezone.utc)
 
-                def already_imported(ts):
-                    for et in existing_times:
-                        if et is not None and abs((et - ts).total_seconds()) < 120:
-                            return True
-                    return False
-
-                new_acts = [a for a in activities if not already_imported(a['start_time'])]
-                max_act_ts = user.last_coros_sync
-                new_session_ids = []
-                for act in new_acts:
-                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.fit')
-                    tmp.close()
-                    try:
-                        ok = client.download_fit(act['id'], act['sport_type'], tmp.name)
-                        if not ok:
-                            os.unlink(tmp.name)
-                            continue
-                        data = parse_fit(
-                            tmp.name,
-                            max_hr=user.max_hr or 177,
-                            max_credible_pace=user.max_credible_pace or 3.0,
-                            max_gps_jump_m=user.max_gps_jump_m or 100.0,
-                            min_hr_for_fast_pace=user.min_hr_for_fast_pace or 130,
-                        )
-                        if data and data.get('begin_ts'):
-                            session = TrainingSession(**data)
-                            session.user_id = user.id
-                            tz = data.get('timezone')
-                            if tz and not user.timezone:
-                                user.timezone = tz
-                            db.add(session)
+                try:
+                    dashboard = await client.get_dashboard()
+                    if dashboard:
+                        today = date.today()
+                        dm = db.query(DailyMetrics).filter(
+                            DailyMetrics.user_id == user.id,
+                            DailyMetrics.date == today
+                        ).first()
+                        if not dm:
+                            dm = DailyMetrics(user_id=user.id, date=today)
+                            db.add(dm)
                             db.flush()
-                            new_session_ids.append((act, session.id, data))
-                            synced_acts += 1
-                            if max_act_ts is None or act['start_time'] > max_act_ts:
-                                max_act_ts = act['start_time']
-                        os.unlink(tmp.name)
-                    except Exception as e:
-                        logger.error("Bot sync: error processing %s: %s", act['name'], e)
+                        dm.recovery_pct = dashboard.get('recovery') or dashboard.get('recoveryPercent')
+                        dm.load_impact = dashboard.get('loadImpact')
+                        dm.intensity_trend = dashboard.get('intensityTrend')
+                except Exception as e:
+                    logger.warning("Bot sync: dashboard error: %s", e)
+                db.commit()
+            except Exception as e:
+                logger.error("Bot sync health error: %s", e)
+                msg_parts.append(f"здоровье: ошибка")
+
+            # === Activity sync ===
+            try:
+                activities = await client.list_activities(since=cred.last_activity_sync_at)
+                if activities:
+                    existing_times = {
+                        r[0] for r in db.query(TrainingSession.begin_ts)
+                        .filter(TrainingSession.user_id == user.id).all()
+                    }
+
+                    def already_imported(ts):
+                        for et in existing_times:
+                            if et is not None and abs((et - ts).total_seconds()) < 120:
+                                return True
+                        return False
+
+                    new_acts = [a for a in activities if not already_imported(a['start_time'])]
+                    new_session_ids = []
+                    for act in new_acts:
                         try:
-                            os.unlink(tmp.name)
-                        except OSError as unlink_err:
-                            logger.debug("Bot sync: не удалось удалить temp-файл %s: %s", tmp.name, unlink_err)
+                            fit_data = await client.download_activity(act['id'], act['sport_type'])
+                            if not fit_data:
+                                continue
+                            with tempfile.NamedTemporaryFile(delete=False, suffix='.fit') as tmp:
+                                tmp.write(fit_data)
+                                tmp_path = tmp.name
+                            try:
+                                data = parse_fit(
+                                    tmp_path,
+                                    max_hr=user.max_hr or 177,
+                                    max_credible_pace=user.max_credible_pace or 3.0,
+                                    max_gps_jump_m=user.max_gps_jump_m or 100.0,
+                                    min_hr_for_fast_pace=user.min_hr_for_fast_pace or 130,
+                                )
+                                if data and data.get('begin_ts'):
+                                    session = TrainingSession(**data)
+                                    session.user_id = user.id
+                                    tz = data.get('timezone')
+                                    if tz and not user.timezone:
+                                        user.timezone = tz
+                                    db.add(session)
+                                    db.flush()
+                                    new_session_ids.append((act, session.id, data))
+                                    synced_acts += 1
+                                os.unlink(tmp_path)
+                            except Exception as e:
+                                logger.error("Bot sync: error parsing %s: %s", act.get('name'), e)
+                                try:
+                                    os.unlink(tmp_path)
+                                except OSError:
+                                    pass
+                        except Exception as e:
+                            logger.error("Bot sync: error processing %s: %s", act.get('name'), e)
 
-                if synced_acts:
-                    user.last_coros_sync = max_act_ts
-                    db.commit()
-                    # Уведомление + запрос оценки для каждой новой тренировки (Notify + rating prompt)
-                    token_bot = os.getenv("TELEGRAM_BOT_TOKEN", "")
-                    for act, sid, data in new_session_ids:
-                        row1 = [{"text": str(i), "callback_data": f"feedback:{sid}:{i}"} for i in range(0, 6)]
-                        row2 = [{"text": str(i), "callback_data": f"feedback:{sid}:{i}"} for i in range(6, 11)]
-                        _send_message(
-                            token_bot, chat_id,
-                            f"🏃 *Новая тренировка!*\n"
-                            f"▫️ {act['name']}\n"
-                            f"▫️ {data.get('total_distance_km', 0):.1f} км\n\n"
-                            f"Насколько тяжёлой была тренировка?\n"
-                            f"`0` — вообще легко\n"
-                            f"`10` — почти умер",
-                            reply_markup={"inline_keyboard": [row1, row2]},
-                            db=db,
-                            user_id=user.id,
+                    if synced_acts:
+                        cred.last_activity_sync_at = max(
+                            a['start_time'] for a, _, _ in new_session_ids
                         )
+                        db.commit()
+                        token_bot = os.getenv("TELEGRAM_BOT_TOKEN", "")
+                        for act, sid, data in new_session_ids:
+                            row1 = [{"text": str(i), "callback_data": f"feedback:{sid}:{i}"} for i in range(0, 6)]
+                            row2 = [{"text": str(i), "callback_data": f"feedback:{sid}:{i}"} for i in range(6, 11)]
+                            _send_message(
+                                token_bot, chat_id,
+                                f"🏃 *Новая тренировка!*\n"
+                                f"▫️ {act['name']}\n"
+                                f"▫️ {data.get('total_distance_km', 0):.1f} км\n\n"
+                                f"Насколько тяжёлой была тренировка?\n"
+                                f"`0` — вообще легко\n"
+                                f"`10` — почти умер",
+                                reply_markup={"inline_keyboard": [row1, row2]},
+                                db=db,
+                                user_id=user.id,
+                            )
 
-            msg_parts.append(f"тренировки: {synced_acts}")
+                msg_parts.append(f"тренировки: {synced_acts}")
+            except Exception as e:
+                logger.error("Bot sync activities error: %s", e)
+                msg_parts.append("тренировки: ошибка")
+
+            msg = f"✅ Синхронизация завершена:\n" + "\n".join(f"• {p}" for p in msg_parts)
+            audit.log_sync_completed(
+                brand='coros',
+                user_id=user.id,
+                found=len(activities) if 'activities' in dir() else 0,
+                processed=synced_acts,
+                source="telegram_sync",
+            )
+            return msg
+
+        except CorosAuthError as e:
+            logger.error("Bot sync auth error: %s", e)
+            msg = f"❌ Ошибка аутентификации Coros: {e}\nПроверь логин и пароль через /start"
+            audit.log_sync_failed(
+                brand='coros',
+                user_id=user.id,
+                error=str(e),
+                source="telegram_sync",
+            )
+            return msg
         except Exception as e:
-            logger.error("Bot sync activities error: %s", e)
-            msg_parts.append("тренировки: ошибка")
+            logger.error("Bot sync error", exc_info=True)
+            msg = f"❌ Ошибка: {e}"
+            audit.log_sync_failed(
+                brand='coros',
+                user_id=user.id,
+                error=str(e),
+                source="telegram_sync",
+            )
+            return msg
+        finally:
+            try:
+                await client.close()
+            except Exception:
+                pass
 
-        msg = f"✅ Синхронизация завершена:\n" + "\n".join(f"• {p}" for p in msg_parts)
-        audit.log_coros_sync_completed(
-            user_id=user.id,
-            email=user.coros_email,
-            trainings_synced=synced_acts,
-            health_synced=synced_health,
-            source="telegram_sync",
-        )
-
-    except CorosAuthError as e:
-        logger.error("Bot sync auth error: %s", e)
-        msg = f"❌ Ошибка аутентификации Coros: {e}\nПроверь логин и пароль через /start"
-        audit.log_coros_sync_failed(
-            user_id=user.id,
-            email=user.coros_email,
-            error=str(e),
-            source="telegram_sync",
-        )
+    try:
+        msg = asyncio.run(_sync_all())
     except Exception as e:
-        logger.error("Bot sync error", exc_info=True)
-        msg = f"❌ Ошибка: {e}"
-        audit.log_coros_sync_failed(
-            user_id=user.id,
-            email=user.coros_email,
-            error=str(e),
-            source="telegram_sync",
-        )
+        msg = f"❌ Ошибка синхронизации: {e}"
     finally:
         db.close()
 
@@ -810,6 +867,7 @@ async def cmd_delete_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.query(DailyMetrics).filter(DailyMetrics.user_id == user.id).delete()
         db.query(WeightMeasurement).filter(WeightMeasurement.user_id == user.id).delete()
         db.query(DeletedTraining).filter(DeletedTraining.user_id == user.id).delete()
+        db.query(WatchCredential).filter(WatchCredential.user_id == user.id).delete()
         user.coros_email = None
         user.coros_password = None
         user.telegram_chat_id = None

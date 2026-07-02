@@ -5,7 +5,8 @@ from src.logger import get_logger
 
 logger = get_logger("crypto")
 
-KEY_ENV_VAR = 'COROS_CRED_KEY'
+KEY_ENV_VAR = 'CRED_KEY'
+_OLD_KEY_ENV_VAR = 'COROS_CRED_KEY'
 _fernet_cache = None
 
 
@@ -35,10 +36,14 @@ def _get_fernet():
         return _fernet_cache
     key = os.environ.get(KEY_ENV_VAR)
     if not key:
+        key = os.environ.get(_OLD_KEY_ENV_VAR)
+        if key:
+            logger.warning("COROS_CRED_KEY is deprecated, rename to CRED_KEY in .env")
+    if not key:
         key = _read_key_from_env_file()
     if not key:
         raise RuntimeError(
-            f"{KEY_ENV_VAR} не задан. Укажите COROS_CRED_KEY в .env "
+            f"{KEY_ENV_VAR} не задан. Укажите CRED_KEY (или COROS_CRED_KEY) в .env "
             f"или переменной окружения. Сгенерировать: "
             f"python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
         )

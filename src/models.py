@@ -46,6 +46,29 @@ class User(Base):
     daily_metrics = relationship("DailyMetrics", back_populates="user")
     weight_measurements = relationship("WeightMeasurement", back_populates="user")
     deleted_trainings = relationship("DeletedTraining", back_populates="user")
+    watch_credentials = relationship("WatchCredential", back_populates="user")
+
+
+# Модель учётных данных часов (Watch credential model — multi-brand)
+class WatchCredential(Base):
+    __tablename__ = 'watch_credentials'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    brand = Column(String(50), nullable=False)  # e.g. 'coros', 'garmin', 'polar'
+    encrypted_user = Column(String(255), nullable=True)   # encrypted email/username
+    encrypted_password = Column(String(255), nullable=True)  # encrypted password
+    access_token = Column(String(512), nullable=True)  # cached API token
+    token_expires_at = Column(DateTime(timezone=True), nullable=True)
+    last_activity_sync_at = Column(DateTime(timezone=True), nullable=True)
+    last_health_sync_at = Column(DateTime(timezone=True), nullable=True)
+    activity_sync_interval = Column(Integer, nullable=True)  # minutes, NULL = default 60
+    health_sync_interval = Column(Integer, nullable=True)  # minutes, NULL = default 480
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    user = relationship("User", back_populates="watch_credentials")
 
 
 # Модель тренировочной сессии (Training session model)
@@ -132,6 +155,7 @@ class DailyMetrics(Base):
     load_impact = Column(Float, nullable=True)  # Coros "Влияние нагрузки"
     intensity_trend = Column(Float, nullable=True)  # Coros "Тренд интенсивности"
     sleep_hrv_interval_list = Column(Text, nullable=True)  # Coros HRV intervals JSON [min, low, normal_start, normal_end]
+    source_brand = Column(String(50), nullable=True)  # e.g. 'coros', 'garmin' (source of metric)
 
     user = relationship("User", back_populates="daily_metrics")
 

@@ -2,12 +2,33 @@
 
 All notable changes to this project are tracked here.
 
-## [02.07.2026] — Hotfix: Jinja2 autoescaping ломает JSON в <script> тегах
+## [02.07.2026] — Sprint 4 п.12+14: мульти-брендовая архитектура (httpx, BaseWatchClient, WatchCredential)
 
-### Fixed
-- **`src/web/templates/index.html`**: `{{ recovery_json }}` и `{{ weight_json }}` без `|safe` — Jinja2 autoescape превращал `"` в `&#34;`, ломая JavaScript. График RHR и вес не отображались.
-- **`src/web/templates/session.html`**: `{{ chart_json }}` без `|safe` — то же самое, график пульса/темпа на странице тренировки не работал.
-- Добавлен `|safe` ко всем трём JSON-переменным.
+### Added
+- **`src/watch/`** — новый пакет мульти-брендовой абстракции часов:
+  - `base.py`: `BaseWatchClient(ABC)` с протоколом `authenticate`, `list_activities`, `download_activity`, `get_daily_metrics`, `get_dashboard`, `get_analytics`
+  - `coros.py`: `CorosWatchClient(BaseWatchClient)` на `httpx.AsyncClient` вместо синхронного `requests`
+  - `factory.py`: реестр брендов (`register`, `get_watch_client`, `list_brands`)
+- **`WatchCredential`** — новая модель в `src/models.py` (таблица `watch_credentials`): `brand`, `encrypted_user`, `encrypted_password`, `access_token`, `token_expires_at`, `last_activity_sync_at`, `last_health_sync_at`, `activity_sync_interval`, `health_sync_interval`, `is_active`
+- **`DailyMetrics.source_brand`** — колонка для указания источника метрик (e.g. 'coros')
+- **`src/services/sync_service.py`** — brand-agnostic сервис синхронизации (заменяет `coros_sync_auto.py`): `sync_health_for_user`, `sync_activities_for_user`, `auto_sync_health`, `auto_sync_activities`
+- **`src/web/routes/sync.py`** — brand-agnostic роуты: `POST /sync/{brand}/run`, `POST /sync/{brand}/health`, `GET /sync/status/{id}` + обратная совместимость `/coros/sync`
+- **Alembic migration** `b6c7d8e9f0a1` — создание `watch_credentials`, добавление `source_brand` в `daily_metrics`, миграция существующих coros учётных данных
+- **AuditService** — brand-agnostic методы: `log_sync_started(brand)`, `log_sync_completed(brand)`, `log_sync_failed(brand)`
+- **CRED_KEY fallback** — `crypto.py` поддерживает `CRED_KEY` как основной и `COROS_CRED_KEY` как deprecated fallback с warning
+
+### Changed
+- **`src/web/routes/__init__.py`** — подключение `sync_router` вместо `coros_router`
+- **`src/scheduler.py`** — brand-agnostic, импортирует из `sync_service` вместо `coros_sync_auto`
+- **`src/web/routes/pages.py`** — чтение coros email из `WatchCredential` в настройках, сохранение и в `WatchCredential`
+- **`src/telegram_bot.py`** — импорт `CorosWatchClient` вместо `CorosClient`, использование `asyncio.run()` для async-вызовов, сохранение кредов в `WatchCredential`
+
+### Removed
+- **`src/coros_client.py`** — старый синхронный CorosClient (весь функционал перенесён в `src/watch/coros.py`)
+- **`src/services/coros_sync_auto.py`** — заменён на `src/services/sync_service.py`
+- **`src/web/routes/coros.py`** — заменён на `src/web/routes/sync.py`
+
+---
 
 ## [02.07.2026] — Hotfix: UnboundLocalError в pages.py (Python 3.13+)
 

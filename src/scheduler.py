@@ -1,9 +1,9 @@
-# Фоновый планировщик автосинхронизации Coros (Background Coros auto-sync scheduler)
+# Фоновый планировщик автосинхронизации (Background auto-sync scheduler — brand-agnostic)
 import time
 import random
 import threading
 from src.logger import get_logger
-from src.services.coros_sync_auto import health_sync_interval, activity_sync_interval, auto_sync_health, auto_sync_activities
+from src.services.sync_service import health_sync_interval, activity_sync_interval, auto_sync_health, auto_sync_activities
 
 logger = get_logger("app")
 
@@ -24,9 +24,9 @@ class AutoSyncScheduler:
         if self._started:
             return
         self._started = True
-        thread = threading.Thread(target=self._loop, daemon=True, name="coros-auto-sync")
+        thread = threading.Thread(target=self._loop, daemon=True, name="auto-sync-scheduler")
         thread.start()
-        logger.info("Автосинхронизация Coros: фоновый поток запущен")
+        logger.info("Автосинхронизация: фоновый поток запущен (brand-agnostic)")
 
     def _loop(self):
         logger.info("Автосинхронизация: запуск планировщика (health=%dс, activities=%dс)",

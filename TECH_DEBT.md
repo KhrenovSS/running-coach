@@ -620,7 +620,7 @@ running-coach-worker.service  # APScheduler для синков/напомина
 
 5. **Спринт 4 — процессы, интеграции, мульти-брендовая архитектура** (3–4 дня)
    - [x] п.8: стандартизировать время (UTC + `User.timezone`).
-   - [ ] п.12+14: переписать Coros-клиент на `httpx.AsyncClient` сразу как `CorosWatchClient(BaseWatchClient)`, внедрить мульти-брендовую архитектуру.
+   - [x] п.12+14: переписать Coros-клиент на `httpx.AsyncClient` сразу как `CorosWatchClient(BaseWatchClient)`, внедрить мульти-брендовую архитектуру.
    — *см. подробное описание ниже.*
    — **Важно:** п.12+14 выполняется **после** Sprint 4.5, чтобы `WatchCredential` и миграции создавались на чистой PostgreSQL-схеме с `TIMESTAMPTZ`.
 
@@ -632,8 +632,7 @@ running-coach-worker.service  # APScheduler для синков/напомина
    — **Зачем:** убирает SQLite-специфичные костыли (`render_as_batch`, naive UTC, `check_same_thread`) перед созданием новых таблиц мульти-брендовой архитектуры.
 
 8. **Спринт 4 (продолжение) — п.12+14: Multi-brand architecture** (2–3 дня)
-   - [ ] п.12+14: переписать Coros-клиент на `httpx.AsyncClient` сразу как `CorosWatchClient(BaseWatchClient)`, внедрить мульти-брендовую архитектуру.
-   — *см. подробное описание ниже.*
+   - [x] п.12+14: переписать Coros-клиент на `httpx.AsyncClient` сразу как `CorosWatchClient(BaseWatchClient)`, внедрить мульти-брендовую архитектуру.
    — **Зависимость:** выполняется после Sprint 4.5.
 
 9. **Спринт 6 — Настраиваемая частота синхронизации per-user (бренд-независимая)** (1–2 дня)
@@ -686,8 +685,8 @@ running-coach-worker.service  # APScheduler для синков/напомина
 
    > **Почему объединены:** переписывать `CorosClient` дважды (сначала на httpx, потом на BaseWatchClient) — лишняя работа. Сразу делаем `CorosWatchClient(BaseWatchClient)` на `httpx.AsyncClient`.
 
-   - [ ] **12+14.1** Создать `src/watch/` пакет с `__init__.py`.
-   - [ ] **12+14.2** Создать `src/watch/base.py` — `BaseWatchClient(ABC)` с протоколом:
+   - [x] **12+14.1** Создать `src/watch/` пакет с `__init__.py`.
+   - [x] **12+14.2** Создать `src/watch/base.py` — `BaseWatchClient(ABC)` с протоколом:
      ```python
      class BaseWatchClient(ABC):
          @abstractmethod
@@ -699,42 +698,42 @@ running-coach-worker.service  # APScheduler для синков/напомина
          @abstractmethod
          async def get_daily_metrics(self, date: str) -> dict | None: ...
      ```
-   - [ ] **12+14.3** Создать `src/watch/coros.py`:
+   - [x] **12+14.3** Создать `src/watch/coros.py`:
      - Класс `CorosWatchClient(BaseWatchClient)` на `httpx.AsyncClient`.
      - Все методы async.
      - Кеширование токена через `WatchCredential.access_token` / `token_expires_at`.
-   - [ ] **12+14.4** Создать `src/watch/factory.py`:
+   - [x] **12+14.4** Создать `src/watch/factory.py`:
      ```python
      _registry: dict[str, type[BaseWatchClient]] = {}
      def register(brand: str, client_cls: type[BaseWatchClient]): ...
      def get_watch_client(brand: str, **kwargs) -> BaseWatchClient: ...
      ```
-   - [ ] **12+14.5** Зарегистрировать `CorosWatchClient` в фабрике.
-   - [ ] **12+14.6** Удалить старый `src/coros_client.py` (весь функционал перенесён в `src/watch/coros.py`).
-   - [ ] **12+14.7** Создать модель `WatchCredential` (отдельная таблица):
+   - [x] **12+14.5** Зарегистрировать `CorosWatchClient` в фабрике.
+   - [x] **12+14.6** Удалить старый `src/coros_client.py` (весь функционал перенесён в `src/watch/coros.py`).
+   - [x] **12+14.7** Создать модель `WatchCredential` (отдельная таблица):
      - `id` (PK), `user_id` (FK→users.id), `brand` (String, например 'coros'),
        `encrypted_user` (Text), `encrypted_password` (Text),
        `access_token` (Text, nullable), `token_expires_at` (DateTime, nullable),
        `created_at`, `updated_at`.
      - Alembic миграция.
-   - [ ] **12+14.8** Перенести данные из `User.coros_email`/`coros_password` в `WatchCredential` (миграция данных).
-   - [ ] **12+14.9** Удалить поля `coros_email`, `coros_password`, `last_coros_sync` из модели `User`.
-   - [ ] **12+14.10** Обобщить `src/services/coros_sync_auto.py` → `src/services/sync_service.py`:
+   - [x] **12+14.8** Перенести данные из `User.coros_email`/`coros_password` в `WatchCredential` (миграция данных).
+   - [ ] **12+14.9** Удалить поля `coros_email`, `coros_password`, `last_coros_sync` из модели `User`. (отложено — оставлено для обратной совместимости с telegram_bot.py)
+   - [x] **12+14.10** Обобщить `src/services/coros_sync_auto.py` → `src/services/sync_service.py`:
      - Функции принимают `BaseWatchClient`, а не `CorosClient`.
      - Выбор клиента — через `get_watch_client(brand, ...)` из `WatchCredential`.
-   - [ ] **12+14.11** Обобщить `src/scheduler.py`:
+   - [x] **12+14.11** Обобщить `src/scheduler.py`:
      - Единый поток перебирает `WatchCredential`, группирует по `user_id`, для каждого brand вызывает соответствующий sync-метод.
-   - [ ] **12+14.12** Обобщить `src/web/routes/coros.py` → `src/web/routes/sync.py`:
+   - [x] **12+14.12** Обобщить `src/web/routes/coros.py` → `src/web/routes/sync.py`:
      - `/sync/{brand}/run` вместо `/coros/sync`.
      - `/sync/{brand}/health` вместо `/coros/sync/health`.
      - `/sync/status/{task_id}` без brand — единый для всех.
      - Старый `/coros/sync` — редирект (обратная совместимость).
-   - [ ] **12+14.13** Добавить колонку `source_brand` (String) в `DailyMetrics`.
-   - [ ] **12+14.14** Переименовать `COROS_CRED_KEY` → `CRED_KEY` в `crypto.py` и `.env`. Поддерживать старый `COROS_CRED_KEY` как fallback с `warn`.
-   - [ ] **12+14.15** Обобщить audit-события в `src/services/audit.py`:
+   - [x] **12+14.13** Добавить колонку `source_brand` (String) в `DailyMetrics`.
+   - [x] **12+14.14** Переименовать `COROS_CRED_KEY` → `CRED_KEY` в `crypto.py` и `.env`. Поддерживать старый `COROS_CRED_KEY` как fallback с `warn`.
+   - [x] **12+14.15** Обобщить audit-события в `src/services/audit.py`:
      - `coros.sync.*` → `sync.{brand}.*`.
      - Методы `log_coros_sync_*` → `log_sync_*(brand, ...)` (обратная совместимость через депрекейт).
-   - [ ] **12+14.16** `src/web/routes/pages.py` — заменить импорт `_auto_sync_status` на brand-agnostic статус.
+   - [x] **12+14.16** `src/web/routes/pages.py` — заменить импорт `_auto_sync_status` на brand-agnostic статус.
 
    **Как проверить:**
    - [ ] `grep -rn "CorosClient" src/` → только в `src/watch/coros.py` и `src/watch/factory.py`.

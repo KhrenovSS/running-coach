@@ -35,9 +35,12 @@ class AuditService:
     # Типы событий (Event types)
     TRAINING_UPLOADED = "training.uploaded"
     TRAINING_DELETED = "training.deleted"
-    COROS_SYNC_STARTED = "coros.sync.started"
-    COROS_SYNC_COMPLETED = "coros.sync.completed"
-    COROS_SYNC_FAILED = "coros.sync.failed"
+    COROS_SYNC_STARTED = "coros.sync.started"  # deprecated — use SYNC_STARTED
+    COROS_SYNC_COMPLETED = "coros.sync.completed"  # deprecated — use SYNC_COMPLETED
+    COROS_SYNC_FAILED = "coros.sync.failed"  # deprecated — use SYNC_FAILED
+    SYNC_STARTED = "sync.{brand}.started"
+    SYNC_COMPLETED = "sync.{brand}.completed"
+    SYNC_FAILED = "sync.{brand}.failed"
     TELEGRAM_NOTIFICATION_SENT = "telegram.notification.sent"
     TELEGRAM_NOTIFICATION_FAILED = "telegram.notification.failed"
     SETTINGS_CHANGED = "settings.changed"
@@ -150,7 +153,7 @@ class AuditService:
             user_id=user_id,
             metadata=extra,
         )
-    
+
     def log_coros_sync_completed(self, user_id: int, found: int = 0, processed: int = 0, **extra) -> None:
         """Аудит: синхронизация Coros завершена (Audit: Coros sync completed)"""
         metadata = {"found": found, "processed": processed, **extra}
@@ -161,7 +164,7 @@ class AuditService:
             user_id=user_id,
             metadata=metadata,
         )
-    
+
     def log_coros_sync_failed(self, user_id: int, error: str, **extra) -> None:
         """Аудит: синхронизация Coros не удалась (Audit: Coros sync failed)"""
         self.log_event(
@@ -170,6 +173,38 @@ class AuditService:
             severity="error",
             user_id=user_id,
             metadata={"error": error, **extra},
+        )
+
+    # Brand-agnostic sync audit methods (Brand-agnostic sync audit methods)
+    def log_sync_started(self, brand: str, user_id: int, **extra) -> None:
+        """Аудит: начата синхронизация (Audit: sync started)"""
+        self.log_event(
+            event_type=f"sync.{brand}.started",
+            message=f"{brand.capitalize()} sync started",
+            severity="info",
+            user_id=user_id,
+            metadata={"brand": brand, **extra},
+        )
+
+    def log_sync_completed(self, brand: str, user_id: int, found: int = 0, processed: int = 0, **extra) -> None:
+        """Аудит: синхронизация завершена (Audit: sync completed)"""
+        metadata = {"brand": brand, "found": found, "processed": processed, **extra}
+        self.log_event(
+            event_type=f"sync.{brand}.completed",
+            message=f"{brand.capitalize()} sync completed: found={found}, processed={processed}",
+            severity="info",
+            user_id=user_id,
+            metadata=metadata,
+        )
+
+    def log_sync_failed(self, brand: str, user_id: int, error: str, **extra) -> None:
+        """Аудит: синхронизация не удалась (Audit: sync failed)"""
+        self.log_event(
+            event_type=f"sync.{brand}.failed",
+            message=f"{brand.capitalize()} sync failed: {error}",
+            severity="error",
+            user_id=user_id,
+            metadata={"brand": brand, "error": error, **extra},
         )
     
     def log_telegram_sent(self, user_id: int, chat_id: int, message_preview: str, **extra) -> None:
