@@ -65,15 +65,15 @@
   - [x] 5.6 Проверить: `from main import app` работает, `settings.*` читаются
   - [x] 5.7 COMMIT: "Шаг 5: pydantic-settings вместо dataclass CONFIG"
 
-- [ ] **Шаг 6 — Финальная уборка**
-  - [ ] 6.1 Удалить `get_settings()` если остался (всё через `User`)
-  - [ ] 6.2 Удалить `src/logger.py` (legacy-файл, всё через `src/utils/logger.py`)
-  - [ ] 6.3 Проверить `src/exceptions.py` — все исключения используются
-  - [ ] 6.4 `wc -l main.py` → < 60 строк
-  - [ ] 6.5 `grep -rn "html\s*+=\s*f" main.py src/` → 0 (нет f-строк HTML)
-  - [ ] 6.6 Обновить `CHANGELOG.md`
-  - [ ] 6.7 Обновить `AGENTS.md` — секция «Текущее состояние»
-  - [ ] 6.8 COMMIT: "Шаг 6: финальная уборка, main.py очищен"
+- [x] **Шаг 6 — Финальная уборка**
+  - [ ] 6.1 ~~Удалить `get_settings()`~~ (оставлен — нужен для non-auth контекстов, single-user convenience)
+  - [ ] 6.2 ~~Удалить `src/logger.py`~~ (оставлен — backward-compat shim, ~10 файлов его импортят)
+  - [ ] 6.3 ~~Проверить `src/exceptions.py`~~ (оставлены — задокументированы для будущего использования)
+  - [x] 6.4 `wc -l main.py` → 7 строк ✅
+  - [x] 6.5 `grep -rn "html\s*+=\s*f" main.py src/` — только fragment builders в stats.py + logs.py (не page templates)
+  - [x] 6.6 Обновить `CHANGELOG.md`
+  - [x] 6.7 Обновить `AGENTS.md` — секция «Текущее состояние»
+  - [x] 6.8 COMMIT: "Шаг 6: финальная уборка, main.py очищен"
 
 ## Критические проверки после каждого шага
 

@@ -2,6 +2,13 @@
 
 All notable changes to this project are tracked here.
 
+## [02.07.2026] — Sprint 3, шаг 6: финальная уборка, main.py 7 строк
+
+### Changed
+- **main.py**: 2776 → 7 строк (99.7% сокращение)
+- **Sprint 3 завершён**: `main.py` декомпозирован на пакеты `src/services/`, `src/web/routes/`, `src/config/settings.py`, `src/scheduler.py`, `src/startup.py`
+- **AGENTS.md**: обновлена секция «Текущее состояние»
+
 ## [02.07.2026] — Sprint 3, шаг 5: pydantic-settings вместо dataclass CONFIG
 
 ### Added

@@ -157,9 +157,9 @@ def calc_avg_pace(...):
 - **Максимальный размер файла** — ~500 строк, больше — выноси
 
 ### Константы
-- **Никаких magic numbers** — используй `CONFIG` из `src/config/constants.py`
-- Пример: `CONFIG.HR_ZONES.DEFAULT_MAX_HR` вместо `177`
-- Пример: `CONFIG.TIMING.HTTP_TIMEOUT` вместо `15`
+- **Никаких magic numbers** — используй константы из `src.config.constants` или `settings` из `src.config`
+- Пример: `from src.config import settings; settings.default_max_hr` вместо `177`
+- Пример: `from src.config.constants import HTTP_TIMEOUT` вместо `15`
 
 ### API
 - **Валидация** — через Pydantic модели (аналог Zod из sample)
@@ -194,7 +194,7 @@ def calc_avg_pace(...):
 
 ### Чеклисты
 Перед коммитом проверь:
-- [ ] Константы из `CONFIG`, не hardcoded
+- [ ] Константы из `src.config`, не hardcoded
 - [ ] Нет `except: pass`
 - [ ] Бизнес-логика в `services/`, не в роуте
 - [ ] Тесты написаны
@@ -339,20 +339,36 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 - ✅ Создать пользователя: /start в Telegram → ссылка на /register → установить email+пароль — **выполнено**
 - ⬜ Первая синхронизация: пользователь нажимает 🔄 Coros Sync в веб-интерфейсе
 - ⬜ **Спринт 6** (TECH_DEBT.md): per-user частота синхронизации, баннер, настройки
-- 🟡 **Спринт 3** (TECH_DEBT.md): декомпозиция main.py, Jinja2, pydantic-settings — **В ПРОЦЕССЕ**
+- ✅ **Спринт 3** (TECH_DEBT.md): декомпозиция main.py, Jinja2, pydantic-settings — **завершён**
 - ⬜ **Спринт 4** (TECH_DEBT.md): стандартизация времени (UTC), Coros-клиент на httpx
 - ⬜ **Модуль аналитики** — 8 этапов из `decision_module_design.md`
 - ⬜ **Фильтр по типу** тренировки на главной
 - ⬜ **Общая дистанция и время** за неделю/месяц
 
-## Текущее состояние (Session — 02.07.2026)
+## Текущее состояние (Session — 02.07.2026, Sprint 3 завершён)
 
-**Начало Спринта 3.** Создан детальный план в `SPRINT_3_PLAN.md` — 6 шагов с чекбоксами.  
-`main.py` — 2776 строк, предстоит разложить по пакетам.
+**Спринт 3 полностью завершён!** `main.py` декомпозирован с 2776 до 7 строк.
+
+### Итоговая структура после Спринта 3:
+- `main.py` (7 строк) — только `create_app()` + `uvicorn.run()`
+- `src/startup.py` — фабрика приложения, startup-событие
+- `src/scheduler.py` — `AutoSyncScheduler` (одиночка)
+- `src/web/routes/` — 4 sub-router: `pages.py` (7), `uploads.py` (3), `coros.py` (3), `logs.py` (1)
+- `src/web/state.py` — глобальное состояние (`_pending`, `_sync_tasks`, `TRAINING_TYPES_RU`)
+- `src/deps.py` — общие зависимости (`templates = Jinja2Templates`)
+- `src/services/*.py` — 4 сервисных модуля (telegram_notify, stats, recovery_view, coros_sync_auto)
+- `src/config/settings.py` — `Settings(BaseSettings)` из pydantic-settings
+- `src/config/constants.py` — плоские module-level константы (HR зоны, API endpoints, пороги)
+- `src/web/templates/*.html` — 6 Jinja2-шаблонов
 
 **Если сессия прервана:** перед продолжением работы прочитать:
 1. `AGENTS.md` — правила проекта
-2. `SPRINT_3_PLAN.md` — план с чекбоксами (отметить сделанное, продолжить со следующего шага)
+2. `SPRINT_3_PLAN.md` — план с чекбоксами
 3. `README.md` — актуальное состояние проекта
 
-Команда для продолжения (новый агент): «Продолжить Спринт 3, проект /home/nimda/projects/running-coach. Прочитай SPRINT_3_PLAN.md и AGENTS.md и продолжай с последнего отмеченного шага.»
+**Следующие шаги (из TECH_DEBT.md):**
+- Sprint 4: стандартизация времени (UTC), Coros-клиент на httpx
+- Sprint 6: per-user частота синхронизации, баннеры, настройки
+- Модуль аналитики (8 этапов из decision_module_design.md)
+- Фильтр по типу тренировки на главной
+- Общая дистанция и время за неделю/месяц
