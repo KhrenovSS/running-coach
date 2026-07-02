@@ -24,6 +24,7 @@ All notable changes to this project are tracked here.
 
 ### Added (п.8.4)
 - **Data migration** `a1b2c3d4e5f6`: конвертирует старые naive-local `begin_ts` → naive UTC (fallback Europe/Moscow), проставляет `timezone` в training_sessions и users
+- **pyproject.toml**: добавлен `jinja2==3.1.5` в зависимости (требовался `Jinja2Templates` но не был явно указан)
 
 ## [02.07.2026] — Hotfix: daily weight reminder timezone (п.15)
 
