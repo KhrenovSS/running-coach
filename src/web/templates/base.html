@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1'>
+    <title>{% block title %}AI Running Coach{% endblock %}</title>
+    <script src='https://cdn.jsdelivr.net/npm/chart.js@4'></script>
+    {% block extra_head %}{% endblock %}
+    {% block styles %}
+    <style>
+        body { font-family: sans-serif; margin: 20px 30px; line-height: 1.6; }
+        .btn { display: inline-block; padding: 6px 14px; background: #4CAF50; color: white; text-decoration: none; border-radius: 5px; font-size: 14px; border: none; cursor: pointer; }
+        .btn:hover { background: #45a049; }
+        .btn-danger { background: #e53935; }
+        .btn-danger:hover { background: #c62828; }
+    </style>
+    {% endblock %}
+</head>
+<body>
+{% block content %}{% endblock %}
+</body>
+</html>

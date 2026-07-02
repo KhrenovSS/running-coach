@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Running Coach — Регистрация</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; background: #f5f5f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+  .auth-card { background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); padding: 40px; max-width: 380px; width: 100%; }
+  .auth-title { font-size: 24px; font-weight: 600; margin: 0 0 8px; }
+  .auth-subtitle { color: #888; font-size: 14px; margin: 0 0 24px; }
+  .auth-field { margin-bottom: 16px; }
+  .auth-field label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 4px; }
+  .auth-field input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; box-sizing: border-box; }
+  .auth-field input:focus { outline: none; border-color: #4caf50; }
+  .auth-btn { width: 100%; padding: 12px; background: #4caf50; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; }
+  .auth-btn:hover { background: #43a047; }
+  .auth-error { background: #ffebee; color: #c62828; padding: 10px 12px; border-radius: 8px; font-size: 14px; margin-bottom: 16px; }
+</style>
+</head>
+<body>
+<div class="auth-card">
+  <h1 class="auth-title">🏃 Регистрация</h1>
+  <p class="auth-subtitle">Установите email и пароль для входа</p>
+  {% if err_html %}{{ err_html|safe }}{% endif %}
+  <form method="post" action="/auth/register">
+    <input type="hidden" name="token" value="{{ token }}">
+    <div class="auth-field">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" required autocomplete="email" autofocus>
+    </div>
+    <div class="auth-field">
+      <label for="password">Пароль (мин. {{ password_min_length }} символов)</label>
+      <input type="password" id="password" name="password" required autocomplete="new-password">
+    </div>
+    <div class="auth-field">
+      <label for="password_confirm">Повторите пароль</label>
+      <input type="password" id="password_confirm" name="password_confirm" required autocomplete="new-password">
+    </div>
+    <button type="submit" class="auth-btn">Зарегистрироваться</button>
+  </form>
+</div>
+</body>
+</html>

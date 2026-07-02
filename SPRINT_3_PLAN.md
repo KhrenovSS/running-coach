@@ -1,0 +1,126 @@
+# Спринт 3 — Декомпозиция main.py + Jinja2 + pydantic-settings
+
+## Цель
+Сократить `main.py` с 2776 → ~50 строк, разложив код по пакетам.
+
+## Перед началом работы
+1. Прочитать `AGENTS.md` — правила кодирования, комментарии, коммиты
+2. Прочитать `docs/CODE_GUIDELINES.md`
+3. Прочитать `README.md` — актуальное состояние проекта
+
+## Статус работ
+
+- [x] **Шаг 0 — Подготовка**
+  - [x] Создать директории: `src/web/templates/`, `src/web/static/`, `src/web/routes/`
+  - [x] Установить `jinja2` если нет в зависимостях
+  - [x] Проверить `git status` — рабочий репозиторий, ветка `main`
+
+- [x] **Шаг 1 — Jinja2-шаблоны (HTML из main.py)**
+  - [x] 1.1 Создать `src/web/templates/base.html` — базовый каркас (DOCTYPE, head, style, scripts)
+  - [x] 1.2 Создать `src/web/templates/login.html` — из строк 1221–1261
+  - [x] 1.3 Создать `src/web/templates/register.html` — из строк 1278–1321
+  - [x] 1.4 Создать `src/web/templates/index.html` — из MAIN_HTML (строки 451–968)
+  - [x] 1.5 Создать `src/web/templates/session.html` — из SESSION_HTML (строки 970–1082)
+  - [x] 1.6 Создать `src/web/templates/settings.html` — из SETTINGS_PAGE (строки 1084–1139)
+  - [ ] 1.7 Создать `src/web/static/styles.css` — собрать весь CSS из шаблонов
+  - [x] 1.8 В main.py: подключить `Jinja2Templates`, заменить `HTMLResponse(f"""...""")` на `templates.TemplateResponse()`
+  - [x] 1.9 Проверить: все страницы открываются, JS/графики работают
+  - [x] 1.10 COMMIT: "Шаг 1: HTML вынесен в Jinja2-шаблоны"
+
+- [ ] **Шаг 2 — Выделение сервисов (бизнес-логика из main.py)**
+  - [ ] 2.1 Создать `src/services/telegram_notify.py` — `_telegram_notify()` (строки 52–97)
+  - [ ] 2.2 Создать `src/services/stats.py` — `calc_stats()`, `zone_ranges()`, `render_zone_bars()`, `render_type_row()`, `fmt_duration()`, `build_nav_html()`, `MONTHS_RU` (строки 102–225)
+  - [ ] 2.3 Создать `src/services/recovery_view.py` — `_hrv_status()`, `_tired_label()`, `_readiness_label()`, `_load_label()` (строки 228–302)
+  - [ ] 2.4 Создать `src/services/coros_sync_auto.py` — `_update_last_health_sync()`, `_save_dashboard_data()`, `_auto_sync_health()`, `_auto_sync_health_inner()`, `_auto_sync_activities()`, `_auto_sync_activities_inner()` (строки 2107–2519)
+  - [ ] 2.5 В main.py: заменить вызовы на импорты из сервисов
+  - [ ] 2.6 Проверить: `_telegram_notify`, статистика, автосинхронизация работают
+  - [ ] 2.7 COMMIT: "Шаг 2: бизнес-логика вынесена в src/services/"
+
+- [ ] **Шаг 3 — Выделение роутов (API endpoints из main.py)**
+  - [ ] 3.1 Создать `src/web/routes/__init__.py` — `web_router = APIRouter()`
+  - [ ] 3.2 Создать `src/web/routes/pages.py` — `GET /`, `GET /session/{id}`, `GET /settings`, `POST /session/{id}/delete`, `POST /settings` + `render_page()` (её логика)
+  - [ ] 3.3 Создать `src/web/routes/uploads.py` — `POST /upload`, `POST /upload/confirm`, `POST /upload/confirm_deleted`
+  - [ ] 3.4 Создать `src/web/routes/coros.py` — `POST /coros/sync`, `POST /coros/sync/health`, `GET /coros/sync/status/{task_id}`
+  - [ ] 3.5 Создать `src/web/routes/logs.py` — `GET /logs`
+  - [ ] 3.6 В main.py: `app.include_router(web_router)` вместо декораторов
+  - [ ] 3.7 Перенести глобальное состояние `_pending`, `_sync_tasks`, `_auto_sync_status`, `TRAINING_TYPES_RU` в `src/web/state.py`
+  - [ ] 3.8 Проверить: все эндпоинты работают (загрузка, синхронизация, логи, удаление)
+  - [ ] 3.9 COMMIT: "Шаг 3: роуты вынесены в src/web/routes/"
+
+- [ ] **Шаг 4 — Выделение scheduler + startup**
+  - [ ] 4.1 Создать `src/scheduler.py` — `AutoSyncScheduler` (класс-одиночка с `_loop`, `start/stop`)
+  - [ ] 4.2 Создать `src/startup.py` — `create_app()` — factory-функция: инициализация Jinja2Templates, регистрация роутов, startup-событие, init_db, alembic, scheduler
+  - [ ] 4.3 Перенести `startup()` из main.py в `src/startup.py`
+  - [ ] 4.4 main.py сократить до:
+    ```python
+    from src.startup import create_app
+    app = create_app()
+    if __name__ == "__main__":
+        import uvicorn
+        uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    ```
+  - [ ] 4.5 Проверить: `python main.py` запускается, `uvicorn main:app` работает
+  - [ ] 4.6 Проверить `run_telegram_bot.py` — не сломался
+  - [ ] 4.7 COMMIT: "Шаг 4: scheduler и startup выделены, main.py ~50 строк"
+
+- [ ] **Шаг 5 — pydantic-settings (единая конфигурация)**
+  - [ ] 5.1 Создать `src/config/settings.py` — класс `Settings(BaseSettings)` с полями из `.env`
+  - [ ] 5.2 Заменить `CONFIG` dataclass на `settings` из pydantic-settings
+  - [ ] 5.3 Обновить `src/config/__init__.py` — экспортировать `settings`
+  - [ ] 5.4 Все импорты `from src.config import CONFIG` → `from src.config import settings`
+  - [ ] 5.5 Убрать автогенерацию ключа в `src/crypto.py` — падать с ошибкой если `COROS_CRED_KEY` не задан
+  - [ ] 5.6 Проверить: `uvicorn main:app` стартует, переменные окружения читаются
+  - [ ] 5.7 COMMIT: "Шаг 5: pydantic-settings вместо dataclass CONFIG"
+
+- [ ] **Шаг 6 — Финальная уборка**
+  - [ ] 6.1 Удалить `get_settings()` если остался (всё через `User`)
+  - [ ] 6.2 Удалить `src/logger.py` (legacy-файл, всё через `src/utils/logger.py`)
+  - [ ] 6.3 Проверить `src/exceptions.py` — все исключения используются
+  - [ ] 6.4 `wc -l main.py` → < 60 строк
+  - [ ] 6.5 `grep -rn "html\s*+=\s*f" main.py src/` → 0 (нет f-строк HTML)
+  - [ ] 6.6 Обновить `CHANGELOG.md`
+  - [ ] 6.7 Обновить `AGENTS.md` — секция «Текущее состояние»
+  - [ ] 6.8 COMMIT: "Шаг 6: финальная уборка, main.py очищен"
+
+## Критические проверки после каждого шага
+
+- [ ] `GET /` — главная страница открывается, тренировки видны
+- [ ] `GET /session/{id}` — детальная страница с графиком
+- [ ] `GET /settings` — настройки открываются
+- [ ] `GET /login` — страница входа
+- [ ] `POST /upload` — загрузка TCX/FIT работает
+- [ ] `POST /settings` — сохранение настроек
+- [ ] `POST /session/{id}/delete` — удаление тренировки
+- [ ] `GET /logs` — логи показываются
+- [ ] `POST /coros/sync` — синхронизация запускается
+- [ ] `POST /coros/sync/health` — health sync запускается
+- [ ] Автосинхронизация работает (фоновый поток)
+- [ ] Telegram-бот не сломан (`run_telegram_bot.py`)
+- [ ] `git status` — нет лишних файлов
+
+## Ошибки и их решения
+
+| Проблема | Решение |
+|----------|---------|
+| Jinja2 `{{` конфликтует с JS `{{` | Использовать `{% raw %}...{% endraw %}` в JS-блоках |
+| Chart.js не отображается | Проверить пути к CDN в base.html, проверить `safe` фильтр |
+| `render_page()` использует глобальные переменные | Передать через параметры или контекст шаблона |
+| `_pending`/`_sync_tasks` не доступны из роутов | Вынести в `src/web/state.py` как модульные переменные |
+| Конфликт импортов после переноса | Использовать `from src.web.state import ...` |
+| `alembic upgrade head` не видит модели | Проверить `target_metadata = Base.metadata` в `alembic/env.py` |
+
+## После завершения спринта
+
+```bash
+# Проверка: main.py должен быть < 60 строк
+wc -l main.py
+
+# Проверка: нет inline HTML
+grep -rn "html\s*+=\s*f" main.py src/ || echo "OK — нет inline HTML"
+
+# Проверка: HTML только в .html файлах
+find src/web/templates/ -name "*.html" | wc -l
+
+# Финальный пуш
+set -a && source .env && set +a && cd /home/nimda/projects/running-coach && git push "https://KhrenovSS:${GITHUB_TOKEN}@github.com/KhrenovSS/running-coach.git" main
+```

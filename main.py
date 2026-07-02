@@ -2,6 +2,7 @@
 from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Form, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from src.models import SessionLocal, User, TrainingSession, WeightMeasurement, DeletedTraining, DailyMetrics, get_settings, get_db
 from src.parsers.tcx_parser import parse_tcx
@@ -33,6 +34,7 @@ register_middleware(app)
 app.include_router(health_router)
 app.include_router(auth_router)
 os.makedirs("uploads", exist_ok=True)
+templates = Jinja2Templates(directory="src/web/templates")
 
 # Хранилище для загруженных TCX, ожидающих подтверждения (Pending uploads awaiting user confirmation)
 PENDING_DIR = Path(os.getenv("PENDING_DIR", "/tmp/running_coach_uploads"))
@@ -420,724 +422,36 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
         return f'через {int(left/60)} мин'
 
     user_header = f"👤 {user_name} | <a href='/auth/logout'>Выйти</a>"
-    return MAIN_HTML.format(
-        rows=rows, nav_html=nav_html, user_header=user_header, max_hr=settings.max_hr, weight=settings.weight,
-        week_km=week_stats['total_km'] if week_stats else 0,
-        week_dur=week_stats['total_dur'] if week_stats else "",
-        week_bars=week_bars,
-        week_types=week_types,
-        month_km=month_stats['total_km'] if month_stats else 0,
-        month_dur=month_stats['total_dur'] if month_stats else "",
-        month_bars=month_bars,
-        month_types=month_types,
-        weight_json=weight_json,
-        recovery_json=recovery_json,
-        latest_hrv=latest_hrv,
-        latest_rhr=latest_rhr,
-        latest_tired=latest_tired,
-        latest_perf=latest_perf,
-        latest_recovery_pct=latest_recovery_pct,
-        auto_health_last=fmt_sync_time(as_health['last_run']),
-        auto_health_next=fmt_next_sync(as_health['next_run']),
-        auto_health_status=as_health['status'],
-        auto_health_msg=as_health['message'],
-        auto_activity_last=fmt_sync_time(as_activity['last_run']),
-        auto_activity_next=fmt_next_sync(as_activity['next_run']),
-        auto_activity_status=as_activity['status'],
-        auto_activity_msg=as_activity['message'],
-    )
-
-
-MAIN_HTML = '''
-<!DOCTYPE html>
-<html lang='ru'>
-<head>
-    <meta charset='UTF-8'>
-    <title>AI Running Coach</title>
-    <script src='https://cdn.jsdelivr.net/npm/chart.js@4'></script>
-    <style>
-        body {{ font-family: sans-serif; max-width: 98%; margin: 20px 30px; line-height: 1.6; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
-        th, td {{ padding: 10px; text-align: center; border-bottom: 1px solid #ddd; }}
-        th {{ background: #4CAF50; color: white; }}
-        tr:hover {{ background: #f1f1f1; }}
-        h2, h3 {{ color: #333; }}
-        .settings {{ background: #e8f5e9; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }}
-        .settings a {{ margin-left: auto; }}
-        .btn {{ display: inline-block; padding: 6px 14px; background: #4CAF50; color: white; text-decoration: none; border-radius: 5px; font-size: 14px; border: none; cursor: pointer; }}
-        .btn:hover {{ background: #45a049; }}
-        input[type=number] {{ width: 70px; padding: 4px; }}
-        .stats-grid {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin: 15px 0; }}
-        .stats-card {{ border: 1px solid #ddd; border-radius: 8px; padding: 15px; background: #fafafa; }}
-        .stats-card h4 {{ margin: 0 0 8px 0; color: #4CAF50; }}
-        .stats-summary {{ display: flex; gap: 15px; flex-wrap: wrap; font-size: 14px; margin-bottom: 10px; }}
-        .stats-summary span {{ background: #e8f5e9; padding: 4px 10px; border-radius: 4px; }}
-        .overlay {{ display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.9); z-index: 999; justify-content: center; align-items: center; flex-direction: column; }}
-        .overlay.active {{ display: flex; }}
-        .spinner {{ border: 4px solid #e0e0e0; border-top: 4px solid #4CAF50; border-radius: 50%; width: 40px; height: 40px; animation: spin 0.8s linear infinite; }}
-        @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
-        .sync-status {{ padding: 6px 10px; border-radius: 4px; margin-top: 6px; font-size: 13px; }}
-        .sync-ok {{ background: #e8f5e9; color: #2e7d32; }}
-        .sync-error {{ background: #ffebee; color: #c62828; }}
-        .ym-nav {{ margin: 10px 0; }}
-        .year-row, .month-row {{ display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }}
-        .ym-pill {{ display: inline-block; padding: 4px 12px; border-radius: 14px; font-size: 13px;
-                    text-decoration: none; color: #555; background: #f0f0f0; border: 1px solid #ddd; }}
-        .ym-pill:hover {{ background: #e0e0e0; }}
-        .active-year {{ background: #4CAF50; color: white; border-color: #4CAF50; }}
-        .active-month {{ background: #2196F3; color: white; border-color: #2196F3; }}
-        .ym-title {{ font-size: 14px; color: #666; margin-bottom: 8px; font-weight: bold; }}
-        .modal {{ background: white; border-radius: 12px; padding: 20px; max-width: 500px; width: 90%; box-shadow: 0 4px 24px rgba(0,0,0,0.15); }}
-        .modal h3 {{ margin-top: 0; }}
-        .modal table {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}
-        .modal td {{ padding: 4px 8px; border-bottom: 1px solid #eee; }}
-        .modal td:first-child {{ color: #666; width: 40%; }}
-        .modal-buttons {{ display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }}
-        .btn-import {{ background: #4CAF50; color: white; padding: 8px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }}
-        .btn-skip {{ background: #f5f5f5; color: #333; padding: 8px 20px; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; font-size: 14px; }}
-        .btn-import:hover {{ background: #43a047; }}
-        .btn-skip:hover {{ background: #e0e0e0; }}
-    </style>
-</head>
-<body>
-    <div class='overlay' id='uploadOverlay'>
-        <div class='spinner'></div>
-        <p style='margin-top:16px;font-size:18px;color:#333;'>Обработка файлов…</p>
-        <p id='progressText' style='margin-top:8px;font-size:15px;color:#555;'></p>
-        <div style='margin-top:12px;width:300px;background:#e0e0e0;border-radius:6px;height:10px;overflow:hidden;'>
-            <div id='progressBar' style='width:0%;background:#4CAF50;border-radius:6px;height:10px;transition:width 0.3s;'></div>
-        </div>
-    </div>
-    <div class='overlay' id='syncOverlay'>
-        <div class='spinner'></div>
-        <p style='margin-top:16px;font-size:18px;color:#333;' id='syncStatusText'>Синхронизация Coros…</p>
-        <p id='syncProgressText' style='margin-top:8px;font-size:15px;color:#555;'></p>
-        <div style='margin-top:12px;width:300px;background:#e0e0e0;border-radius:6px;height:10px;overflow:hidden;'>
-            <div id='syncProgressBar' style='width:0%;background:#2196F3;border-radius:6px;height:10px;transition:width 0.3s;'></div>
-        </div>
-    </div>
-    <div class='overlay' id='deletedConfirmOverlay'>
-        <div class='modal'>
-            <h3>⚠️ Тренировка была удалена</h3>
-            <p style='color:#555;'>Эта тренировка ранее была удалена. Хотите импортировать её заново?</p>
-            <div id='deletedDetails'></div>
-            <div class='modal-buttons'>
-                <button class='btn-skip' id='deletedSkipBtn'>Пропустить</button>
-                <button class='btn-import' id='deletedImportBtn'>Импортировать</button>
-            </div>
-        </div>
-    </div>
-
-    <div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0;">
-        <h2 style="margin:0;">🏃 AI Running Coach</h2>
-        <div>{user_header}</div>
-    </div>
-
-    <div class='settings'>
-        <span><b>ЧССмакс:</b> {max_hr} уд/мин</span>
-        <span id='weightToggle' style='cursor:pointer' onclick='toggleWeightChart()'><b>Вес:</b> {weight} кг ▾</span>
-        <input type='file' name='files' accept='.tcx,.fit' multiple id='fileInput' style='display:none'>
-        <button type='button' class='btn' onclick='document.getElementById("fileInput").click()'>&#128206; Загрузить TCX/FIT</button>
-        <button type='button' class='btn' id='corosSyncBtn' style='background:#2196F3'>🔄 Coros Sync</button>
-        <button type='button' class='btn' id='healthSyncBtn' style='background:#7B1FA2'>❤️ Health Sync</button>
-        <a href='/settings' class='btn'>⚙️ Настройки</a>
-        <div id='corosSyncStatus' style='width:100%;margin-top:6px;font-size:13px;'></div>
-        <div id='healthSyncStatus' style='width:100%;margin-top:4px;font-size:13px;'></div>
-    </div>
-    <div id='weightChartContainer' style='display:none; margin-bottom:15px'>
-        <div class='stats-card'>
-            <h4>📉 Динамика веса</h4>
-            <div style='max-height:300px; overflow-y:auto;'>
-                <table style='margin-top:5px'>
-                    <thead><tr><th>Дата</th><th>Вес, кг</th></tr></thead>
-                    <tbody id='weightTableBody'></tbody>
-                </table>
-            </div>
-            <canvas id='weightChart' height='100' style='margin-top:10px'></canvas>
-        </div>
-    </div>
-    <script>
-    // Функция для показа модала подтверждения удалённой тренировки (Show deleted training confirmation modal)
-    function showDeletedModal(match, tempId) {{
-        return new Promise((resolve) => {{
-            const overlay = document.getElementById('deletedConfirmOverlay');
-            const details = document.getElementById('deletedDetails');
-            details.innerHTML = `
-                <table>
-                    <tr><td>Дата</td><td>${{match.date}}</td></tr>
-                    <tr><td>Дистанция</td><td>${{match.distance_display || match.distance}}</td></tr>
-                    <tr><td>Темп</td><td>${{match.pace}}</td></tr>
-                    <tr><td>Длительность</td><td>${{match.duration}}</td></tr>
-                    <tr><td>Тип</td><td>${{match.type}}</td></tr>
-                    <tr><td>Пульс</td><td>${{match.hr}}</td></tr>
-                    <tr><td>Калории</td><td>${{match.calories}}</td></tr>
-                </table>`;
-            overlay.classList.add('active');
-
-            const skipBtn = document.getElementById('deletedSkipBtn');
-            const importBtn = document.getElementById('deletedImportBtn');
-
-            const cleanup = () => {{
-                overlay.classList.remove('active');
-                skipBtn.replaceWith(skipBtn.cloneNode(true));
-                importBtn.replaceWith(importBtn.cloneNode(true));
-            }};
-
-            document.getElementById('deletedSkipBtn').onclick = () => {{ cleanup(); resolve(false); }};
-            document.getElementById('deletedImportBtn').onclick = async () => {{
-                cleanup();
-                const fd = new FormData();
-                fd.append('temp_id', tempId);
-                try {{
-                    const r = await fetch('/upload/confirm_deleted', {{ method: 'POST', body: fd }});
-                    const j = await r.json();
-                    resolve(j.ok);
-                }} catch (e) {{
-                    resolve(false);
-                }}
-            }};
-        }});
-    }}
-
-    document.getElementById('fileInput').addEventListener('change', async function() {{
-        if (!this.files.length) return;
-        const files = Array.from(this.files);
-        const total = files.length;
-        let processed = 0;
-        let allSaved = 0;
-
-        const overlay = document.getElementById('uploadOverlay');
-        const progressText = document.getElementById('progressText');
-        const progressBar = document.getElementById('progressBar');
-
-        overlay.classList.add('active');
-
-        for (const file of files) {{
-            const fd = new FormData();
-            fd.append('files', file);
-            try {{
-                const resp = await fetch('/upload', {{ method: 'POST', body: fd }});
-                const text = await resp.text();
-                let j;
-                try {{
-                    j = JSON.parse(text);
-                }} catch (e) {{
-                    continue;
-                }}
-                // Если сервер обнаружил, что файл был ранее удалён (If server found this was previously deleted)
-                if (j.deleted_match && j.temp_id) {{
-                    const imported = await showDeletedModal(j.deleted_match, j.temp_id);
-                    if (imported) {{
-                        allSaved++;
-                    }}
-                }} else {{
-                    allSaved += j.saved || 0;
-                }}
-            }} catch (e) {{
-                // ignore network errors for individual files
-            }}
-            processed++;
-            const pct = Math.round(processed / total * 100);
-            progressText.textContent = `Обработано ${{processed}} из ${{total}} (${{pct}}%)`;
-            progressBar.style.width = pct + '%';
-        }}
-
-        window.location.href = '/';
-    }});
-    </script>
-
-    <div class='stats-grid'>
-        <div class='stats-card'>
-            <h4>Неделя (7 дней)</h4>
-            <div class='stats-summary'>
-                <span>📏 {week_km} км</span>
-                <span>⏱ {week_dur}</span>
-            </div>
-            <div style='font-size:12px;color:#888;margin-bottom:4px'>Пульс</div>
-            <div>{week_bars}</div>
-            <div style='font-size:13px;color:#555;margin-top:6px'>{week_types}</div>
-        </div>
-        <div class='stats-card'>
-            <h4>Месяц (30 дней)</h4>
-            <div class='stats-summary'>
-                <span>📏 {month_km} км</span>
-                <span>⏱ {month_dur}</span>
-            </div>
-            <div style='font-size:12px;color:#888;margin-bottom:4px'>Пульс</div>
-            <div>{month_bars}</div>
-            <div style='font-size:13px;color:#555;margin-top:6px'>{month_types}</div>
-        </div>
-        <div class='stats-card' id='recoveryCard' onclick='toggleRecoveryChart()' style='cursor:pointer'>
-            <h4>❤️ Восстановление</h4>
-            <div class='stats-summary'>
-                <span>Восстановление: <b>{latest_recovery_pct}</b></span>
-                <span>Нервная система: <b>{latest_hrv}</b></span>
-                <span>Пульс покоя: <b>{latest_rhr}</b> уд/мин</span>
-                <span>Усталость: <b>{latest_tired}</b></span>
-                <span>Состояние: <b>{latest_perf}</b></span>
-            </div>
-            <div style='font-size:13px;color:#888;margin-top:4px' id='recoveryToggle'>▾ График пульса покоя</div>
-        </div>
-    </div>
-    <div id='recoveryChartContainer' style='display:none; margin-bottom:15px'>
-        <div class='stats-card'>
-            <h4>📈 Пульс покоя (RHR)</h4>
-            <canvas id='recoveryChart' height='80'></canvas>
-        </div>
-    </div>
-
-    <!-- Статус автосинхронизации Coros (Auto-sync status) -->
-    <div class='sync-status' style='font-size:12px;color:#888;margin-bottom:15px;display:flex;gap:20px;flex-wrap:wrap;padding:8px 12px;background:#f9f9f9;border-radius:6px;'>
-        <span>🔄 <b>Автосинхронизация:</b></span>
-    <span>Health: <span id='autoHealthStatus' title='{auto_health_msg}'>{auto_health_status}</span>
-          (последняя: {auto_health_last}, след.: {auto_health_next})</span>
-    <span>Activities: <span id='autoActivityStatus' title='{auto_activity_msg}'>{auto_activity_status}</span>
-          (последняя: {auto_activity_last}, след.: {auto_activity_next})</span>
-    </div>
-
-    <script>
-    const recoveryData = {recovery_json};
-    let recoveryChart = null;
-
-    function toggleRecoveryChart() {{
-        const container = document.getElementById('recoveryChartContainer');
-        const toggle = document.getElementById('recoveryToggle');
-        if (container.style.display === 'none') {{
-            container.style.display = 'block';
-            toggle.textContent = '▴ График пульса покоя';
-            renderRecoveryChart();
-        }} else {{
-            container.style.display = 'none';
-            toggle.textContent = '▾ График пульса покоя';
-        }}
-    }}
-
-    function renderRecoveryChart() {{
-        if (recoveryData.length < 2) return;
-        if (recoveryChart) {{
-            recoveryChart.destroy();
-            recoveryChart = null;
-        }}
-        recoveryChart = new Chart(document.getElementById('recoveryChart'), {{
-            type: 'line',
-            data: {{
-                labels: recoveryData.map(d => d.date),
-                datasets: [{{
-                    label: 'Пульс покоя (уд/мин)',
-                    data: recoveryData.map(d => d.rhr),
-                    borderColor: '#e53935',
-                    backgroundColor: 'transparent',
-                    tension: 0.4,
-                    pointRadius: 4,
-                    pointBackgroundColor: '#e53935',
-                    pointBorderColor: '#fff',
-                    pointBorderWidth: 2,
-                    fill: true,
-                    backgroundColor: 'rgba(229,57,53,0.08)',
-                }}]
-            }},
-            options: {{
-                responsive: true,
-                scales: {{
-                    x: {{ title: {{ display: true, text: 'Дата' }} }},
-                    y: {{ title: {{ display: true, text: 'уд/мин' }}, beginAtZero: false }},
-                }},
-                plugins: {{ legend: {{ display: false }} }}
-            }}
-        }});
-    }}
-
-    const weightData = {weight_json};
-    let weightChart = null;
-
-    function toggleWeightChart() {{
-        const container = document.getElementById('weightChartContainer');
-        const toggle = document.getElementById('weightToggle');
-        if (container.style.display === 'none') {{
-            container.style.display = 'block';
-            toggle.innerHTML = '<b>Вес:</b> {weight} кг ▴';
-            renderWeightChart();
-            renderWeightTable();
-        }} else {{
-            container.style.display = 'none';
-            toggle.innerHTML = '<b>Вес:</b> {weight} кг ▾';
-        }}
-    }}
-
-    function renderWeightTable() {{
-        const tbody = document.getElementById('weightTableBody');
-        tbody.innerHTML = weightData.map(d =>
-            `<tr><td>${{d.date}}</td><td>${{d.weight}}</td></tr>`
-        ).join('');
-    }}
-
-    function renderWeightChart() {{
-        if (weightData.length < 2) return;
-        if (weightChart) {{
-            weightChart.destroy();
-            weightChart = null;
-        }}
-        weightChart = new Chart(document.getElementById('weightChart'), {{
-            type: 'line',
-            data: {{
-                labels: weightData.map(d => d.date),
-                datasets: [{{
-                    label: 'Вес (кг)',
-                    data: weightData.map(d => d.weight),
-                    borderColor: '#4CAF50',
-                    backgroundColor: 'transparent',
-                    tension: 0.4,
-                    pointRadius: 5,
-                    pointBackgroundColor: '#4CAF50',
-                    pointBorderColor: '#fff',
-                    pointBorderWidth: 2,
-                }}]
-            }},
-            options: {{
-                responsive: true,
-                scales: {{
-                    x: {{ title: {{ display: true, text: 'Дата' }} }},
-                    y: {{ title: {{ display: true, text: 'кг' }}, beginAtZero: false }},
-                }},
-                plugins: {{ legend: {{ display: false }} }}
-            }}
-        }});
-    }}
-    </script>
-
-    <script>
-    async function syncCoros() {{
-        const btn = document.getElementById('corosSyncBtn');
-        const statusDiv = document.getElementById('corosSyncStatus');
-        const overlay = document.getElementById('syncOverlay');
-        const statusText = document.getElementById('syncStatusText');
-        const progressText = document.getElementById('syncProgressText');
-        const progressBar = document.getElementById('syncProgressBar');
-        btn.disabled = true;
-        btn.textContent = '🔄 Синхронизация…';
-        statusDiv.className = 'sync-status';
-        statusDiv.textContent = 'Запуск...';
-        overlay.classList.add('active');
-        statusText.textContent = 'Подключение к Coros...';
-        progressText.textContent = '';
-        progressBar.style.width = '0%';
-        try {{
-            const resp = await fetch('/coros/sync', {{ method: 'POST' }});
-            const j = await resp.json();
-            if (j.status !== 'started') {{
-                overlay.classList.remove('active');
-                statusDiv.className = 'sync-status sync-error';
-                statusDiv.textContent = '❌ ' + (j.message || 'Ошибка запуска');
-                btn.disabled = false;
-                btn.textContent = '🔄 Coros Sync';
-                return;
-            }}
-            const taskId = j.task_id;
-            let done = false;
-            while (!done) {{
-                await new Promise(r => setTimeout(r, 800));
-                const sr = await fetch('/coros/sync/status/' + taskId);
-                const sp = await sr.json();
-                statusText.textContent = sp.message || '';
-                if (sp.total > 0) {{
-                    const pct = Math.round(sp.current / sp.total * 100);
-                    progressText.textContent = sp.current + ' из ' + sp.total;
-                    progressBar.style.width = pct + '%';
-                }}
-                if (sp.step === 'done' || sp.step === 'error') {{
-                    done = true;
-                    overlay.classList.remove('active');
-                    if (sp.step === 'error') {{
-                        statusDiv.className = 'sync-status sync-error';
-                        statusDiv.textContent = '❌ ' + (sp.message || 'Ошибка');
-                    }} else if (sp.has_pending_deleted && sp.pending_deleted) {{
-                        // Показываем модал для каждой удалённой тренировки (Show modal for each deleted training)
-                        statusDiv.className = 'sync-status sync-ok';
-                        statusDiv.textContent = '✅ Найдены ранее удалённые тренировки';
-                        for (const pd of sp.pending_deleted) {{
-                            const imported = await showDeletedModal(pd, pd.temp_id);
-                            if (imported) {{
-                                sp.synced = (sp.synced || 0) + 1;
-                            }}
-                        }}
-                        statusDiv.textContent = '✅ Обработано: ' + (sp.synced || 0) + ' / ' + sp.pending_deleted.length;
-                        window.location.href = '/';
-                    }} else if (sp.synced > 0) {{
-                        statusDiv.className = 'sync-status sync-ok';
-                        statusDiv.textContent = '✅ Синхронизировано: ' + sp.synced;
-                        if (sp.total_found) statusDiv.textContent += ' (найдено ' + sp.total_found + ')';
-                        window.location.href = '/';
-                    }} else {{
-                        statusDiv.className = 'sync-status sync-ok';
-                        statusDiv.textContent = '✅ ' + (sp.message || 'Новых тренировок нет');
-                        setTimeout(() => {{ statusDiv.textContent = ''; }}, 5000);
-                    }}
-                }}
-            }}
-        }} catch (e) {{
-            overlay.classList.remove('active');
-            statusDiv.className = 'sync-status sync-error';
-            statusDiv.textContent = '❌ ' + e.message;
-        }} finally {{
-            btn.disabled = false;
-            btn.textContent = '🔄 Coros Sync';
-        }}
-    }}
-
-    document.getElementById('corosSyncBtn').addEventListener('click', syncCoros);
-
-    async function syncHealth() {{
-        const btn = document.getElementById('healthSyncBtn');
-        const statusDiv = document.getElementById('healthSyncStatus');
-        const overlay = document.getElementById('syncOverlay');
-        const statusText = document.getElementById('syncStatusText');
-        const progressText = document.getElementById('syncProgressText');
-        const progressBar = document.getElementById('syncProgressBar');
-        btn.disabled = true;
-        btn.textContent = '❤️ Синхронизация…';
-        statusDiv.className = 'sync-status';
-        statusDiv.textContent = 'Запуск...';
-        overlay.classList.add('active');
-        statusText.textContent = 'Подключение к Coros...';
-        progressText.textContent = '';
-        progressBar.style.width = '0%';
-        try {{
-            const resp = await fetch('/coros/sync/health', {{ method: 'POST' }});
-            const j = await resp.json();
-            if (j.status !== 'started') {{
-                overlay.classList.remove('active');
-                statusDiv.className = 'sync-status sync-error';
-                statusDiv.textContent = '❌ ' + (j.message || 'Ошибка');
-                btn.disabled = false;
-                btn.textContent = '❤️ Health Sync';
-                return;
-            }}
-            const taskId = j.task_id;
-            let done = false;
-            while (!done) {{
-                await new Promise(r => setTimeout(r, 800));
-                const sr = await fetch('/coros/sync/status/' + taskId);
-                const sp = await sr.json();
-                statusText.textContent = sp.message || '';
-                if (sp.total > 0) {{
-                    const pct = Math.round(sp.current / sp.total * 100);
-                    progressText.textContent = sp.current + ' из ' + sp.total;
-                    progressBar.style.width = pct + '%';
-                }}
-                if (sp.step === 'done' || sp.step === 'error') {{
-                    done = true;
-                    overlay.classList.remove('active');
-                    if (sp.step === 'error') {{
-                        statusDiv.className = 'sync-status sync-error';
-                        statusDiv.textContent = '❌ ' + (sp.message || 'Ошибка');
-                    }} else if (sp.synced > 0) {{
-                        statusDiv.className = 'sync-status sync-ok';
-                        statusDiv.textContent = '✅ Синхронизировано метрик: ' + sp.synced;
-                        window.location.href = '/';
-                    }} else {{
-                        statusDiv.className = 'sync-status sync-ok';
-                        statusDiv.textContent = '✅ ' + (sp.message || 'Новых данных нет');
-                        setTimeout(() => {{ statusDiv.textContent = ''; }}, 5000);
-                    }}
-                }}
-            }}
-        }} catch (e) {{
-            overlay.classList.remove('active');
-            statusDiv.className = 'sync-status sync-error';
-            statusDiv.textContent = '❌ ' + e.message;
-        }} finally {{
-            btn.disabled = false;
-            btn.textContent = '❤️ Health Sync';
-        }}
-    }}
-
-    document.getElementById('healthSyncBtn').addEventListener('click', syncHealth);
-    </script>
-
-    {nav_html}
-    <table>
-            <thead>
-                <tr><th>Дата</th><th>Длительность</th><th>Дист., км</th><th>Пульс, уд/мин</th><th>Тип</th><th>Каденс</th><th>Набор</th><th>Энергозатраты, ккал</th></tr>
-            </thead>
-        <tbody>
-            {rows}
-        </tbody>
-    </table>
-</body>
-</html>
-'''
-
-SESSION_HTML = '''
-<!DOCTYPE html>
-<html lang='ru'>
-<head>
-    <meta charset='UTF-8'>
-    <title>Тренировка — AI Running Coach</title>
-    <script src='https://cdn.jsdelivr.net/npm/chart.js@4'></script>
-    <style>
-        body {{ font-family: sans-serif; max-width: 98%; margin: 20px 30px; line-height: 1.6; }}
-        .card {{ border: 1px solid #ccc; padding: 20px; border-radius: 10px; background: #f9f9f9; margin-bottom: 20px; }}
-        .info {{ display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr; gap: 10px; margin: 15px 0; }}
-        .info-item {{ background: white; padding: 8px; border-radius: 6px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 1px; }}
-        .info-item b {{ font-size: 20px; color: #4CAF50; font-weight: bold; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
-        th, td {{ padding: 8px; text-align: center; border-bottom: 1px solid #ddd; }}
-        th {{ background: #4CAF50; color: white; }}
-        .zone-z1 {{ background: #e8f5e9; }}
-        .zone-z2 {{ background: #c8e6c9; }}
-        .zone-z3 {{ background: #fff3e0; }}
-        .zone-z4 {{ background: #ffccbc; }}
-        .zone-z5 {{ background: #ffcdd2; }}
-        .btn {{ display: inline-block; padding: 8px 20px; background: #4CAF50; color: white; text-decoration: none; border-radius: 5px; }}
-        .btn:hover {{ background: #45a049; }}
-        .btn-danger {{ background: #e53935; }}
-        .btn-danger:hover {{ background: #c62828; }}
-        .info-label {{ font-size: 13px; font-weight: bold; color: #444; }}
-        .info-unit {{ font-size: 12px; font-weight: bold; color: #666; }}
-    </style>
-</head>
-<body>
-    <div style="text-align:right;margin-bottom:10px;">{user_header}</div>
-    <h2>🏃 {type_ru} {suspect_badge}</h2>
-    <p style='color:#666;'>{date}</p>
-    {suspect_detail}
-    <p style='color:#666;font-size:14px;margin:0 0 10px 0'>{background_info}</p>
-
-    {recovery_html}
-
-    <div class='card'>
-        <div class='info'>
-            <div class='info-item'><span class='info-label'>Дистанция</span><b>{dist}</b><span class='info-unit'>км</span></div>
-            <div class='info-item'><span class='info-label'>Общее время</span><b>{dur}</b><span class='info-unit'></span></div>
-            <div class='info-item'><span class='info-label'>Пульс</span><b>{hr}</b><span class='info-unit'>уд/мин</span></div>
-            <div class='info-item'><span class='info-label'>Каденс</span><b>{cadence}</b><span class='info-unit'></span></div>
-            <div class='info-item'><span class='info-label'>Подъем</span><b>{elev_gain}</b><span class='info-unit'>м</span></div>
-            <div class='info-item'><span class='info-label'>Спуск</span><b>{elev_loss}</b><span class='info-unit'>м</span></div>
-            <div class='info-item'><span class='info-label'>Калории</span><b>{cal}</b><span class='info-unit'>ккал</span></div>
-        </div>
-
-        <h3>Пульс и темп</h3>
-        <canvas id='hrPaceChart' height='100'></canvas>
-        <script>
-        const raw = {chart_json};
-        if (raw.length > 0) {{
-            const step = Math.max(1, Math.floor(raw.length / 200));
-            const data = raw.filter((_, i) => i % step === 0);
-            if (data[data.length-1] !== raw[raw.length-1]) data.push(raw[raw.length-1]);
-            new Chart(document.getElementById('hrPaceChart'), {{
-                type: 'line',
-                data: {{
-                    datasets: [{{
-                        label: 'Пульс (уд/мин)',
-                        data: data.map(d => ({{x: d.dist_km, y: d.hr}})),
-                        borderColor: '#e53935',
-                        backgroundColor: 'transparent',
-                        yAxisID: 'y',
-                        cubicInterpolationMode: 'monotone',
-                        tension: 0.4,
-                        pointRadius: 0,
-                    }}, {{
-                        label: 'Темп (мин/км)',
-                        data: data.map(d => ({{x: d.dist_km, y: d.pace}})),
-                        borderColor: '#1e88e5',
-                        backgroundColor: 'transparent',
-                        yAxisID: 'y1',
-                        cubicInterpolationMode: 'monotone',
-                        tension: 0.4,
-                        pointRadius: 0,
-                    }}]
-                }},
-                options: {{
-                    responsive: true,
-                    interaction: {{ mode: 'index', intersect: false }},
-                    scales: {{
-                        x: {{ type: 'linear', title: {{ display: true, text: 'Дистанция, км' }}, ticks: {{ stepSize: 0.25, autoSkip: false }} }},
-                        y: {{ title: {{ display: true, text: 'Пульс, уд/мин' }}, position: 'left' }},
-                        y1: {{ title: {{ display: true, text: 'Темп, мин/км' }}, position: 'right', reverse: true }},
-                    }}
-                }}
-            }});
-        }}
-        </script>
-
-        <h3>Детали по отрезкам</h3>
-        <table>
-            <thead>
-                <tr><th>#</th><th>Зона</th><th>Длительность</th><th>Дист., км</th><th>Пульс, уд/мин</th><th>Каденс</th><th>Темп</th><th>↑ м</th><th>↓ м</th></tr>
-            </thead>
-            <tbody>
-                {segments_rows}
-            </tbody>
-        </table>
-    </div>
-
-    <div style='margin-top: 20px; display: flex; gap: 10px;'>
-        <a href='/' class='btn'>&larr; Назад к списку</a>
-        <form action='/session/{session_id}/delete' method='post' style='display:inline' onsubmit='return confirm("Удалить тренировку?")'>
-            <button type='submit' class='btn btn-danger'>Удалить</button>
-        </form>
-    </div>
-</body>
-</html>
-'''
-
-SETTINGS_PAGE = '''
-<!DOCTYPE html>
-<html lang='ru'>
-<head>
-    <meta charset='UTF-8'>
-    <title>Настройки — AI Running Coach</title>
-    <style>
-        body {{ font-family: sans-serif; max-width: 500px; margin: 50px auto; line-height: 1.6; padding: 0 20px; }}
-        .card {{ border: 1px solid #ccc; padding: 20px; border-radius: 10px; background: #f9f9f9; }}
-        label {{ display: block; margin: 15px 0 5px; }}
-        input[type=number] {{ width: 120px; padding: 8px; font-size: 16px; }}
-        .btn {{ display: inline-block; padding: 8px 20px; background: #4CAF50; color: white; text-decoration: none; border-radius: 5px; font-size: 16px; border: none; cursor: pointer; }}
-        .btn:hover {{ background: #45a049; }}
-    </style>
-</head>
-<body>
-    <div style="text-align:right;margin-bottom:10px;">{user_header}</div>
-    <h2>⚙️ Настройки</h2>
-    <div class='card'>
-        <form action='/settings' method='post'>
-            <label><b>Максимальный пульс (ЧССмакс):</b></label>
-            <input type='number' name='max_hr' value='{max_hr}' min='100' max='250'>
-            <label><b>Вес (кг):</b></label>
-            <input type='number' name='weight' value='{weight}' min='30' max='250' step='0.1'>
-            <hr>
-            <h4>Детекция ошибочных тренировок (Bogus session detection)</h4>
-            <label><b>Мин. темп (мин/км):</b> темп быстрее этого считается ошибкой</label>
-            <input type='number' name='max_credible_pace' value='{max_credible_pace}' min='2.0' max='6.0' step='0.1'>
-            <label><b>Макс. GPS-скачок (м):</b> прыжок координат больше этого — ошибка</label>
-            <input type='number' name='max_gps_jump_m' value='{max_gps_jump_m}' min='10' max='500' step='10'>
-            <label><b>Мин. пульс для быстрого темпа:</b> если пульс ниже, а темп быстрее — ошибка</label>
-            <input type='number' name='min_hr_for_fast_pace' value='{min_hr_for_fast_pace}' min='90' max='180'>
-            <hr>
-            <h4>Синхронизация Coros (Coros sync)</h4>
-            <label><b>Email Coros Training Hub:</b></label>
-            <input type='email' name='coros_email' value='{coros_email}' style='width:250px;padding:6px;font-size:14px'>
-            <label><b>Пароль Coros:</b></label>
-            <input type='password' name='coros_password' placeholder='{coros_password}' style='width:250px;padding:6px;font-size:14px'>
-            <div style='font-size:12px;color:#888;margin-top:4px'>Пароль хранится в зашифрованном виде (Fernet). Оставьте пустым, чтобы не менять.</div>
-            <br><br>
-            <button type='submit' class='btn'>Сохранить</button>
-            <a href='/' class='btn' style='background:#888;'>&larr; Назад</a>
-        </form>
-        <h4>Зоны пульса (при ЧССмакс = {max_hr})</h4>
-        <table>
-            <tr><th>Зона</th><th>% от ЧССмакс</th><th>Пульс</th></tr>
-            <tr><td>Z1</td><td>50-60%</td><td>{z1}</td></tr>
-            <tr><td>Z2</td><td>60-70%</td><td>{z2}</td></tr>
-            <tr><td>Z3</td><td>70-80%</td><td>{z3}</td></tr>
-            <tr><td>Z4</td><td>80-90%</td><td>{z4}</td></tr>
-            <tr><td>Z5</td><td>90-100%</td><td>{z5}</td></tr>
-        </table>
-    </div>
-</body>
-</html>
-'''
-
+    return {
+        "rows": rows,
+        "nav_html": nav_html,
+        "user_header": user_header,
+        "max_hr": settings.max_hr,
+        "weight": settings.weight,
+        "week_km": week_stats['total_km'] if week_stats else 0,
+        "week_dur": week_stats['total_dur'] if week_stats else "",
+        "week_bars": week_bars,
+        "week_types": week_types,
+        "month_km": month_stats['total_km'] if month_stats else 0,
+        "month_dur": month_stats['total_dur'] if month_stats else "",
+        "month_bars": month_bars,
+        "month_types": month_types,
+        "weight_json": weight_json,
+        "recovery_json": recovery_json,
+        "latest_hrv": latest_hrv,
+        "latest_rhr": latest_rhr,
+        "latest_tired": latest_tired,
+        "latest_perf": latest_perf,
+        "latest_recovery_pct": latest_recovery_pct,
+        "auto_health_last": fmt_sync_time(as_health['last_run']),
+        "auto_health_next": fmt_next_sync(as_health['next_run']),
+        "auto_health_status": as_health['status'],
+        "auto_health_msg": as_health['message'],
+        "auto_activity_last": fmt_sync_time(as_activity['last_run']),
+        "auto_activity_next": fmt_next_sync(as_activity['next_run']),
+        "auto_activity_status": as_activity['status'],
+        "auto_activity_msg": as_activity['message'],
+    }
 
 # Событие при запуске сервера: инициализация БД и миграции (Startup event: DB init and migrations)
 @app.on_event("startup")
@@ -1218,47 +532,7 @@ async def login_page(request: Request, error: Optional[str] = None):
         return RedirectResponse(url="/", status_code=303)
     err_msg = _AUTH_ERRORS.get(error, "")
     err_html = f'<div class="auth-error">{err_msg}</div>' if err_msg else ''
-    return HTMLResponse(f"""<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Running Coach — Вход</title>
-<style>
-  body {{ font-family: -apple-system, system-ui, sans-serif; background: #f5f5f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }}
-  .auth-card {{ background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); padding: 40px; max-width: 380px; width: 100%; }}
-  .auth-title {{ font-size: 24px; font-weight: 600; margin: 0 0 8px; }}
-  .auth-subtitle {{ color: #888; font-size: 14px; margin: 0 0 24px; }}
-  .auth-field {{ margin-bottom: 16px; }}
-  .auth-field label {{ display: block; font-size: 14px; font-weight: 500; margin-bottom: 4px; }}
-  .auth-field input {{ width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; box-sizing: border-box; }}
-  .auth-field input:focus {{ outline: none; border-color: #4caf50; }}
-  .auth-btn {{ width: 100%; padding: 12px; background: #4caf50; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; }}
-  .auth-btn:hover {{ background: #43a047; }}
-  .auth-error {{ background: #ffebee; color: #c62828; padding: 10px 12px; border-radius: 8px; font-size: 14px; margin-bottom: 16px; }}
-  .auth-hint {{ text-align: center; margin-top: 16px; font-size: 13px; color: #aaa; }}
-</style>
-</head>
-<body>
-<div class="auth-card">
-  <h1 class="auth-title">🏃 Running Coach</h1>
-  <p class="auth-subtitle">Вход в личный кабинет</p>
-  {err_html}
-  <form method="post" action="/auth/login">
-    <div class="auth-field">
-      <label for="email">Email</label>
-      <input type="email" id="email" name="email" required autocomplete="email" autofocus>
-    </div>
-    <div class="auth-field">
-      <label for="password">Пароль</label>
-      <input type="password" id="password" name="password" required autocomplete="current-password">
-    </div>
-    <button type="submit" class="auth-btn">Войти</button>
-  </form>
-  <p class="auth-hint">Нет аккаунта? Напишите боту в Telegram /start</p>
-</div>
-</body>
-</html>""")
+    return templates.TemplateResponse(request, "login.html", {"err_html": err_html})
 
 
 @app.get('/register', response_class=HTMLResponse)
@@ -1275,58 +549,19 @@ async def register_page(token: str = "", error: Optional[str] = None, db: Sessio
         return RedirectResponse(url="/login?error=invalid_token", status_code=303)
     err_msg = _AUTH_ERRORS.get(error, "")
     err_html = f'<div class="auth-error">{err_msg}</div>' if err_msg else ''
-    return HTMLResponse(f"""<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Running Coach — Регистрация</title>
-<style>
-  body {{ font-family: -apple-system, system-ui, sans-serif; background: #f5f5f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }}
-  .auth-card {{ background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); padding: 40px; max-width: 380px; width: 100%; }}
-  .auth-title {{ font-size: 24px; font-weight: 600; margin: 0 0 8px; }}
-  .auth-subtitle {{ color: #888; font-size: 14px; margin: 0 0 24px; }}
-  .auth-field {{ margin-bottom: 16px; }}
-  .auth-field label {{ display: block; font-size: 14px; font-weight: 500; margin-bottom: 4px; }}
-  .auth-field input {{ width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; box-sizing: border-box; }}
-  .auth-field input:focus {{ outline: none; border-color: #4caf50; }}
-  .auth-btn {{ width: 100%; padding: 12px; background: #4caf50; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; }}
-  .auth-btn:hover {{ background: #43a047; }}
-  .auth-error {{ background: #ffebee; color: #c62828; padding: 10px 12px; border-radius: 8px; font-size: 14px; margin-bottom: 16px; }}
-</style>
-</head>
-<body>
-<div class="auth-card">
-  <h1 class="auth-title">🏃 Регистрация</h1>
-  <p class="auth-subtitle">Установите email и пароль для входа</p>
-  {err_html}
-  <form method="post" action="/auth/register">
-    <input type="hidden" name="token" value="{token}">
-    <div class="auth-field">
-      <label for="email">Email</label>
-      <input type="email" id="email" name="email" required autocomplete="email" autofocus>
-    </div>
-    <div class="auth-field">
-      <label for="password">Пароль (мин. {CONFIG.AUTH.PASSWORD_MIN_LENGTH} символов)</label>
-      <input type="password" id="password" name="password" required autocomplete="new-password">
-    </div>
-    <div class="auth-field">
-      <label for="password_confirm">Повторите пароль</label>
-      <input type="password" id="password_confirm" name="password_confirm" required autocomplete="new-password">
-    </div>
-    <button type="submit" class="auth-btn">Зарегистрироваться</button>
-  </form>
-</div>
-</body>
-</html>""")
+    return templates.TemplateResponse(request, "register.html", {
+        "err_html": err_html, "token": token,
+        "password_min_length": CONFIG.AUTH.PASSWORD_MIN_LENGTH,
+    })
 
 
 # Главная страница: список тренировок и статистика (Main page: session list and stats)
 @app.get('/', response_class=HTMLResponse)
-async def index(year: Optional[int] = None, month: Optional[int] = None, db: Session = Depends(get_db),
+async def index(request: Request, year: Optional[int] = None, month: Optional[int] = None, db: Session = Depends(get_db),
                 current_user: User = Depends(get_current_user)):
     user_name = current_user.name or current_user.telegram_username or "Бегун"
-    return render_page(db, user_id=current_user.id, user_name=user_name, year=year, month=month)
+    ctx = render_page(db, user_id=current_user.id, user_name=user_name, year=year, month=month)
+    return templates.TemplateResponse(request, "index.html", ctx)
 
 
 # Загрузка TCX/FIT-файлов (TCX/FIT file upload endpoint)
@@ -1544,7 +779,7 @@ async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db
 
 # Детальный просмотр тренировки (Training session detail page)
 @app.get('/session/{session_id}', response_class=HTMLResponse)
-async def session_detail(session_id: int, db: Session = Depends(get_db),
+async def session_detail(request: Request, session_id: int, db: Session = Depends(get_db),
                          current_user: User = Depends(get_current_user)):
     s = db.query(TrainingSession).filter(TrainingSession.id == session_id, TrainingSession.user_id == current_user.id).first()
     if not s:
@@ -1653,30 +888,30 @@ async def session_detail(session_id: int, db: Session = Depends(get_db),
 
     user_name = current_user.name or current_user.telegram_username or "Бегун"
     user_header = f"👤 {user_name} | <a href='/auth/logout'>Выйти</a>"
-    return SESSION_HTML.format(
-        user_header=user_header,
-        session_id=s.id,
-        suspect_badge=suspect_badge,
-        suspect_detail=suspect_detail,
-        type_ru=TRAINING_TYPES_RU.get(s.training_type, s.training_type),
-        date=s.begin_ts.strftime("%d.%m.%Y %H:%M") if s.begin_ts else "",
-        dist=f"{s.total_distance_km:.2f}",
-        dur=fmt_duration(s.duration_minutes),
-        hr=s.avg_heart_rate,
-        cadence=cadence_display,
-        cal=cal,
-        background_info=background_info,
-        elev_gain=eg_total,
-        elev_loss=el_total,
-        segments_rows=seg_rows,
-        chart_json=chart_json,
-        recovery_html=recovery_html,
-    )
+    return templates.TemplateResponse(request, "session.html", {
+        "user_header": user_header,
+        "session_id": s.id,
+        "suspect_badge": suspect_badge,
+        "suspect_detail": suspect_detail,
+        "type_ru": TRAINING_TYPES_RU.get(s.training_type, s.training_type),
+        "date": s.begin_ts.strftime("%d.%m.%Y %H:%M") if s.begin_ts else "",
+        "dist": f"{s.total_distance_km:.2f}",
+        "dur": fmt_duration(s.duration_minutes),
+        "hr": s.avg_heart_rate,
+        "cadence": cadence_display,
+        "cal": cal,
+        "background_info": background_info,
+        "elev_gain": eg_total,
+        "elev_loss": el_total,
+        "segments_rows": seg_rows,
+        "chart_json": chart_json,
+        "recovery_html": recovery_html,
+    })
 
 
 # Страница настроек (Settings page)
 @app.get('/settings', response_class=HTMLResponse)
-async def settings_page(current_user: User = Depends(get_current_user)):
+async def settings_page(request: Request, current_user: User = Depends(get_current_user)):
     settings = get_settings()
     m = settings.max_hr
     z1 = f"{round(m * 0.5)}-{round(m * 0.6)}"
@@ -1687,15 +922,15 @@ async def settings_page(current_user: User = Depends(get_current_user)):
     pw_placeholder = '********' if settings.coros_password else ''
     user_name = current_user.name or current_user.telegram_username or "Бегун"
     user_header = f"👤 {user_name} | <a href='/auth/logout'>Выйти</a>"
-    return SETTINGS_PAGE.format(
-        user_header=user_header,
-        max_hr=m, weight=settings.weight, z1=z1, z2=z2, z3=z3, z4=z4, z5=z5,
-        max_credible_pace=settings.max_credible_pace,
-        max_gps_jump_m=settings.max_gps_jump_m,
-        min_hr_for_fast_pace=settings.min_hr_for_fast_pace,
-        coros_email=settings.coros_email or '',
-        coros_password=pw_placeholder,
-    )
+    return templates.TemplateResponse(request, "settings.html", {
+        "user_header": user_header,
+        "max_hr": m, "weight": settings.weight, "z1": z1, "z2": z2, "z3": z3, "z4": z4, "z5": z5,
+        "max_credible_pace": settings.max_credible_pace,
+        "max_gps_jump_m": settings.max_gps_jump_m,
+        "min_hr_for_fast_pace": settings.min_hr_for_fast_pace,
+        "coros_email": settings.coros_email or '',
+        "coros_password": pw_placeholder,
+    })
 
 
 # Удаление тренировки с сохранением метаданных (Delete training, save metadata for re-upload confirmation)

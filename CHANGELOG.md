@@ -2,6 +2,30 @@
 
 All notable changes to this project are tracked here.
 
+## [02.07.2026] — Sprint 3, шаг 1: Jinja2-шаблоны
+
+### Added
+- **`src/web/templates/`**: директория Jinja2-шаблонов (base.html, index.html, login.html, register.html, session.html, settings.html)
+- **`templates = Jinja2Templates(directory)`**: инициализация Jinja2Templates в main.py
+- **Chart.js**: CDN-скрипт в base.html (был дублирован в MAIN_HTML и SESSION_HTML)
+
+### Changed
+- **Главная страница `GET /`**: вместо `render_page()` → `MAIN_HTML.format()` использует `templates.TemplateResponse(request, "index.html", ctx)`
+- **Страница тренировки `GET /session/{id}`**: вместо `SESSION_HTML.format()` использует `templates.TemplateResponse(request, "session.html", ...)`
+- **Страница настроек `GET /settings`**: вместо `SETTINGS_PAGE.format()` использует `templates.TemplateResponse(request, "settings.html", ...)`
+- **Страница входа `GET /login`**: вместо inline HTML-строки использует `templates.TemplateResponse(request, "login.html", ...)`
+- **Страница регистрации `GET /register`**: вместо inline HTML-строки использует `templates.TemplateResponse(request, "register.html", ...)`
+
+### Removed
+- **`MAIN_HTML`**: inline-шаблон главной страницы (~520 строк) — заменён на `src/web/templates/index.html`
+- **`SESSION_HTML`**: inline-шаблон страницы тренировки (~110 строк) — заменён на `src/web/templates/session.html`
+- **`SETTINGS_PAGE`**: inline-шаблон страницы настроек (~55 строк) — заменён на `src/web/templates/settings.html`
+- **Удалено ~700 строк** inline HTML из main.py (было 2776 → ~2010 строк)
+
+### Fixed
+- **`login_page`**: восстановлена строка `err_msg = _AUTH_ERRORS.get(error, "")` (случайно удалена при замене HTMLResponse)
+- **`TemplateResponse` positional args**: исправлен вызов с `(name, context)` на `(request, name, context)` (Starlette API)
+
 ## [01.07.2026] (вечер)
 
 ### Added

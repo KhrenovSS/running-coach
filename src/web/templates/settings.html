@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Настройки — AI Running Coach{% endblock %}
+{% block styles %}
+{{ super() }}
+<style>
+    body { max-width: 500px; margin: 50px auto; padding: 0 20px; }
+    .card { border: 1px solid #ccc; padding: 20px; border-radius: 10px; background: #f9f9f9; }
+    label { display: block; margin: 15px 0 5px; }
+    input[type=number] { width: 120px; padding: 8px; font-size: 16px; }
+</style>
+{% endblock %}
+{% block content %}
+    {% if user_header %}
+    <div style="text-align:right;margin-bottom:10px;">{{ user_header|safe }}</div>
+    {% endif %}
+    <h2>⚙️ Настройки</h2>
+    <div class='card'>
+        <form action='/settings' method='post'>
+            <label><b>Максимальный пульс (ЧССмакс):</b></label>
+            <input type='number' name='max_hr' value='{{ max_hr }}' min='100' max='250'>
+            <label><b>Вес (кг):</b></label>
+            <input type='number' name='weight' value='{{ weight }}' min='30' max='250' step='0.1'>
+            <hr>
+            <h4>Детекция ошибочных тренировок (Bogus session detection)</h4>
+            <label><b>Мин. темп (мин/км):</b> темп быстрее этого считается ошибкой</label>
+            <input type='number' name='max_credible_pace' value='{{ max_credible_pace }}' min='2.0' max='6.0' step='0.1'>
+            <label><b>Макс. GPS-скачок (м):</b> прыжок координат больше этого — ошибка</label>
+            <input type='number' name='max_gps_jump_m' value='{{ max_gps_jump_m }}' min='10' max='500' step='10'>
+            <label><b>Мин. пульс для быстрого темпа:</b> если пульс ниже, а темп быстрее — ошибка</label>
+            <input type='number' name='min_hr_for_fast_pace' value='{{ min_hr_for_fast_pace }}' min='90' max='180'>
+            <hr>
+            <h4>Синхронизация Coros (Coros sync)</h4>
+            <label><b>Email Coros Training Hub:</b></label>
+            <input type='email' name='coros_email' value='{{ coros_email }}' style='width:250px;padding:6px;font-size:14px'>
+            <label><b>Пароль Coros:</b></label>
+            <input type='password' name='coros_password' placeholder='{{ coros_password }}' style='width:250px;padding:6px;font-size:14px'>
+            <div style='font-size:12px;color:#888;margin-top:4px'>Пароль хранится в зашифрованном виде (Fernet). Оставьте пустым, чтобы не менять.</div>
+            <br><br>
+            <button type='submit' class='btn'>Сохранить</button>
+            <a href='/' class='btn' style='background:#888;'>&larr; Назад</a>
+        </form>
+        <h4>Зоны пульса (при ЧССмакс = {{ max_hr }})</h4>
+        <table>
+            <tr><th>Зона</th><th>% от ЧССмакс</th><th>Пульс</th></tr>
+            <tr><td>Z1</td><td>50-60%</td><td>{{ z1 }}</td></tr>
+            <tr><td>Z2</td><td>60-70%</td><td>{{ z2 }}</td></tr>
+            <tr><td>Z3</td><td>70-80%</td><td>{{ z3 }}</td></tr>
+            <tr><td>Z4</td><td>80-90%</td><td>{{ z4 }}</td></tr>
+            <tr><td>Z5</td><td>90-100%</td><td>{{ z5 }}</td></tr>
+        </table>
+    </div>
+{% endblock %}

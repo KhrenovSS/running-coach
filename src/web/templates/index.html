@@ -1,0 +1,513 @@
+{% extends "base.html" %}
+{% block title %}AI Running Coach{% endblock %}
+{% block styles %}
+{{ super() }}
+<style>
+    body { max-width: 98%; margin: 20px 30px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { padding: 10px; text-align: center; border-bottom: 1px solid #ddd; }
+    th { background: #4CAF50; color: white; }
+    tr:hover { background: #f1f1f1; }
+    h2, h3 { color: #333; }
+    .settings { background: #e8f5e9; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
+    .settings a { margin-left: auto; }
+    input[type=number] { width: 70px; padding: 4px; }
+    .stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin: 15px 0; }
+    .stats-card { border: 1px solid #ddd; border-radius: 8px; padding: 15px; background: #fafafa; }
+    .stats-card h4 { margin: 0 0 8px 0; color: #4CAF50; }
+    .stats-summary { display: flex; gap: 15px; flex-wrap: wrap; font-size: 14px; margin-bottom: 10px; }
+    .stats-summary span { background: #e8f5e9; padding: 4px 10px; border-radius: 4px; }
+    .overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.9); z-index: 999; justify-content: center; align-items: center; flex-direction: column; }
+    .overlay.active { display: flex; }
+    .spinner { border: 4px solid #e0e0e0; border-top: 4px solid #4CAF50; border-radius: 50%; width: 40px; height: 40px; animation: spin 0.8s linear infinite; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .sync-status { padding: 6px 10px; border-radius: 4px; margin-top: 6px; font-size: 13px; }
+    .sync-ok { background: #e8f5e9; color: #2e7d32; }
+    .sync-error { background: #ffebee; color: #c62828; }
+    .ym-nav { margin: 10px 0; }
+    .year-row, .month-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+    .ym-pill { display: inline-block; padding: 4px 12px; border-radius: 14px; font-size: 13px; text-decoration: none; color: #555; background: #f0f0f0; border: 1px solid #ddd; }
+    .ym-pill:hover { background: #e0e0e0; }
+    .active-year { background: #4CAF50; color: white; border-color: #4CAF50; }
+    .active-month { background: #2196F3; color: white; border-color: #2196F3; }
+    .ym-title { font-size: 14px; color: #666; margin-bottom: 8px; font-weight: bold; }
+    .modal { background: white; border-radius: 12px; padding: 20px; max-width: 500px; width: 90%; box-shadow: 0 4px 24px rgba(0,0,0,0.15); }
+    .modal h3 { margin-top: 0; }
+    .modal table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+    .modal td { padding: 4px 8px; border-bottom: 1px solid #eee; }
+    .modal td:first-child { color: #666; width: 40%; }
+    .modal-buttons { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+    .btn-import { background: #4CAF50; color: white; padding: 8px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    .btn-skip { background: #f5f5f5; color: #333; padding: 8px 20px; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    .btn-import:hover { background: #43a047; }
+    .btn-skip:hover { background: #e0e0e0; }
+</style>
+{% endblock %}
+{% block content %}
+    <div class='overlay' id='uploadOverlay'>
+        <div class='spinner'></div>
+        <p style='margin-top:16px;font-size:18px;color:#333;'>Обработка файлов…</p>
+        <p id='progressText' style='margin-top:8px;font-size:15px;color:#555;'></p>
+        <div style='margin-top:12px;width:300px;background:#e0e0e0;border-radius:6px;height:10px;overflow:hidden;'>
+            <div id='progressBar' style='width:0%;background:#4CAF50;border-radius:6px;height:10px;transition:width 0.3s;'></div>
+        </div>
+    </div>
+    <div class='overlay' id='syncOverlay'>
+        <div class='spinner'></div>
+        <p style='margin-top:16px;font-size:18px;color:#333;' id='syncStatusText'>Синхронизация Coros…</p>
+        <p id='syncProgressText' style='margin-top:8px;font-size:15px;color:#555;'></p>
+        <div style='margin-top:12px;width:300px;background:#e0e0e0;border-radius:6px;height:10px;overflow:hidden;'>
+            <div id='syncProgressBar' style='width:0%;background:#2196F3;border-radius:6px;height:10px;transition:width 0.3s;'></div>
+        </div>
+    </div>
+    <div class='overlay' id='deletedConfirmOverlay'>
+        <div class='modal'>
+            <h3>⚠️ Тренировка была удалена</h3>
+            <p style='color:#555;'>Эта тренировка ранее была удалена. Хотите импортировать её заново?</p>
+            <div id='deletedDetails'></div>
+            <div class='modal-buttons'>
+                <button class='btn-skip' id='deletedSkipBtn'>Пропустить</button>
+                <button class='btn-import' id='deletedImportBtn'>Импортировать</button>
+            </div>
+        </div>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0;">
+        <h2 style="margin:0;">🏃 AI Running Coach</h2>
+        <div>{{ user_header|safe }}</div>
+    </div>
+
+    <div class='settings'>
+        <span><b>ЧССмакс:</b> {{ max_hr }} уд/мин</span>
+        <span id='weightToggle' style='cursor:pointer' onclick='toggleWeightChart()'><b>Вес:</b> {{ weight }} кг ▾</span>
+        <input type='file' name='files' accept='.tcx,.fit' multiple id='fileInput' style='display:none'>
+        <button type='button' class='btn' onclick='document.getElementById("fileInput").click()'>&#128206; Загрузить TCX/FIT</button>
+        <button type='button' class='btn' id='corosSyncBtn' style='background:#2196F3'>🔄 Coros Sync</button>
+        <button type='button' class='btn' id='healthSyncBtn' style='background:#7B1FA2'>❤️ Health Sync</button>
+        <a href='/settings' class='btn'>⚙️ Настройки</a>
+        <div id='corosSyncStatus' style='width:100%;margin-top:6px;font-size:13px;'></div>
+        <div id='healthSyncStatus' style='width:100%;margin-top:4px;font-size:13px;'></div>
+    </div>
+    <div id='weightChartContainer' style='display:none; margin-bottom:15px'>
+        <div class='stats-card'>
+            <h4>📉 Динамика веса</h4>
+            <div style='max-height:300px; overflow-y:auto;'>
+                <table style='margin-top:5px'>
+                    <thead><tr><th>Дата</th><th>Вес, кг</th></tr></thead>
+                    <tbody id='weightTableBody'></tbody>
+                </table>
+            </div>
+            <canvas id='weightChart' height='100' style='margin-top:10px'></canvas>
+        </div>
+    </div>
+    <script>
+        const recoveryData = {{ recovery_json }};
+        const weightData = {{ weight_json }};
+        const CURRENT_WEIGHT = {{ weight }};
+    </script>
+{% raw %}
+    <script>
+    function showDeletedModal(match, tempId) {
+        return new Promise((resolve) => {
+            const overlay = document.getElementById('deletedConfirmOverlay');
+            const details = document.getElementById('deletedDetails');
+            details.innerHTML = `
+                <table>
+                    <tr><td>Дата</td><td>${match.date}</td></tr>
+                    <tr><td>Дистанция</td><td>${match.distance_display || match.distance}</td></tr>
+                    <tr><td>Темп</td><td>${match.pace}</td></tr>
+                    <tr><td>Длительность</td><td>${match.duration}</td></tr>
+                    <tr><td>Тип</td><td>${match.type}</td></tr>
+                    <tr><td>Пульс</td><td>${match.hr}</td></tr>
+                    <tr><td>Калории</td><td>${match.calories}</td></tr>
+                </table>`;
+            overlay.classList.add('active');
+
+            const skipBtn = document.getElementById('deletedSkipBtn');
+            const importBtn = document.getElementById('deletedImportBtn');
+
+            const cleanup = () => {
+                overlay.classList.remove('active');
+                skipBtn.replaceWith(skipBtn.cloneNode(true));
+                importBtn.replaceWith(importBtn.cloneNode(true));
+            };
+
+            document.getElementById('deletedSkipBtn').onclick = () => { cleanup(); resolve(false); };
+            document.getElementById('deletedImportBtn').onclick = async () => {
+                cleanup();
+                const fd = new FormData();
+                fd.append('temp_id', tempId);
+                try {
+                    const r = await fetch('/upload/confirm_deleted', { method: 'POST', body: fd });
+                    const j = await r.json();
+                    resolve(j.ok);
+                } catch (e) {
+                    resolve(false);
+                }
+            };
+        });
+    }
+
+    document.getElementById('fileInput').addEventListener('change', async function() {
+        if (!this.files.length) return;
+        const files = Array.from(this.files);
+        const total = files.length;
+        let processed = 0;
+        let allSaved = 0;
+
+        const overlay = document.getElementById('uploadOverlay');
+        const progressText = document.getElementById('progressText');
+        const progressBar = document.getElementById('progressBar');
+
+        overlay.classList.add('active');
+
+        for (const file of files) {
+            const fd = new FormData();
+            fd.append('files', file);
+            try {
+                const resp = await fetch('/upload', { method: 'POST', body: fd });
+                const text = await resp.text();
+                let j;
+                try {
+                    j = JSON.parse(text);
+                } catch (e) {
+                    continue;
+                }
+                if (j.deleted_match && j.temp_id) {
+                    const imported = await showDeletedModal(j.deleted_match, j.temp_id);
+                    if (imported) {
+                        allSaved++;
+                    }
+                } else {
+                    allSaved += j.saved || 0;
+                }
+            } catch (e) {
+                // ignore network errors for individual files
+            }
+            processed++;
+            const pct = Math.round(processed / total * 100);
+            progressText.textContent = `Обработано ${processed} из ${total} (${pct}%)`;
+            progressBar.style.width = pct + '%';
+        }
+
+        window.location.href = '/';
+    });
+    </script>
+{% endraw %}
+
+    <div class='stats-grid'>
+        <div class='stats-card'>
+            <h4>Неделя (7 дней)</h4>
+            <div class='stats-summary'>
+                <span>📏 {{ week_km }} км</span>
+                <span>⏱ {{ week_dur }}</span>
+            </div>
+            <div style='font-size:12px;color:#888;margin-bottom:4px'>Пульс</div>
+            <div>{{ week_bars|safe }}</div>
+            <div style='font-size:13px;color:#555;margin-top:6px'>{{ week_types }}</div>
+        </div>
+        <div class='stats-card'>
+            <h4>Месяц (30 дней)</h4>
+            <div class='stats-summary'>
+                <span>📏 {{ month_km }} км</span>
+                <span>⏱ {{ month_dur }}</span>
+            </div>
+            <div style='font-size:12px;color:#888;margin-bottom:4px'>Пульс</div>
+            <div>{{ month_bars|safe }}</div>
+            <div style='font-size:13px;color:#555;margin-top:6px'>{{ month_types }}</div>
+        </div>
+        <div class='stats-card' id='recoveryCard' onclick='toggleRecoveryChart()' style='cursor:pointer'>
+            <h4>❤️ Восстановление</h4>
+            <div class='stats-summary'>
+                <span>Восстановление: <b>{{ latest_recovery_pct }}</b></span>
+                <span>Нервная система: <b>{{ latest_hrv }}</b></span>
+                <span>Пульс покоя: <b>{{ latest_rhr }}</b> уд/мин</span>
+                <span>Усталость: <b>{{ latest_tired }}</b></span>
+                <span>Состояние: <b>{{ latest_perf }}</b></span>
+            </div>
+            <div style='font-size:13px;color:#888;margin-top:4px' id='recoveryToggle'>▾ График пульса покоя</div>
+        </div>
+    </div>
+    <div id='recoveryChartContainer' style='display:none; margin-bottom:15px'>
+        <div class='stats-card'>
+            <h4>📈 Пульс покоя (RHR)</h4>
+            <canvas id='recoveryChart' height='80'></canvas>
+        </div>
+    </div>
+
+    <div class='sync-status' style='font-size:12px;color:#888;margin-bottom:15px;display:flex;gap:20px;flex-wrap:wrap;padding:8px 12px;background:#f9f9f9;border-radius:6px;'>
+        <span>🔄 <b>Автосинхронизация:</b></span>
+    <span>Health: <span id='autoHealthStatus' title='{{ auto_health_msg }}'>{{ auto_health_status }}</span>
+          (последняя: {{ auto_health_last }}, след.: {{ auto_health_next }})</span>
+    <span>Activities: <span id='autoActivityStatus' title='{{ auto_activity_msg }}'>{{ auto_activity_status }}</span>
+          (последняя: {{ auto_activity_last }}, след.: {{ auto_activity_next }})</span>
+    </div>
+
+{% raw %}
+    <script>
+    let recoveryChart = null;
+
+    function toggleRecoveryChart() {
+        const container = document.getElementById('recoveryChartContainer');
+        const toggle = document.getElementById('recoveryToggle');
+        if (container.style.display === 'none') {
+            container.style.display = 'block';
+            toggle.textContent = '▴ График пульса покоя';
+            renderRecoveryChart();
+        } else {
+            container.style.display = 'none';
+            toggle.textContent = '▾ График пульса покоя';
+        }
+    }
+
+    function renderRecoveryChart() {
+        if (recoveryData.length < 2) return;
+        if (recoveryChart) {
+            recoveryChart.destroy();
+            recoveryChart = null;
+        }
+        recoveryChart = new Chart(document.getElementById('recoveryChart'), {
+            type: 'line',
+            data: {
+                labels: recoveryData.map(d => d.date),
+                datasets: [{
+                    label: 'Пульс покоя (уд/мин)',
+                    data: recoveryData.map(d => d.rhr),
+                    borderColor: '#e53935',
+                    backgroundColor: 'transparent',
+                    tension: 0.4,
+                    pointRadius: 4,
+                    pointBackgroundColor: '#e53935',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    fill: true,
+                    backgroundColor: 'rgba(229,57,53,0.08)',
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: { title: { display: true, text: 'Дата' } },
+                    y: { title: { display: true, text: 'уд/мин' }, beginAtZero: false },
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+
+    let weightChart = null;
+
+    function toggleWeightChart() {
+        const container = document.getElementById('weightChartContainer');
+        const toggle = document.getElementById('weightToggle');
+        if (container.style.display === 'none') {
+            container.style.display = 'block';
+            toggle.innerHTML = '<b>Вес:</b> ' + CURRENT_WEIGHT + ' кг ▴';
+            renderWeightChart();
+            renderWeightTable();
+        } else {
+            container.style.display = 'none';
+            toggle.innerHTML = '<b>Вес:</b> ' + CURRENT_WEIGHT + ' кг ▾';
+        }
+    }
+
+    function renderWeightTable() {
+        const tbody = document.getElementById('weightTableBody');
+        tbody.innerHTML = weightData.map(d =>
+            `<tr><td>${d.date}</td><td>${d.weight}</td></tr>`
+        ).join('');
+    }
+
+    function renderWeightChart() {
+        if (weightData.length < 2) return;
+        if (weightChart) {
+            weightChart.destroy();
+            weightChart = null;
+        }
+        weightChart = new Chart(document.getElementById('weightChart'), {
+            type: 'line',
+            data: {
+                labels: weightData.map(d => d.date),
+                datasets: [{
+                    label: 'Вес (кг)',
+                    data: weightData.map(d => d.weight),
+                    borderColor: '#4CAF50',
+                    backgroundColor: 'transparent',
+                    tension: 0.4,
+                    pointRadius: 5,
+                    pointBackgroundColor: '#4CAF50',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: { title: { display: true, text: 'Дата' } },
+                    y: { title: { display: true, text: 'кг' }, beginAtZero: false },
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+    </script>
+
+    <script>
+    async function syncCoros() {
+        const btn = document.getElementById('corosSyncBtn');
+        const statusDiv = document.getElementById('corosSyncStatus');
+        const overlay = document.getElementById('syncOverlay');
+        const statusText = document.getElementById('syncStatusText');
+        const progressText = document.getElementById('syncProgressText');
+        const progressBar = document.getElementById('syncProgressBar');
+        btn.disabled = true;
+        btn.textContent = '🔄 Синхронизация…';
+        statusDiv.className = 'sync-status';
+        statusDiv.textContent = 'Запуск...';
+        overlay.classList.add('active');
+        statusText.textContent = 'Подключение к Coros...';
+        progressText.textContent = '';
+        progressBar.style.width = '0%';
+        try {
+            const resp = await fetch('/coros/sync', { method: 'POST' });
+            const j = await resp.json();
+            if (j.status !== 'started') {
+                overlay.classList.remove('active');
+                statusDiv.className = 'sync-status sync-error';
+                statusDiv.textContent = '❌ ' + (j.message || 'Ошибка запуска');
+                btn.disabled = false;
+                btn.textContent = '🔄 Coros Sync';
+                return;
+            }
+            const taskId = j.task_id;
+            let done = false;
+            while (!done) {
+                await new Promise(r => setTimeout(r, 800));
+                const sr = await fetch('/coros/sync/status/' + taskId);
+                const sp = await sr.json();
+                statusText.textContent = sp.message || '';
+                if (sp.total > 0) {
+                    const pct = Math.round(sp.current / sp.total * 100);
+                    progressText.textContent = sp.current + ' из ' + sp.total;
+                    progressBar.style.width = pct + '%';
+                }
+                if (sp.step === 'done' || sp.step === 'error') {
+                    done = true;
+                    overlay.classList.remove('active');
+                    if (sp.step === 'error') {
+                        statusDiv.className = 'sync-status sync-error';
+                        statusDiv.textContent = '❌ ' + (sp.message || 'Ошибка');
+                    } else if (sp.has_pending_deleted && sp.pending_deleted) {
+                        statusDiv.className = 'sync-status sync-ok';
+                        statusDiv.textContent = '✅ Найдены ранее удалённые тренировки';
+                        for (const pd of sp.pending_deleted) {
+                            const imported = await showDeletedModal(pd, pd.temp_id);
+                            if (imported) {
+                                sp.synced = (sp.synced || 0) + 1;
+                            }
+                        }
+                        statusDiv.textContent = '✅ Обработано: ' + (sp.synced || 0) + ' / ' + sp.pending_deleted.length;
+                        window.location.href = '/';
+                    } else if (sp.synced > 0) {
+                        statusDiv.className = 'sync-status sync-ok';
+                        statusDiv.textContent = '✅ Синхронизировано: ' + sp.synced;
+                        if (sp.total_found) statusDiv.textContent += ' (найдено ' + sp.total_found + ')';
+                        window.location.href = '/';
+                    } else {
+                        statusDiv.className = 'sync-status sync-ok';
+                        statusDiv.textContent = '✅ ' + (sp.message || 'Новых тренировок нет');
+                        setTimeout(() => { statusDiv.textContent = ''; }, 5000);
+                    }
+                }
+            }
+        } catch (e) {
+            overlay.classList.remove('active');
+            statusDiv.className = 'sync-status sync-error';
+            statusDiv.textContent = '❌ ' + e.message;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '🔄 Coros Sync';
+        }
+    }
+
+    document.getElementById('corosSyncBtn').addEventListener('click', syncCoros);
+
+    async function syncHealth() {
+        const btn = document.getElementById('healthSyncBtn');
+        const statusDiv = document.getElementById('healthSyncStatus');
+        const overlay = document.getElementById('syncOverlay');
+        const statusText = document.getElementById('syncStatusText');
+        const progressText = document.getElementById('syncProgressText');
+        const progressBar = document.getElementById('syncProgressBar');
+        btn.disabled = true;
+        btn.textContent = '❤️ Синхронизация…';
+        statusDiv.className = 'sync-status';
+        statusDiv.textContent = 'Запуск...';
+        overlay.classList.add('active');
+        statusText.textContent = 'Подключение к Coros...';
+        progressText.textContent = '';
+        progressBar.style.width = '0%';
+        try {
+            const resp = await fetch('/coros/sync/health', { method: 'POST' });
+            const j = await resp.json();
+            if (j.status !== 'started') {
+                overlay.classList.remove('active');
+                statusDiv.className = 'sync-status sync-error';
+                statusDiv.textContent = '❌ ' + (j.message || 'Ошибка');
+                btn.disabled = false;
+                btn.textContent = '❤️ Health Sync';
+                return;
+            }
+            const taskId = j.task_id;
+            let done = false;
+            while (!done) {
+                await new Promise(r => setTimeout(r, 800));
+                const sr = await fetch('/coros/sync/status/' + taskId);
+                const sp = await sr.json();
+                statusText.textContent = sp.message || '';
+                if (sp.total > 0) {
+                    const pct = Math.round(sp.current / sp.total * 100);
+                    progressText.textContent = sp.current + ' из ' + sp.total;
+                    progressBar.style.width = pct + '%';
+                }
+                if (sp.step === 'done' || sp.step === 'error') {
+                    done = true;
+                    overlay.classList.remove('active');
+                    if (sp.step === 'error') {
+                        statusDiv.className = 'sync-status sync-error';
+                        statusDiv.textContent = '❌ ' + (sp.message || 'Ошибка');
+                    } else if (sp.synced > 0) {
+                        statusDiv.className = 'sync-status sync-ok';
+                        statusDiv.textContent = '✅ Синхронизировано метрик: ' + sp.synced;
+                        window.location.href = '/';
+                    } else {
+                        statusDiv.className = 'sync-status sync-ok';
+                        statusDiv.textContent = '✅ ' + (sp.message || 'Новых данных нет');
+                        setTimeout(() => { statusDiv.textContent = ''; }, 5000);
+                    }
+                }
+            }
+        } catch (e) {
+            overlay.classList.remove('active');
+            statusDiv.className = 'sync-status sync-error';
+            statusDiv.textContent = '❌ ' + e.message;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '❤️ Health Sync';
+        }
+    }
+
+    document.getElementById('healthSyncBtn').addEventListener('click', syncHealth);
+    </script>
+{% endraw %}
+
+    {{ nav_html|safe }}
+    <table>
+            <thead>
+                <tr><th>Дата</th><th>Длительность</th><th>Дист., км</th><th>Пульс, уд/мин</th><th>Тип</th><th>Каденс</th><th>Набор</th><th>Энергозатраты, ккал</th></tr>
+            </thead>
+        <tbody>
+            {{ rows|safe }}
+        </tbody>
+    </table>
+{% endblock %}
