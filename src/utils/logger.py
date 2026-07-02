@@ -20,7 +20,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Any
@@ -40,7 +40,7 @@ class JSONFormatter(logging.Formatter):
     
     def format(self, record: logging.LogRecord) -> str:
         log_entry = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -72,7 +72,7 @@ class TextFormatter(logging.Formatter):
     
     def format(self, record: logging.LogRecord) -> str:
         # Базовая часть
-        base = f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} | {record.levelname:8} | {record.name}"
+        base = f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} | {record.levelname:8} | {record.name}"
         
         # Добавляем context если есть (Add context if present)
         context = getattr(record, "context", None)

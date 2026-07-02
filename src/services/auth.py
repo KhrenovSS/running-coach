@@ -8,7 +8,7 @@ Hashes and verifies passwords via bcrypt.
 """
 
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import bcrypt
@@ -30,7 +30,7 @@ def generate_telegram_login_token(db: Session, user: User) -> str:
     Create a single-use login token for Telegram authentication
     """
     token = secrets.token_urlsafe(32)
-    expires_at = datetime.utcnow() + timedelta(minutes=TOKEN_TTL_MINUTES)
+    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=TOKEN_TTL_MINUTES)
     
     auth_token = AuthToken(
         token=token,
@@ -61,11 +61,11 @@ def verify_telegram_login_token(db: Session, token: str) -> Optional[User]:
         .filter(
             AuthToken.token == token,
             AuthToken.used_at.is_(None),
-            AuthToken.expires_at > datetime.utcnow(),
+            AuthToken.expires_at > datetime.now(timezone.utc).replace(tzinfo=None),
         )
         .first()
     )
-    
+
     if not auth_token:
         logger.warning(
             "Invalid or expired Telegram login token: %s...",
@@ -73,9 +73,9 @@ def verify_telegram_login_token(db: Session, token: str) -> Optional[User]:
             extra={"context": "Auth"},
         )
         return None
-    
+
     # Помечаем токен использованным (Mark token as used)
-    auth_token.used_at = datetime.utcnow()
+    auth_token.used_at = datetime.now(timezone.utc).replace(tzinfo=None)
     db.commit()
     
     logger.info(
@@ -99,7 +99,7 @@ def check_telegram_login_token(db: Session, token: str) -> Optional[User]:
         .filter(
             AuthToken.token == token,
             AuthToken.used_at.is_(None),
-            AuthToken.expires_at > datetime.utcnow(),
+            AuthToken.expires_at > datetime.now(timezone.utc).replace(tzinfo=None),
         )
         .first()
     )
@@ -113,7 +113,7 @@ def cleanup_expired_tokens(db: Session) -> int:
     Удалить просроченные использованные токены
     Delete expired used tokens
     """
-    cutoff = datetime.utcnow() - timedelta(days=1)
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=1)
     deleted = (
         db.query(AuthToken)
         .filter(

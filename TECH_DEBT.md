@@ -662,12 +662,12 @@ running-coach-worker.service  # APScheduler для синков/напомина
 
    #### п.8 — Стандартизация времени (UTC)
 
-   - [ ] **8.1** Заменить `datetime.utcnow()` → `datetime.now(timezone.utc)` во всех моделях (`src/models.py:34,49,92,105,134,145,158`).
-   - [ ] **8.2** Добавить поле `User.timezone` (String(50), nullable) — определяется через `timezonefinder` по первой GPS-точке первой тренировки.
-   - [ ] **8.3** Парсер `src/parsers/common.py`: сохранять UTC-время, таймзону писать в `User.timezone`.
+   - [x] **8.1** Заменить `datetime.utcnow()` → `datetime.now(timezone.utc)` во всех моделях и сервисах.
+   - [x] **8.2** Добавить поле `User.timezone` (String(50), nullable) — определяется по GPS первой тренировки.
+   - [x] **8.3** Парсер `src/parsers/common.py`: сохранять UTC-время, таймзону писать в `User.timezone` и `TrainingSession.timezone`.
    - [ ] **8.4** Миграция Alembic: конвертировать старые naive-local `begin_ts` в UTC (используя таймзону первой GPS-точки каждой тренировки).
-   - [ ] **8.5** Шаблоны Jinja2: конвертировать UTC → локальное время пользователя через хелпер `format_local(dt, user)`.
-   - [ ] **8.6** `grep -rn "datetime.utcnow" src/ main.py` → 0 совпадений.
+   - [x] **8.5** Шаблоны Jinja2: конвертировать UTC → локальное время пользователя через хелпер `local_dt(dt, user)`.
+   - [x] **8.6** `grep -rn "datetime.utcnow" src/ main.py` → 0 совпадений.
 
    #### п.12+14 — Coros-клиент на httpx.AsyncClient + мульти-брендовая архитектура (одним блоком)
 

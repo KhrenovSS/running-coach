@@ -370,23 +370,49 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 - ⬜ **Фильтр по типу** тренировки на главной
 - ⬜ **Общая дистанция и время** за неделю/месяц
 
-## Текущее состояние (Session — 02.07.2026, Sprint 3 завершён)
+## Текущее состояние (Session — 02.07.2026, Sprint 4 п.8 завершён)
 
-**Спринт 3 полностью завершён!** `main.py` декомпозирован с 2776 до 7 строк.
+**Спринт 4, п.8 (стандартизация времени UTC) выполнен.**
 
-### Итоговая структура после Спринта 3:
+### Что сделано:
+1. **Все `datetime.utcnow()` заменены** на `datetime.now(timezone.utc).replace(tzinfo=None)` во всех файлах проекта
+2. **`datetime.fromtimestamp(ts)` → `datetime.fromtimestamp(ts, tz=timezone.utc)`** — исправлена ошибка с системным часовым поясом в coros_client.py
+3. **Парсер `common.py`**: `begin_ts` сохраняется как naive UTC (вместо naive local); время погоды вычисляется через `begin_local` (aware local time); возвращает `'timezone'` в результате
+4. **Модели**: `User.timezone` (VARCHAR 50), `TrainingSession.timezone` (VARCHAR 50)
+5. **Alembic**: 2 новые миграции (`user.timezone`, `training_sessions.timezone`)
+6. **`src/deps.py:local_dt()`** — хелпер для конвертации naive UTC → local time при отображении
+7. **Отображение** index и session_detail: даты конвертируются в локальное время через `ZoneInfo`
+8. **Callers** (uploads.py, coros.py, coros_sync_auto.py, telegram_bot.py): сохраняют `timezone` в `TrainingSession.timezone` и `User.timezone`
+9. **catch-up в daily_weight_job**: использует MSK время для определения приветствия (утро/день/вечер)
+
+### Ещё не сделано в п.8:
+- ⬜ Data migration: конвертировать старые naive-local `begin_ts` → naive UTC (по GPS из segments_json, fallback Europe/Moscow)
+- ⬜ `fmt_sync_time` в pages.py — использует UTC для сравнения с _auto_sync_status (работает, но сообщения типа "5 ч назад" могут быть неточны в первые часы дня)
+- ⬜ Фильтрация по году/месяцу в index использует UTC даты вместо локальных
+- ⬜ `daily_recovery_check_job` использует MSK (Europe/Moscow) hardcoded вместо User.timezone
+
+**Следующие шаги (из TECH_DEBT.md):**
+- Sprint 4: п.12+14 (httpx Coros-клиент + мульти-брендовая архитектура: BaseWatchClient, WatchCredential, sync_service)
+- Sprint 4: data migration для старых `begin_ts`
+- Sprint 6: per-user частота синхронизации (бренд-независимая), баннеры, настройки
+- Модуль аналитики (8 этапов из decision_module_design.md)
+- Фильтр по типу тренировки на главной
+- Общая дистанция и время за неделю/месяц
+
+### Итоговая структура после Спринта 3 + п.8:
 - `main.py` (7 строк) — только `create_app()` + `uvicorn.run()`
 - `src/startup.py` — фабрика приложения, startup-событие
 - `src/scheduler.py` — `AutoSyncScheduler` (одиночка; **в Спринте 4 станет brand-независимым**)
 - `src/web/routes/` — 4 sub-router: `pages.py` (7), `uploads.py` (3), `coros.py` (3 → **переименуется в sync.py** в Спринте 4), `logs.py` (1)
 - `src/web/state.py` — глобальное состояние (`_pending`, `_sync_tasks`, `TRAINING_TYPES_RU`)
-- `src/deps.py` — общие зависимости (`templates = Jinja2Templates`)
+- `src/deps.py` — общие зависимости (`templates = Jinja2Templates` + `local_dt()`)
 - `src/services/*.py` — 4 сервисных модуля (telegram_notify, stats, recovery_view, coros_sync_auto → **sync_service.py в Спринте 4**)
 - `src/config/settings.py` — `Settings(BaseSettings)` из pydantic-settings
 - `src/config/constants.py` — плоские module-level константы (HR зоны, API endpoints, пороги)
 - `src/web/templates/*.html` — 6 Jinja2-шаблонов
+- `src/models.py` — добавляет `User.timezone`, `TrainingSession.timezone`
 
-**В Спринте 4 добавится:**
+**В Спринте 4 (далее) добавится:**
 - `src/watch/` — пакет мульти-брендовой абстракции:
   - `base.py` — `BaseWatchClient(ABC)`
   - `coros.py` — `CorosWatchClient(BaseWatchClient)`
@@ -394,14 +420,18 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 - `WatchCredential` модель (отдельная таблица, вместо `coros_email`/`coros_password` на `User`)
 - `src/services/sync_service.py` — brand-agnostic sync-сервис
 
+### Команды управления:
+```bash
+# Запуск (из директории проекта, нужен sudo для docker)
+sudo bash -c 'cd /home/nimda/projects/running-coach && set -a && source .env && set +a && export POSTGRES_PASSWORD && docker compose up -d'
+
+# Остановка
+sudo bash -c 'cd /home/nimda/projects/running-coach && docker compose down'
+
+# Применить миграции alembic
+python3 -m alembic upgrade head
+```
+
 **Если сессия прервана:** перед продолжением работы прочитать:
 1. `AGENTS.md` — правила проекта
-2. `SPRINT_3_PLAN.md` — план с чекбоксами
-3. `README.md` — актуальное состояние проекта
-
-**Следующие шаги (из TECH_DEBT.md):**
-- Sprint 4: стандартизация времени (UTC), мульти-брендовая архитектура (BaseWatchClient ABC, WatchCredential), httpx Coros-клиент
-- Sprint 6: per-user частота синхронизации (бренд-независимая), баннеры, настройки
-- Модуль аналитики (8 этапов из decision_module_design.md)
-- Фильтр по типу тренировки на главной
-- Общая дистанция и время за неделю/месяц
+2. `README.md` — актуальное состояние проекта

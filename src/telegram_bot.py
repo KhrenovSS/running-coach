@@ -4,7 +4,7 @@ import logging
 import os
 import threading
 import tempfile
-from datetime import datetime, timedelta, date, time as dt_time
+from datetime import datetime, timedelta, date, time as dt_time, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -191,7 +191,7 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
         old_coros_email = user.coros_email
         user.coros_email = email
         user.coros_password = encrypt(password)
-        user.registered_at = datetime.utcnow()
+        user.registered_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
         db.commit()
         logger.info("Пользователь %s (chat_id=%s) привязал Coros: %s", username, chat_id, email)
@@ -368,7 +368,7 @@ def _sync_for_user(user: User, chat_id: int, token: str):
                 msg_parts.append(f"здоровье: {synced_health}")
 
             # Сохраняем время последней синхронизации здоровья (Save last health sync time)
-            user.last_health_sync_at = datetime.utcnow()
+            user.last_health_sync_at = datetime.now(timezone.utc).replace(tzinfo=None)
             # Сохраняем dashboard данные (Save dashboard data)
             try:
                 dashboard = client.get_dashboard()
@@ -428,6 +428,9 @@ def _sync_for_user(user: User, chat_id: int, token: str):
                         if data and data.get('begin_ts'):
                             session = TrainingSession(**data)
                             session.user_id = user.id
+                            tz = data.get('timezone')
+                            if tz and not user.timezone:
+                                user.timezone = tz
                             db.add(session)
                             db.flush()
                             new_session_ids.append((act, session.id, data))
@@ -530,7 +533,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     dur_str = f"{h}ч {m}мин" if h else f"{m}мин"
 
     # За последние 7 дней (Last 7 days)
-    week_ago = datetime.utcnow() - timedelta(days=7)
+    week_ago = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)
     week_sessions = [s for s in sessions if s.begin_ts and s.begin_ts >= week_ago]
     week_km = sum(s.total_distance_km or 0 for s in week_sessions)
 
@@ -604,7 +607,7 @@ async def handle_weight_message(update: Update, context: ContextTypes.DEFAULT_TY
         if not user:
             await update.message.reply_text("❌ Пользователь не найден. Используй /start.")
             return
-        wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.utcnow(), user_id=user.id)
+        wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.now(timezone.utc).replace(tzinfo=None), user_id=user.id)
         db.add(wm)
         db.commit()
         await update.message.reply_text(f"✅ Вес {weight} кг сохранён!")
@@ -642,7 +645,7 @@ async def cmd_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db = SessionLocal()
     try:
-        wm = WeightMeasurement(weight_kg=w, measured_at=datetime.utcnow(), user_id=user.id)
+        wm = WeightMeasurement(weight_kg=w, measured_at=datetime.now(timezone.utc).replace(tzinfo=None), user_id=user.id)
         db.add(wm)
         db.commit()
         await update.message.reply_text(f"✅ Вес {w} кг сохранён!")
@@ -656,12 +659,12 @@ async def cmd_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def daily_weight_job(context: ContextTypes.DEFAULT_TYPE):
     """Ежедневный опрос/напоминание о весе (Daily weight prompt/reminder — runs at 9:00, 12:00, 15:00, 18:00 if no weight logged today)"""
-    logger.info("daily_weight_job fired at %s", datetime.utcnow().isoformat())
+    logger.info("daily_weight_job fired at %s", datetime.now(timezone.utc).isoformat())
     db = SessionLocal()
     audit = AuditService(db)
     try:
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-        hour = datetime.utcnow().hour
+        today_start = datetime.now(timezone.utc).replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
+        hour = datetime.now(ZoneInfo("Europe/Moscow")).hour
         users = db.query(User).filter(
             User.telegram_chat_id.isnot(None),
             User.is_active == True,
@@ -712,7 +715,7 @@ async def daily_recovery_check_job(context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     audit = AuditService(db)
     try:
-        now = datetime.utcnow()
+        now = datetime.now(ZoneInfo("Europe/Moscow"))
         hour = now.hour
 
         # За пределами активного времени (0:00–8:00 и после 19:00) — пропускаем (Outside active hours — skip)

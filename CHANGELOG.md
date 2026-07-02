@@ -2,6 +2,26 @@
 
 All notable changes to this project are tracked here.
 
+## [02.07.2026] — Sprint 4, п.8: стандартизация времени (UTC)
+
+### Added
+- **User.timezone** — колонка `VARCHAR(50)`, IANA-таймзона пользователя (напр. "Europe/Moscow")
+- **TrainingSession.timezone** — колонка с часовым поясом конкретной тренировки
+- **`src/deps.py:local_dt()`** — хелпер для конвертации naive UTC → naive local time при отображении
+- **Alembic migrations** — `3205fe660d47` (user.timezone), `4201426df9cc` (training_sessions.timezone)
+
+### Changed
+- **Все `datetime.utcnow()` заменены** на `datetime.now(timezone.utc).replace(tzinfo=None)` — в auth.py, audit.py, telegram_bot.py, pages.py, tcx_parser.py, coros_sync_auto.py, coros_client.py
+- **Все `datetime.now()` (наивные) заменены** — в coros_sync_auto.py, pages.py
+- **`datetime.fromtimestamp(ts)` → `datetime.fromtimestamp(ts, tz=timezone.utc).replace(tzinfo=None)`** — coros_client.py (исправлена ошибка с системным часовым поясом)
+- **Парсер `common.py`**: `begin_ts` теперь сохраняется как naive UTC (вместо naive local). Время погоды вычисляется через `begin_local` (aware local time)
+- **Парсер `common.py`**: возвращает `'timezone'` в словаре результата для сохранения в БД
+- **Callers (uploads.py, coros.py, coros_sync_auto.py, telegram_bot.py)**: сохраняют `timezone` из результата парсера в `TrainingSession.timezone` и в `User.timezone`
+- **Отображение дат** на index и session_detail страницах: конвертация UTC → local время через `ZoneInfo`
+
+### Fixed
+- **`coros_client.py`**: `datetime.fromtimestamp()` без timezone использовал системный часовой пояс вместо UTC
+
 ## [02.07.2026] — Hotfix: daily weight reminder timezone (п.15)
 
 ### Fixed

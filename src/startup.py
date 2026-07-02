@@ -1,7 +1,7 @@
 # Фабрика приложения и startup-событие (App factory and startup event)
 import os
 from fastapi import FastAPI
-from src.models import SessionLocal, User, get_settings, init_db, WeightMeasurement
+from src.models import SessionLocal, User, get_settings, init_db, WeightMeasurement, utcnow
 from src.logger import get_logger
 from src.api.middleware import register_middleware
 from src.api.routes.health import router as health_router
@@ -40,7 +40,7 @@ def on_startup():
         settings = get_settings()
         existing = db.query(WeightMeasurement).filter(WeightMeasurement.user_id == admin_user.id).first()
         if not existing and settings.weight:
-            wm = WeightMeasurement(weight_kg=settings.weight, measured_at=datetime.utcnow(), user_id=admin_user.id)
+            wm = WeightMeasurement(weight_kg=settings.weight, measured_at=utcnow(), user_id=admin_user.id)
             db.add(wm)
             db.commit()
 

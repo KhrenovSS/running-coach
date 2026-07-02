@@ -176,6 +176,9 @@ async def coros_sync(db: Session = Depends(get_db),
                         session.cleaning_log = cleaning_log
                     if flags_val:
                         session.suspect_flags = flags_val
+                    tz = data.get('timezone')
+                    if tz and not us.timezone:
+                        us.timezone = tz
                     db.add(session)
                     db.commit()
                     db.refresh(session)

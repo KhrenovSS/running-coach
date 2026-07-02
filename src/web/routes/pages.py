@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from sqlalchemy.orm import Session
 from src.models import get_db, User, TrainingSession, DailyMetrics, WeightMeasurement, DeletedTraining, get_settings
 from src.logger import get_logger
-from src.deps import templates
+from src.deps import templates, local_dt
 from src.api.deps import get_current_user
 from src.config import settings
 from src.services.auth import check_telegram_login_token
@@ -19,6 +19,8 @@ from src.web.state import _pending, TRAINING_TYPES_RU
 from src.crypto import encrypt
 import json
 from pathlib import Path
+from datetime import timezone
+from zoneinfo import ZoneInfo
 
 logger = get_logger("app")
 router = APIRouter()
@@ -32,7 +34,7 @@ _AUTH_ERRORS = {
 }
 
 
-def render_page(db, user_id: int, user_name: str = "Бегун", year=None, month=None):
+def render_page(db, user_id: int, user_name: str = "Бегун", year=None, month=None, tz_str=None):
     all_sessions = db.query(TrainingSession).filter(TrainingSession.user_id == user_id).order_by(TrainingSession.begin_ts.desc()).all()
     settings = get_settings()
     weight_measurements = db.query(WeightMeasurement).filter(WeightMeasurement.user_id == user_id).order_by(WeightMeasurement.measured_at).all()
@@ -66,7 +68,12 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
 
     rows = ""
     for s in filtered:
-        t = s.begin_ts.strftime("%d.%m.%Y %H:%M") if s.begin_ts else ""
+        if s.begin_ts:
+            tz_name = tz_str or s.timezone or "Europe/Moscow"
+            local_begin = s.begin_ts.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(tz_name))
+            t = local_begin.strftime("%d.%m.%Y %H:%M")
+        else:
+            t = ""
         dur = fmt_duration(s.duration_minutes)
         eg = s.elevation_gain
         el = s.elevation_loss
@@ -109,8 +116,8 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
     else:
         latest_hrv = latest_rhr = latest_tired = latest_perf = latest_recovery_pct = ''
 
-    from datetime import datetime
-    now = datetime.now()
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     with _auto_sync_status_lock:
         as_health = dict(_auto_sync_status['health'])
         as_activity = dict(_auto_sync_status['activity'])
@@ -199,7 +206,7 @@ async def register_page(request: Request, token: str = "", error: Optional[str] 
 async def index(request: Request, year: Optional[int] = None, month: Optional[int] = None, db: Session = Depends(get_db),
                 current_user: User = Depends(get_current_user)):
     user_name = current_user.name or current_user.telegram_username or "Бегун"
-    ctx = render_page(db, user_id=current_user.id, user_name=user_name, year=year, month=month)
+    ctx = render_page(db, user_id=current_user.id, user_name=user_name, year=year, month=month, tz_str=current_user.timezone)
     return templates.TemplateResponse(request, "index.html", ctx)
 
 
@@ -212,8 +219,9 @@ async def session_detail(request: Request, session_id: int, db: Session = Depend
 
     recovery_info = None
     if s.begin_ts:
-        from datetime import date
-        training_date = s.begin_ts.date()
+        tz_name = current_user.timezone or s.timezone or "Europe/Moscow"
+        local_begin = s.begin_ts.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(tz_name))
+        training_date = local_begin.date()
         rm = db.query(DailyMetrics).filter(DailyMetrics.user_id == current_user.id, DailyMetrics.date == training_date).first()
         if rm:
             _, hrv_label = hrv_status(rm.avg_sleep_hrv, rm.sleep_hrv_baseline, rm.sleep_hrv_sd,
@@ -317,7 +325,7 @@ async def session_detail(request: Request, session_id: int, db: Session = Depend
         "suspect_badge": suspect_badge,
         "suspect_detail": suspect_detail,
         "type_ru": TRAINING_TYPES_RU.get(s.training_type, s.training_type),
-        "date": s.begin_ts.strftime("%d.%m.%Y %H:%M") if s.begin_ts else "",
+        "date": local_begin.strftime("%d.%m.%Y %H:%M") if s.begin_ts else "",
         "dist": f"{s.total_distance_km:.2f}",
         "dur": fmt_duration(s.duration_minutes),
         "hr": s.avg_heart_rate,
@@ -415,7 +423,7 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
                         db: Session = Depends(get_db),
                         current_user: User = Depends(get_current_user)):
     from src.models import User, WeightMeasurement
-    from datetime import datetime
+    from datetime import datetime, timezone
     user = db.query(User).filter(User.id == current_user.id).first()
     audit = AuditService(db)
     if not user:
@@ -435,7 +443,7 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
     elif not coros_email:
         user.coros_password = None
     if old_weight != weight:
-        wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.utcnow(), user_id=current_user.id)
+        wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.now(timezone.utc).replace(tzinfo=None), user_id=current_user.id)
         db.add(wm)
     db.commit()
 

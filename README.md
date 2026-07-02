@@ -74,6 +74,7 @@ max_hr INTEGER DEFAULT 177              -- Максимальный пульс (
 max_credible_pace FLOAT DEFAULT 3.0     -- Максимально правдоподобный темп (мин/км)
 max_gps_jump_m FLOAT DEFAULT 100.0      -- Макс. скачок GPS между точками (м)
 min_hr_for_fast_pace INTEGER DEFAULT 130-- Мин. пульс для быстрого темпа (уд/мин)
+timezone VARCHAR(50)                     -- IANA-таймзона пользователя (e.g. "Europe/Moscow")
 is_active BOOLEAN DEFAULT TRUE          -- Активен ли пользователь
 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 registered_at DATETIME                  -- Дата регистрации
@@ -99,6 +100,7 @@ elevation_loss INTEGER                  -- Общий спуск (м)
 suspect_flags JSON DEFAULT []           -- Флаги сомнительных точек
 cleaning_log JSON DEFAULT []            -- Лог очистки GPS-ошибок
 avg_cadence INTEGER                     -- Средний каденс (spm)
+timezone VARCHAR(50)                     -- IANA-таймзона тренировки (e.g. "Europe/Moscow")
 training_effect FLOAT                   -- Аэробный тренировочный эффект (0‑10)
 anaerobic_training_effect FLOAT         -- Анаэробный тренировочный эффект (0‑10)
 vo2max FLOAT                           -- Макс. потребление кислорода
@@ -452,7 +454,9 @@ python run_telegram_bot.py
 ### ⬜ В работе / запланировано
 - [ ] **Sprint 6** (TECH_DEBT.md): настраиваемая частота синхронизации Coros per-user, баннер для новых пользователей, ручная первая синхронизация
 - [ ] **Sprint 7** (TECH_DEBT.md): панель администрирования — дашборд, управление пользователями, просмотр аудита, принудительный sync
-- [ ] **Sprint 4** (TECH_DEBT.md): стандартизация времени (UTC), мульти-брендовая архитектура (`BaseWatchClient`, `WatchCredential`), Coros-клиент на httpx
+- [ ] **Sprint 4** (TECH_DEBT.md): 
+  - [x] п.8 — стандартизация времени (UTC): все `utcnow()` заменены, время в БД — naive UTC, User.timezone, TrainingSession.timezone
+  - [ ] п.12+14 — мульти-брендовая архитектура (`BaseWatchClient`, `WatchCredential`), Coros-клиент на httpx
 - [ ] **Модуль аналитики** — 8 этапов из `decision_module_design.md`
 - [ ] Фильтр по типу тренировки на главной (Все / Бег / Ходьба)
 - [ ] Общая дистанция и время за неделю/месяц

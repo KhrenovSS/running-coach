@@ -1,5 +1,5 @@
 # Импорт библиотек (Library imports)
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from timezonefinder import TimezoneFinder
 import json
@@ -278,6 +278,7 @@ def process_trackpoints(trackpoints, start_time_utc, max_hr=177,
             'elevation_gain': 0,
             'elevation_loss': 0,
             'avg_cadence': None,
+            'timezone': None,
             'cleaning_log': cleaning_log,
         }
 
@@ -322,6 +323,7 @@ def process_trackpoints(trackpoints, start_time_utc, max_hr=177,
             'elevation_gain': 0,
             'elevation_loss': 0,
             'avg_cadence': None,
+            'timezone': tz_name,
             'cleaning_log': cleaning_log,
         }
 
@@ -624,7 +626,8 @@ def process_trackpoints(trackpoints, start_time_utc, max_hr=177,
         start_utc_aware = start_time_utc.replace(tzinfo=ZoneInfo("UTC"))
     else:
         start_utc_aware = start_time_utc
-    begin_ts = start_utc_aware.astimezone(local_tz).replace(tzinfo=None)
+    begin_ts = start_utc_aware.replace(tzinfo=None)  # naive UTC for storage
+    begin_local = start_utc_aware.astimezone(local_tz)  # aware local time for weather
 
     # Расчёт суммарного набора/спуска высоты (Calculate total elevation gain/loss)
     avg_temperature = None
@@ -641,21 +644,17 @@ def process_trackpoints(trackpoints, start_time_utc, max_hr=177,
     if positions:
         mid_idx = len(positions) // 2
         center_lat, center_lon = positions[mid_idx]
-        date_str = begin_ts.strftime("%Y-%m-%d")
+        date_str = begin_local.strftime("%Y-%m-%d")
         weather = fetch_weather(center_lat, center_lon, date_str)
         if weather:
-            ref_tz = ZoneInfo(tz_name) if tz_name else None
-            # Добавить часовой пояс к наивному datetime (Add timezone to naive datetime)
-            def aware(dt_naive):
-                return dt_naive.replace(tzinfo=ref_tz) if ref_tz else dt_naive
-            avg_temperature = get_temp_at_time(weather, aware(begin_ts))
-            weather_code = get_weather_code_at_time(weather, aware(begin_ts))
+            avg_temperature = get_temp_at_time(weather, begin_local)
+            weather_code = get_weather_code_at_time(weather, begin_local)
             cumul_min = 0.0
             for seg in segments:
                 seg_mid_min = cumul_min + seg['duration_min'] / 2
-                seg_dt = begin_ts + timedelta(minutes=seg_mid_min)
-                seg['temperature'] = get_temp_at_time(weather, aware(seg_dt))
-                seg['weather_code'] = get_weather_code_at_time(weather, aware(seg_dt))
+                seg_dt = begin_local + timedelta(minutes=seg_mid_min)
+                seg['temperature'] = get_temp_at_time(weather, seg_dt)
+                seg['weather_code'] = get_weather_code_at_time(weather, seg_dt)
                 cumul_min += seg['duration_min']
 
     # Средний каденс за тренировку (Average cadence for the session)
@@ -678,6 +677,7 @@ def process_trackpoints(trackpoints, start_time_utc, max_hr=177,
         'elevation_gain': total_elevation_gain,
         'elevation_loss': total_elevation_loss,
         'avg_cadence': avg_cadence,
+        'timezone': tz_name,
     }
 
     if cleaning_log:

@@ -96,6 +96,11 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
                 session.cleaning_log = cleaning_log_val
             if flags_val:
                 session.suspect_flags = flags_val
+            tz = data.get('timezone')
+            if tz:
+                db_user = db.query(User).filter(User.id == current_user.id).first()
+                if db_user and not db_user.timezone:
+                    db_user.timezone = tz
             db.add(session)
             db.commit()
             db.refresh(session)

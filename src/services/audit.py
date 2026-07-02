@@ -18,7 +18,7 @@ Usage:
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -81,7 +81,7 @@ class AuditService:
                 user_id=user_id,
                 ip_address=ip_address,
                 metadata_json=metadata_str,
-                created_at=datetime.utcnow(),
+                created_at=datetime.now(timezone.utc).replace(tzinfo=None),
             )
             self.db.add(event)
             self.db.commit()
@@ -115,7 +115,7 @@ class AuditService:
                 "user_id": user_id,
                 "ip_address": ip_address,
                 "metadata": metadata,
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             },
         )
     

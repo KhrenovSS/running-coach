@@ -7,7 +7,7 @@ Application health check for monitoring and self-diagnostics.
 
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -78,7 +78,7 @@ async def health_check(db: Session = Depends(get_db)):
     
     response = {
         "status": overall_status,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "application": {
             "name": "AI Running Coach",
             "uptime_seconds": int(uptime_seconds),
