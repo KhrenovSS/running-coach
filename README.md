@@ -179,8 +179,10 @@ created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 Управление схемой БД — через **Alembic**. При старте контейнера `app` выполняется `alembic upgrade head`:
 
 - `f75d2362cf9f` (fresh baseline) — единая database-agnostic миграция: все таблицы (users, training_sessions, daily_metrics, deleted_trainings, weight_measurements, training_feedback, audit_events, auth_tokens) с индексами и ограничениями. Заменены 4 старые SQLite-only миграции.
+- `a1b2c3d4e5f6` — data migration: конвертация старых naive-local `begin_ts` → naive UTC
+- `5e287a9fc289` — convert all DateTime columns to `TIMESTAMP WITH TIME ZONE`
 
-Файлы миграций: `alembic/versions/`. Конфигурация: `alembic.ini`, `alembic/env.py` (`DATABASE_URL` из env, `render_as_batch=True` только для SQLite).
+Файлы миграций: `alembic/versions/`. Конфигурация: `alembic.ini`, `alembic/env.py` (`DATABASE_URL` из env).
 
 ### Отношения (Foreign Keys)
 ```
@@ -428,8 +430,8 @@ volume: pgdata      uploads/ logs/      (нет volumes)
 ```bash
 cd /home/nimda/projects/running-coach
 
-# Веб-сервер (используется SQLite, если DATABASE_URL не задан)
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+# Веб-сервер (требуется запущенный PostgreSQL через docker compose up db -d)
+DATABASE_URL=postgresql://running_coach:${POSTGRES_PASSWORD}@localhost:5432/running_coach uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 # Telegram-бот (отдельный терминал)
 python run_telegram_bot.py
@@ -453,11 +455,11 @@ python run_telegram_bot.py
 - [x] Миграции схемы БД через Alembic (автоматически при старте)
 - [x] Структурированное логирование и аудит (Level 2 observability)
 - [x] Аутентификация: email+пароль (bcrypt), Telegram-токены, session-cookie
-- [x] PostgreSQL + Docker Compose (3 контейнера: db, app, bot) — Sprint 5
+- [x] PostgreSQL + Docker Compose (3 контейнера: db, app, bot)
 - [x] **Sprint 3**: декомпозиция main.py (2776 → 7 строк), Jinja2‑шаблонизация (6 шаблонов), pydantic‑settings
+- [x] **Sprint 4.5** (TECH_DEBT.md): полный отказ от SQLite, переход на PostgreSQL + `TIMESTAMP WITH TIME ZONE`
 
 ### ⬜ В работе / запланировано
-- [ ] **Sprint 4.5** (TECH_DEBT.md): полный отказ от SQLite, переход на PostgreSQL + `TIMESTAMP WITH TIME ZONE`
 - [ ] **Sprint 4** (TECH_DEBT.md) — п.12+14: мульти-брендовая архитектура (`BaseWatchClient`, `WatchCredential`), Coros-клиент на httpx
 - [ ] **Sprint 6** (TECH_DEBT.md): настраиваемая частота синхронизации per-user, баннер для новых пользователей, ручная первая синхронизация
 - [ ] **Модуль аналитики** — 8 этапов из `decision_module_design.md`
@@ -525,13 +527,11 @@ python run_telegram_bot.py
 
 **Краткий список (по приоритету):**
 
-🟠 **Серьёзно — мешает развитию:**
-- Путаница UTC vs локальное время в `DateTime`-полях.
-
 🟡 **Средне — техдолг:**
 - Coros-клиент на синхронном `requests`, без TTL токена.
 
-✅ **Решено (Sprint 1–2 + Sprint 5):**
+✅ **Решено (Sprint 1–3 + Sprint 4.5):**
+- ~~Путаница UTC vs локальное время в `DateTime`-полях~~ → Все 14 колонок `TIMESTAMP WITH TIME ZONE`, все `.replace(tzinfo=None)` удалены
 - ~~Telegram-бот запускался через `subprocess.Popen` из `main.py`~~ → Вынесен в отдельный процесс (Docker-контейнер `bot`)
 - ~~Два источника правды для настроек: `UserSettings` (веб) vs `User` (бот)~~ → модель `UserSettings` удалена, всё на `User`
 - ~~SQLite без WAL~~ → PostgreSQL 16 в Docker (SQLite — fallback для локальной разработки с WAL)
@@ -596,4 +596,4 @@ sudo bash -c 'cd /home/nimda/projects/running-coach && set -a && source .env && 
 
 ---
 
-*Последнее обновление: 02.07.2026 — Sprint 3 завершён*
+*Последнее обновление: 02.07.2026 — Sprint 4.5 завершён*

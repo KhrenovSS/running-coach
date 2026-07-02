@@ -2,58 +2,31 @@
 
 All notable changes to this project are tracked here.
 
-## [02.07.2026] — Sprint 4.5, Phase 4-5: Remove all naive-UTC workarounds
+## [02.07.2026] — Sprint 4.5 завершён: PostgreSQL-only + TIMESTAMPTZ
 
 ### Changed
-- **All `.replace(tzinfo=None)` removed** from 10 files — datetimes are now stored/compared as aware UTC
-- **`src/services/auth.py`**: 5 `datetime.now(timezone.utc)` calls now return aware (was stripped to naive)
-- **`src/services/audit.py`**: `created_at` now aware UTC
-- **`src/telegram_bot.py`**: 6 datetime calls now aware (registered_at, last_health_sync_at, week_ago, measured_at ×2, today_start)
-- **`src/web/routes/pages.py`**: `now` and `measured_at` now aware UTC
-- **`src/services/coros_sync_auto.py`**: 5 status datetime calls now aware; `bt` parsing now produces aware UTC (`.replace(tzinfo=timezone.utc)`)
-- **`src/parsers/tcx_parser.py`**: fallback `start_time_utc` now aware
-- **`src/coros_client.py`**: `start_time`/`end_time` from `datetime.fromtimestamp()` now aware UTC
-- **`src/parsers/common.py`**: `start_time_utc` normalized to aware UTC at function entry; `begin_ts` in result dict now aware UTC
-- **`src/deps.py:local_dt()`**: simplified — `dt.astimezone(tz)` with naive fallback (was `dt.replace(tzinfo=utc).astimezone(tz).replace(tzinfo=None)`)
+- **Полный отказ от SQLite** для разработки/продакшена — `DATABASE_URL` обязателен, engine создаётся лениво
+- **All 14 DateTime columns → TIMESTAMPTZ** (Alembic `5e287a9fc289`) — `AT TIME ZONE 'UTC'` для существующих данных
+- **14 columns**: users (created_at, registered_at, last_coros_sync, last_health_sync_at), training_sessions (begin_ts), deleted_trainings (begin_ts, deleted_at), daily_metrics (synced_at), weight_measurements (measured_at), training_feedback (created_at), audit_events (created_at), auth_tokens (created_at, expires_at, used_at)
+- **`utcnow()`** возвращает aware `datetime.now(timezone.utc)`
+- **All `.replace(tzinfo=None)` removed** (grep → 0 matches) — 10 files: auth.py, audit.py, telegram_bot.py, pages.py, coros_sync_auto.py, tcx_parser.py, coros_client.py, common.py, deps.py
+- **`local_dt()`** simplified: `dt.astimezone(tz)` with naive fallback
+- **`common.py`**: `start_time_utc` normalized to aware UTC at function entry
+- **Port 5432 exposed** on db container for local dev access
+- **Lazy engine** in models.py: `get_engine()` / `SessionLocal` — engine created on first access
+
+### Removed
+- SQLite engine branch, WAL pragmas, `check_same_thread`, auto-fallback
+- `_RENDER_AS_BATCH` from alembic/env.py
+- `sqlalchemy.url` from alembic.ini
+- All `render_as_batch` calls
 
 ### Verified
 - `grep "replace(tzinfo=None)" src/` → 0 matches
-- Docker app+bot start without errors
-- Audit events stored with `+00` timezone (aware UTC)
-- Tests pass (3/3)
-
-## [02.07.2026] — Sprint 4.5, Phase 3: TIMESTAMPTZ models + migration
-
-### Changed
-- **All 14 DateTime columns** in `src/models.py` changed to `DateTime(timezone=True)`:
-  - users: created_at, registered_at, last_coros_sync, last_health_sync_at
-  - training_sessions: begin_ts
-  - deleted_trainings: begin_ts, deleted_at
-  - daily_metrics: synced_at
-  - weight_measurements: measured_at
-  - training_feedback: created_at
-  - audit_events: created_at
-  - auth_tokens: created_at, expires_at, used_at
-- **`utcnow()` helper** now returns aware datetime `datetime.now(timezone.utc)` (was `.replace(tzinfo=None)`)
-- **Alembic migration `5e287a9fc289`**: ALTER all 14 columns to `TIMESTAMP WITH TIME ZONE` on PostgreSQL
-- **All existing data** (27 training sessions) preserved with UTC timezone attached
-
-## [02.07.2026] — Sprint 4.5, Phase 1-2: infra + remove SQLite from code
-
-### Added
-- **Port 5432 exposed** on db container for local dev access
-- **Lazy engine** in models.py: `get_engine()` / `SessionLocal` — engine not created at import time
-
-### Changed
-- **docker-compose.yml**: db container now exposes port 5432
-- **.env.example / .env**: `DATABASE_URL` defaults to PostgreSQL on localhost
-- **src/models.py**: removed SQLite branch, WAL pragmas, auto-fallback; `DATABASE_URL` is now required
-- **alembic/env.py**: removed `_RENDER_AS_BATCH` and `render_as_batch`
-- **alembic.ini**: removed `sqlalchemy.url = sqlite:///running_coach.db`
-- **tests/conftest.py**: sets `DATABASE_URL=sqlite:///:memory:` before importing models
-- **README.md, AGENTS.md**: updated local dev instructions
-
-## [02.07.2026] — Sprint 4.5, Phase 1: infra (expose PostgreSQL, .env.example)
+- Docker 3/3 containers Up and healthy
+- Audit events stored with `+00` timezone
+- All training sessions preserved with correct UTC values
+- Tests pass (3/3) with in-memory SQLite
 
 ## [02.07.2026] — Sprint 4, п.8: стандартизация времени (UTC)
 
