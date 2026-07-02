@@ -2,6 +2,19 @@
 
 All notable changes to this project are tracked here.
 
+## [02.07.2026] — Добавлено подробное логирование синхронизации + исправлен баг NameError в settings
+
+### Added
+- **`src/services/sync_service.py`**: подробное логирование каждого шага синхронизации:
+  - `auto_sync_health()` / `auto_sync_activities()` — логируется количество обработанных credentials, результат по каждому (synced/empty/failed), итоговый счётчик
+  - `sync_health_for_user()` — логируется число записей от API, сколько добавлено/пропущено, заполнение аналитики
+  - `sync_activities_for_user()` — логируется `last_activity_sync_at`, `since`, число активностей от API, сколько пропущено (уже существует/удалено), сколько синхронизировано
+  - `_make_client()` — логируется ошибка аутентификации с указанием brand и user_id
+  - При пустом списке `WatchCredential` — логируется что нет учётных данных
+
+### Fixed
+- **`src/web/routes/pages.py:7`**: `NameError: name 'WatchCredential' is not defined` при открытии `/settings`. Модель `WatchCredential` не была импортирована в глобальных импортах, хотя использовалась в `settings_page()`. Добавлена в `from src.models import ... WatchCredential`.
+
 ## [02.07.2026] — Добавлена Фаза 4 в план работ: выбор бренда часов при регистрации
 
 ### Added

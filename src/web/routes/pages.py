@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from sqlalchemy.orm import Session
-from src.models import get_db, User, TrainingSession, DailyMetrics, WeightMeasurement, DeletedTraining, get_settings
+from src.models import get_db, User, TrainingSession, DailyMetrics, WeightMeasurement, DeletedTraining, WatchCredential, get_settings
 from src.logger import get_logger
 from src.deps import templates, local_dt
 from src.api.deps import get_current_user

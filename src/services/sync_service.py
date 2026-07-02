@@ -89,6 +89,7 @@ async def sync_health_for_user(cred: WatchCredential, brand: str) -> int:
     """Возвращает количество новых синхронизированных записей (Return count of new synced records)"""
     client = await _make_client(cred)
     if not client:
+        logger.warning("Health sync: brand=%s user=%s — не удалось создать клиент (auth failed)", brand, cred.user_id)
         return -1
 
     db = SessionLocal()
@@ -99,9 +100,10 @@ async def sync_health_for_user(cred: WatchCredential, brand: str) -> int:
         end_day = today.strftime("%Y%m%d")
 
         metrics_list = await client.get_daily_metrics(start_day, end_day)
-        logger.info("Health sync for brand=%s user=%s: got %d records", brand, cred.user_id, len(metrics_list))
+        logger.info("Health sync for brand=%s user=%s: got %d records from API", brand, cred.user_id, len(metrics_list))
         if not metrics_list:
             save_dashboard_data(client, db, cred.user_id, brand)
+            logger.info("Health sync: brand=%s user=%s — API вернул пустой список (нет данных)", brand, cred.user_id)
             return 0
 
         analytics_by_date = {}
@@ -157,6 +159,9 @@ async def sync_health_for_user(cred: WatchCredential, brand: str) -> int:
 
         if synced:
             db.commit()
+            logger.info("Health sync: brand=%s user=%s — добавлено %d новых записей", brand, cred.user_id, synced)
+        else:
+            logger.info("Health sync: brand=%s user=%s — все %d записей уже существуют (пропущены)", brand, cred.user_id, len(metrics_list))
 
         # Fill analytics gaps
         if analytics_by_date:
@@ -180,6 +185,7 @@ async def sync_health_for_user(cred: WatchCredential, brand: str) -> int:
                     updated += 1
             if updated:
                 db.commit()
+                logger.info("Health sync: brand=%s user=%s — заполнено аналитикой %d записей", brand, cred.user_id, updated)
 
         save_dashboard_data(client, db, cred.user_id, brand)
         return synced
@@ -201,29 +207,39 @@ async def sync_activities_for_user(cred: WatchCredential, brand: str) -> int:
 
     client = await _make_client(cred)
     if not client:
+        logger.warning("Activity sync: brand=%s user=%s — не удалось создать клиент (auth failed)", brand, cred.user_id)
         return -1
 
     db = SessionLocal()
     try:
         us = db.query(User).filter(User.id == cred.user_id).first()
         if not us:
+            logger.warning("Activity sync: brand=%s user=%s — пользователь не найден", brand, cred.user_id)
             return -1
 
         # Буфер 2ч чтобы не пропустить активности, которые Coros обработал с задержкой (2h lookback buffer to catch delayed Coros activities)
         since = cred.last_activity_sync_at - timedelta(hours=2) if cred.last_activity_sync_at else None
+        logger.info("Activity sync: brand=%s user=%s last_activity_sync_at=%s since=%s",
+                     brand, cred.user_id, cred.last_activity_sync_at, since)
         activities = await client.list_activities(since=since)
         if not activities:
+            logger.info("Activity sync: brand=%s user=%s — API вернул пустой список", brand, cred.user_id)
             return 0
+
+        logger.info("Activity sync: brand=%s user=%s — API вернул %d активностей, фильтрация...", brand, cred.user_id, len(activities))
 
         existing_begin = {r[0] for r in db.query(TrainingSession.begin_ts).filter(TrainingSession.user_id == cred.user_id).all()}
         all_deleted = db.query(DeletedTraining).filter(DeletedTraining.user_id == cred.user_id).all()
 
         synced = 0
+        skipped_existing = 0
+        skipped_deleted = 0
         for act in activities:
             bt = act.get('start_time')
             if not bt:
                 continue
             if bt in existing_begin:
+                skipped_existing += 1
                 continue
 
             fit_data = await client.download_activity(act['id'], act['sport_type'])
@@ -237,6 +253,7 @@ async def sync_activities_for_user(cred: WatchCredential, brand: str) -> int:
                     deleted_match = d
                     break
             if deleted_match:
+                skipped_deleted += 1
                 continue
 
             with tempfile.NamedTemporaryFile(delete=False, suffix=".fit") as tmp:
@@ -265,9 +282,13 @@ async def sync_activities_for_user(cred: WatchCredential, brand: str) -> int:
             synced += 1
 
         if synced:
-            # Update last_activity_sync_at
             cred.last_activity_sync_at = datetime.now(timezone.utc)
             db.commit()
+            logger.info("Activity sync: brand=%s user=%s — синхронизировано %d новых тренировок (skipped_existing=%d, skipped_deleted=%d)",
+                         brand, cred.user_id, synced, skipped_existing, skipped_deleted)
+        else:
+            logger.info("Activity sync: brand=%s user=%s — новых тренировок нет (всего=%d, already_exist=%d, deleted=%d)",
+                         brand, cred.user_id, len(activities), skipped_existing, skipped_deleted)
 
         return synced
     except Exception as e:
@@ -297,14 +318,34 @@ def auto_sync_health():
         finally:
             db.close()
 
+        if not credentials:
+            logger.info("Health sync: нет учётных данных WatchCredential")
+            with _auto_sync_status_lock:
+                s = _auto_sync_status['health']
+                s['status'] = 'ok'
+                s['last_run'] = datetime.now(timezone.utc)
+                s['message'] = 'Нет учётных данных'
+                s['next_run'] = s['last_run'] + timedelta(seconds=health_sync_interval)
+            return
+
         total_synced = 0
         total_empty = 0
+        total_failed = 0
         for cred in credentials:
-            result = asyncio.run(sync_health_for_user(cred, cred.brand))
-            if result > 0:
-                total_synced += result
-            elif result == 0:
-                total_empty += 1
+            try:
+                result = asyncio.run(sync_health_for_user(cred, cred.brand))
+                if result > 0:
+                    total_synced += result
+                    logger.info("Health sync: brand=%s user=%s synced=%d", cred.brand, cred.user_id, result)
+                elif result == 0:
+                    total_empty += 1
+                    logger.info("Health sync: brand=%s user=%s — нет новых данных", cred.brand, cred.user_id)
+                elif result == -1:
+                    total_failed += 1
+                    logger.warning("Health sync: brand=%s user=%s — ошибка аутентификации", cred.brand, cred.user_id)
+            except Exception as e:
+                total_failed += 1
+                logger.error("Health sync: brand=%s user=%s — исключение: %s", cred.brand, cred.user_id, e)
 
         with _auto_sync_status_lock:
             s = _auto_sync_status['health']
@@ -312,12 +353,16 @@ def auto_sync_health():
             s['last_run'] = datetime.now(timezone.utc)
             if total_synced > 0:
                 s['message'] = f'✓ Синхронизировано: {total_synced}'
-            elif total_empty > 0:
+            elif total_empty > 0 and total_failed == 0:
                 s['message'] = '🟡 Синхронизация прошла, но данных о сне нет'
+            elif total_failed > 0:
+                s['message'] = f'⚠ Ошибок: {total_failed}, пусто: {total_empty}'
             else:
                 s['message'] = 'Нет учётных данных'
             s['next_run'] = s['last_run'] + timedelta(seconds=health_sync_interval)
+        logger.info("Health sync: итого — synced=%d, empty=%d, failed=%d", total_synced, total_empty, total_failed)
     except Exception as e:
+        logger.exception("Health sync: глобальная ошибка")
         with _auto_sync_status_lock:
             s = _auto_sync_status['health']
             s['status'] = 'error'
@@ -342,14 +387,34 @@ def auto_sync_activities():
         finally:
             db.close()
 
+        if not credentials:
+            logger.info("Activity sync: нет учётных данных WatchCredential")
+            with _auto_sync_status_lock:
+                s = _auto_sync_status['activity']
+                s['status'] = 'ok'
+                s['last_run'] = datetime.now(timezone.utc)
+                s['message'] = 'Нет учётных данных'
+                s['next_run'] = s['last_run'] + timedelta(seconds=activity_sync_interval)
+            return
+
         total_synced = 0
         total_empty = 0
+        total_failed = 0
         for cred in credentials:
-            result = asyncio.run(sync_activities_for_user(cred, cred.brand))
-            if result > 0:
-                total_synced += result
-            elif result == 0:
-                total_empty += 1
+            try:
+                result = asyncio.run(sync_activities_for_user(cred, cred.brand))
+                if result > 0:
+                    total_synced += result
+                    logger.info("Activity sync: brand=%s user=%s synced=%d", cred.brand, cred.user_id, result)
+                elif result == 0:
+                    total_empty += 1
+                    logger.info("Activity sync: brand=%s user=%s — нет новых тренировок", cred.brand, cred.user_id)
+                elif result == -1:
+                    total_failed += 1
+                    logger.warning("Activity sync: brand=%s user=%s — ошибка аутентификации", cred.brand, cred.user_id)
+            except Exception as e:
+                total_failed += 1
+                logger.error("Activity sync: brand=%s user=%s — исключение: %s", cred.brand, cred.user_id, e)
 
         with _auto_sync_status_lock:
             s = _auto_sync_status['activity']
@@ -357,12 +422,16 @@ def auto_sync_activities():
             s['last_run'] = datetime.now(timezone.utc)
             if total_synced > 0:
                 s['message'] = f'✓ Синхронизировано: {total_synced}'
-            elif total_empty > 0:
+            elif total_empty > 0 and total_failed == 0:
                 s['message'] = '🟡 Синхронизация прошла, но новых тренировок нет'
+            elif total_failed > 0:
+                s['message'] = f'⚠ Ошибок: {total_failed}, пусто: {total_empty}'
             else:
                 s['message'] = 'Нет учётных данных'
             s['next_run'] = s['last_run'] + timedelta(seconds=activity_sync_interval)
+        logger.info("Activity sync: итого — synced=%d, empty=%d, failed=%d", total_synced, total_empty, total_failed)
     except Exception as e:
+        logger.exception("Activity sync: глобальная ошибка")
         with _auto_sync_status_lock:
             s = _auto_sync_status['activity']
             s['status'] = 'error'
