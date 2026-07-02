@@ -2,6 +2,22 @@
 
 All notable changes to this project are tracked here.
 
+## [02.07.2026] — Sprint 3, шаг 2: сервисы выделены в src/services/
+
+### Added
+- **`src/services/telegram_notify.py`**: `telegram_notify()` — отправка уведомлений через Telegram (выделена из main.py)
+- **`src/services/stats.py`**: `fmt_duration()`, `calc_stats()`, `zone_ranges()`, `render_zone_bars()`, `render_type_row()`, `build_nav_html()`, `MONTHS_RU`, `MONTHS_RU_SHORT`, `ZONE_COLORS` — вспомогательные функции статистики и отображения
+- **`src/services/recovery_view.py`**: `hrv_status()`, `tired_label()`, `readiness_label()`, `load_label()` — классификация метрик здоровья
+- **`src/services/coros_sync_auto.py`**: `_auto_sync_status`, `_auto_sync_status_lock`, `health_sync_interval`, `activity_sync_interval`, `update_last_health_sync()`, `save_dashboard_data()`, `auto_sync_health()`, `auto_sync_health_inner()`, `auto_sync_activities()`, `auto_sync_activities_inner()` — фоновая автосинхронизация Coros
+
+### Changed
+- **main.py**: все выделенные функции и глобальные переменные заменены на импорты из `src.services.*`
+- **Убраны префиксы `_`** у публичных функций: `_telegram_notify` → `telegram_notify`, `_hrv_status` → `hrv_status`, `_tired_label` → `tired_label`, `_readiness_label` → `readiness_label`, `_load_label` → `load_label`, `_update_last_health_sync` → `update_last_health_sync`, `_save_dashboard_data` → `save_dashboard_data`, `_auto_sync_health` → `auto_sync_health`, `_auto_sync_activities` → `auto_sync_activities`
+- **Глобалы автосинхронизации**: `_HEALTH_SYNC_INTERVAL` → `health_sync_interval`, `_ACTIVITY_SYNC_INTERVAL` → `activity_sync_interval`, `_AUTO_SYNC_STATUS_LOCK` → `_auto_sync_status_lock`
+
+### Removed
+- **~670 строк** из main.py (было ~2010 → ~1340 строк) — 22 функции/переменные вынесены в сервисные модули
+
 ## [02.07.2026] — Sprint 3, шаг 1: Jinja2-шаблоны
 
 ### Added

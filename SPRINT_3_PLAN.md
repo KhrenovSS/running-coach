@@ -27,14 +27,14 @@
   - [x] 1.9 Проверить: все страницы открываются, JS/графики работают
   - [x] 1.10 COMMIT: "Шаг 1: HTML вынесен в Jinja2-шаблоны"
 
-- [ ] **Шаг 2 — Выделение сервисов (бизнес-логика из main.py)**
-  - [ ] 2.1 Создать `src/services/telegram_notify.py` — `_telegram_notify()` (строки 52–97)
-  - [ ] 2.2 Создать `src/services/stats.py` — `calc_stats()`, `zone_ranges()`, `render_zone_bars()`, `render_type_row()`, `fmt_duration()`, `build_nav_html()`, `MONTHS_RU` (строки 102–225)
-  - [ ] 2.3 Создать `src/services/recovery_view.py` — `_hrv_status()`, `_tired_label()`, `_readiness_label()`, `_load_label()` (строки 228–302)
-  - [ ] 2.4 Создать `src/services/coros_sync_auto.py` — `_update_last_health_sync()`, `_save_dashboard_data()`, `_auto_sync_health()`, `_auto_sync_health_inner()`, `_auto_sync_activities()`, `_auto_sync_activities_inner()` (строки 2107–2519)
-  - [ ] 2.5 В main.py: заменить вызовы на импорты из сервисов
-  - [ ] 2.6 Проверить: `_telegram_notify`, статистика, автосинхронизация работают
-  - [ ] 2.7 COMMIT: "Шаг 2: бизнес-логика вынесена в src/services/"
+- [x] **Шаг 2 — Выделение сервисов (бизнес-логика из main.py)**
+  - [x] 2.1 Создать `src/services/telegram_notify.py` — `telegram_notify()` (бывш. `_telegram_notify`)
+  - [x] 2.2 Создать `src/services/stats.py` — `calc_stats()`, `zone_ranges()`, `render_zone_bars()`, `render_type_row()`, `fmt_duration()`, `build_nav_html()`, `MONTHS_RU`, `MONTHS_RU_SHORT`, `ZONE_COLORS`
+  - [x] 2.3 Создать `src/services/recovery_view.py` — `hrv_status()`, `tired_label()`, `readiness_label()`, `load_label()` (бывш. `_hrv_status`, `_tired_label`, `_readiness_label`, `_load_label`)
+  - [x] 2.4 Создать `src/services/coros_sync_auto.py` — `_auto_sync_status`, `_auto_sync_status_lock`, `health_sync_interval`, `activity_sync_interval`, `update_last_health_sync()`, `save_dashboard_data()`, `auto_sync_health()`, `auto_sync_health_inner()`, `auto_sync_activities()`, `auto_sync_activities_inner()`
+  - [x] 2.5 В main.py: заменить вызовы на импорты из сервисов; убраны префиксы `_` у глобальных переменных и функций
+  - [x] 2.6 Проверить: `telegram_notify`, статистика, автосинхронизация работают (импорты без ошибок)
+  - [x] 2.7 COMMIT: "Шаг 2: бизнес-логика вынесена в src/services/"
 
 - [ ] **Шаг 3 — Выделение роутов (API endpoints из main.py)**
   - [ ] 3.1 Создать `src/web/routes/__init__.py` — `web_router = APIRouter()`
