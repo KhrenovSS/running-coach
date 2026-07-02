@@ -24,7 +24,7 @@ _auto_sync_status_lock = threading.Lock()
 
 # Интервалы синхронизации из переменных окружения (Env-based sync intervals, will be per-credential in Sprint 6)
 health_sync_interval = int(os.getenv("COROS_HEALTH_SYNC_INTERVAL", "21600"))
-activity_sync_interval = int(os.getenv("COROS_ACTIVITY_SYNC_INTERVAL", "3600"))
+activity_sync_interval = int(os.getenv("COROS_ACTIVITY_SYNC_INTERVAL", "1800"))
 
 
 # Создать клиента для бренда по WatchCredential (Create a brand client from WatchCredential)
