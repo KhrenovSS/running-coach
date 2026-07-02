@@ -81,7 +81,7 @@ class AuditService:
                 user_id=user_id,
                 ip_address=ip_address,
                 metadata_json=metadata_str,
-                created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                created_at=datetime.now(timezone.utc),
             )
             self.db.add(event)
             self.db.commit()

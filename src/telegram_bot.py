@@ -191,7 +191,7 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
         old_coros_email = user.coros_email
         user.coros_email = email
         user.coros_password = encrypt(password)
-        user.registered_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        user.registered_at = datetime.now(timezone.utc)
 
         db.commit()
         logger.info("Пользователь %s (chat_id=%s) привязал Coros: %s", username, chat_id, email)
@@ -368,7 +368,7 @@ def _sync_for_user(user: User, chat_id: int, token: str):
                 msg_parts.append(f"здоровье: {synced_health}")
 
             # Сохраняем время последней синхронизации здоровья (Save last health sync time)
-            user.last_health_sync_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            user.last_health_sync_at = datetime.now(timezone.utc)
             # Сохраняем dashboard данные (Save dashboard data)
             try:
                 dashboard = client.get_dashboard()
@@ -533,7 +533,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     dur_str = f"{h}ч {m}мин" if h else f"{m}мин"
 
     # За последние 7 дней (Last 7 days)
-    week_ago = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)
+    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
     week_sessions = [s for s in sessions if s.begin_ts and s.begin_ts >= week_ago]
     week_km = sum(s.total_distance_km or 0 for s in week_sessions)
 
@@ -607,7 +607,7 @@ async def handle_weight_message(update: Update, context: ContextTypes.DEFAULT_TY
         if not user:
             await update.message.reply_text("❌ Пользователь не найден. Используй /start.")
             return
-        wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.now(timezone.utc).replace(tzinfo=None), user_id=user.id)
+        wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.now(timezone.utc), user_id=user.id)
         db.add(wm)
         db.commit()
         await update.message.reply_text(f"✅ Вес {weight} кг сохранён!")
@@ -645,7 +645,7 @@ async def cmd_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db = SessionLocal()
     try:
-        wm = WeightMeasurement(weight_kg=w, measured_at=datetime.now(timezone.utc).replace(tzinfo=None), user_id=user.id)
+        wm = WeightMeasurement(weight_kg=w, measured_at=datetime.now(timezone.utc), user_id=user.id)
         db.add(wm)
         db.commit()
         await update.message.reply_text(f"✅ Вес {w} кг сохранён!")
@@ -663,7 +663,7 @@ async def daily_weight_job(context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     audit = AuditService(db)
     try:
-        today_start = datetime.now(timezone.utc).replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         hour = datetime.now(ZoneInfo("Europe/Moscow")).hour
         users = db.query(User).filter(
             User.telegram_chat_id.isnot(None),

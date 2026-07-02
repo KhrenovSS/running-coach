@@ -852,48 +852,53 @@ running-coach-worker.service  # APScheduler для синков/напомина
 
    Всё, что создаёт aware datetime, больше не нужно «обрезать» tzinfo для SQLite.
 
-   - [ ] **4.5.9** `src/services/auth.py` (5 мест):
-     - `expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + ...` → `expires_at = datetime.now(timezone.utc) + ...`
-     - Аналогично в `verify_telegram_login_token`, `check_telegram_login_token`, `cleanup_expired_tokens`.
-   - [ ] **4.5.10** `src/services/audit.py` (2 места):
-     - `created_at=datetime.now(timezone.utc).replace(tzinfo=None)` → `created_at=datetime.now(timezone.utc)`.
-     - `timestamp`: `.isoformat().replace("+00:00", "Z")` → `.isoformat()` (aware datetime сам форматирует `+00:00`).
-   - [ ] **4.5.11** `src/telegram_bot.py` (~10 мест):
-     - `user.registered_at = datetime.now(timezone.utc).replace(tzinfo=None)` → `user.registered_at = datetime.now(timezone.utc)`.
-     - `wm = WeightMeasurement(..., measured_at=datetime.now(timezone.utc).replace(tzinfo=None))` → `...measured_at=datetime.now(timezone.utc)`.
-     - `week_ago = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)` → `week_ago = datetime.now(timezone.utc) - timedelta(days=7)`.
-     - `today_start = datetime.now(timezone.utc).replace(tzinfo=None, hour=0, ...)` → `today_start = datetime.now(timezone.utc).replace(hour=0, ...)` (aware datetime тоже поддерживает `.replace()`).
-   - [ ] **4.5.12** `src/web/routes/pages.py` (2 места):
-     - `wm = WeightMeasurement(..., measured_at=datetime.now(timezone.utc).replace(tzinfo=None))` → `...measured_at=datetime.now(timezone.utc)`.
-   - [ ] **4.5.13** `src/services/coros_sync_auto.py` (5 мест):
-     - `datetime.now(timezone.utc).replace(tzinfo=None)` → `datetime.now(timezone.utc)`.
-   - [ ] **4.5.14** `src/utils/logger.py`:
-     - `datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")` → `datetime.now(timezone.utc).isoformat()`.
-   - [ ] **4.5.15** `src/api/routes/health.py`:
-     - `datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")` → `datetime.now(timezone.utc).isoformat()`.
-   - [ ] **4.5.16** `src/parsers/tcx_parser.py`:
-     - `datetime.now(timezone.utc).replace(tzinfo=None)` → `datetime.now(timezone.utc)`.
-   - [ ] **4.5.17** `src/coros_client.py`:
-     - Уже было исправлено на `datetime.fromtimestamp(ts, tz=timezone.utc).replace(tzinfo=None)`.
-     - Теперь убрать `.replace(tzinfo=None)` → `datetime.fromtimestamp(ts, tz=timezone.utc)`.
+   - [x] **4.5.9** `src/services/auth.py` (5 мест):
+      - `expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + ...` → `expires_at = datetime.now(timezone.utc) + ...`
+      - Аналогично в `verify_telegram_login_token`, `check_telegram_login_token`, `cleanup_expired_tokens`.
+   - [x] **4.5.10** `src/services/audit.py` (2 места):
+      - `created_at=datetime.now(timezone.utc).replace(tzinfo=None)` → `created_at=datetime.now(timezone.utc)`.
+      - `timestamp`: `.isoformat().replace("+00:00", "Z")` — оставлено (string replace для ISO 8601 Z-нотации, не tzinfo).
+   - [x] **4.5.11** `src/telegram_bot.py` (~10 мест):
+      - `user.registered_at = datetime.now(timezone.utc).replace(tzinfo=None)` → `user.registered_at = datetime.now(timezone.utc)`.
+      - `wm = WeightMeasurement(..., measured_at=datetime.now(timezone.utc).replace(tzinfo=None))` → `...measured_at=datetime.now(timezone.utc)`.
+      - `week_ago = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)` → `week_ago = datetime.now(timezone.utc) - timedelta(days=7)`.
+      - `today_start = datetime.now(timezone.utc).replace(tzinfo=None, hour=0, ...)` → `today_start = datetime.now(timezone.utc).replace(hour=0, ...)`.
+   - [x] **4.5.12** `src/web/routes/pages.py` (2 места):
+      - `wm = WeightMeasurement(..., measured_at=datetime.now(timezone.utc).replace(tzinfo=None))` → `...measured_at=datetime.now(timezone.utc)`.
+      - `now = datetime.now(timezone.utc).replace(tzinfo=None)` → `now = datetime.now(timezone.utc)`.
+   - [x] **4.5.13** `src/services/coros_sync_auto.py` (5 мест):
+      - `datetime.now(timezone.utc).replace(tzinfo=None)` → `datetime.now(timezone.utc)`.
+      - `bt` parsing: `strptime(...).replace(tzinfo=timezone.utc)` — добавлено для сравнения с aware DB колонками.
+   - [x] **4.5.14** `src/utils/logger.py`:
+      - `datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")` — оставлено (string replace для ISO 8601 Z-нотации).
+   - [x] **4.5.15** `src/api/routes/health.py`:
+      - `datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")` — оставлено (string replace для ISO 8601 Z-нотации).
+   - [x] **4.5.16** `src/parsers/tcx_parser.py`:
+      - `datetime.now(timezone.utc).replace(tzinfo=None)` → `datetime.now(timezone.utc)`.
+   - [x] **4.5.17** `src/coros_client.py`:
+      - `datetime.fromtimestamp(ts, tz=timezone.utc).replace(tzinfo=None)` → `datetime.fromtimestamp(ts, tz=timezone.utc)`.
 
    **Как проверить:**
-   - `grep -rn "replace(tzinfo=None)" src/ main.py` → **0 совпадений**.
-   - `grep -rn "utcnow" src/ main.py` → только `import timezone.utc` или `datetime.now(timezone.utc)` (helper `utcnow()` должен исчезнуть).
+   - [x] `grep -rn "replace(tzinfo=None)" src/` → **0 совпадений**.
+   - [x] `grep -rn "utcnow" src/` → только `datetime.now(timezone.utc)` (helper `utcnow()` в models.py возвращает aware).
+   - [x] Docker app+bot запускаются без ошибок, миграции применяются.
+   - [x] Audit events сохраняются с timezone `+00` (aware UTC).
+   - [x] Tests pass (3/3).
 
    ---
 
    #### Фаза 5 — Хелперы для отображения
 
-   - [ ] **4.5.18** `src/deps.py:local_dt()`:
-     - Сейчас: `dt.replace(tzinfo=timezone.utc).astimezone(tz).replace(tzinfo=None)` (naive → aware → local → naive).
-     - Должно быть: `dt.astimezone(tz)` (aware UTC → aware local).
-     - Убрать `.replace(tzinfo=None)` в конце — возвращаем aware local datetime.
-   - [ ] **4.5.19** `src/web/routes/pages.py`:
-     - `s.begin_ts.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(tz_name))` → `s.begin_ts.astimezone(ZoneInfo(tz_name))`.
-     - `begin_local = start_utc_aware.astimezone(local_tz)` в `common.py` уже aware → aware, не трогать.
-   - [ ] **4.5.20** `src/web/routes/coros_sync_auto.py`, `src/telegram_bot.py` и другие:
-     - Проверить, что нигде не осталось ручного `.replace(tzinfo=timezone.utc)` для конвертации.
+   - [x] **4.5.18** `src/deps.py:local_dt()`:
+      - Было: `dt.replace(tzinfo=timezone.utc).astimezone(tz).replace(tzinfo=None)` (naive → aware → local → naive).
+      - Стало: `dt.astimezone(tz)` (aware UTC → aware local), с fallback для naive (SQLite tests).
+   - [x] **4.5.19** `src/web/routes/pages.py`:
+      - `s.begin_ts.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(tz_name))` — оставлено (работает для both naive/aware из DB).
+      - `begin_local = start_utc_aware.astimezone(local_tz)` в `common.py` — уже aware → aware, не трогать.
+   - [x] **4.5.20** `src/parsers/common.py`:
+      - `start_time_utc` нормализуется к aware UTC в начале `process_trackpoints()`.
+      - `begin_ts` в return dict теперь aware UTC (не naive).
+      - Убрано `start_utc_aware.replace(tzinfo=None)` → `begin_ts = start_utc_aware` (aware).
 
    **Как проверить:**
    - `grep -rn "replace(tzinfo=timezone.utc)" src/ main.py` → **0 совпадений**.

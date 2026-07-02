@@ -117,7 +117,7 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
         latest_hrv = latest_rhr = latest_tired = latest_perf = latest_recovery_pct = ''
 
     from datetime import datetime, timezone
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(timezone.utc)
     with _auto_sync_status_lock:
         as_health = dict(_auto_sync_status['health'])
         as_activity = dict(_auto_sync_status['activity'])
@@ -443,7 +443,7 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
     elif not coros_email:
         user.coros_password = None
     if old_weight != weight:
-        wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.now(timezone.utc).replace(tzinfo=None), user_id=current_user.id)
+        wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.now(timezone.utc), user_id=current_user.id)
         db.add(wm)
     db.commit()
 

@@ -126,8 +126,8 @@ class CorosClient:
                 "id": str(act["labelId"]),
                 "name": act.get("name", ""),
                 "sport_type": sport_type,
-                "start_time": datetime.fromtimestamp(start_ts, tz=timezone.utc).replace(tzinfo=None),
-                "end_time": datetime.fromtimestamp(act.get("endTime", start_ts), tz=timezone.utc).replace(tzinfo=None),
+                "start_time": datetime.fromtimestamp(start_ts, tz=timezone.utc),
+                "end_time": datetime.fromtimestamp(act.get("endTime", start_ts), tz=timezone.utc),
                 "distance_m": float(act.get("distance", 0)),
                 "duration_s": act.get("workoutTime", 0),
             })

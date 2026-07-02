@@ -20,7 +20,7 @@ def parse_tcx(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0
 
     # Извлечение времени старта из TCX (Extract start time from TCX)
     start_time_str = root.findtext('.//tcx:StartTime', namespaces=NS) or root.findtext('.//tcx:Id', namespaces=NS)
-    start_time_utc = datetime.fromisoformat(start_time_str.replace('Z', '+00:00')) if start_time_str else datetime.now(timezone.utc).replace(tzinfo=None)
+    start_time_utc = datetime.fromisoformat(start_time_str.replace('Z', '+00:00')) if start_time_str else datetime.now(timezone.utc)
 
     # Парсинг всех trackpoint (Parse all trackpoints)
     trackpoints = []

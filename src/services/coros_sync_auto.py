@@ -32,7 +32,7 @@ def update_last_health_sync(user_id: int):
         try:
             user = db.query(User).filter(User.id == user_id).first()
             if user:
-                user.last_health_sync_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                user.last_health_sync_at = datetime.now(timezone.utc)
                 db.commit()
         finally:
             db.close()
@@ -111,7 +111,7 @@ def auto_sync_health():
         with _auto_sync_status_lock:
             s = _auto_sync_status['health']
             s['status'] = 'ok'
-            s['last_run'] = datetime.now(timezone.utc).replace(tzinfo=None)
+            s['last_run'] = datetime.now(timezone.utc)
             if total_synced > 0:
                 s['message'] = f'✓ Синхронизировано: {total_synced}'
             elif total_empty > 0:
@@ -123,7 +123,7 @@ def auto_sync_health():
         with _auto_sync_status_lock:
             s = _auto_sync_status['health']
             s['status'] = 'error'
-            s['last_run'] = datetime.now(timezone.utc).replace(tzinfo=None)
+            s['last_run'] = datetime.now(timezone.utc)
             s['message'] = str(e)[:80]
             s['next_run'] = s['last_run'] + timedelta(seconds=health_sync_interval)
 
@@ -276,7 +276,7 @@ def auto_sync_activities():
         with _auto_sync_status_lock:
             s = _auto_sync_status['activity']
             s['status'] = 'ok'
-            s['last_run'] = datetime.now(timezone.utc).replace(tzinfo=None)
+            s['last_run'] = datetime.now(timezone.utc)
             if total_synced > 0:
                 s['message'] = f'✓ Синхронизировано: {total_synced}'
             elif total_empty > 0:
@@ -288,7 +288,7 @@ def auto_sync_activities():
         with _auto_sync_status_lock:
             s = _auto_sync_status['activity']
             s['status'] = 'error'
-            s['last_run'] = datetime.now(timezone.utc).replace(tzinfo=None)
+            s['last_run'] = datetime.now(timezone.utc)
             s['message'] = str(e)[:80]
             s['next_run'] = s['last_run'] + timedelta(seconds=activity_sync_interval)
 
@@ -327,11 +327,11 @@ def auto_sync_activities_inner(user_id: int) -> int:
                 continue
             try:
                 from datetime import datetime as dt_cls
-                bt = dt_cls.strptime(str(begin_ts)[:19], "%Y-%m-%dT%H:%M:%S") if 'T' in str(begin_ts) else dt_cls.strptime(str(begin_ts)[:19], "%Y-%m-%d %H:%M:%S")
+                bt = dt_cls.strptime(str(begin_ts)[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc) if 'T' in str(begin_ts) else dt_cls.strptime(str(begin_ts)[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
             except (ValueError, TypeError):
                 try:
                     from datetime import datetime as dt_cls
-                    bt = dt_cls.strptime(str(begin_ts)[:16], "%Y-%m-%dT%H:%M")
+                    bt = dt_cls.strptime(str(begin_ts)[:16], "%Y-%m-%dT%H:%M").replace(tzinfo=timezone.utc)
                 except (ValueError, TypeError):
                     continue
 

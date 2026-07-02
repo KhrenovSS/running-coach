@@ -2,6 +2,26 @@
 
 All notable changes to this project are tracked here.
 
+## [02.07.2026] — Sprint 4.5, Phase 4-5: Remove all naive-UTC workarounds
+
+### Changed
+- **All `.replace(tzinfo=None)` removed** from 10 files — datetimes are now stored/compared as aware UTC
+- **`src/services/auth.py`**: 5 `datetime.now(timezone.utc)` calls now return aware (was stripped to naive)
+- **`src/services/audit.py`**: `created_at` now aware UTC
+- **`src/telegram_bot.py`**: 6 datetime calls now aware (registered_at, last_health_sync_at, week_ago, measured_at ×2, today_start)
+- **`src/web/routes/pages.py`**: `now` and `measured_at` now aware UTC
+- **`src/services/coros_sync_auto.py`**: 5 status datetime calls now aware; `bt` parsing now produces aware UTC (`.replace(tzinfo=timezone.utc)`)
+- **`src/parsers/tcx_parser.py`**: fallback `start_time_utc` now aware
+- **`src/coros_client.py`**: `start_time`/`end_time` from `datetime.fromtimestamp()` now aware UTC
+- **`src/parsers/common.py`**: `start_time_utc` normalized to aware UTC at function entry; `begin_ts` in result dict now aware UTC
+- **`src/deps.py:local_dt()`**: simplified — `dt.astimezone(tz)` with naive fallback (was `dt.replace(tzinfo=utc).astimezone(tz).replace(tzinfo=None)`)
+
+### Verified
+- `grep "replace(tzinfo=None)" src/` → 0 matches
+- Docker app+bot start without errors
+- Audit events stored with `+00` timezone (aware UTC)
+- Tests pass (3/3)
+
 ## [02.07.2026] — Sprint 4.5, Phase 3: TIMESTAMPTZ models + migration
 
 ### Changed

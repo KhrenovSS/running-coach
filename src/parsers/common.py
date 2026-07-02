@@ -256,6 +256,10 @@ def process_trackpoints(trackpoints, start_time_utc, max_hr=177,
     if len(trackpoints) < 2:
         return None
 
+    # Нормализация: ensure start_time_utc is aware UTC (Normalize: ensure start_time_utc is aware UTC)
+    if start_time_utc.tzinfo is None:
+        start_time_utc = start_time_utc.replace(tzinfo=timezone.utc)
+
     # Очистка трекпоинтов от ошибочных GPS/pace точек (Clean trackpoints — remove bad GPS/pace points)
     trackpoints, cleaning_log = clean_trackpoints(
         trackpoints, max_credible_pace, max_gps_jump_m, min_hr_for_fast_pace
@@ -264,7 +268,7 @@ def process_trackpoints(trackpoints, start_time_utc, max_hr=177,
     # Если после очистки осталось слишком мало точек — пропускаем (Too few points after cleaning)
     if len(trackpoints) < 2:
         return {
-            'begin_ts': start_time_utc.replace(tzinfo=None),
+            'begin_ts': start_time_utc,
             'total_distance_km': 0,
             'avg_heart_rate': 0,
             'max_heart_rate': 0,
@@ -309,7 +313,7 @@ def process_trackpoints(trackpoints, start_time_utc, max_hr=177,
     distances = [tp['dist'] for tp in trackpoints if tp['dist'] is not None]
     if not distances or not hr_values:
         return {
-            'begin_ts': start_time_utc.replace(tzinfo=None),
+            'begin_ts': start_time_utc,
             'total_distance_km': 0,
             'avg_heart_rate': 0,
             'max_heart_rate': 0,
@@ -622,12 +626,9 @@ def process_trackpoints(trackpoints, start_time_utc, max_hr=177,
         local_tz = ZoneInfo(tz_name)
     else:
         local_tz = ZoneInfo("Europe/Moscow")
-    if start_time_utc.tzinfo is None:
-        start_utc_aware = start_time_utc.replace(tzinfo=ZoneInfo("UTC"))
-    else:
-        start_utc_aware = start_time_utc
-    begin_ts = start_utc_aware.replace(tzinfo=None)  # naive UTC for storage
-    begin_local = start_utc_aware.astimezone(local_tz)  # aware local time for weather
+    # start_time_utc is already aware UTC (normalized at function entry)
+    begin_ts = start_time_utc  # aware UTC for storage
+    begin_local = start_time_utc.astimezone(local_tz)  # aware local time for weather
 
     # Расчёт суммарного набора/спуска высоты (Calculate total elevation gain/loss)
     avg_temperature = None

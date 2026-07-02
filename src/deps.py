@@ -8,12 +8,12 @@ templates = Jinja2Templates(directory="src/web/templates")
 
 
 def local_dt(dt: datetime, user, session=None) -> datetime:
-    """Convert naive UTC datetime to naive local datetime using user's timezone"""
+    """Convert UTC datetime to local datetime using user's timezone"""
     if dt is None:
         return None
-    if dt.tzinfo is not None:
-        return dt
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
     tz_name = user.timezone or (session.timezone if session else None) or "Europe/Moscow"
     tz = ZoneInfo(tz_name)
-    return dt.replace(tzinfo=timezone.utc).astimezone(tz).replace(tzinfo=None)
+    return dt.astimezone(tz)
 
