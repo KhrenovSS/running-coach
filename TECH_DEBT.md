@@ -615,15 +615,16 @@ running-coach-worker.service  # APScheduler для синков/напомина
    - [ ] п.11: Jinja2-шаблоны.
    - [ ] п.13: единая конфигурация через `pydantic-settings`.
 
-4. **Спринт 4 — процессы и интеграции** (1–2 дня)
-   - [x] п.10: разделить на systemd-юниты web/bot (выполнено: `running-coach-web.service` + `running-coach-bot.service`).
+4. **Спринт 4 — процессы, интеграции, мульти-брендовая архитектура** (3–4 дня)
    - [ ] п.8: стандартизировать время (UTC + `User.timezone`).
    - [ ] п.12: переписать Coros-клиент на `httpx.AsyncClient` + TTL токена.
+   - [ ] п.14: внедрить мульти-брендовую архитектуру (BaseWatchClient ABC, WatchCredential, обобщение синхронизации).
+   — *см. подробное описание ниже.*
 
 5. **Спринт 5 — PostgreSQL + Docker (3 контейнера)** (2–3 дня)
    — *завершён, см. подробное описание ниже.*
 
-6. **Спринт 6 — Настраиваемая частота синхронизации Coros (per-user)** (1–2 дня)
+6. **Спринт 6 — Настраиваемая частота синхронизации per-user (бренд-независимая)** (1–2 дня)
    — *см. подробное описание ниже.*
 
 7. **Спринт 7 — Панель администрирования (Admin panel)** (2–3 дня)
@@ -631,7 +632,86 @@ running-coach-worker.service  # APScheduler для синков/напомина
 
 ---
 
-### Детальное описание Спринта 5 (завершён)
+### Детальное описание Спринта 4
+
+4. **Спринт 4 — Процессы, интеграции, мульти-брендовая архитектура** (3–4 дня)
+
+   **Цель:** стандартизировать хранение времени, перевести Coros-клиент на async HTTP, внедрить абстракцию бренда часов, чтобы в будущем добавлять Garmin/Polar/Suunto без переписывания пайплайна синхронизации.
+
+   #### п.8 — Стандартизация времени (UTC)
+
+   - [ ] **8.1** Заменить `datetime.utcnow()` → `datetime.now(timezone.utc)` во всех моделях (`src/models.py:34,49,92,105,134,145,158`).
+   - [ ] **8.2** Добавить поле `User.timezone` (String(50), nullable) — определяется через `timezonefinder` по первой GPS-точке первой тренировки.
+   - [ ] **8.3** Парсер `src/parsers/common.py`: сохранять UTC-время, таймзону писать в `User.timezone`.
+   - [ ] **8.4** Миграция Alembic: конвертировать старые naive-local `begin_ts` в UTC (используя таймзону первой GPS-точки каждой тренировки).
+   - [ ] **8.5** Шаблоны Jinja2: конвертировать UTC → локальное время пользователя через хелпер `format_local(dt, user)`.
+   - [ ] **8.6** `grep -rn "datetime.utcnow" src/ main.py` → 0 совпадений.
+
+   #### п.12 — Coros-клиент на httpx.AsyncClient + TTL
+
+   - [ ] **12.1** `src/coros_client.py`: заменить `requests.Session()` на `httpx.AsyncClient`.
+   - [ ] **12.2** Все методы сделать асинхронными (`async def`).
+   - [ ] **12.3** Добавить кеширование токена: поля `User.coros_access_token` (Text), `User.coros_token_expires_at` (DateTime, nullable). Реавторизация только при `401` или истечении срока.
+   - [ ] **12.4** Адаптировать вызывающий код (`src/services/coros_sync_auto.py`, `src/web/routes/coros.py`) под async-клиент.
+
+   #### п.14 — Мульти-брендовая архитектура синхронизации
+
+   - [ ] **14.1** Создать `src/watch/base.py` — `BaseWatchClient(ABC)` с протоколом:
+     ```python
+     class BaseWatchClient(ABC):
+         @abstractmethod
+         async def authenticate(self) -> bool: ...
+         @abstractmethod
+         async def list_activities(self, since: datetime | None) -> list[dict]: ...
+         @abstractmethod
+         async def download_activity(self, activity_id: str) -> bytes: ...
+         @abstractmethod
+         async def get_daily_metrics(self, date: str) -> dict | None: ...
+     ```
+   - [ ] **14.2** Переименовать `src/coros_client.py` → `src/watch/coros.py`, класс `CorosClient` → `CorosWatchClient(BaseWatchClient)`.
+   - [ ] **14.3** Создать `src/watch/factory.py` — реестр брендов и фабрика:
+     ```python
+     _registry: dict[str, type[BaseWatchClient]] = {}
+     def register(brand: str, client_cls: type[BaseWatchClient]): ...
+     def get_watch_client(brand: str, **kwargs) -> BaseWatchClient: ...
+     ```
+   - [ ] **14.4** Зарегистрировать `CorosWatchClient` в фабрике при импорте.
+   - [ ] **14.5** Создать модель `WatchCredential` (отдельная таблица):
+     - `id` (PK), `user_id` (FK→users.id), `brand` (String, например 'coros'),
+       `encrypted_user` (Text), `encrypted_password` (Text), `created_at`, `updated_at`.
+     - Alembic миграция.
+   - [ ] **14.6** Перенести данные из `User.coros_email`/`coros_password` в `WatchCredential` (миграция данных).
+   - [ ] **14.7** Удалить поля `coros_email`, `coros_password`, `last_coros_sync` из модели `User`.
+   - [ ] **14.8** Обобщить `src/services/coros_sync_auto.py` → `src/services/sync_service.py`:
+     - Функции принимают `BaseWatchClient`, а не `CorosClient`.
+     - Выбор клиента — через `get_watch_client(brand, ...)` из `WatchCredential`.
+   - [ ] **14.9** Переименовать `src/scheduler.py` → brand-agnostic:
+     - Единый поток перебирает `WatchCredential`, группирует по `user_id`, для каждого brand вызывает соответствующий sync-метод.
+   - [ ] **14.10** Обобщить `src/web/routes/coros.py` → `src/web/routes/sync.py`:
+     - `/sync/{brand}/run` вместо `/coros/sync`.
+     - `/sync/{brand}/health` вместо `/coros/sync/health`.
+     - `/sync/status/{task_id}` без brand — единый для всех.
+     - Старый `/coros/sync` — редирект (обратная совместимость).
+   - [ ] **14.11** Добавить колонку `source_brand` (String) в `DailyMetrics`.
+   - [ ] **14.12** Переименовать `COROS_CRED_KEY` → `CRED_KEY` в `src/crypto.py` и `.env`. Обновить `crypto.py` — читать `CRED_KEY`, поддерживать старый `COROS_CRED_KEY` как fallback с `warn`.
+   - [ ] **14.13** Обобщить audit-события в `src/services/audit.py`:
+     - `coros.sync.*` → `sync.{brand}.*`.
+     - Методы `log_coros_sync_*` → `log_sync_*(brand, ...)` (обратная совместимость через депрекейт).
+   - [ ] **14.14** `src/web/routes/pages.py` — заменить импорт `_auto_sync_status` на brand-agnostic статус.
+   - [ ] **14.15** `src/web/state.py` — `_sync_tasks` уже brand-agnostic, проверить что ключи задач включают brand.
+
+   **Как проверить мульти-брендовость:**
+   - [ ] `grep -rn "CorosClient" src/` → только в `src/watch/coros.py` и `src/watch/factory.py` (регистрация).
+   - [ ] `grep -rn "coros_email\|coros_password" src/` → 0 совпадений (всё через `WatchCredential`).
+   - [ ] Синхронизация Coros работает через `/sync/coros/run`.
+   - [ ] Написать заглушку `DummyWatchClient(BaseWatchClient)` — зарегистрировать, запустить синхронизацию — пайплайн не падает.
+   - [ ] Audit-события пишут `sync.coros.*`, не `coros.sync.*` (старые записи не ломаются).
+
+   **Что НЕ входит в Спринт 4:**
+   - Реализация клиентов для Polar, Suunto, Garmin — только архитектура.
+   - Per-user интервалы синхронизации — Sprint 6.
+
+---
 
 5. **Спринт 5 — PostgreSQL + Docker (3 контейнера)** (2–3 дня)
    - [x] **5.1** Добавить `psycopg2-binary==2.9.10` в `pyproject.toml`.
@@ -667,43 +747,45 @@ running-coach-worker.service  # APScheduler для синков/напомина
 
 ### Детальное описание Спринта 6
 
-6. **Спринт 6 — Настраиваемая частота синхронизации Coros (per-user)** (1–2 дня)
-   - [ ] **6.1** `src/models.py` — новые колонки `User`:
-     - `activity_sync_interval` (Integer, nullable) — минуты, NULL = по умолчанию (60).
-     - `health_sync_interval` (Integer, nullable) — минуты, NULL = по умолчанию (480 = 8 часов, 3 раза в день).
-     - `last_activity_sync_at` (DateTime, nullable) — время последней синхронизации тренировок.
-     (`last_health_sync_at` уже существует.)
-   - [ ] **6.2** Alembic миграция — добавить 3 новые колонки в таблицу `users`.
-   - [ ] **6.3** `src/config/constants.py` + `src/config/__init__.py` — новые константы в `TimingConfig`:
-     - `MIN_ACTIVITY_SYNC_INTERVAL_MIN = 15` — мин. 15 мин между синхронизациями тренировок.
-     - `MIN_HEALTH_SYNC_INTERVAL_MIN = 30` — мин. 30 мин между синхронизациями здоровья.
-     - `MAX_SYNC_INTERVAL_MIN = 1440` — макс. 24 часа.
-     - `DEFAULT_ACTIVITY_SYNC_INTERVAL_MIN = 60` — по умолчанию 60 мин.
-     - `DEFAULT_HEALTH_SYNC_INTERVAL_MIN = 480` — по умолчанию 8 часов (3 раза в день).
-   - [ ] **6.4** `main.py` — автосинхронизация: индивидуальные интервалы для каждого пользователя:
-     - `_auto_sync_activities()`: перебирать пользователей, проверять `last_activity_sync_at` + `activity_sync_interval` (или `DEFAULT_ACTIVITY_SYNC_INTERVAL_MIN`). Синхронизировать только тех, у кого интервал прошёл.
-     - `_auto_sync_health()`: то же самое, через `last_health_sync_at` + `health_sync_interval` (или `DEFAULT_HEALTH_SYNC_INTERVAL_MIN`).
-     - После синхронизации обновлять `last_activity_sync_at` / `last_health_sync_at`.
-     - Для здоровья: логировать в аудит сколько новых vs. unchanged записей (для оптимизации частоты в будущем).
-   - [ ] **6.5** `main.py` — страница настроек: добавить поля частоты синхронизации:
-     - **Частота синхр. тренировок (мин)**: `<input type='number' min='15' max='1440' placeholder='60'>`
-     - **Частота синхр. здоровья (мин)**: `<input type='number' min='30' max='1440' placeholder='480'>`
-     - Подсказка: «Оставьте пустым для значений по умолчанию (60 мин / 8 часов)».
-   - [ ] **6.6** `main.py` — `POST /settings`: принимать `activity_sync_interval` и `health_sync_interval` (опционально). Валидация по min/max из `CONFIG`. NULL = использовать значения по умолчанию.
-   - [ ] **6.7** `main.py` — баннер для новых пользователей: в `render_page()`, если `coros_email` задан и 0 тренировок — показать жёлтый баннер над таблицей: «👋 Нажмите 🔄 Coros Sync для загрузки тренировок из Coros.» Исчезает после первой синхронизации.
-   - [ ] **6.8** `main.py` — индивидуальный статус автосинхронизации: на главной странице показывать время следующей синхронизации для текущего пользователя (на основе его интервала и `last_activity_sync_at` / `last_health_sync_at`), а не глобальный статус.
-   - [ ] **6.9** `src/telegram_bot.py` — `get_password()`: обновить сообщение после сохранения данных Coros — добавить: «Откройте ссылку и нажмите 🔄 Coros Sync для загрузки тренировок.»
+6. **Спринт 6 — Настраиваемая частота синхронизации per-user (бренд-независимая)** (1–2 дня)
+
+   **Важно:** После Спринта 4 синхронизация работает через `WatchCredential` + `BaseWatchClient`.  
+   Все изменения Спринта 6 делаются на brand-agnostic архитектуре.
+
+   - [ ] **6.1** `src/models.py` — новые колонки в `WatchCredential` (не `User`):
+      - `activity_sync_interval` (Integer, nullable) — минуты, NULL = по умолчанию (60).
+      - `health_sync_interval` (Integer, nullable) — минуты, NULL = по умолчанию (480 = 8 часов, 3 раза в день).
+      - `last_activity_sync_at` (DateTime, nullable) — время последней синхронизации тренировок.
+      - `last_health_sync_at` уже существует (перенести из `User` при миграции).
+   - [ ] **6.2** Alembic миграция — добавить колонки в `watch_credentials`, удалить `last_coros_sync`, `last_health_sync_at` из `users`.
+   - [ ] **6.3** `src/config/constants.py` — новые константы:
+      - `MIN_ACTIVITY_SYNC_INTERVAL_MIN = 15`
+      - `MIN_HEALTH_SYNC_INTERVAL_MIN = 30`
+      - `MAX_SYNC_INTERVAL_MIN = 1440`
+      - `DEFAULT_ACTIVITY_SYNC_INTERVAL_MIN = 60`
+      - `DEFAULT_HEALTH_SYNC_INTERVAL_MIN = 480`
+   - [ ] **6.4** `src/services/sync_service.py` — индивидуальные интервалы для каждого brand/пользователя:
+      - Перебирать `WatchCredential`, проверять `last_activity_sync_at` + `activity_sync_interval`. Синхронизировать только тех, у кого интервал прошёл.
+      - То же для health.
+      - После синхронизации обновлять `last_activity_sync_at` / `last_health_sync_at` в `WatchCredential`.
+   - [ ] **6.5** Страница настроек — добавить поля частоты синхронизации для каждого бренда:
+      - **{Brand} — частота синхр. тренировок (мин)**: `<input ...>`
+      - **{Brand} — частота синхр. здоровья (мин)**: `<input ...>`
+      - Подсказка: «Оставьте пустым для значений по умолчанию (60 мин / 8 часов)».
+   - [ ] **6.6** `POST /settings` — принимать `{brand}_activity_sync_interval` и `{brand}_health_sync_interval` (опционально). Валидация по min/max.
+   - [ ] **6.7** Баннер для новых пользователей: если есть `WatchCredential` и 0 тренировок — показать жёлтый баннер: «👋 Нажмите «Синхронизация» для загрузки тренировок.» Исчезает после первой синхронизации.
+   - [ ] **6.8** Индивидуальный статус автосинхронизации: на главной показывать время следующей синхронизации для каждого бренда пользователя.
+   - [ ] **6.9** `src/telegram_bot.py` — обновить сообщение после сохранения credentials: «Бренд {brand} подключён. Откройте веб-интерфейс и нажмите «Синхронизация».»
    - [ ] **6.10** `CHANGELOG.md` — обновить.
 
    **Обоснование интервалов:**
-   - Тренировки: мин. 15 мин (96 синхронизаций/сутки). Каждая синхронизация = 2+ API-вызова Coros (auth + list activities) + скачивание FIT для новых. Чаще 15 мин — риск блокировки аккаунта/IP со стороны Coros (ботоподобное поведение). По умолчанию 60 мин.
-   - Здоровье: мин. 30 мин, по умолчанию 480 мин (8 часов = 3 раза в день). Метрики (сон HRV, RHR, восстановление) не меняются чаще, чем раз за ночь. Логирование новых vs. unchanged записей поможет определить оптимальную частоту в будущем.
+   - Тренировки: мин. 15 мин. Каждая синхронизация = 2+ API-вызова к серверу бренда. Чаще 15 мин — риск блокировки. По умолчанию 60 мин.
+   - Здоровье: мин. 30 мин, по умолчанию 480 мин (8 часов = 3 раза в день). Метрики не меняются чаще. Логирование новых vs. unchanged записей поможет определить оптимальную частоту.
 
    **Что не меняется:**
-   - Первая синхронизация — ручная (пользователь нажимает 🔄 Coros Sync, существующий JS-оверлей работает без изменений).
+   - Первая синхронизация — ручная через кнопку в UI.
    - Никакого авто-запуска синхронизации при загрузке страницы.
-   - Существующие эндпоинты `POST /coros/sync` и `POST /coros/sync/health` без изменений.
-   - Глобальные переменные окружения `COROS_HEALTH_SYNC_INTERVAL` и `COROS_ACTIVITY_SYNC_INTERVAL` — удалить или оставить как fallback для случая `user.activity_sync_interval IS NULL` (решить при реализации).
+   - Глобальные env-переменные `*_SYNC_INTERVAL` — удалить в пользу per-credential настроек.
 
 ---
 

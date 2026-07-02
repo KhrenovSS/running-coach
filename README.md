@@ -195,12 +195,16 @@ training_sessions.id                     │
 
 ```
 /home/nimda/projects/running-coach/
-├── main.py                          # FastAPI‑роуты, HTML‑шаблоны, планировщик автосинхронизации
+├── main.py                          # 7 строк — create_app() + uvicorn.run()
+├── run_telegram_bot.py              # Запуск Telegram‑бота
 ├── src/
+│   ├── startup.py                   # create_app() фабрика + startup-событие
+│   ├── scheduler.py                 # AutoSyncScheduler (одиночка)
+│   ├── deps.py                      # Jinja2Templates (общие зависимости)
 │   ├── telegram_bot.py              # Telegram‑бот (регистрация, sync, stats, daily weight)
 │   ├── models.py                    # SQLAlchemy‑модели (User, TrainingSession, DailyMetrics, …)
 │   ├── coros_client.py              # Клиент для неофициального Coros API
-│   ├── crypto.py                    # Шифрование паролей Coros (Fernet)
+│   ├── crypto.py                    # Шифрование паролей Coros (Fernet, требует COROS_CRED_KEY)
 │   ├── exceptions.py                # Типизированные исключения приложения
 │   ├── logger.py                    # re-export → src.utils.logger (обратная совместимость)
 │   ├── api/
@@ -211,15 +215,29 @@ training_sessions.id                     │
 │   │       ├── auth.py              # /auth/telegram, /auth/login, /auth/register, /auth/logout
 │   │       └── health.py            # /health/ endpoint
 │   ├── config/
-│   │   ├── __init__.py
-│   │   └── constants.py             # Централизованный CONFIG
+│   │   ├── __init__.py              # Экспортирует settings + constants
+│   │   ├── settings.py              # pydantic-settings BaseSettings (env vars)
+│   │   └── constants.py             # Плоские module-level константы (HR зоны, API URLs, пороги)
 │   ├── parsers/
 │   │   ├── common.py                # Очистка треков, сегментация, классификация, погода
 │   │   ├── tcx_parser.py            # Парсинг TCX‑файлов (XML)
 │   │   └── fit_parser.py            # Парсинг FIT‑файлов (бинарный)
 │   ├── services/
 │   │   ├── audit.py                 # AuditService (события в БД + файл)
-│   │   └── auth.py                  # Генерация/верификация токенов входа, bcrypt
+│   │   ├── auth.py                  # Генерация/верификация токенов входа, bcrypt
+│   │   ├── telegram_notify.py       # Отправка уведомлений в Telegram
+│   │   ├── stats.py                 # calc_stats, fmt_duration, build_nav_html, пульсовые зоны
+│   │   ├── recovery_view.py         # hrv_status, tired_label, readiness_label, load_label
+│   │   └── coros_sync_auto.py       # Фоновая автосинхронизация Coros
+│   ├── web/
+│   │   ├── state.py                 # Глобальное состояние (_pending, _sync_tasks, TRAINING_TYPES_RU)
+│   │   ├── templates/               # 6 Jinja2-шаблонов (base, index, login, register, session, settings)
+│   │   └── routes/
+│   │       ├── __init__.py          # web_router = pages + uploads + coros + logs
+│   │       ├── pages.py             # GET /, /login, /register, /session/{id}, /settings (7 роутов)
+│   │       ├── uploads.py           # POST /upload, /upload/confirm, /upload/confirm_deleted
+│   │       ├── coros.py             # POST /coros/sync, /coros/sync/health, GET /coros/sync/status/{id}
+│   │       └── logs.py              # GET /logs
 │   └── utils/
 │       └── logger.py                # Структурированное логирование, ежедневная ротация
 ├── alembic/
@@ -429,12 +447,12 @@ python run_telegram_bot.py
 - [x] Структурированное логирование и аудит (Level 2 observability)
 - [x] Аутентификация: email+пароль (bcrypt), Telegram-токены, session-cookie
 - [x] PostgreSQL + Docker Compose (3 контейнера: db, app, bot) — Sprint 5
+- [x] **Sprint 3**: декомпозиция main.py (2776 → 7 строк), Jinja2‑шаблонизация (6 шаблонов), pydantic‑settings
 
 ### ⬜ В работе / запланировано
 - [ ] **Sprint 6** (TECH_DEBT.md): настраиваемая частота синхронизации Coros per-user, баннер для новых пользователей, ручная первая синхронизация
 - [ ] **Sprint 7** (TECH_DEBT.md): панель администрирования — дашборд, управление пользователями, просмотр аудита, принудительный sync
-- [ ] **Sprint 3** (TECH_DEBT.md): декомпозиция main.py, Jinja2, pydantic-settings
-- [ ] **Sprint 4** (TECH_DEBT.md): стандартизация времени (UTC), Coros-клиент на httpx.AsyncClient
+- [ ] **Sprint 4** (TECH_DEBT.md): стандартизация времени (UTC), мульти-брендовая архитектура (`BaseWatchClient`, `WatchCredential`), Coros-клиент на httpx
 - [ ] **Модуль аналитики** — 8 этапов из `decision_module_design.md`
 - [ ] Фильтр по типу тренировки на главной (Все / Бег / Ходьба)
 - [ ] Общая дистанция и время за неделю/месяц
@@ -499,17 +517,11 @@ python run_telegram_bot.py
 
 **Краткий список (по приоритету):**
 
-🔴 **Критично — блокирует модуль рекомендаций:**
-- Монолитный `main.py` на ~2650 строк (роуты + HTML + логика + планировщик в одном файле).
-- ~~Веб захардкожен на одного пользователя (`_current_user_id = 1`), без аутентификации.~~ → ✅ решено: Telegram-аутентификация, session-cookie, `get_current_user` Depends
-
 🟠 **Серьёзно — мешает развитию:**
 - Путаница UTC vs локальное время в `DateTime`-полях.
 
 🟡 **Средне — техдолг:**
-- Inline-HTML на f-строках (~94 места), нужен Jinja2.
 - Coros-клиент на синхронном `requests`, без TTL токена.
-- Конфигурация разбросана; ключ шифрования автогенерируется в `.env`.
 
 ✅ **Решено (Sprint 1–2 + Sprint 5):**
 - ~~Telegram-бот запускался через `subprocess.Popen` из `main.py`~~ → Вынесен в отдельный процесс (Docker-контейнер `bot`)
@@ -522,6 +534,9 @@ python run_telegram_bot.py
 - ~~Нет структурированного логирования~~ → `src/utils/logger.py` с ежедневной ротацией, JSON/text
 - ~~Нет аудита событий~~ → `AuditService`, таблица `audit_events`, покрытие всех ключевых операций
 - ~~Веб захардкожен на одного пользователя~~ → email+пароль (bcrypt), session-cookie, `get_current_user` Depends
+- ~~Монолитный `main.py` на ~2650 строк~~ → 7 строк (`create_app()` + `uvicorn.run()`), вся логика в `src/web/routes/` и `src/services/` — **Sprint 3**
+- ~~Inline-HTML на f-строках (~94 места)~~ → 6 Jinja2-шаблонов в `src/web/templates/` — **Sprint 3**
+- ~~Конфигурация разбросана; ключ шифрования автогенерируется~~ → `pydantic-settings`, `src/config/settings.py`, `crypto.py` требует явного `COROS_CRED_KEY` — **Sprint 3**
 
 Рекомендуемый порядок исправлений (7 спринтов) описан в `TECH_DEBT.md` → раздел «Порядок работ».
 
@@ -573,4 +588,4 @@ sudo bash -c 'cd /home/nimda/projects/running-coach && set -a && source .env && 
 
 ---
 
-*Последнее обновление: 01.07.2026 (вечер)*
+*Последнее обновление: 02.07.2026 — Sprint 3 завершён*
