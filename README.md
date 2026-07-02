@@ -42,7 +42,12 @@
 
 ## 🗄️ Структура базы данных
 
-Проект использует **PostgreSQL 16** (через Docker Compose, контейнер `db`) с управлением схемой через **Alembic** (миграции применяются автоматически при старте контейнера `app`). Для локальной разработки поддерживается fallback на SQLite (`DATABASE_URL` не задан → `running_coach.db`).
+Проект использует **PostgreSQL 16** (через Docker Compose, контейнер `db`) с управлением схемой через **Alembic** (миграции применяются автоматически при старте контейнера `app`). Для локальной разработки требуется запущенный контейнер PostgreSQL:
+```
+docker compose up db -d          # Запустить PostgreSQL
+DATABASE_URL=postgresql://running_coach:${POSTGRES_PASSWORD}@localhost:5432/running_coach
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
 
 ### Таблицы и схемы (дополнительные)
 

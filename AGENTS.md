@@ -6,7 +6,7 @@
 ## Стек
 Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через ИИ (open code style).  
 Сервер: Docker Compose — 3 контейнера (`db`, `app`, `bot`).  
-Локальная разработка: `uvicorn main:app --host 0.0.0.0 --port 8000` (SQLite fallback).
+Локальная разработка: `docker compose up db -d && DATABASE_URL=postgresql://running_coach:<PASSWORD>@localhost:5432/running_coach uvicorn main:app --host 0.0.0.0 --port 8000`.
 
 ## Документация для разработки
 

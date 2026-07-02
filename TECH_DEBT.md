@@ -796,9 +796,9 @@ running-coach-worker.service  # APScheduler для синков/напомина
 
    #### Фаза 1 — Инфраструктура (без изменения кода)
 
-   - [ ] **4.5.1** `docker-compose.yml`: expose порт `5432` наружу для сервиса `db` (чтобы можно подключаться с хоста при локальной разработке).
-   - [ ] **4.5.2** `.env.example`: добавить `DATABASE_URL=postgresql://running_coach:${POSTGRES_PASSWORD}@localhost:5432/running_coach` для локальной разработки.
-   - [ ] **4.5.3** `README.md`: обновить раздел «Локальная разработка» — теперь требуется PostgreSQL (Docker или локальный).
+   - [x] **4.5.1** `docker-compose.yml`: expose порт `5432` наружу для сервиса `db` (чтобы можно подключаться с хоста при локальной разработке).
+   - [x] **4.5.2** `.env.example`: добавить `DATABASE_URL=postgresql://running_coach:${POSTGRES_PASSWORD}@localhost:5432/running_coach` для локальной разработки.
+   - [x] **4.5.3** `README.md`: обновить раздел «Локальная разработка» — теперь требуется PostgreSQL (Docker или локальный).
 
    **Как проверить:**
    - `docker compose up db` → порт 5432 доступен с хоста (`psql postgresql://...` подключается).

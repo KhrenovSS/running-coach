@@ -2,6 +2,14 @@
 
 All notable changes to this project are tracked here.
 
+## [02.07.2026] — Sprint 4.5, Phase 1: infra (expose PostgreSQL, .env.example)
+
+### Changed
+- **docker-compose.yml**: exposed port 5432 for local dev access to the db container
+- **.env.example**: `DATABASE_URL` now defaults to `postgresql://...@localhost:5432/...` instead of SQLite
+- **README.md**: local dev section updated — requires PostgreSQL via Docker
+- **AGENTS.md**: local dev command updated
+
 ## [02.07.2026] — Sprint 4, п.8: стандартизация времени (UTC)
 
 ### Added
