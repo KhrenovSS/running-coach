@@ -346,6 +346,11 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 - [ ] Фильтр по типу тренировки на главной (Все / Бег / Ходьба)
 - [ ] Общая дистанция и время за неделю/месяц
 
+**Фаза 4 — Выбор бренда часов при регистрации (Multi-brand onboarding):**
+- [ ] Telegram `/start` — после ввода email спрашивать бренд часов (Coros / Polar / Garmin / Suunto)
+- [ ] Coros — существующий флоу. Остальные — заглушка «не реализовано»
+- [ ] Сохранять бренд в `WatchCredential.brand`, показывать в настройках веб
+
 **Далее — Модуль аналитики (8 этапов из `decision_module_design.md`):**
 - [ ] Этап 0 — Каркас и данные
 - [ ] Этап 1 — Аналитика (Skills) + State Assessor
@@ -364,9 +369,10 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 1. ~~**Фаза 1** — остатки Sprint 4 (п.12+14.9) + Sprint 4.5 проверки~~ ✅
 2. ~~**🐛 БАГ: Потеря тренировок при задержке Coros API** — lookback-буфер в `sync_activities_for_user()`~~ ✅
 3. **Фаза 2** — Sprint 6: per-user частота синхронизации (бренд-независимая), баннер для новых пользователей
-3. **Фаза 3** — фильтр по типу тренировки на главной, общая дистанция/время за неделю/месяц
-4. **Модуль аналитики** — 8 этапов из `decision_module_design.md`
-5. **Sprint 7**: Admin panel
+4. **Фаза 3** — фильтр по типу тренировки на главной, общая дистанция/время за неделю/месяц
+5. **Фаза 4** — выбор бренда часов при регистрации (multi-brand onboarding), заглушки для Polar/Garmin/Suunto
+6. **Модуль аналитики** — 8 этапов из `decision_module_design.md`
+7. **Sprint 7**: Admin panel
 
 ### Команды управления:
 ```bash

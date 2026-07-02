@@ -2,6 +2,13 @@
 
 All notable changes to this project are tracked here.
 
+## [02.07.2026] — Добавлена Фаза 4 в план работ: выбор бренда часов при регистрации
+
+### Added
+- **TECH_DEBT.md, AGENTS.md, README.md**: добавлена «Фаза 4 — Выбор бренда часов при регистрации (Multi-brand onboarding)» в план работ. При `/start` спрашивать бренд, для не-Coros — заглушка «не реализовано».
+
+---
+
 ## [02.07.2026] — Шаг 3: Sprint 4.5 Фаза 7 — проверка миграций, alembic downgrade/upgrade
 
 ### Fixed
