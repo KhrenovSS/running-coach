@@ -666,6 +666,9 @@ running-coach-worker.service  # APScheduler для синков/напомина
    - [x] **8.2** Добавить поле `User.timezone` (String(50), nullable) — определяется по GPS первой тренировки.
    - [x] **8.3** Парсер `src/parsers/common.py`: сохранять UTC-время, таймзону писать в `User.timezone` и `TrainingSession.timezone`.
    - [ ] **8.4** Миграция Alembic: конвертировать старые naive-local `begin_ts` в UTC (используя таймзону первой GPS-точки каждой тренировки).
+      - [x] **8.4.1** Написать Alembic data migration: для каждой TrainingSession с `timezone IS NULL` определить таймзону по GPS из `segments_json` (или fallback Europe/Moscow), конвертировать `begin_ts` из local→UTC.
+      - [x] **8.4.2** Применить миграцию на локальной SQLite и проверить корректность конвертации.
+      - [ ] **8.4.3** Применить миграцию на Docker PostgreSQL.
    - [x] **8.5** Шаблоны Jinja2: конвертировать UTC → локальное время пользователя через хелпер `local_dt(dt, user)`.
    - [x] **8.6** `grep -rn "datetime.utcnow" src/ main.py` → 0 совпадений.
 

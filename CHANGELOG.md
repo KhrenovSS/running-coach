@@ -8,7 +8,7 @@ All notable changes to this project are tracked here.
 - **User.timezone** — колонка `VARCHAR(50)`, IANA-таймзона пользователя (напр. "Europe/Moscow")
 - **TrainingSession.timezone** — колонка с часовым поясом конкретной тренировки
 - **`src/deps.py:local_dt()`** — хелпер для конвертации naive UTC → naive local time при отображении
-- **Alembic migrations** — `3205fe660d47` (user.timezone), `4201426df9cc` (training_sessions.timezone)
+- **Alembic migrations** — `3205fe660d47` (user.timezone), `4201426df9cc` (training_sessions.timezone), `a1b2c3d4e5f6` (data migration old begin_ts)
 
 ### Changed
 - **Все `datetime.utcnow()` заменены** на `datetime.now(timezone.utc).replace(tzinfo=None)` — в auth.py, audit.py, telegram_bot.py, pages.py, tcx_parser.py, coros_sync_auto.py, coros_client.py
@@ -21,6 +21,9 @@ All notable changes to this project are tracked here.
 
 ### Fixed
 - **`coros_client.py`**: `datetime.fromtimestamp()` без timezone использовал системный часовой пояс вместо UTC
+
+### Added (п.8.4)
+- **Data migration** `a1b2c3d4e5f6`: конвертирует старые naive-local `begin_ts` → naive UTC (fallback Europe/Moscow), проставляет `timezone` в training_sessions и users
 
 ## [02.07.2026] — Hotfix: daily weight reminder timezone (п.15)
 
