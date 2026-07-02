@@ -2,7 +2,50 @@
 
 All notable changes to this project are tracked here.
 
-## [02.07.2026] — Sprint 4 п.12+14: мульти-брендовая архитектура (httpx, BaseWatchClient, WatchCredential)
+## [02.07.2026] — Актуализация AGENTS.md и README.md для следующей сессии
+
+### Changed
+- **AGENTS.md**: удалены устаревшие почасовые записи (20-25.06.2026 — перенесены в CHANGELOG.md). Исправлена нумерация в «Что сделано за сессию». Из «Известные проблемы» убрано «Docker требует sudo» (решено bin/docker.sh). «Следующие шаги» — Фаза 1 помечена выполненной. Сокращён объём для минимизации токенов при старте новой сессии.
+- **README.md**: структура проекта приведена к актуальной (добавлены `bin/`, `src/watch/`, `src/services/sync_service.py`; удалены `coros_client.py`, `coros_sync_auto.py`, `web/routes/coros.py`). Схема `users` — удалены `coros_email`, `coros_password`, `last_coros_sync`. Список миграций дополнен `b6c7d8e9f0a1` и `c9d8e7f6a0b2`. Roadmap — Фаза 1 помечена ✅. Техдолг — Coros-клиент помечен как решённый. `Очистка БД` — заменена на `./bin/docker.sh`.
+
+---
+
+## [02.07.2026] — Фаза 1: п.12+14.9 — удалены старые поля Coros из User, очищена документация
+
+### Security
+- **`.env`**: права доступа изменены на `600` (только владелец). Добавлен `SUDO_PASSWORD` для docker-команд. `.env` в `.gitignore` — не коммитится.
+- **`bin/docker.sh`**: защищённый скрипт-обёртка для `docker compose` с `sudo`. Права `700`. Пароль читается из `.env`, не передаётся в аргументах и не сохраняется в истории. `bin/` добавлен в `.gitignore`.
+- **AGENTS.md, README.md**: все `sudo docker compose ...` команды заменены на `./bin/docker.sh ...`
+
+### Removed
+- **`User.coros_email`, `User.coros_password`, `User.last_coros_sync`** — удалены из модели `User`. Все данные теперь хранятся только в `WatchCredential`.
+- **Alembic migration** `c9d8e7f6a0b2` — DROP колонок `coros_email`, `coros_password`, `last_coros_sync` из `users`.
+- **Устаревшие упоминания `coros_client.py`** удалены из `AGENTS.md`, `README.md`, `docs/ARCHITECTURE.md` (файл был удалён в Sprint 4).
+
+### Changed
+- **`src/telegram_bot.py`**: `start()` — email читается из `WatchCredential` вместо `user.coros_email`. `get_password()` — удалена запись в `user.coros_email`/`user.coros_password`. `cmd_sync()` — проверка `has_cred` через `WatchCredential`. `delete_me()` — удалена очистка `user.coros_email`/`coros_password` (WatchCredential уже удаляется).
+- **`src/web/routes/pages.py`**: `settings_save()` — `old_coros_email` читается из `WatchCredential`, удалена запись в `user.coros_email`/`user.coros_password`.
+
+### Tech Debt
+- **TECH_DEBT.md**: п.12+14.9 помечен как выполненный. AGENTS.md: чекбоксы Фазы 1 обновлены.
+
+---
+
+## [02.07.2026] — Планирование дальнейших работ (Фазы 1–3 + модуль аналитики)
+
+### Added
+- **AGENTS.md**: обновлён раздел «Текущее состояние» — добавлен детальный план работ:
+  - Фаза 1: остатки Sprint 4 (п.12+14.9 — удаление старых полей `User`) + Sprint 4.5 проверки
+  - Фаза 2: Sprint 6 — per-user частота синхронизации (бренд-независимая), баннер новичкам
+  - Фаза 3: фильтр по типу тренировки, общая дистанция/время за неделю/месяц
+  - Затем: модуль аналитики (8 этапов из `decision_module_design.md`) и Sprint 7 (Admin panel)
+- **TECH_DEBT.md**: добавлен раздел «Обновлённый план дальнейших работ» с детальными чекбоксами по фазам. Версия обновлена до 1.3.
+- **TECH_DEBT.md**: Sprint 4.5 Фаза 7 — невыполненные пункты помечены с указанием фазы выполнения
+
+### Changed
+- **AGENTS.md**: секция «Следующие шаги» переписана в порядок выполнения по фазам
+- **TECH_DEBT.md**: добавлен раздел «Обновлённый план дальнейших работ» (Фазы 1–3 → модуль аналитики → Sprint 7), невыполненные пункты Sprint 4.5 Фазы 7 помечены фазами
+- **README.md**: Roadmap обновлён — добавлены Фазы 1–3 перед модулем аналитики
 
 ### Added
 - **`src/watch/`** — новый пакет мульти-брендовой абстракции часов:

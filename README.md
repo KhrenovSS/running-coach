@@ -71,9 +71,6 @@ weight_kg FLOAT                         -- Вес (кг)
 sport_level VARCHAR(50)                 -- Уровень (beginner/intermediate/advanced)
 goal_type VARCHAR(50)                   -- Цель (lose_weight/10k/half_marathon/marathon/general)
 goal_target VARCHAR(255)                -- Конкретная цель («sub 60 min 10k»)
-coros_email VARCHAR(255)                -- Email для Coros Training Hub
-coros_password VARCHAR(255)             -- Пароль Coros (шифрованный Fernet)
-last_coros_sync DATETIME                -- Время последней синхронизации тренировок с Coros
 last_health_sync_at DATETIME            -- Время последней синхронизации метрик здоровья
 max_hr INTEGER DEFAULT 177              -- Максимальный пульс (уд/мин)
 max_credible_pace FLOAT DEFAULT 3.0     -- Максимально правдоподобный темп (мин/км)
@@ -178,9 +175,11 @@ created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 
 Управление схемой БД — через **Alembic**. При старте контейнера `app` выполняется `alembic upgrade head`:
 
-- `f75d2362cf9f` (fresh baseline) — единая database-agnostic миграция: все таблицы (users, training_sessions, daily_metrics, deleted_trainings, weight_measurements, training_feedback, audit_events, auth_tokens) с индексами и ограничениями. Заменены 4 старые SQLite-only миграции.
+- `f75d2362cf9f` (fresh baseline) — единая database-agnostic миграция: все таблицы
 - `a1b2c3d4e5f6` — data migration: конвертация старых naive-local `begin_ts` → naive UTC
 - `5e287a9fc289` — convert all DateTime columns to `TIMESTAMP WITH TIME ZONE`
+- `b6c7d8e9f0a1` — add `watch_credentials` table, `source_brand` to `daily_metrics`
+- `c9d8e7f6a0b2` — remove `coros_email`, `coros_password`, `last_coros_sync` from `users`
 
 Файлы миграций: `alembic/versions/`. Конфигурация: `alembic.ini`, `alembic/env.py` (`DATABASE_URL` из env).
 
@@ -206,13 +205,18 @@ training_sessions.id                     │
 /home/nimda/projects/running-coach/
 ├── main.py                          # 7 строк — create_app() + uvicorn.run()
 ├── run_telegram_bot.py              # Запуск Telegram‑бота
+├── bin/
+│   └── docker.sh                    # Защищённая обёртка docker compose (права 700)
 ├── src/
 │   ├── startup.py                   # create_app() фабрика + startup-событие
 │   ├── scheduler.py                 # AutoSyncScheduler (одиночка)
 │   ├── deps.py                      # Jinja2Templates (общие зависимости)
 │   ├── telegram_bot.py              # Telegram‑бот (регистрация, sync, stats, daily weight)
-│   ├── models.py                    # SQLAlchemy‑модели (User, TrainingSession, DailyMetrics, …)
-│   ├── coros_client.py              # Клиент для неофициального Coros API
+│   ├── models.py                    # SQLAlchemy‑модели (User, TrainingSession, WatchCredential, …)
+│   ├── watch/                       # Мульти-брендовая абстракция часов
+│   │   ├── base.py                  #   BaseWatchClient(ABC)
+│   │   ├── coros.py                 #   CorosWatchClient на httpx.AsyncClient
+│   │   └── factory.py               #   Реестр брендов (register / get_watch_client)
 │   ├── crypto.py                    # Шифрование паролей Coros (Fernet, требует COROS_CRED_KEY)
 │   ├── exceptions.py                # Типизированные исключения приложения
 │   ├── logger.py                    # re-export → src.utils.logger (обратная совместимость)
@@ -235,17 +239,17 @@ training_sessions.id                     │
 │   │   ├── audit.py                 # AuditService (события в БД + файл)
 │   │   ├── auth.py                  # Генерация/верификация токенов входа, bcrypt
 │   │   ├── telegram_notify.py       # Отправка уведомлений в Telegram
+│   │   ├── sync_service.py          # Brand-agnostic sync (замена coros_sync_auto.py)
 │   │   ├── stats.py                 # calc_stats, fmt_duration, build_nav_html, пульсовые зоны
-│   │   ├── recovery_view.py         # hrv_status, tired_label, readiness_label, load_label
-│   │   └── coros_sync_auto.py       # Фоновая автосинхронизация Coros
+│   │   └── recovery_view.py         # hrv_status, tired_label, readiness_label, load_label
 │   ├── web/
 │   │   ├── state.py                 # Глобальное состояние (_pending, _sync_tasks, TRAINING_TYPES_RU)
 │   │   ├── templates/               # 6 Jinja2-шаблонов (base, index, login, register, session, settings)
 │   │   └── routes/
-│   │       ├── __init__.py          # web_router = pages + uploads + coros + logs
+│   │       ├── __init__.py          # web_router = pages + uploads + sync + logs
 │   │       ├── pages.py             # GET /, /login, /register, /session/{id}, /settings (7 роутов)
 │   │       ├── uploads.py           # POST /upload, /upload/confirm, /upload/confirm_deleted
-│   │       ├── coros.py             # POST /coros/sync, /coros/sync/health, GET /coros/sync/status/{id}
+│   │       ├── sync.py              # POST /sync/{brand}/run, /sync/{brand}/health, /sync/status/{id}
 │   │       └── logs.py              # GET /logs
 │   └── utils/
 │       └── logger.py                # Структурированное логирование, ежедневная ротация
@@ -369,8 +373,7 @@ training_sessions.id                     │
 - **max_credible_pace** – максимально правдоподобный темп (для очистки GPS‑ошибок)
 - **max_gps_jump_m** – максимальный скачок GPS между точками
 - **min_hr_for_fast_pace** – минимальный пульс для быстрого темпа (проверка правдоподобия)
-- **coros_email / coros_password** – учётные данные Coros (шифруются Fernet‑ключом)
-- **last_coros_sync** – время последней синхронизации с Coros
+- **coros_email / coros_password** – учётные данные Coros (хранятся в WatchCredential, шифруются Fernet)
 
 ---
 
@@ -398,14 +401,14 @@ COROS_ACTIVITY_SYNC_INTERVAL=60 # Интервал синхронизации т
 3 контейнера: `db` (PostgreSQL 16), `app` (FastAPI/uvicorn), `bot` (Telegram-бот).
 
 ```bash
-# Запуск (нужен sudo для docker)
-sudo bash -c 'cd /home/nimda/projects/running-coach && set -a && source .env && set +a && export POSTGRES_PASSWORD && docker compose up -d'
+# Запуск (через защищённую обёртку bin/docker.sh)
+cd /home/nimda/projects/running-coach && ./bin/docker.sh up -d
 
 # Остановка
-sudo bash -c 'cd /home/nimda/projects/running-coach && docker compose down'
+./bin/docker.sh down
 
 # Статус
-sudo docker compose -f /home/nimda/projects/running-coach/docker-compose.yml ps
+./bin/docker.sh ps
 
 # Логи
 sudo docker logs running-coach-app-1 --tail 50
@@ -459,13 +462,13 @@ python run_telegram_bot.py
 - [x] **Sprint 3**: декомпозиция main.py (2776 → 7 строк), Jinja2‑шаблонизация (6 шаблонов), pydantic‑settings
 - [x] **Sprint 4.5** (TECH_DEBT.md): полный отказ от SQLite, переход на PostgreSQL + `TIMESTAMP WITH TIME ZONE`
 - [x] **Sprint 4** (TECH_DEBT.md) — п.12+14: мульти-брендовая архитектура (`BaseWatchClient`, `WatchCredential`, `sync_service`), Coros-клиент на httpx
+- [x] **Фаза 1 — п.12+14.9** (TECH_DEBT.md): удаление старых полей `coros_email`/`coros_password`/`last_coros_sync` из `User`
 
 ### ⬜ В работе / запланировано
-- [ ] **Sprint 6** (TECH_DEBT.md): настраиваемая частота синхронизации per-user, баннер для новых пользователей, ручная первая синхронизация
+- [ ] **Фаза 2 — Sprint 6** (TECH_DEBT.md): настраиваемая частота синхронизации per-user, баннер для новых пользователей, ручная первая синхронизация
+- [ ] **Фаза 3**: фильтр по типу тренировки на главной, общая дистанция/время за неделю/месяц
 - [ ] **Модуль аналитики** — 8 этапов из `decision_module_design.md`
 - [ ] **Sprint 7** (TECH_DEBT.md): панель администрирования — дашборд, управление пользователями, просмотр аудита, принудительный sync
-- [ ] Фильтр по типу тренировки на главной (Все / Бег / Ходьба)
-- [ ] Общая дистанция и время за неделю/месяц
 - [ ] Мобильное PWA (Progressive Web App)
 
 ---
@@ -528,9 +531,9 @@ python run_telegram_bot.py
 **Краткий список (по приоритету):**
 
 🟡 **Средне — техдолг:**
-- Coros-клиент на синхронном `requests`, без TTL токена.
+- ~~Coros-клиент на синхронном `requests`, без TTL токена~~ → `CorosWatchClient(BaseWatchClient)` на `httpx.AsyncClient`, токен кэшируется в `WatchCredential` — **Sprint 4**
 
-✅ **Решено (Sprint 1–3 + Sprint 4.5):**
+✅ **Решено (Sprint 1–3 + Sprint 4.5 + Sprint 4):**
 - ~~Путаница UTC vs локальное время в `DateTime`-полях~~ → Все 14 колонок `TIMESTAMP WITH TIME ZONE`, все `.replace(tzinfo=None)` удалены
 - ~~Telegram-бот запускался через `subprocess.Popen` из `main.py`~~ → Вынесен в отдельный процесс (Docker-контейнер `bot`)
 - ~~Два источника правды для настроек: `UserSettings` (веб) vs `User` (бот)~~ → модель `UserSettings` удалена, всё на `User`
@@ -577,13 +580,13 @@ LOGS_DIR=logs
 ### Очистка БД (PostgreSQL в Docker)
 ```bash
 # Остановить контейнеры
-sudo bash -c 'cd /home/nimda/projects/running-coach && docker compose down'
+./bin/docker.sh down
 
 # Удалить volume с данными PostgreSQL
 sudo docker volume rm running-coach_pgdata
 
 # Запустить заново (БД создастся с нуля)
-sudo bash -c 'cd /home/nimda/projects/running-coach && set -a && source .env && set +a && export POSTGRES_PASSWORD && docker compose up -d'
+./bin/docker.sh up -d
 ```
 
 ---
@@ -596,4 +599,4 @@ sudo bash -c 'cd /home/nimda/projects/running-coach && set -a && source .env && 
 
 ---
 
-*Последнее обновление: 02.07.2026 — Sprint 4.5 завершён*
+*Последнее обновление: 02.07.2026 — Sprint 4.5 + Sprint 4 завершены, Фаза 1 выполнена*

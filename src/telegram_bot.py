@@ -123,9 +123,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db = SessionLocal()
         try:
             login_link = _generate_login_link(db, user)
+            cred = db.query(WatchCredential).filter(
+                WatchCredential.user_id == user.id,
+                WatchCredential.brand == 'coros',
+            ).first()
+            cred_email = cred.encrypted_user or '' if cred else ''
         finally:
             db.close()
-        cred_email = user.coros_email or ''
         await update.message.reply_text(
             f"👋 Привет, {user.name or username or 'бегун'}!\n"
             f"Твой Coros аккаунт уже привязан: {cred_email}\n\n"
@@ -201,12 +205,14 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         user.telegram_username = username
         user.name = name
-        old_coros_email = user.coros_email
-        user.coros_email = email
-        user.coros_password = encrypt(password)
+        old_cred = db.query(WatchCredential).filter(
+            WatchCredential.user_id == user.id,
+            WatchCredential.brand == 'coros',
+        ).first()
+        old_coros_email = old_cred.encrypted_user if old_cred else ''
         user.registered_at = datetime.now(timezone.utc)
 
-        # Сохраняем также в WatchCredential (Save to WatchCredential as well)
+        # Сохраняем в WatchCredential (Save to WatchCredential)
         cred = db.query(WatchCredential).filter(
             WatchCredential.user_id == user.id,
             WatchCredential.brand == 'coros',
@@ -272,7 +278,21 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_sync(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user = get_user(chat_id)
-    if not user or not user.coros_email:
+    if not user:
+        await update.message.reply_text(
+            "❌ Ты не зарегистрирован. Используй /start чтобы настроить."
+        )
+        return
+    db_check = SessionLocal()
+    try:
+        has_cred = db_check.query(WatchCredential).filter(
+            WatchCredential.user_id == user.id,
+            WatchCredential.brand == 'coros',
+            WatchCredential.encrypted_password.isnot(None),
+        ).first() is not None
+    finally:
+        db_check.close()
+    if not has_cred:
         await update.message.reply_text(
             "❌ Coros аккаунт не привязан. Используй /start чтобы настроить."
         )
@@ -868,8 +888,6 @@ async def cmd_delete_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.query(WeightMeasurement).filter(WeightMeasurement.user_id == user.id).delete()
         db.query(DeletedTraining).filter(DeletedTraining.user_id == user.id).delete()
         db.query(WatchCredential).filter(WatchCredential.user_id == user.id).delete()
-        user.coros_email = None
-        user.coros_password = None
         user.telegram_chat_id = None
         db.commit()
         audit.log_settings_changed(

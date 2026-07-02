@@ -81,7 +81,6 @@ running-coach/
 │   │   ├── date_format.py
 │   │   ├── logger.py
 │   │   └── validators.py
-│   ├── coros_client.py         # Legacy: Coros HTTP client (перенести в services/coros/)
 │   ├── crypto.py               # Шифрование паролей
 │   ├── logger.py               # Legacy: logger (перенести в utils/logger.py)
 │   ├── telegram_bot.py         # Telegram бот
@@ -151,7 +150,6 @@ async def upload_training(
 ### Legacy-код
 
 Некоторые файлы ещё не перенесены в новую структуру:
-- `src/coros_client.py` → переносится в `src/services/coros/client.py`
 - `src/logger.py` → переносится в `src/utils/logger.py`
 - `src/telegram_bot.py` → часть логики переносится в `src/services/telegram/`
 

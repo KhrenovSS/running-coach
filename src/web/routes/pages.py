@@ -438,19 +438,21 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
         db.add(user)
     old_weight = user.weight_kg
     old_max_hr = user.max_hr
-    old_coros_email = user.coros_email
+
+    # Читаем старый email из WatchCredential (Read old email from WatchCredential)
+    old_cred = db.query(WatchCredential).filter(
+        WatchCredential.user_id == current_user.id,
+        WatchCredential.brand == 'coros',
+    ).first()
+    old_coros_email = old_cred.encrypted_user if old_cred else ''
+
     user.max_hr = max_hr
     user.weight_kg = weight
     user.max_credible_pace = max_credible_pace
     user.max_gps_jump_m = max_gps_jump_m
     user.min_hr_for_fast_pace = min_hr_for_fast_pace
-    user.coros_email = coros_email or None
-    if coros_password and coros_password != '********':
-        user.coros_password = encrypt(coros_password)
-    elif not coros_email:
-        user.coros_password = None
 
-    # Сохраняем также в WatchCredential (Save to WatchCredential as well)
+    # Сохраняем credentials в WatchCredential (Save credentials to WatchCredential)
     if coros_email:
         cred = db.query(WatchCredential).filter(
             WatchCredential.user_id == current_user.id,
@@ -467,7 +469,6 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
         if coros_password and coros_password != '********':
             cred.encrypted_password = encrypt(coros_password)
     else:
-        # Remove credential if email is cleared
         cred = db.query(WatchCredential).filter(
             WatchCredential.user_id == current_user.id,
             WatchCredential.brand == 'coros',

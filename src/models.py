@@ -29,9 +29,6 @@ class User(Base):
     sport_level = Column(String(50), nullable=True)  # beginner / intermediate / advanced
     goal_type = Column(String(50), nullable=True)  # lose_weight / 10k / half_marathon / marathon / general
     goal_target = Column(String(255), nullable=True)  # e.g. "sub 60 min 10k"
-    coros_email = Column(String(255), nullable=True)
-    coros_password = Column(String(255), nullable=True)  # encrypted
-    last_coros_sync = Column(DateTime(timezone=True), nullable=True)
     last_health_sync_at = Column(DateTime(timezone=True), nullable=True)
     max_hr = Column(Integer, default=177)
     max_credible_pace = Column(Float, default=3.0)

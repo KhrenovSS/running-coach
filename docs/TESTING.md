@@ -11,7 +11,7 @@ tests/
 │   ├── test_parsers.py
 │   ├── test_classification.py
 │   ├── test_zones.py
-│   └── test_coros_client.py
+│   └── test_watch_client.py
 ├── integration/             # С реальной БД
 │   ├── test_api_training.py
 │   ├── test_api_settings.py
