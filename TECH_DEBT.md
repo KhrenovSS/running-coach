@@ -626,10 +626,13 @@ running-coach-worker.service  # APScheduler для синков/напомина
 6. **Спринт 5 — PostgreSQL + Docker (3 контейнера)** (2–3 дня)
    — *завершён, см. подробное описание ниже.*
 
-7. **Спринт 6 — Настраиваемая частота синхронизации per-user (бренд-независимая)** (1–2 дня)
+7. **Sprint 4.5 — Полный отказ от SQLite, переход на PostgreSQL + TIMESTAMPTZ** (1 день)
    — *см. подробное описание ниже.*
 
-8. **Спринт 7 — Панель администрирования (Admin panel)** (2–3 дня)
+8. **Спринт 6 — Настраиваемая частота синхронизации per-user (бренд-независимая)** (1–2 дня)
+   — *см. подробное описание ниже.*
+
+9. **Спринт 7 — Панель администрирования (Admin panel)** (2–3 дня)
    — *отложен до появления >1 пользователя или модуля аналитики.*
 
 ---
@@ -765,7 +768,164 @@ running-coach-worker.service  # APScheduler для синков/напомина
    volume: pgdata      uploads/ logs/      (нет volumes)
    ```
 
-   **Примечание:** данные SQLite не переносятся. Пользователь создаётся заново через Telegram `/start`, тренировки синхронизируются с Coros автоматически.
+    **Примечание:** данные SQLite не переносятся. Пользователь создаётся заново через Telegram `/start`, тренировки синхронизируются с Coros автоматически.
+
+---
+
+### Детальное описание Sprint 4.5
+
+7. **Sprint 4.5 — Полный отказ от SQLite, переход на PostgreSQL + TIMESTAMPTZ** (1 день)
+
+   **Цель:** убрать SQLite как dev-альтернативу, стандартизироваться на PostgreSQL. Все DateTime-колонки хранят `TIMESTAMP WITH TIME ZONE` (aware UTC), убраны костыли `utcnow()` и `.replace(tzinfo=None)`.
+
+   **Зачем:** SQLite вызывает различия в поведении Alembic, миграций, JSON-полей, datetime. Сейчас (один пользователь = разработчик) — самый дешёвый момент для перехода.
+
+   ---
+
+   #### Фаза 1 — Инфраструктура (без изменения кода)
+
+   - [ ] **4.5.1** `docker-compose.yml`: expose порт `5432` наружу для сервиса `db` (чтобы можно подключаться с хоста при локальной разработке).
+   - [ ] **4.5.2** `.env.example`: добавить `DATABASE_URL=postgresql://running_coach:${POSTGRES_PASSWORD}@localhost:5432/running_coach` для локальной разработки.
+   - [ ] **4.5.3** `README.md`: обновить раздел «Локальная разработка» — теперь требуется PostgreSQL (Docker или локальный).
+
+   **Как проверить:**
+   - `docker compose up db` → порт 5432 доступен с хоста (`psql postgresql://...` подключается).
+
+   ---
+
+   #### Фаза 2 — Убрать SQLite из кода
+
+   - [ ] **4.5.4** `src/models.py`:
+     - Убрать ветку `if database_url.startswith("sqlite")`.
+     - Всегда создавать engine для PostgreSQL (`pool_size=10, max_overflow=20`).
+     - Убрать `check_same_thread=False`, `PRAGMA journal_mode=WAL`, `PRAGMA synchronous=NORMAL`.
+     - Убрать fallback на SQLite при отсутствии `DATABASE_URL` (теперь URL обязателен).
+   - [ ] **4.5.5** `alembic/env.py`:
+     - Убрать `_RENDER_AS_BATCH` и `render_as_batch`.
+     - Убрать условие `db_url is None or db_url.startswith("sqlite")`.
+     - Всегда использовать `render_as_batch=False`.
+   - [ ] **4.5.6** `alembic.ini`:
+     - Убрать `sqlalchemy.url = sqlite:///running_coach.db`.
+     - Оставить пустым или прокомментировать: `# set via DATABASE_URL env variable`.
+
+   **Как проверить:**
+   - `python3 -c "from src.models import engine; print(engine.url)"` → `postgresql://...`.
+   - `alembic current` подключается к PostgreSQL, не падает.
+
+   ---
+
+   #### Фаза 3 — TIMESTAMPTZ: модели и дефолты
+
+   - [ ] **4.5.7** `src/models.py`:
+     - Убрать функцию `utcnow()` (helper для naive UTC).
+     - Все `Column(DateTime, ...)` → `Column(DateTime(timezone=True), ...)` (12 колонок: users.created_at, users.registered_at, training_sessions.begin_ts, deleted_trainings.deleted_at, daily_metrics.synced_at, weight_measurements.measured_at, auth_tokens.expires_at/used_at/created_at, audit_events.created_at).
+     - `default=utcnow` → `default=lambda: datetime.now(timezone.utc)`.
+   - [ ] **4.5.8** `src/startup.py`:
+     - `measured_at=utcnow()` → `measured_at=datetime.now(timezone.utc)`.
+
+   **Как проверить:**
+   - `python3 -c "from src.models import TrainingSession; print(TrainingSession.__table__.c.begin_ts.type)"` → `TIMESTAMP WITH TIME ZONE`.
+
+   ---
+
+   #### Фаза 4 — Убрать `.replace(tzinfo=None)`
+
+   Всё, что создаёт aware datetime, больше не нужно «обрезать» tzinfo для SQLite.
+
+   - [ ] **4.5.9** `src/services/auth.py` (5 мест):
+     - `expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + ...` → `expires_at = datetime.now(timezone.utc) + ...`
+     - Аналогично в `verify_telegram_login_token`, `check_telegram_login_token`, `cleanup_expired_tokens`.
+   - [ ] **4.5.10** `src/services/audit.py` (2 места):
+     - `created_at=datetime.now(timezone.utc).replace(tzinfo=None)` → `created_at=datetime.now(timezone.utc)`.
+     - `timestamp`: `.isoformat().replace("+00:00", "Z")` → `.isoformat()` (aware datetime сам форматирует `+00:00`).
+   - [ ] **4.5.11** `src/telegram_bot.py` (~10 мест):
+     - `user.registered_at = datetime.now(timezone.utc).replace(tzinfo=None)` → `user.registered_at = datetime.now(timezone.utc)`.
+     - `wm = WeightMeasurement(..., measured_at=datetime.now(timezone.utc).replace(tzinfo=None))` → `...measured_at=datetime.now(timezone.utc)`.
+     - `week_ago = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)` → `week_ago = datetime.now(timezone.utc) - timedelta(days=7)`.
+     - `today_start = datetime.now(timezone.utc).replace(tzinfo=None, hour=0, ...)` → `today_start = datetime.now(timezone.utc).replace(hour=0, ...)` (aware datetime тоже поддерживает `.replace()`).
+   - [ ] **4.5.12** `src/web/routes/pages.py` (2 места):
+     - `wm = WeightMeasurement(..., measured_at=datetime.now(timezone.utc).replace(tzinfo=None))` → `...measured_at=datetime.now(timezone.utc)`.
+   - [ ] **4.5.13** `src/services/coros_sync_auto.py` (5 мест):
+     - `datetime.now(timezone.utc).replace(tzinfo=None)` → `datetime.now(timezone.utc)`.
+   - [ ] **4.5.14** `src/utils/logger.py`:
+     - `datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")` → `datetime.now(timezone.utc).isoformat()`.
+   - [ ] **4.5.15** `src/api/routes/health.py`:
+     - `datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")` → `datetime.now(timezone.utc).isoformat()`.
+   - [ ] **4.5.16** `src/parsers/tcx_parser.py`:
+     - `datetime.now(timezone.utc).replace(tzinfo=None)` → `datetime.now(timezone.utc)`.
+   - [ ] **4.5.17** `src/coros_client.py`:
+     - Уже было исправлено на `datetime.fromtimestamp(ts, tz=timezone.utc).replace(tzinfo=None)`.
+     - Теперь убрать `.replace(tzinfo=None)` → `datetime.fromtimestamp(ts, tz=timezone.utc)`.
+
+   **Как проверить:**
+   - `grep -rn "replace(tzinfo=None)" src/ main.py` → **0 совпадений**.
+   - `grep -rn "utcnow" src/ main.py` → только `import timezone.utc` или `datetime.now(timezone.utc)` (helper `utcnow()` должен исчезнуть).
+
+   ---
+
+   #### Фаза 5 — Хелперы для отображения
+
+   - [ ] **4.5.18** `src/deps.py:local_dt()`:
+     - Сейчас: `dt.replace(tzinfo=timezone.utc).astimezone(tz).replace(tzinfo=None)` (naive → aware → local → naive).
+     - Должно быть: `dt.astimezone(tz)` (aware UTC → aware local).
+     - Убрать `.replace(tzinfo=None)` в конце — возвращаем aware local datetime.
+   - [ ] **4.5.19** `src/web/routes/pages.py`:
+     - `s.begin_ts.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(tz_name))` → `s.begin_ts.astimezone(ZoneInfo(tz_name))`.
+     - `begin_local = start_utc_aware.astimezone(local_tz)` в `common.py` уже aware → aware, не трогать.
+   - [ ] **4.5.20** `src/web/routes/coros_sync_auto.py`, `src/telegram_bot.py` и другие:
+     - Проверить, что нигде не осталось ручного `.replace(tzinfo=timezone.utc)` для конвертации.
+
+   **Как проверить:**
+   - `grep -rn "replace(tzinfo=timezone.utc)" src/ main.py` → **0 совпадений**.
+   - Загрузить TCX → на странице тренировки время отображается в MSK (не смещено на 3 часа).
+
+   ---
+
+   #### Фаза 6 — Data migration (naive UTC → aware UTC)
+
+   Существующие записи в PostgreSQL хранят `begin_ts` как naive UTC (тип PostgreSQL `TIMESTAMP WITHOUT TIME ZONE`).
+   После смены колонки на `TIMESTAMP WITH TIME ZONE` PostgreSQL будет считать эти значения UTC.
+   Нужно «привязать» tzinfo к существующим значениям.
+
+   - [ ] **4.5.21** Alembic data migration:
+     - Скрипт обновляет все `TIMESTAMP` колонки: читает значение, пишет обратно с `+00:00`.
+     - Для PostgreSQL: `UPDATE table SET col = col::timestamp with time zone AT TIME ZONE 'UTC'`.
+     - Или через SQLAlchemy: прочитать все записи, `begin_ts = begin_ts.replace(tzinfo=timezone.utc)`, `db.commit()`.
+
+   **Как проверить:**
+   - `SELECT begin_ts FROM training_sessions LIMIT 1` → значение содержит `+00:00` (или `Z` в выводе psql).
+   - `SELECT pg_typeof(begin_ts) FROM training_sessions LIMIT 1` → `timestamp with time zone`.
+
+   ---
+
+   #### Фаза 7 — Финальная проверка и тестирование
+
+   - [ ] **4.5.22** `docker compose build app bot && docker compose up -d`.
+   - [ ] **4.5.23** `curl /health/` — `database.status = ok`, `current_revision` корректная.
+   - [ ] **4.5.24** Telegram `/start` → регистрация → вход через веб — работает.
+   - [ ] **4.5.25** Загрузить TCX-файл через веб → тренировка сохраняется → время на странице в MSK.
+   - [ ] **4.5.26** Синхронизация Coros через кнопку → тренировки загружаются → время в MSK.
+   - [ ] **4.5.27** `daily_weight_job` и `daily_recovery_check_job` — падают ли в лог ошибки.
+   - [ ] **4.5.28** `alembic downgrade -1` → `alembic upgrade head` — чистый цикл без ошибок.
+
+   **Регрессионные тесты:**
+   - [ ] Старые тренировки (конвертированные в п.8.4) отображаются с правильным временем.
+   - [ ] Новые тренировки (загруженные после перехода на TIMESTAMPTZ) отображаются с правильным временем.
+   - [ ] `DeletedTraining.begin_ts` — корректно при удалении и повторной загрузке.
+   - [ ] `WeightMeasurement.measured_at` — график веса показывает правильные даты.
+
+   ---
+
+   #### Итоговый чеклист перед мержем
+
+   - [ ] `grep -rn "replace(tzinfo=None)" src/ main.py` → **0**.
+   - [ ] `grep -rn "utcnow()" src/ main.py` → **0** (кроме `datetime.now(timezone.utc)`).
+   - [ ] `grep -rn "sqlite" src/ alembic/` → **0** (кроме документации/комментариев).
+   - [ ] `grep -rn "render_as_batch" alembic/` → **0**.
+   - [ ] `docker compose ps` → все 3 контейнера `Up`.
+   - [ ] `curl /health/` → `status: healthy`, `database: ok`.
+   - [ ] 1 новая тренировка загружена и отображается с правильным временем.
+   - [ ] `CHANGELOG.md`, `AGENTS.md`, `README.md` обновлены.
 
 ---
 
