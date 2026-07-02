@@ -5,9 +5,9 @@ from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime, timezone
 import os
 
-# Helper: текущее UTC время без tzinfo для хранения в БД (Server-agnostic UTC helper)
+# Helper: текущее UTC время с tzinfo для TIMESTAMPTZ (Aware UTC helper for TIMESTAMPTZ)
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(timezone.utc)
 
 # Базовый класс для всех моделей SQLAlchemy (Base class for all SQLAlchemy models)
 Base = declarative_base()
@@ -31,16 +31,16 @@ class User(Base):
     goal_target = Column(String(255), nullable=True)  # e.g. "sub 60 min 10k"
     coros_email = Column(String(255), nullable=True)
     coros_password = Column(String(255), nullable=True)  # encrypted
-    last_coros_sync = Column(DateTime, nullable=True)
-    last_health_sync_at = Column(DateTime, nullable=True)
+    last_coros_sync = Column(DateTime(timezone=True), nullable=True)
+    last_health_sync_at = Column(DateTime(timezone=True), nullable=True)
     max_hr = Column(Integer, default=177)
     max_credible_pace = Column(Float, default=3.0)
     max_gps_jump_m = Column(Float, default=100.0)
     min_hr_for_fast_pace = Column(Integer, default=130)
     is_active = Column(Boolean, default=True)
     timezone = Column(String(50), nullable=True)  # Часовой пояс пользователя (User timezone, e.g. "Europe/Moscow")
-    created_at = Column(DateTime, default=utcnow)
-    registered_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    registered_at = Column(DateTime(timezone=True), nullable=True)
 
     training_sessions = relationship("TrainingSession", back_populates="user")
     daily_metrics = relationship("DailyMetrics", back_populates="user")
@@ -54,7 +54,7 @@ class TrainingSession(Base):
     
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)  # Для обратной совместимости nullable
-    begin_ts = Column(DateTime, default=utcnow)
+    begin_ts = Column(DateTime(timezone=True), default=utcnow)
     total_distance_km = Column(Float)
     avg_heart_rate = Column(Integer)
     max_heart_rate = Column(Integer)
@@ -84,7 +84,7 @@ class DeletedTraining(Base):
     __tablename__ = 'deleted_trainings'
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
-    begin_ts = Column(DateTime, nullable=False)
+    begin_ts = Column(DateTime(timezone=True), nullable=False)
     total_distance_km = Column(Float, nullable=True)
     avg_heart_rate = Column(Integer, nullable=True)
     max_heart_rate = Column(Integer, nullable=True)
@@ -97,7 +97,7 @@ class DeletedTraining(Base):
     vo2max = Column(Float, nullable=True)
     calories = Column(Integer, nullable=True)
     avg_pace = Column(Float, nullable=True)
-    deleted_at = Column(DateTime, default=utcnow)
+    deleted_at = Column(DateTime(timezone=True), default=utcnow)
 
     user = relationship("User", back_populates="deleted_trainings")
 
@@ -126,7 +126,7 @@ class DailyMetrics(Base):
     stamina_level = Column(Float, nullable=True)
     ltsp = Column(Float, nullable=True)
     stamina_level_7d = Column(Float, nullable=True)
-    synced_at = Column(DateTime, default=utcnow)
+    synced_at = Column(DateTime(timezone=True), default=utcnow)
     recovery_pct = Column(Integer, nullable=True)  # Coros recovery % (0-100)
     form_score = Column(Float, nullable=True)  # Coros "Базовая форма"
     load_impact = Column(Float, nullable=True)  # Coros "Влияние нагрузки"
@@ -142,7 +142,7 @@ class WeightMeasurement(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
     weight_kg = Column(Float, nullable=False)
-    measured_at = Column(DateTime, default=utcnow)
+    measured_at = Column(DateTime(timezone=True), default=utcnow)
 
     user = relationship("User", back_populates="weight_measurements")
 
@@ -155,7 +155,7 @@ class TrainingFeedback(Base):
     user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
     rating = Column(Integer, nullable=False)  # 0–10 (тяжесть тренировки)
     notes = Column(String(500), nullable=True)
-    created_at = Column(DateTime, default=utcnow)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
 
     session = relationship("TrainingSession")
     user = relationship("User")
@@ -172,7 +172,7 @@ class AuditEvent(Base):
     user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
     ip_address = Column(String(45), nullable=True)
     metadata_json = Column(Text, nullable=True)  # JSON string
-    created_at = Column(DateTime, default=utcnow, index=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
     
     user = relationship("User")
 
@@ -184,9 +184,9 @@ class AuthToken(Base):
     id = Column(Integer, primary_key=True)
     token = Column(String(64), unique=True, nullable=False, index=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
-    used_at = Column(DateTime, nullable=True)
-    expires_at = Column(DateTime, nullable=False, index=True)
-    created_at = Column(DateTime, default=utcnow)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
 
     user = relationship("User")
 

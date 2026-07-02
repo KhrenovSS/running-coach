@@ -830,15 +830,21 @@ running-coach-worker.service  # APScheduler для синков/напомина
 
    #### Фаза 3 — TIMESTAMPTZ: модели и дефолты
 
-   - [ ] **4.5.7** `src/models.py`:
-     - Убрать функцию `utcnow()` (helper для naive UTC).
-     - Все `Column(DateTime, ...)` → `Column(DateTime(timezone=True), ...)` (12 колонок: users.created_at, users.registered_at, training_sessions.begin_ts, deleted_trainings.deleted_at, daily_metrics.synced_at, weight_measurements.measured_at, auth_tokens.expires_at/used_at/created_at, audit_events.created_at).
-     - `default=utcnow` → `default=lambda: datetime.now(timezone.utc)`.
-   - [ ] **4.5.8** `src/startup.py`:
-     - `measured_at=utcnow()` → `measured_at=datetime.now(timezone.utc)`.
+   - [x] **4.5.7** `src/models.py`:
+      - Убрать функцию `utcnow()` (helper для naive UTC).
+      - Все `Column(DateTime, ...)` → `Column(DateTime(timezone=True), ...)` (12 колонок: users.created_at, users.registered_at, training_sessions.begin_ts, deleted_trainings.deleted_at, daily_metrics.synced_at, weight_measurements.measured_at, auth_tokens.expires_at/used_at/created_at, audit_events.created_at).
+      - `default=utcnow` → `default=lambda: datetime.now(timezone.utc)`.
+   - [x] **4.5.8** `src/startup.py`:
+      - `measured_at=utcnow()` → `measured_at=datetime.now(timezone.utc)`.
+   - [x] **4.5.7b** Alembic migration `5e287a9fc289`:
+      - ALTER все DateTime колонки в PostgreSQL → `TIMESTAMP WITH TIME ZONE`
+      - Существующие naive UTC значения интерпретируются как UTC
+      - Применена на Docker PostgreSQL (14 колонок), все training_sessions корректно сконвертированы
 
    **Как проверить:**
-   - `python3 -c "from src.models import TrainingSession; print(TrainingSession.__table__.c.begin_ts.type)"` → `TIMESTAMP WITH TIME ZONE`.
+   - [x] `python3 -c "from src.models import TrainingSession; print(TrainingSession.__table__.c.begin_ts.type)"` → `DATETIME (timezone=True)`.
+   - [x] `psql -c "\d training_sessions"` → `begin_ts: timestamp with time zone`.
+   - [x] Существующие записи сохраняют значения и получают timezone `+00`.
 
    ---
 

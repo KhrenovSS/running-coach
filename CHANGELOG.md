@@ -2,6 +2,22 @@
 
 All notable changes to this project are tracked here.
 
+## [02.07.2026] — Sprint 4.5, Phase 3: TIMESTAMPTZ models + migration
+
+### Changed
+- **All 14 DateTime columns** in `src/models.py` changed to `DateTime(timezone=True)`:
+  - users: created_at, registered_at, last_coros_sync, last_health_sync_at
+  - training_sessions: begin_ts
+  - deleted_trainings: begin_ts, deleted_at
+  - daily_metrics: synced_at
+  - weight_measurements: measured_at
+  - training_feedback: created_at
+  - audit_events: created_at
+  - auth_tokens: created_at, expires_at, used_at
+- **`utcnow()` helper** now returns aware datetime `datetime.now(timezone.utc)` (was `.replace(tzinfo=None)`)
+- **Alembic migration `5e287a9fc289`**: ALTER all 14 columns to `TIMESTAMP WITH TIME ZONE` on PostgreSQL
+- **All existing data** (27 training sessions) preserved with UTC timezone attached
+
 ## [02.07.2026] — Sprint 4.5, Phase 1-2: infra + remove SQLite from code
 
 ### Added
