@@ -45,7 +45,7 @@
         <h3>Пульс и темп</h3>
         <canvas id='hrPaceChart' height='100'></canvas>
         <script>
-        const chartData = {{ chart_json }};
+        const chartData = {{ chart_json|safe }};
         if (chartData.length > 0) {
             const step = Math.max(1, Math.floor(chartData.length / 200));
             const data = chartData.filter((_, i) => i % step === 0);

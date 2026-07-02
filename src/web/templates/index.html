@@ -101,8 +101,8 @@
         </div>
     </div>
     <script>
-        const recoveryData = {{ recovery_json }};
-        const weightData = {{ weight_json }};
+        const recoveryData = {{ recovery_json|safe }};
+        const weightData = {{ weight_json|safe }};
         const CURRENT_WEIGHT = {{ weight }};
     </script>
 {% raw %}

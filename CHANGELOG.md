@@ -2,6 +2,13 @@
 
 All notable changes to this project are tracked here.
 
+## [02.07.2026] — Hotfix: Jinja2 autoescaping ломает JSON в <script> тегах
+
+### Fixed
+- **`src/web/templates/index.html`**: `{{ recovery_json }}` и `{{ weight_json }}` без `|safe` — Jinja2 autoescape превращал `"` в `&#34;`, ломая JavaScript. График RHR и вес не отображались.
+- **`src/web/templates/session.html`**: `{{ chart_json }}` без `|safe` — то же самое, график пульса/темпа на странице тренировки не работал.
+- Добавлен `|safe` ко всем трём JSON-переменным.
+
 ## [02.07.2026] — Hotfix: UnboundLocalError в pages.py (Python 3.13+)
 
 ### Fixed
