@@ -384,8 +384,9 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
    - `common.py`: `start_time_utc` normalized to aware UTC at function entry
    - `coros_sync_auto.py`: `bt` parsing produces aware UTC for DB comparisons
 5. **Hotfix (02.07.2026)**: `UnboundLocalError` in `pages.py:73` — Python 3.13+ scoping issue with inner `import` shadowing module-level `timezone`
-6. **Docker**: all 3 containers (`db`, `app`, `bot`) Up and healthy
-7. **Tests**: 3/3 pass with in-memory SQLite
+6. **Hotfix (02.07.2026)**: Jinja2 autoescaping breaks JSON in `<script>` tags — `{{ recovery_json|safe }}`, `{{ weight_json|safe }}`, `{{ chart_json|safe }}` added to templates. All charts (RHR, weight, HR/pace) were broken since Sprint 3 template migration.
+7. **Docker**: all 3 containers (`db`, `app`, `bot`) Up and healthy
+8. **Tests**: 3/3 pass with in-memory SQLite
 
 ### Следующие шаги (из TECH_DEBT.md):
 1. **Sprint 4 п.12+14** — httpx Coros-клиент + мульти-брендовая архитектура (BaseWatchClient, WatchCredential, sync_service)
