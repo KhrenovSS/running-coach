@@ -2,6 +2,23 @@
 
 All notable changes to this project are tracked here.
 
+## [02.07.2026] — Hotfix: daily weight reminder timezone (п.15)
+
+### Fixed
+- **daily weight reminder** — PTB `JobQueue` работал в UTC, `run_daily(hour=9)`
+  срабатывал в 12:00 MSK вместо 9:00. Исправлено: `Defaults(tzinfo=ZoneInfo("Europe/Moscow"))`
+  в `Application.builder()`.
+- **catch-up query** — глобальная проверка веса без `user_id` заменена на безусловный
+  `run_once` (т.к. `daily_weight_job` сам проверяет who has/hasn't weighed).
+- **docker-compose.yml** — добавлен `TZ: Europe/Moscow` для сервисов `app` и `bot`.
+
+### Changed
+- **TECH_DEBT.md**: п.15 вынесен из Спринта 4 в отдельный «Шаг 0 — быстрые исправления»
+  перед Спринтом 4.
+- **TECH_DEBT.md**: п.12+14 объединены (Coros-клиент пишется на httpx сразу как
+  `CorosWatchClient(BaseWatchClient)`, без промежуточного шага).
+- **TECH_DEBT.md**: Спринт 7 помечен как отложенный.
+
 ## [02.07.2026] — Планирование мульти-брендовой архитектуры
 
 ### Added

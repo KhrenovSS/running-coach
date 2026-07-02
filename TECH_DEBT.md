@@ -610,26 +610,47 @@ running-coach-worker.service  # APScheduler для синков/напомина
    - [x] п.2: убрать `_current_user_id = 1`, добавить аутентификацию (email+password, bcrypt, `/login`, `/register`, `/reset_password` в боте).
    - [x] п.6: ввести `get_db()` через `Depends`, починить detached-объекты.
 
-3. **Спринт 3 — структура и UI** (3–5 дней)
-   - [ ] п.1: декомпозиция `main.py` на `web/routes`, `services`, `scheduler`.
-   - [ ] п.11: Jinja2-шаблоны.
-   - [ ] п.13: единая конфигурация через `pydantic-settings`.
+3. **Спринт 3 — структура и UI** (3–5 дней) — ✅ *завершён*
+   - [x] п.1: декомпозиция `main.py` на `web/routes`, `services`, `scheduler`.
+   - [x] п.11: Jinja2-шаблоны.
+   - [x] п.13: единая конфигурация через `pydantic-settings`.
 
-4. **Спринт 4 — процессы, интеграции, мульти-брендовая архитектура** (3–4 дня)
-   - [ ] п.8: стандартизировать время (UTC + `User.timezone`).
-   - [ ] п.12: переписать Coros-клиент на `httpx.AsyncClient` + TTL токена.
-   - [ ] п.14: внедрить мульти-брендовую архитектуру (BaseWatchClient ABC, WatchCredential, обобщение синхронизации).
+4. **Шаг 0 — быстрые исправления** (до Спринта 4)
    - [ ] п.15: исправить часовой пояс daily weight reminder (бот присылает в 12:00 MSK вместо 9:00).
+
+5. **Спринт 4 — процессы, интеграции, мульти-брендовая архитектура** (3–4 дня)
+   - [ ] п.8: стандартизировать время (UTC + `User.timezone`).
+   - [ ] п.12+14: переписать Coros-клиент на `httpx.AsyncClient` сразу как `CorosWatchClient(BaseWatchClient)`, внедрить мульти-брендовую архитектуру.
    — *см. подробное описание ниже.*
 
-5. **Спринт 5 — PostgreSQL + Docker (3 контейнера)** (2–3 дня)
+6. **Спринт 5 — PostgreSQL + Docker (3 контейнера)** (2–3 дня)
    — *завершён, см. подробное описание ниже.*
 
-6. **Спринт 6 — Настраиваемая частота синхронизации per-user (бренд-независимая)** (1–2 дня)
+7. **Спринт 6 — Настраиваемая частота синхронизации per-user (бренд-независимая)** (1–2 дня)
    — *см. подробное описание ниже.*
 
-7. **Спринт 7 — Панель администрирования (Admin panel)** (2–3 дня)
-   — *см. подробное описание ниже.*
+8. **Спринт 7 — Панель администрирования (Admin panel)** (2–3 дня)
+   — *отложен до появления >1 пользователя или модуля аналитики.*
+
+---
+
+### Детальное описание Шага 0 (перед Спринтом 4)
+
+#### п.15 — Исправление daily weight reminder (часовой пояс бота)
+
+**Проблема:** PTB `JobQueue` работает в UTC, `run_daily(hour=9)` срабатывает в 9:00 UTC = 12:00 MSK.  
+Пользователь ожидает напоминание в 9:00 MSK.
+
+- [ ] **15.1** `src/telegram_bot.py`: добавить `Defaults(tzinfo=pytz.timezone("Europe/Moscow"))` в `Application.builder()`.
+- [ ] **15.2** Исправить catch-up запрос при старте бота (`telegram_bot.py:1049-1053`): убрать глобальную проверку `any_weight_today` без `user_id` — она бессмысленна, т.к. `daily_weight_job` и так итерирует всех пользователей. Заменить на `run_once` через 30 сек без предварительной проверки (бот сам разберётся).
+- [ ] **15.3** `docker-compose.yml`: добавить `TZ=Europe/Moscow` в `environment` сервисов `bot` и `app`.
+- [ ] **15.4** Пересобрать образ бота: `docker compose build bot && docker compose up -d`.
+- [ ] **15.5** Проверить лог: `sudo docker logs running-coach-bot-1 --tail 20 | grep -i "weight\|вес"`.
+
+**Как проверить:**
+- [ ] Бот присылает напоминание о весе ровно в 9:00 MSK (а не в 12:00).
+- [ ] Лог содержит `Scheduler timezone: Europe/Moscow` или эквивалент.
+- [ ] `daily_weight_job` в логе показывает `hour=9` в 9:00 MSK.
 
 ---
 
@@ -637,7 +658,7 @@ running-coach-worker.service  # APScheduler для синков/напомина
 
 4. **Спринт 4 — Процессы, интеграции, мульти-брендовая архитектура** (3–4 дня)
 
-   **Цель:** стандартизировать хранение времени, перевести Coros-клиент на async HTTP, внедрить абстракцию бренда часов, чтобы в будущем добавлять Garmin/Polar/Suunto без переписывания пайплайна синхронизации.
+   **Цель:** стандартизировать хранение времени, перевести Coros-клиент на async HTTP c одновременным внедрением абстракции `BaseWatchClient`, чтобы в будущем добавлять Garmin/Polar/Suunto без переписывания пайплайна синхронизации.
 
    #### п.8 — Стандартизация времени (UTC)
 
@@ -648,16 +669,12 @@ running-coach-worker.service  # APScheduler для синков/напомина
    - [ ] **8.5** Шаблоны Jinja2: конвертировать UTC → локальное время пользователя через хелпер `format_local(dt, user)`.
    - [ ] **8.6** `grep -rn "datetime.utcnow" src/ main.py` → 0 совпадений.
 
-   #### п.12 — Coros-клиент на httpx.AsyncClient + TTL
+   #### п.12+14 — Coros-клиент на httpx.AsyncClient + мульти-брендовая архитектура (одним блоком)
 
-   - [ ] **12.1** `src/coros_client.py`: заменить `requests.Session()` на `httpx.AsyncClient`.
-   - [ ] **12.2** Все методы сделать асинхронными (`async def`).
-   - [ ] **12.3** Добавить кеширование токена: поля `User.coros_access_token` (Text), `User.coros_token_expires_at` (DateTime, nullable). Реавторизация только при `401` или истечении срока.
-   - [ ] **12.4** Адаптировать вызывающий код (`src/services/coros_sync_auto.py`, `src/web/routes/coros.py`) под async-клиент.
+   > **Почему объединены:** переписывать `CorosClient` дважды (сначала на httpx, потом на BaseWatchClient) — лишняя работа. Сразу делаем `CorosWatchClient(BaseWatchClient)` на `httpx.AsyncClient`.
 
-   #### п.14 — Мульти-брендовая архитектура синхронизации
-
-   - [ ] **14.1** Создать `src/watch/base.py` — `BaseWatchClient(ABC)` с протоколом:
+   - [ ] **12+14.1** Создать `src/watch/` пакет с `__init__.py`.
+   - [ ] **12+14.2** Создать `src/watch/base.py` — `BaseWatchClient(ABC)` с протоколом:
      ```python
      class BaseWatchClient(ABC):
          @abstractmethod
@@ -669,60 +686,53 @@ running-coach-worker.service  # APScheduler для синков/напомина
          @abstractmethod
          async def get_daily_metrics(self, date: str) -> dict | None: ...
      ```
-   - [ ] **14.2** Переименовать `src/coros_client.py` → `src/watch/coros.py`, класс `CorosClient` → `CorosWatchClient(BaseWatchClient)`.
-   - [ ] **14.3** Создать `src/watch/factory.py` — реестр брендов и фабрика:
+   - [ ] **12+14.3** Создать `src/watch/coros.py`:
+     - Класс `CorosWatchClient(BaseWatchClient)` на `httpx.AsyncClient`.
+     - Все методы async.
+     - Кеширование токена через `WatchCredential.access_token` / `token_expires_at`.
+   - [ ] **12+14.4** Создать `src/watch/factory.py`:
      ```python
      _registry: dict[str, type[BaseWatchClient]] = {}
      def register(brand: str, client_cls: type[BaseWatchClient]): ...
      def get_watch_client(brand: str, **kwargs) -> BaseWatchClient: ...
      ```
-   - [ ] **14.4** Зарегистрировать `CorosWatchClient` в фабрике при импорте.
-   - [ ] **14.5** Создать модель `WatchCredential` (отдельная таблица):
+   - [ ] **12+14.5** Зарегистрировать `CorosWatchClient` в фабрике.
+   - [ ] **12+14.6** Удалить старый `src/coros_client.py` (весь функционал перенесён в `src/watch/coros.py`).
+   - [ ] **12+14.7** Создать модель `WatchCredential` (отдельная таблица):
      - `id` (PK), `user_id` (FK→users.id), `brand` (String, например 'coros'),
-       `encrypted_user` (Text), `encrypted_password` (Text), `created_at`, `updated_at`.
+       `encrypted_user` (Text), `encrypted_password` (Text),
+       `access_token` (Text, nullable), `token_expires_at` (DateTime, nullable),
+       `created_at`, `updated_at`.
      - Alembic миграция.
-   - [ ] **14.6** Перенести данные из `User.coros_email`/`coros_password` в `WatchCredential` (миграция данных).
-   - [ ] **14.7** Удалить поля `coros_email`, `coros_password`, `last_coros_sync` из модели `User`.
-   - [ ] **14.8** Обобщить `src/services/coros_sync_auto.py` → `src/services/sync_service.py`:
+   - [ ] **12+14.8** Перенести данные из `User.coros_email`/`coros_password` в `WatchCredential` (миграция данных).
+   - [ ] **12+14.9** Удалить поля `coros_email`, `coros_password`, `last_coros_sync` из модели `User`.
+   - [ ] **12+14.10** Обобщить `src/services/coros_sync_auto.py` → `src/services/sync_service.py`:
      - Функции принимают `BaseWatchClient`, а не `CorosClient`.
      - Выбор клиента — через `get_watch_client(brand, ...)` из `WatchCredential`.
-   - [ ] **14.9** Переименовать `src/scheduler.py` → brand-agnostic:
+   - [ ] **12+14.11** Обобщить `src/scheduler.py`:
      - Единый поток перебирает `WatchCredential`, группирует по `user_id`, для каждого brand вызывает соответствующий sync-метод.
-   - [ ] **14.10** Обобщить `src/web/routes/coros.py` → `src/web/routes/sync.py`:
+   - [ ] **12+14.12** Обобщить `src/web/routes/coros.py` → `src/web/routes/sync.py`:
      - `/sync/{brand}/run` вместо `/coros/sync`.
      - `/sync/{brand}/health` вместо `/coros/sync/health`.
      - `/sync/status/{task_id}` без brand — единый для всех.
      - Старый `/coros/sync` — редирект (обратная совместимость).
-   - [ ] **14.11** Добавить колонку `source_brand` (String) в `DailyMetrics`.
-   - [ ] **14.12** Переименовать `COROS_CRED_KEY` → `CRED_KEY` в `src/crypto.py` и `.env`. Обновить `crypto.py` — читать `CRED_KEY`, поддерживать старый `COROS_CRED_KEY` как fallback с `warn`.
-   - [ ] **14.13** Обобщить audit-события в `src/services/audit.py`:
+   - [ ] **12+14.13** Добавить колонку `source_brand` (String) в `DailyMetrics`.
+   - [ ] **12+14.14** Переименовать `COROS_CRED_KEY` → `CRED_KEY` в `crypto.py` и `.env`. Поддерживать старый `COROS_CRED_KEY` как fallback с `warn`.
+   - [ ] **12+14.15** Обобщить audit-события в `src/services/audit.py`:
      - `coros.sync.*` → `sync.{brand}.*`.
      - Методы `log_coros_sync_*` → `log_sync_*(brand, ...)` (обратная совместимость через депрекейт).
-   - [ ] **14.14** `src/web/routes/pages.py` — заменить импорт `_auto_sync_status` на brand-agnostic статус.
-   - [ ] **14.15** `src/web/state.py` — `_sync_tasks` уже brand-agnostic, проверить что ключи задач включают brand.
-
-   **Как проверить мульти-брендовость:**
-   - [ ] `grep -rn "CorosClient" src/` → только в `src/watch/coros.py` и `src/watch/factory.py` (регистрация).
-   - [ ] `grep -rn "coros_email\|coros_password" src/` → 0 совпадений (всё через `WatchCredential`).
-   - [ ] Синхронизация Coros работает через `/sync/coros/run`.
-   - [ ] Написать заглушку `DummyWatchClient(BaseWatchClient)` — зарегистрировать, запустить синхронизацию — пайплайн не падает.
-   - [ ] Audit-события пишут `sync.coros.*`, не `coros.sync.*` (старые записи не ломаются).
-
-   #### п.15 — Исправление daily weight reminder (часовой пояс бота)
-
-   - [ ] **15.1** `src/telegram_bot.py`: добавить `Defaults(tzinfo=pytz.timezone("Europe/Moscow"))` в `Application.builder()`.
-   - [ ] **15.2** Исправить catch-up запрос при старте бота (`telegram_bot.py:1049-1053`): убрать глобальную проверку `any_weight_today` без `user_id` — она бессмысленна, т.к. `daily_weight_job` и так итерирует всех пользователей. Заменить на `run_once` через 30 сек без предварительной проверки (бот сам разберётся).
-   - [ ] **15.3** `docker-compose.yml`: добавить `TZ=Europe/Moscow` в `environment` сервисов `bot` и `app`.
-   - [ ] **15.4** Пересобрать образ бота: `docker compose build bot && docker compose up -d`.
-   - [ ] **15.5** Проверить лог: `sudo docker logs running-coach-bot-1 --tail 20 | grep -i "weight\|вес"`.
+   - [ ] **12+14.16** `src/web/routes/pages.py` — заменить импорт `_auto_sync_status` на brand-agnostic статус.
 
    **Как проверить:**
-   - [ ] Бот присылает напоминание о весе ровно в 9:00 MSK (а не в 12:00).
-   - [ ] Лог содержит `Scheduler timezone: Europe/Moscow` или эквивалент.
-   - [ ] `daily_weight_job` в логе показывает `hour=9` в 9:00 MSK.
+   - [ ] `grep -rn "CorosClient" src/` → только в `src/watch/coros.py` и `src/watch/factory.py`.
+   - [ ] `grep -rn "coros_email\|coros_password" src/` → 0 совпадений.
+   - [ ] Синхронизация Coros работает через `/sync/coros/run`.
+   - [ ] Написать заглушку `DummyWatchClient(BaseWatchClient)` — зарегистрировать, запустить синхронизацию — пайплайн не падает.
+   - [ ] Audit-события пишут `sync.coros.*`.
 
    **Что НЕ входит в Спринт 4:**
    - Реализация клиентов для Polar, Suunto, Garmin — только архитектура.
+   - Per-user интервалы синхронизации — Sprint 6.
    - Per-user интервалы синхронизации — Sprint 6.
 
 ---
@@ -761,7 +771,7 @@ running-coach-worker.service  # APScheduler для синков/напомина
 
 ### Детальное описание Спринта 6
 
-6. **Спринт 6 — Настраиваемая частота синхронизации per-user (бренд-независимая)** (1–2 дня)
+7. **Спринт 6 — Настраиваемая частота синхронизации per-user (бренд-независимая)** (1–2 дня)
 
    **Важно:** После Спринта 4 синхронизация работает через `WatchCredential` + `BaseWatchClient`.  
    Все изменения Спринта 6 делаются на brand-agnostic архитектуре.
@@ -805,7 +815,9 @@ running-coach-worker.service  # APScheduler для синков/напомина
 
 ### Детальное описание Спринта 7
 
-7. **Спринт 7 — Панель администрирования (Admin panel)** (2–3 дня)
+8. **Спринт 7 — Панель администрирования (Admin panel)** (2–3 дня)
+
+   > **Отложен** до появления >1 пользователя или до запуска модуля аналитики.
    - [ ] **7.1** `src/models.py` — колонка `role` (String(20), default='user', значения: 'user', 'admin') в модель User + Alembic миграция. Установить `role='admin'` для user id=1.
    - [ ] **7.2** `src/api/deps.py` — зависимость `get_admin_user`: проверяет `role == 'admin'`, иначе 403. Параллельно с `get_current_user`.
    - [ ] **7.3** `src/api/routes/admin.py` — роутер с префиксом `/admin`, все эндпоинты под `Depends(get_admin_user)`.

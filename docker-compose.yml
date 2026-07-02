@@ -24,6 +24,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://running_coach:${POSTGRES_PASSWORD}@db:5432/running_coach
+      TZ: Europe/Moscow
       PENDING_DIR: /tmp/running_coach_uploads
     volumes:
       - ./uploads:/app/uploads
@@ -40,6 +41,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://running_coach:${POSTGRES_PASSWORD}@db:5432/running_coach
+      TZ: Europe/Moscow
     depends_on:
       db:
         condition: service_healthy

@@ -6,11 +6,12 @@ import threading
 import tempfile
 from datetime import datetime, timedelta, date, time as dt_time
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, ConversationHandler, CallbackQueryHandler,
-    MessageHandler, filters, ContextTypes,
+    Defaults, MessageHandler, filters, ContextTypes,
 )
 
 from src.models import (
@@ -1004,6 +1005,7 @@ def run_bot():
         Application.builder()
         .token(token)
         .job_queue(JobQueue())
+        .defaults(Defaults(tzinfo=ZoneInfo("Europe/Moscow")))
         .build()
     )
 
@@ -1042,19 +1044,10 @@ def run_bot():
     logger.info("Ежедневный опрос веса запланирован на 9:00, 12:00, 15:00, 18:00")
 
     # Если текущее время после 9:00 — запускаем проверку веса сразу (If past 9:00 — run weight check immediately)
-    now = datetime.utcnow()
+    now = datetime.now(ZoneInfo("Europe/Moscow"))
     if now.hour >= 9 and not (now.hour == 9 and now.minute == 0 and now.second < 5):
-        db = SessionLocal()
-        try:
-            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            any_weight_today = db.query(WeightMeasurement).filter(
-                WeightMeasurement.measured_at >= today_start,
-            ).first()
-            if not any_weight_today:
-                logger.info("Вес ещё не введён сегодня — запускаем напоминание через 30 секунд")
-                application.job_queue.run_once(daily_weight_job, when=datetime.utcnow() + timedelta(seconds=30))
-        finally:
-            db.close()
+        logger.info("Бот запущен после 9:00 MSK — запускаем напоминание веса через 30 секунд")
+        application.job_queue.run_once(daily_weight_job, when=timedelta(seconds=30))
 
     # Проверка данных сна — старт в 10:00, дальше функция сама планирует (Recovery check starts at 10:00, then schedules itself)
     application.job_queue.run_daily(daily_recovery_check_job, time=dt_time(hour=10, minute=0))
