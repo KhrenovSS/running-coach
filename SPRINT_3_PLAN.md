@@ -47,21 +47,14 @@
   - [x] 3.8 Проверить: все 14 роутов загружаются (7 pages + 3 uploads + 3 coros + 1 logs)
   - [x] 3.9 COMMIT: "Шаг 3: роуты вынесены в src/web/routes/"
 
-- [ ] **Шаг 4 — Выделение scheduler + startup**
-  - [ ] 4.1 Создать `src/scheduler.py` — `AutoSyncScheduler` (класс-одиночка с `_loop`, `start/stop`)
-  - [ ] 4.2 Создать `src/startup.py` — `create_app()` — factory-функция: инициализация Jinja2Templates, регистрация роутов, startup-событие, init_db, alembic, scheduler
-  - [ ] 4.3 Перенести `startup()` из main.py в `src/startup.py`
-  - [ ] 4.4 main.py сократить до:
-    ```python
-    from src.startup import create_app
-    app = create_app()
-    if __name__ == "__main__":
-        import uvicorn
-        uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
-    ```
-  - [ ] 4.5 Проверить: `python main.py` запускается, `uvicorn main:app` работает
-  - [ ] 4.6 Проверить `run_telegram_bot.py` — не сломался
-  - [ ] 4.7 COMMIT: "Шаг 4: scheduler и startup выделены, main.py ~50 строк"
+- [x] **Шаг 4 — Выделение scheduler + startup**
+  - [x] 4.1 Создать `src/scheduler.py` — `AutoSyncScheduler` (класс-одиночка с `_loop`, `start/stop`)
+  - [x] 4.2 Создать `src/startup.py` — `create_app()` — factory-функция: инициализация Jinja2Templates, регистрация роутов, startup-событие, init_db, alembic, scheduler
+  - [x] 4.3 Перенести `startup()` из main.py в `src/startup.py`
+  - [x] 4.4 main.py сокращён до 7 строк
+  - [x] 4.5 Проверить: `from main import app` работает
+  - [x] 4.6 Проверить `run_telegram_bot.py` — не сломался
+  - [x] 4.7 COMMIT: "Шаг 4: scheduler и startup выделены, main.py 7 строк"
 
 - [ ] **Шаг 5 — pydantic-settings (единая конфигурация)**
   - [ ] 5.1 Создать `src/config/settings.py` — класс `Settings(BaseSettings)` с полями из `.env`

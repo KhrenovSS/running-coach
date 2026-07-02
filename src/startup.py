@@ -1,0 +1,74 @@
+# Фабрика приложения и startup-событие (App factory and startup event)
+import os
+from fastapi import FastAPI
+from src.models import SessionLocal, User, get_settings, init_db, WeightMeasurement
+from src.logger import get_logger
+from src.api.middleware import register_middleware
+from src.api.routes.health import router as health_router
+from src.api.routes.auth import router as auth_router
+from src.web.routes import web_router
+from src.web.state import _pending, PENDING_DIR
+from src.services.audit import AuditService
+
+logger = get_logger("app")
+
+
+def on_startup():
+    from datetime import datetime
+    init_db()
+    try:
+        from alembic.config import Config as AlembicConfig
+        from alembic import command
+        alembic_cfg = AlembicConfig("alembic.ini")
+        command.upgrade(alembic_cfg, "head")
+    except Exception as e:
+        logger.error("Ошибка Alembic миграции: %s", e)
+
+    for f in PENDING_DIR.glob("*.tcx"):
+        f.unlink(missing_ok=True)
+    _pending.clear()
+
+    db = SessionLocal()
+    try:
+        admin_user = db.query(User).filter(User.id == 1).first()
+        if not admin_user:
+            admin_user = User(id=1, is_active=True, max_hr=177)
+            db.add(admin_user)
+            db.commit()
+            db.refresh(admin_user)
+
+        settings = get_settings()
+        existing = db.query(WeightMeasurement).filter(WeightMeasurement.user_id == admin_user.id).first()
+        if not existing and settings.weight:
+            wm = WeightMeasurement(weight_kg=settings.weight, measured_at=datetime.utcnow(), user_id=admin_user.id)
+            db.add(wm)
+            db.commit()
+
+        audit = AuditService(db)
+        audit.log_event(
+            event_type="app.startup",
+            message="Application started",
+            severity="info",
+            user_id=admin_user.id,
+        )
+    except Exception as e:
+        logger.warning("Не удалось инициализировать пользователя и аудит: %s", e)
+    finally:
+        db.close()
+
+    from src.utils.logger import fix_logger_after_uvicorn
+    fix_logger_after_uvicorn()
+
+    from src.scheduler import AutoSyncScheduler
+    AutoSyncScheduler().start()
+
+
+def create_app():
+    app = FastAPI(title="AI Running Coach")
+    register_middleware(app)
+    app.include_router(health_router)
+    app.include_router(auth_router)
+    app.include_router(web_router)
+    os.makedirs("uploads", exist_ok=True)
+    app.on_event("startup")(on_startup)
+    return app

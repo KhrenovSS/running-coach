@@ -2,6 +2,19 @@
 
 All notable changes to this project are tracked here.
 
+## [02.07.2026] — Sprint 3, шаг 4: scheduler и startup выделены, main.py 7 строк
+
+### Added
+- **`src/scheduler.py`**: `AutoSyncScheduler` — класс-одиночка с фоновым циклом автосинхронизации (health + activity), jitter, graceful error handling
+- **`src/startup.py`**: `create_app()` — фабрика приложения: middleware, роуты, startup-событие (init_db, alembic, весы, аудит, scheduler)
+
+### Changed
+- **main.py**: 118 → 7 строк (только `from src.startup import create_app` + `app = create_app()` + `if __name__ == "__main__"`)
+- **startup-логика** перенесена из декоратора `@app.on_event("startup")` в `src.startup.on_startup()`
+
+### Removed
+- **~111 строк** из main.py (startup + _start_auto_sync + _AUTO_SYNC_LOCK)
+
 ## [02.07.2026] — Sprint 3, шаг 3: роуты вынесены в src/web/routes/
 
 ### Added
