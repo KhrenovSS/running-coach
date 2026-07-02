@@ -2,6 +2,17 @@
 
 All notable changes to this project are tracked here.
 
+## [02.07.2026] — Шаг 1: Исправлен баг потери тренировок при задержке Coros API
+
+### Fixed
+- **`src/services/sync_service.py:212`**: добавлен lookback-буфер 2ч (`since = last_activity_sync_at - timedelta(hours=2)`) — активности, которые Coros обработал с задержкой, больше не теряются навсегда.
+- **`src/telegram_bot.py:460`**: тот же фикс для синхронизации через Telegram-бота.
+
+### Security
+- **Health sync**: проверено — не подвержен багу (окно 120 дней, фильтр по дате).
+
+---
+
 ## [02.07.2026] — Обнаружен критический баг: потеря тренировок при задержке Coros API
 
 ### Added

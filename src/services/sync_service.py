@@ -209,7 +209,9 @@ async def sync_activities_for_user(cred: WatchCredential, brand: str) -> int:
         if not us:
             return -1
 
-        activities = await client.list_activities(since=cred.last_activity_sync_at)
+        # Буфер 2ч чтобы не пропустить активности, которые Coros обработал с задержкой (2h lookback buffer to catch delayed Coros activities)
+        since = cred.last_activity_sync_at - timedelta(hours=2) if cred.last_activity_sync_at else None
+        activities = await client.list_activities(since=since)
         if not activities:
             return 0
 

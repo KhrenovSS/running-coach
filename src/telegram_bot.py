@@ -457,7 +457,9 @@ def _sync_for_user(user: User, chat_id: int, token: str):
 
             # === Activity sync ===
             try:
-                activities = await client.list_activities(since=cred.last_activity_sync_at)
+                # Буфер 2ч чтобы не пропустить активности, которые Coros обработал с задержкой (2h lookback buffer to catch delayed Coros activities)
+                since = cred.last_activity_sync_at - timedelta(hours=2) if cred.last_activity_sync_at else None
+                activities = await client.list_activities(since=since)
                 if activities:
                     existing_times = {
                         r[0] for r in db.query(TrainingSession.begin_ts)
