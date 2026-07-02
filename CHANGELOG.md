@@ -5,8 +5,8 @@ All notable changes to this project are tracked here.
 ## [02.07.2026] — Планирование мульти-брендовой архитектуры
 
 ### Added
-- **TECH_DEBT.md**: Спринт 4 расширен — п.14 (мульти-брендовая архитектура): `BaseWatchClient ABC`, `WatchCredential` таблица, `src/watch/` пакет, обобщение scheduler/routes/audit
-- **TECH_DEBT.md**: добавлен детальный план Спринта 4 (п.8 время UTC, п.12 httpx Coros-клиент, п.14 мульти-бренд)
+- **TECH_DEBT.md**: Спринт 4 расширен — п.14 (мульти-брендовая архитектура) и п.15 (исправление daily weight reminder — часовой пояс бота)
+- **TECH_DEBT.md**: добавлен детальный план Спринта 4 (п.8 время UTC, п.12 httpx Coros-клиент, п.14 мульти-бренд, п.15 weight reminder)
 - **AGENTS.md**: золотое правило №10 — «Мульти-брендовость закладывать сразу»
 
 ### Changed

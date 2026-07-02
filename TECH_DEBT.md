@@ -619,6 +619,7 @@ running-coach-worker.service  # APScheduler для синков/напомина
    - [ ] п.8: стандартизировать время (UTC + `User.timezone`).
    - [ ] п.12: переписать Coros-клиент на `httpx.AsyncClient` + TTL токена.
    - [ ] п.14: внедрить мульти-брендовую архитектуру (BaseWatchClient ABC, WatchCredential, обобщение синхронизации).
+   - [ ] п.15: исправить часовой пояс daily weight reminder (бот присылает в 12:00 MSK вместо 9:00).
    — *см. подробное описание ниже.*
 
 5. **Спринт 5 — PostgreSQL + Docker (3 контейнера)** (2–3 дня)
@@ -706,6 +707,19 @@ running-coach-worker.service  # APScheduler для синков/напомина
    - [ ] Синхронизация Coros работает через `/sync/coros/run`.
    - [ ] Написать заглушку `DummyWatchClient(BaseWatchClient)` — зарегистрировать, запустить синхронизацию — пайплайн не падает.
    - [ ] Audit-события пишут `sync.coros.*`, не `coros.sync.*` (старые записи не ломаются).
+
+   #### п.15 — Исправление daily weight reminder (часовой пояс бота)
+
+   - [ ] **15.1** `src/telegram_bot.py`: добавить `Defaults(tzinfo=pytz.timezone("Europe/Moscow"))` в `Application.builder()`.
+   - [ ] **15.2** Исправить catch-up запрос при старте бота (`telegram_bot.py:1049-1053`): убрать глобальную проверку `any_weight_today` без `user_id` — она бессмысленна, т.к. `daily_weight_job` и так итерирует всех пользователей. Заменить на `run_once` через 30 сек без предварительной проверки (бот сам разберётся).
+   - [ ] **15.3** `docker-compose.yml`: добавить `TZ=Europe/Moscow` в `environment` сервисов `bot` и `app`.
+   - [ ] **15.4** Пересобрать образ бота: `docker compose build bot && docker compose up -d`.
+   - [ ] **15.5** Проверить лог: `sudo docker logs running-coach-bot-1 --tail 20 | grep -i "weight\|вес"`.
+
+   **Как проверить:**
+   - [ ] Бот присылает напоминание о весе ровно в 9:00 MSK (а не в 12:00).
+   - [ ] Лог содержит `Scheduler timezone: Europe/Moscow` или эквивалент.
+   - [ ] `daily_weight_job` в логе показывает `hour=9` в 9:00 MSK.
 
    **Что НЕ входит в Спринт 4:**
    - Реализация клиентов для Polar, Suunto, Garmin — только архитектура.
