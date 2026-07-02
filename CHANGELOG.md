@@ -6,9 +6,11 @@ All notable changes to this project are tracked here.
 
 ### Fixed
 - **`watch_credentials` / `source_brand`**: исправлено частичное применение миграции `b6c7d8e9f0a1` (таблица была создана, alembic_version не обновлён). Ручное восстановление: `UPDATE alembic_version`, добавлена колонка `source_brand` в `daily_metrics`.
+- **Telegram-бот**: контейнер `bot` пересобран — использовал старый код с `users.coros_email`, который удалён миграцией. Бот падал при любом запросе. Теперь работает.
 
 ### Changed
 - **Docker образ `app`**: пересобран, миграции включены. Контейнер перезапущен.
+- **Docker образ `bot`**: пересобран под актуальный код.
 
 ### Infrastructure
 - **Alembic downgrade/upgrade**: `downgrade -1` + `upgrade head` — чистый цикл без ошибок.
