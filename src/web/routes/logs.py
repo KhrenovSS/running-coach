@@ -10,10 +10,10 @@ router = APIRouter()
 @router.get('/logs')
 async def view_logs(lines: int = 100):
     from datetime import date
-    from src.config import CONFIG
+    from src.config import settings
 
     log_filename = f"app_{date.today().isoformat()}.log"
-    log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG.LOG_FILE)
+    log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), settings.log_file)
     rotated_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", log_filename)
 
     chosen_path = None

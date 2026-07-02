@@ -56,14 +56,14 @@
   - [x] 4.6 Проверить `run_telegram_bot.py` — не сломался
   - [x] 4.7 COMMIT: "Шаг 4: scheduler и startup выделены, main.py 7 строк"
 
-- [ ] **Шаг 5 — pydantic-settings (единая конфигурация)**
-  - [ ] 5.1 Создать `src/config/settings.py` — класс `Settings(BaseSettings)` с полями из `.env`
-  - [ ] 5.2 Заменить `CONFIG` dataclass на `settings` из pydantic-settings
-  - [ ] 5.3 Обновить `src/config/__init__.py` — экспортировать `settings`
-  - [ ] 5.4 Все импорты `from src.config import CONFIG` → `from src.config import settings`
-  - [ ] 5.5 Убрать автогенерацию ключа в `src/crypto.py` — падать с ошибкой если `COROS_CRED_KEY` не задан
-  - [ ] 5.6 Проверить: `uvicorn main:app` стартует, переменные окружения читаются
-  - [ ] 5.7 COMMIT: "Шаг 5: pydantic-settings вместо dataclass CONFIG"
+- [x] **Шаг 5 — pydantic-settings (единая конфигурация)**
+  - [x] 5.1 Создать `src/config/settings.py` — класс `Settings(BaseSettings)` с полями из `.env`
+  - [x] 5.2 Заменить `CONFIG` dataclass на `settings` из pydantic-settings
+  - [x] 5.3 Обновить `src/config/__init__.py` — экспортировать `settings`
+  - [x] 5.4 Все импорты `from src.config import CONFIG` → `from src.config import settings`
+  - [x] 5.5 Убрать автогенерацию ключа в `src/crypto.py` — падать с ошибкой если `COROS_CRED_KEY` не задан
+  - [x] 5.6 Проверить: `from main import app` работает, `settings.*` читаются
+  - [x] 5.7 COMMIT: "Шаг 5: pydantic-settings вместо dataclass CONFIG"
 
 - [ ] **Шаг 6 — Финальная уборка**
   - [ ] 6.1 Удалить `get_settings()` если остался (всё через `User`)

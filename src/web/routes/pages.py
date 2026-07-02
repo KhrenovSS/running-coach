@@ -8,7 +8,7 @@ from src.models import get_db, User, TrainingSession, DailyMetrics, WeightMeasur
 from src.logger import get_logger
 from src.deps import templates
 from src.api.deps import get_current_user
-from src.config import CONFIG
+from src.config import settings
 from src.services.auth import check_telegram_login_token
 from src.services.audit import AuditService
 from src.parsers.common import weather_icon, format_pace, format_duration
@@ -191,7 +191,7 @@ async def register_page(request: Request, token: str = "", error: Optional[str] 
     err_html = f'<div class="auth-error">{err_msg}</div>' if err_msg else ''
     return templates.TemplateResponse(request, "register.html", {
         "err_html": err_html, "token": token,
-        "password_min_length": CONFIG.AUTH.PASSWORD_MIN_LENGTH,
+        "password_min_length": settings.password_min_length,
     })
 
 

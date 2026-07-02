@@ -37,22 +37,11 @@ def _get_fernet():
     if not key:
         key = _read_key_from_env_file()
     if not key:
-        logger.warning(
-            "%s не задан — генерирую временный ключ. "
-            "В Docker/production задайте COROS_CRED_KEY в .env, "
-            "иначе зашифрованные данные будут потеряны при рестарте. "
-            "Сгенерировать: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\"",
-            KEY_ENV_VAR,
+        raise RuntimeError(
+            f"{KEY_ENV_VAR} не задан. Укажите COROS_CRED_KEY в .env "
+            f"или переменной окружения. Сгенерировать: "
+            f"python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
         )
-        key = Fernet.generate_key().decode()
-        env_path = _get_env_path()
-        # Пытаемся записать в .env (только для локальной разработки) (Try to write to .env — local dev only)
-        try:
-            with open(env_path, 'a') as f:
-                f.write(f'\n{KEY_ENV_VAR}={key}\n')
-        except (OSError, PermissionError) as e:
-            logger.warning("Не удалось записать ключ Fernet в .env: %s", e)
-        os.environ[KEY_ENV_VAR] = key
     _fernet_cache = Fernet(key.encode())
     return _fernet_cache
 

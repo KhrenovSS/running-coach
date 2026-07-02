@@ -12,7 +12,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from src.api.deps import get_db
-from src.config import CONFIG
+from src.config import settings
 from src.models import User
 from src.services.auth import (
     verify_telegram_login_token,
@@ -143,7 +143,7 @@ async def register(
         return RedirectResponse(url="/login?error=invalid_token", status_code=303)
     
     # Валидация пароля (Validate password)
-    min_len = CONFIG.AUTH.PASSWORD_MIN_LENGTH
+    min_len = settings.password_min_length
     if len(password) < min_len:
         return RedirectResponse(
             url=f"/register?token={token}&error=short_password",

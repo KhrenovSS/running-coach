@@ -861,9 +861,9 @@ async def cmd_reset_password(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "❌ У вас ещё не установлен email. Сначала зарегистрируйтесь через /start."
         )
         return ConversationHandler.END
-    from src.config import CONFIG
+    from src.config import settings
     await update.message.reply_text(
-        f"🔑 Введите новый пароль (минимум {CONFIG.AUTH.PASSWORD_MIN_LENGTH} символов).\n"
+        f"🔑 Введите новый пароль (минимум {settings.password_min_length} символов).\n"
         f"🔒 Пароль будет показан 2 секунды, затем сообщение удалится (как при вводе пароля Coros)."
     )
     return NEW_PASSWORD
@@ -871,7 +871,7 @@ async def cmd_reset_password(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def get_new_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Получить новый пароль, сохранить хеш, показать и удалить (Receive new password, save hash, show and delete)"""
-    from src.config import CONFIG
+    from src.config import settings
     chat_id = update.effective_chat.id
     user = get_user(chat_id)
     if not user:
@@ -879,9 +879,9 @@ async def get_new_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     password = update.message.text.strip()
-    if len(password) < CONFIG.AUTH.PASSWORD_MIN_LENGTH:
+    if len(password) < settings.password_min_length:
         await update.message.reply_text(
-            f"Слишком короткий пароль (минимум {CONFIG.AUTH.PASSWORD_MIN_LENGTH} символов). Попробуйте ещё раз:"
+            f"Слишком короткий пароль (минимум {settings.password_min_length} символов). Попробуйте ещё раз:"
         )
         return NEW_PASSWORD
 

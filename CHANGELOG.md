@@ -2,6 +2,21 @@
 
 All notable changes to this project are tracked here.
 
+## [02.07.2026] — Sprint 3, шаг 5: pydantic-settings вместо dataclass CONFIG
+
+### Added
+- **`src/config/settings.py`**: `Settings(BaseSettings)` — env-конфигурируемые настройки (auth, paths, hr zones, timing)
+- **`pydantic-settings==2.14.2`** в `pyproject.toml`
+
+### Changed
+- **`src/config/__init__.py`**: экспортирует `settings` из `settings.py` + все константы из `constants.py`
+- **`src/config/constants.py`**: dataclass `CONFIG` заменён на плоские module-level константы (HR зоны, API endpoints, пороги); утилиты `calculate_hr_zones()`, `get_hr_zone()` обновлены
+- **5 файлов** обновлены: `from src.config import CONFIG` → `from src.config import settings`, `CONFIG.AUTH.PASSWORD_MIN_LENGTH` → `settings.password_min_length`, `CONFIG.AUTH.TOKEN_TTL_MINUTES` → `settings.token_ttl_minutes`, `CONFIG.LOG_FILE` → `settings.log_file`
+- **`src/crypto.py`**: вместо автогенерации ключа — `RuntimeError` если `COROS_CRED_KEY` не задан
+
+### Removed
+- **Dataclass-иерархия CONFIG** (~160 строк) — заменена на `pydantic-settings` + плоские константы
+
 ## [02.07.2026] — Sprint 3, шаг 4: scheduler и startup выделены, main.py 7 строк
 
 ### Added

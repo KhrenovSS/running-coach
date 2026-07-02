@@ -15,13 +15,13 @@ import bcrypt
 from sqlalchemy.orm import Session
 
 from src.models import User, AuthToken
-from src.config import CONFIG
+from src.config import settings
 from src.utils.logger import get_logger
 
 logger = get_logger("auth")
 
 # Время жизни токена — из конфига (Token lifetime from config)
-TOKEN_TTL_MINUTES = CONFIG.AUTH.TOKEN_TTL_MINUTES
+TOKEN_TTL_MINUTES = settings.token_ttl_minutes
 
 
 def generate_telegram_login_token(db: Session, user: User) -> str:
