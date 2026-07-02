@@ -393,9 +393,10 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 - ⬜ `daily_recovery_check_job` использует MSK (Europe/Moscow) hardcoded вместо User.timezone
 
 **Следующие шаги (из TECH_DEBT.md):**
-- **Sprint 4.5** — полный отказ от SQLite, переход на PostgreSQL + `TIMESTAMP WITH TIME ZONE` (убираем naive-UTC костыли)
-- Sprint 4: п.12+14 (httpx Coros-клиент + мульти-брендовая архитектура: BaseWatchClient, WatchCredential, sync_service)
-- Sprint 6: per-user частота синхронизации (бренд-независимая), баннеры, настройки
+1. **Sprint 4.5** — полный отказ от SQLite, переход на PostgreSQL + `TIMESTAMP WITH TIME ZONE` (убираем naive-UTC костыли)
+2. Sprint 4: п.12+14 (httpx Coros-клиент + мульти-брендовая архитектура: BaseWatchClient, WatchCredential, sync_service)
+3. Sprint 6: per-user частота синхронизации (бренд-независимая), баннеры, настройки
+4. Модуль аналитики (8 этапов из decision_module_design.md)
 - Модуль аналитики (8 этапов из decision_module_design.md)
 - Фильтр по типу тренировки на главной
 - Общая дистанция и время за неделю/месяц

@@ -452,12 +452,11 @@ python run_telegram_bot.py
 - [x] **Sprint 3**: декомпозиция main.py (2776 → 7 строк), Jinja2‑шаблонизация (6 шаблонов), pydantic‑settings
 
 ### ⬜ В работе / запланировано
-- [ ] **Sprint 6** (TECH_DEBT.md): настраиваемая частота синхронизации Coros per-user, баннер для новых пользователей, ручная первая синхронизация
-- [ ] **Sprint 7** (TECH_DEBT.md): панель администрирования — дашборд, управление пользователями, просмотр аудита, принудительный sync
-- [ ] **Sprint 4** (TECH_DEBT.md): 
-  - [x] п.8 — стандартизация времени (UTC): все `utcnow()` заменены, время в БД — naive UTC, User.timezone, TrainingSession.timezone
-  - [ ] п.12+14 — мульти-брендовая архитектура (`BaseWatchClient`, `WatchCredential`), Coros-клиент на httpx
+- [ ] **Sprint 4.5** (TECH_DEBT.md): полный отказ от SQLite, переход на PostgreSQL + `TIMESTAMP WITH TIME ZONE`
+- [ ] **Sprint 4** (TECH_DEBT.md) — п.12+14: мульти-брендовая архитектура (`BaseWatchClient`, `WatchCredential`), Coros-клиент на httpx
+- [ ] **Sprint 6** (TECH_DEBT.md): настраиваемая частота синхронизации per-user, баннер для новых пользователей, ручная первая синхронизация
 - [ ] **Модуль аналитики** — 8 этапов из `decision_module_design.md`
+- [ ] **Sprint 7** (TECH_DEBT.md): панель администрирования — дашборд, управление пользователями, просмотр аудита, принудительный sync
 - [ ] Фильтр по типу тренировки на главной (Все / Бег / Ходьба)
 - [ ] Общая дистанция и время за неделю/месяц
 - [ ] Мобильное PWA (Progressive Web App)
