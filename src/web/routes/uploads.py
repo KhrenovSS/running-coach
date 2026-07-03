@@ -106,13 +106,19 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
             db.commit()
             db.refresh(session)
             saved += 1
+            row1 = [{"text": str(i), "callback_data": f"feedback:{session.id}:{i}"} for i in range(0, 6)]
+            row2 = [{"text": str(i), "callback_data": f"feedback:{session.id}:{i}"} for i in range(6, 11)]
             telegram_notify(
                 user_id=current_user.id,
-                text=f"🏃 Тренировка загружена!\n"
+                text=f"🏃 *Тренировка загружена!*\n"
                      f"📅 {session.begin_ts.strftime('%d.%m.%Y %H:%M')}\n"
                      f"▫️ {session.total_distance_km:.1f} км\n"
                      f"▫️ {session.training_type or '—'}\n"
-                     f"📂 {file.filename or 'unknown'}"
+                     f"📂 {file.filename or 'unknown'}\n\n"
+                     f"Насколько тяжёлой была тренировка?\n"
+                     f"`0` — легко\n"
+                     f"`10` — очень тяжело",
+                reply_markup={"inline_keyboard": [row1, row2]},
             )
             audit.log_training_uploaded(
                 user_id=current_user.id,
@@ -164,12 +170,18 @@ async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(
             db.commit()
             db.refresh(session)
             confirmed += 1
+            row1 = [{"text": str(i), "callback_data": f"feedback:{session.id}:{i}"} for i in range(0, 6)]
+            row2 = [{"text": str(i), "callback_data": f"feedback:{session.id}:{i}"} for i in range(6, 11)]
             telegram_notify(
                 user_id=current_user.id,
-                text=f"🏃 Тренировка восстановлена!\n"
+                text=f"🏃 *Тренировка восстановлена!*\n"
                      f"📅 {session.begin_ts.strftime('%d.%m.%Y %H:%M')}\n"
                      f"▫️ {session.total_distance_km:.1f} км\n"
-                     f"📂 {pending.get('filename', 'unknown')}"
+                     f"📂 {pending.get('filename', 'unknown')}\n\n"
+                     f"Насколько тяжёлой была тренировка?\n"
+                     f"`0` — легко\n"
+                     f"`10` — очень тяжело",
+                reply_markup={"inline_keyboard": [row1, row2]},
             )
             audit.log_training_uploaded(
                 user_id=current_user.id,
@@ -228,11 +240,17 @@ async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db
         db.add(session)
         db.commit()
         db.refresh(session)
+        row1 = [{"text": str(i), "callback_data": f"feedback:{session.id}:{i}"} for i in range(0, 6)]
+        row2 = [{"text": str(i), "callback_data": f"feedback:{session.id}:{i}"} for i in range(6, 11)]
         telegram_notify(
             user_id=current_user.id,
-            text=f"🏃 Ранее удалённая тренировка восстановлена!\n"
+            text=f"🏃 *Ранее удалённая тренировка восстановлена!*\n"
                  f"📅 {session.begin_ts.strftime('%d.%m.%Y %H:%M')}\n"
-                 f"▫️ {session.total_distance_km:.1f} км"
+                 f"▫️ {session.total_distance_km:.1f} км\n\n"
+                 f"Насколько тяжёлой была тренировка?\n"
+                 f"`0` — легко\n"
+                 f"`10` — очень тяжело",
+            reply_markup={"inline_keyboard": [row1, row2]},
         )
         logger.info("Удалённая тренировка от %s повторно импортирована (Deleted training re-imported)", bt)
         audit.log_training_uploaded(

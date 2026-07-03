@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from sqlalchemy.orm import Session
-from src.models import get_db, User, TrainingSession, DailyMetrics, WeightMeasurement, DeletedTraining, WatchCredential, get_settings
+from src.models import get_db, User, TrainingSession, DailyMetrics, WeightMeasurement, DeletedTraining, WatchCredential, TrainingFeedback, get_settings
 from src.logger import get_logger
 from src.deps import templates, local_dt
 from src.api.deps import get_current_user
@@ -66,6 +66,14 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
     else:
         filtered = all_sessions[:20]
 
+    # Загружаем оценки тренировок (Load training feedback ratings)
+    session_ids = [s.id for s in filtered]
+    feedbacks = db.query(TrainingFeedback).filter(
+        TrainingFeedback.session_id.in_(session_ids),
+        TrainingFeedback.user_id == user_id,
+    ).all()
+    feedback_map = {fb.session_id: fb.rating for fb in feedbacks}
+
     rows = ""
     for s in filtered:
         if s.begin_ts:
@@ -93,12 +101,14 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
         cad_str = str(s.avg_cadence) if s.avg_cadence is not None else "—"
         cal_str = f"{s.calories}" if s.calories is not None else ""
         extra_str = cal_str
+        rating = feedback_map.get(s.id)
+        rating_str = f"⭐ {rating}/10" if rating is not None else ""
         rows += f"<tr onclick=\"window.location='/session/{s.id}'\" style='cursor:pointer'>"
         rows += f"<td>{warn} {t}</td><td>{dur}</td><td>{s.total_distance_km:.2f}</td><td>{s.avg_heart_rate}</td>"
-        rows += f"<td>{TRAINING_TYPES_RU.get(s.training_type, s.training_type)}</td><td>{cad_str}</td><td>{elev_str}</td><td>{extra_str}</td></tr>"
+        rows += f"<td>{TRAINING_TYPES_RU.get(s.training_type, s.training_type)}</td><td>{cad_str}</td><td>{elev_str}</td><td>{extra_str}</td><td>{rating_str}</td></tr>"
 
     if not rows:
-        rows = "<tr><td colspan='8' style='color:#888;padding:30px;'>Нет тренировок за выбранный период</td></tr>"
+        rows = "<tr><td colspan='9' style='color:#888;padding:30px;'>Нет тренировок за выбранный период</td></tr>"
 
     week_bars = render_zone_bars(week_stats['zone_min'], week_stats['total_min'], settings.max_hr) if week_stats else ""
     month_bars = render_zone_bars(month_stats['zone_min'], month_stats['total_min'], settings.max_hr) if month_stats else ""
@@ -317,6 +327,13 @@ async def session_detail(request: Request, session_id: int, db: Session = Depend
             </div>
         </div>'''
 
+    # Загружаем оценку тренировки (Load training feedback rating)
+    fb = db.query(TrainingFeedback).filter(
+        TrainingFeedback.session_id == session_id,
+        TrainingFeedback.user_id == current_user.id,
+    ).first()
+    rating_display = f"⭐ {fb.rating}/10" if fb else ""
+
     user_name = current_user.name or current_user.telegram_username or "Бегун"
     user_header = f"👤 {user_name} | <a href='/auth/logout'>Выйти</a>"
     return templates.TemplateResponse(request, "session.html", {
@@ -337,6 +354,7 @@ async def session_detail(request: Request, session_id: int, db: Session = Depend
         "segments_rows": seg_rows,
         "chart_json": chart_json,
         "recovery_html": recovery_html,
+        "rating_display": rating_display,
     })
 
 

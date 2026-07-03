@@ -235,6 +235,7 @@ async def sync_activities_for_user(cred: WatchCredential, brand: str) -> int:
         synced = 0
         skipped_existing = 0
         skipped_deleted = 0
+        new_trainings = []  # Собираем данные для per-training уведомлений (Collect data for per-training notifications)
         for act in activities:
             bt = act.get('start_time')
             if not bt:
@@ -280,6 +281,13 @@ async def sync_activities_for_user(cred: WatchCredential, brand: str) -> int:
             if tz and not us.timezone:
                 us.timezone = tz
             db.add(session)
+            db.flush()  # Получаем session.id до commit (Get session.id before commit)
+            new_trainings.append({
+                'session_id': session.id,
+                'distance': data.get('total_distance_km', 0),
+                'training_type': data.get('training_type', ''),
+                'begin_ts': data.get('begin_ts', datetime.now(timezone.utc)),
+            })
             synced += 1
 
         if synced:
@@ -287,14 +295,27 @@ async def sync_activities_for_user(cred: WatchCredential, brand: str) -> int:
             db.commit()
             logger.info("Activity sync: brand=%s user=%s — синхронизировано %d новых тренировок (skipped_existing=%d, skipped_deleted=%d)",
                          brand, cred.user_id, synced, skipped_existing, skipped_deleted)
-            # Уведомление в Telegram (Notify user in Telegram about new training)
-            telegram_notify(
-                user_id=cred.user_id,
-                text=f"🏃 Новая тренировка синхронизирована!\n"
-                     f"📅 {datetime.now(timezone.utc).strftime('%d.%m.%Y %H:%M')} UTC\n"
-                     f"Всего добавлено: {synced}\n"
-                     f"Зайди в веб-интерфейс для деталей."
-            )
+            # Уведомление по каждой тренировке с inline-клавиатурой оценки (Per-training notification with rating inline keyboard)
+            for nt in new_trainings:
+                sid = nt['session_id']
+                dist = nt['distance']
+                ttype = nt['training_type']
+                begin = nt['begin_ts']
+                date_str = begin.strftime("%d.%m.%Y") if begin else ""
+                time_str = begin.strftime("%H:%M") if begin else ""
+                row1 = [{"text": str(i), "callback_data": f"feedback:{sid}:{i}"} for i in range(0, 6)]
+                row2 = [{"text": str(i), "callback_data": f"feedback:{sid}:{i}"} for i in range(6, 11)]
+                telegram_notify(
+                    user_id=cred.user_id,
+                    text=f"🏃 *Новая тренировка синхронизирована!*\n"
+                         f"▫️ {date_str} в {time_str}\n"
+                         f"▫️ {dist:.1f} км\n"
+                         f"▫️ {ttype or '—'}\n\n"
+                         f"Насколько тяжёлой была тренировка?\n"
+                         f"`0` — легко\n"
+                         f"`10` — очень тяжело",
+                    reply_markup={"inline_keyboard": [row1, row2]},
+                )
         else:
             logger.info("Activity sync: brand=%s user=%s — новых тренировок нет (всего=%d, already_exist=%d, deleted=%d)",
                          brand, cred.user_id, len(activities), skipped_existing, skipped_deleted)

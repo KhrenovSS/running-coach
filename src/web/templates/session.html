@@ -40,6 +40,9 @@
             <div class='info-item'><span class='info-label'>Подъем</span><b>{{ elev_gain }}</b><span class='info-unit'>м</span></div>
             <div class='info-item'><span class='info-label'>Спуск</span><b>{{ elev_loss }}</b><span class='info-unit'>м</span></div>
             <div class='info-item'><span class='info-label'>Калории</span><b>{{ cal }}</b><span class='info-unit'>ккал</span></div>
+            {% if rating_display %}
+            <div class='info-item'><span class='info-label'>Оценка</span><b style='font-size:18px;'>{{ rating_display }}</b><span class='info-unit'></span></div>
+            {% endif %}
         </div>
 
         <h3>Пульс и темп</h3>

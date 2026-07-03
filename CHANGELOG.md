@@ -2,6 +2,19 @@
 
 All notable changes to this project are tracked here.
 
+## [03.07.2026] — Фаза 3Б: inline-клавиатура оценки 0-10 + отображение в веб
+
+### Added
+- **Фаза 3Б.1** `src/services/sync_service.py` — per-training уведомления: каждая новая тренировка при автосинке отправляется отдельным сообщением с inline_keyboard `0–10` (триггер: инлайн-клавиатура 0-10 для оценки тяжести).
+- **Фаза 3Б.2** `src/web/routes/uploads.py` — три вызова `telegram_notify()` (upload, confirm, confirm_deleted) дополнены `reply_markup` с inline-клавиатурой.
+- **Фаза 3Б.3** `src/web/routes/pages.py` — `render_page()` загружает `TrainingFeedback` для всех тренировок на странице; `session_detail()` читает оценку и передаёт `rating_display` в шаблон.
+- **Фаза 3Б.4** `src/web/templates/session.html` — блок `⭐ Оценка: X/10` на странице детального просмотра.
+- **Фаза 3Б.5** `src/web/templates/index.html` — колонка `Оценка` в таблице тренировок на главной.
+
+### Changed
+- **TECH_DEBT.md** — Фаза 3Б перенесена перед Sprint 6, помечена как выполненная.
+- **AGENTS.md** — обновлён план работ (Фаза 3Б ✅, Sprint 6 следующий).
+
 ## [02.07.2026] — Исправлен баг save_dashboard_data + уведомления Telegram при веб-загрузке
 
 ### Fixed
