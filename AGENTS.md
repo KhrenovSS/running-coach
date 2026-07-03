@@ -414,6 +414,306 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 
 **❄️ Отложено — Sprint 7: Admin panel**
 
+**Фаза 5 — Факторы самочувствия после тренировки (Factors affecting training feel):**
+**Суть:** После оценки тяжести (0–10) добавить вопрос «Что сильнее всего повлияло на ощущения?» с множественным выбором. Данные лягут в основу модуля аналитики.
+
+**Описание задачи:**
+После каждой тренировки пользователь оценивает тяжесть (уже реализовано), а затем выбирает один или несколько факторов, повлиявших на самочувствие:
+- 🦵 Ноги — мышечная усталость, боль в ногах
+- 🌬 Дыхание — сбитое дыхание, не хватало воздуха
+- ❤️ Сердце (пульс) — пульс зашкаливал
+- 🌡 Жара — высокая температура, духота
+- 😴 Недосып — плохой сон накануне
+- 😰 Стресс — нервное напряжение
+- ✨ Всё прошло отлично — самочувствие хорошее
+- ✏️ Другое... — свободный текст
+
+Если пользователь ранее вводил кастомную причину (например «боль в левом колене»), предлагать её в списке в следующий раз. Если фактор давно не выбирался (>180 дней) — убирать из предложенных.
+
+**Изменяемые файлы (11):**
+| Файл | Что делать |
+|------|-----------|
+| `src/config/constants.py` | Добавить `BUILTIN_FACTORS: Final[dict]`, `FACTOR_INACTIVITY_DAYS: Final[int] = 180` |
+| `src/models.py` | Добавить модели `FeedbackFactor` и `UserActiveFactor` |
+| `src/services/feedback_service.py` | **Новый файл** — `get_active_factors(user_id)`, `save_factors(session_id, user_id, factor_codes, custom_text)`, `get_factors_for_session(session_id)` |
+| `src/telegram_bot.py` | Новый callback-хендлер `factor_callback` (toggle/done/custom). Модифицировать `feedback_callback` — после сохранения рейтинга показывать клавиатуру факторов. Добавить MessageHandler для приёма кастомного текста. |
+| `src/web/routes/pages.py` | Расширить `session_feedback`: принимать `factors[]` + `custom_factor_text`, сохранять через `FeedbackService` |
+| `src/web/templates/session.html` | Добавить чекбоксы факторов под формой рейтинга, отображать выбранные факторы |
+| Alembic migration | Новая миграция: таблицы `feedback_factors`, `user_active_factors` |
+
+**Детальный план реализации (для разработки):**
+
+### 1. Константы (`src/config/constants.py`)
+```python
+BUILTIN_FACTORS: Final[dict] = {
+    "legs":      "Ноги",
+    "breathing": "Дыхание",
+    "heart":     "Сердце (пульс)",
+    "heat":      "Жара",
+    "sleep":     "Недосып",
+    "stress":    "Стресс",
+    "great":     "Всё прошло отлично",
+}
+FACTOR_INACTIVITY_DAYS: Final[int] = 180
+```
+
+### 2. Модели (`src/models.py`)
+
+```python
+# Факторы, повлиявшие на ощущения от тренировки (Factors affecting training feel)
+class FeedbackFactor(Base):
+    __tablename__ = 'feedback_factors'
+    id = Column(Integer, primary_key=True)
+    session_id = Column(Integer, ForeignKey('training_sessions.id'), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+    factor_code = Column(String(50), nullable=False)  # 'legs','breathing','heart','heat','sleep','stress','great','custom'
+    custom_label = Column(String(200), nullable=True)  # Только для factor_code='custom'
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    session = relationship("TrainingSession")
+    user = relationship("User")
+
+
+# Активные факторы пользователя (User's active factors for suggestion)
+class UserActiveFactor(Base):
+    __tablename__ = 'user_active_factors'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    factor_code = Column(String(50), nullable=False)  # 'legs' или 'custom:{unique_id}'
+    display_label = Column(String(200), nullable=False)
+    is_builtin = Column(Boolean, default=False)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    use_count = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    user = relationship("User")
+```
+
+### 3. Сервис (`src/services/feedback_service.py`)
+
+```python
+# Сервис для работы с факторами самочувствия (Feedback factors service)
+import logging
+from datetime import datetime, timezone, timedelta
+from sqlalchemy.orm import Session
+from src.config.constants import BUILTIN_FACTORS, FACTOR_INACTIVITY_DAYS
+from src.models import FeedbackFactor, UserActiveFactor, TrainingSession
+
+logger = logging.getLogger(__name__)
+
+
+# Получить активные факторы для пользователя (Get active factors for user)
+def get_active_factors(user_id: int, db: Session) -> list[dict]:
+    """Возвращает список активных факторов: сначала встроенные (если активны), потом кастомные"""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=FACTOR_INACTIVITY_DAYS)
+    
+    factors = db.query(UserActiveFactor).filter(
+        UserActiveFactor.user_id == user_id,
+        UserActiveFactor.is_active == True,
+    ).all()
+    
+    # Если у пользователя ещё нет факторов — засеять все встроенные
+    if not factors:
+        _seed_builtin_factors(user_id, db)
+        return [{"code": k, "label": v} for k, v in BUILTIN_FACTORS.items()]
+    
+    result = []
+    for f in factors:
+        if f.last_used_at and f.last_used_at < cutoff and not f.is_builtin:
+            # Старый кастомный фактор — пропускаем
+            f.is_active = False
+            db.flush()
+            continue
+        if f.last_used_at and f.last_used_at < cutoff and f.is_builtin:
+            # Встроенный фактор давно не использовался — пропускаем
+            continue
+        result.append({"code": f.factor_code, "label": f.display_label})
+    db.commit()
+    return result
+
+
+# Засеять встроенные факторы для нового пользователя (Seed built-in factors for new user)
+def _seed_builtin_factors(user_id: int, db: Session):
+    for code, label in BUILTIN_FACTORS.items():
+        uaf = UserActiveFactor(
+            user_id=user_id,
+            factor_code=code,
+            display_label=label,
+            is_builtin=True,
+            is_active=True,
+        )
+        db.add(uaf)
+    db.flush()
+
+
+# Сохранить выбранные факторы для тренировки (Save selected factors for session)
+def save_factors(session_id: int, user_id: int, factor_codes: list[str], custom_text: str, db: Session):
+    # Удалить старые факторы для этой сессии (Replace old factors)
+    db.query(FeedbackFactor).filter(
+        FeedbackFactor.session_id == session_id,
+    ).delete()
+    
+    for code in factor_codes:
+        ff = FeedbackFactor(
+            session_id=session_id,
+            user_id=user_id,
+            factor_code=code,
+            custom_label=custom_text if code == 'custom' else None,
+        )
+        db.add(ff)
+        
+        # Обновить/создать UserActiveFactor (Update or create UserActiveFactor)
+        uaf = db.query(UserActiveFactor).filter(
+            UserActiveFactor.user_id == user_id,
+            UserActiveFactor.factor_code == code,
+        ).first()
+        if uaf:
+            uaf.last_used_at = datetime.now(timezone.utc)
+            uaf.use_count = UserActiveFactor.use_count + 1
+            uaf.is_active = True
+        elif code == 'custom' and custom_text:
+            # Кастомный фактор — сохраняем с display_label = custom_text (Custom factor with user's text)
+            uaf = UserActiveFactor(
+                user_id=user_id,
+                factor_code=f'custom:{session_id}',  # уникальный код
+                display_label=custom_text,
+                is_builtin=False,
+                last_used_at=datetime.now(timezone.utc),
+                use_count=1,
+                is_active=True,
+            )
+            db.add(uaf)
+        else:
+            # Встроенный фактор, которого нет в UserActiveFactor (редкий случай) (Builtin factor missing from UserActiveFactor)
+            label = BUILTIN_FACTORS.get(code, code)
+            uaf = UserActiveFactor(
+                user_id=user_id,
+                factor_code=code,
+                display_label=label,
+                is_builtin=True,
+                last_used_at=datetime.now(timezone.utc),
+                use_count=1,
+                is_active=True,
+            )
+            db.add(uaf)
+    
+    db.commit()
+
+
+# Получить выбранные факторы для тренировки (Get selected factors for session)
+def get_factors_for_session(session_id: int, db: Session) -> list[dict]:
+    factors = db.query(FeedbackFactor).filter(
+        FeedbackFactor.session_id == session_id,
+    ).all()
+    return [
+        {
+            "code": f.factor_code,
+            "label": f.custom_label if f.factor_code == 'custom' else BUILTIN_FACTORS.get(f.factor_code, f.factor_code),
+        }
+        for f in factors
+    ]
+```
+
+### 4. Telegram-бот — новый callback `factor:` (`src/telegram_bot.py`)
+
+Добавить хендлер:
+```python
+application.add_handler(CallbackQueryHandler(factor_callback, pattern="^factor:"))
+```
+
+**Принцип работы:**
+- После сохранения рейтинга в `feedback_callback` отправить новое сообщение:
+  «Что сильнее всего повлияло на ощущения? (можно выбрать несколько)»
+  с inline-клавиатурой факторов, полученных через `get_active_factors(user_id)`.
+- **`factor:toggle:{session_id}:{code}`** — отметить/снять фактор. Хранить выбранные коды в `context.user_data['selected_factors']`.
+  Сообщение перерисовывается: выбранные факторы с префиксом «✅».
+- **`factor:done:{session_id}`** — взять выбранные из `user_data`, вызвать `save_factors()`, показать финальное подтверждение.
+- **`factor:custom:{session_id}`** — удалить клавиатуру, спросить «Напиши, что повлияло:».
+  Установить `context.user_data['awaiting_factor_text'] = session_id`.
+  Добавить `MessageHandler(filters.TEXT & ~filters.COMMAND)` (регистрировать динамически или расширить существующий хендлер).
+
+**Inline-клавиатура** (пример на 8 кнопок):
+```
+✅ Ноги | 🌬 Дыхание | ❤️ Сердце
+🌡 Жара | 😴 Недосып | 😰 Стресс
+✨ Всё отлично | ✏️ Другое...
+[✅ Готово]
+```
+Каждый фактор — кнопка `callback_data=f"factor:toggle:{session_id}:{code}"`.
+
+### 5. Web — страница тренировки (`src/web/routes/pages.py` + `session.html`)
+
+**`session_feedback` endpoint** расширить:
+```python
+@router.post('/session/{session_id}/feedback')
+async def session_feedback(
+    session_id: int,
+    rating: int = Form(...),
+    factors: list[str] = Form(default=[]),
+    custom_factor_text: str = Form(default=''),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # ... existing rating logic ...
+    # Сохранить факторы (Save factors)
+    from src.services.feedback_service import save_factors
+    save_factors(session_id, current_user.id, factors, custom_factor_text, db)
+    return RedirectResponse(url=f'/session/{session_id}', status_code=303)
+```
+
+**`session.html`** — добавить в форму:
+```html
+<div style="margin-top:10px;">
+  <span style="font-weight:bold;color:#1565c0;">Что повлияло на ощущения?</span>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;">
+    {% for code, label in builtin_factors.items() %}
+    <label style="...">
+      <input type="checkbox" name="factors" value="{{ code }}"
+        {% if code in selected_factor_codes %}checked{% endif %}> {{ label }}
+    </label>
+    {% endfor %}
+    {% for uaf in custom_factors %}
+    <label style="...">
+      <input type="checkbox" name="factors" value="{{ uaf.factor_code }}"
+        {% if uaf.factor_code in selected_factor_codes %}checked{% endif %}> {{ uaf.display_label }}
+    </label>
+    {% endfor %}
+  </div>
+  <div style="margin-top:6px;">
+    <input type="text" name="custom_factor_text" placeholder="Другое (введите причину)..."
+      style="padding:6px;font-size:14px;width:300px;border-radius:4px;border:1px solid #ccc;">
+  </div>
+</div>
+```
+
+**Отображение выбранных факторов** под рейтингом на странице:
+```html
+{% if selected_factors %}
+<div style="margin-top:6px;">
+  {% for f in selected_factors %}
+    <span class="factor-badge">{{ f.label }}</span>
+  {% endfor %}
+</div>
+{% endif %}
+```
+
+### 6. Миграция Alembic
+
+Создать новую ревизию:
+```bash
+alembic revision --autogenerate -m "add feedback_factors and user_active_factors tables"
+```
+Проверить автогенерацию, поправить вручную при необходимости.
+
+### Важные моменты:
+- Multi-select: `UserActiveFactor` с `factor_code` не обязательно уникален на пользователя — кастомные метки могут повторяться. Используем `user_id + factor_code` как уникальный идентификатор для upsert.
+- Кастомные метки: при повторном вводе того же текста — не создавать дубликат `UserActiveFactor`, а использовать существующий (поиск по `display_label`).
+- Все builtin-факторы должны быть в `UserActiveFactor` с `is_builtin=True` и `factor_code` = ключ из `BUILTIN_FACTORS`.
+- При переключении `user_data['selected_factors']` в Telegram — хранить сет выбранных factor_code.
+
+
 ### Известные проблемы:
 - DNS: `/etc/resolv.conf` может вернуться на 192.168.1.1 после перезагрузки
 - **🐛 Потеря тренировок при задержке Coros API:** `list_activities(since=last_activity_sync_at)` теряет активности, которые Coros обработал с задержкой. Фикс: lookback-буфер (см. TECH_DEBT.md «🐛 Критический баг — Потеря тренировок при задержке Coros API»). Health sync не подвержен — использует окно 120 дней.
@@ -424,8 +724,9 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 3. ~~**Фаза 2** — Sprint 6: per-user частота синхронизации (бренд-независимая), баннер для новых пользователей~~ ✅
 4. **Фаза 3** — фильтр по типу тренировки на главной, общая дистанция/время за неделю/месяц
 5. **Фаза 4** — выбор бренда часов при регистрации (multi-brand onboarding), заглушки для Polar/Garmin/Suunto
-6. **Модуль аналитики** — 8 этапов из `decision_module_design.md`
-7. **Sprint 7**: Admin panel
+6. **Фаза 5** — факторы самочувствия после тренировки (детальный план в разделе «Фаза 5» выше)
+7. **Модуль аналитики** — 8 этапов из `decision_module_design.md`
+8. **Sprint 7**: Admin panel
 
 ### Команды управления:
 ```bash
