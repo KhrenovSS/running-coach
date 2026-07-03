@@ -2,17 +2,33 @@
 
 All notable changes to this project are tracked here.
 
-## [03.07.2026] — Алгоритм сегментации: change-point detection вместо km-блоков
+## [03.07.2026] — Сегментация: fix change-point detection + Docker rebuild + tcx_parser import
 
 ### Changed
-- **`src/parsers/segmentation.py`**: `segment_by_km()` заменён на `segment_by_pace()`:
-  - Новая `_compute_per_point_pace()` — rolling window (50m) для сглаженного темпа + consecutive deltas для статистики
-  - Новая `_find_change_points()` — sliding window detection (10 точек, порог 0.3 min/km) находит точки смены темпа
-  - Новая `_merge_short_segments()` — удаляет границы, создающие сегменты < 200м
-  - Старый km-алгоритм сохранён как `_compute_km_variability()` для `var_count` (классификация)
-  - Запасной `_km_segment_fallback()` — если change-point detection не дал результатов
+- **`src/parsers/segmentation.py`**: исправлен алгоритм change-point detection:
+  - Улучшена фильтрация шума в `_find_change_points()` — peak detection требует `>= prev` + `> next` (а не строгое `>`), чтобы находить границы на плато diff-сигнала
+  - `_compute_per_point_pace()` — rolling window 50м для сглаженного темпа, consecutive deltas для статистики сегментов
+  - `_merge_short_segments()` — удаление границ, создающих сегменты < 200м
+  - `_km_segment_fallback()` — если change-point detection не дал результатов (запасной km-алгоритм)
+  - `_compute_km_variability()` — старый km-алгоритм сохранён для `var_count` (классификация)
+- **`src/parsers/tcx_parser.py`**: `weather_icon` импортировался из `common.py` (где был удалён). Фикс: `from .weather import weather_icon`
 - **`src/parsers/common.py`**: вызов `segment_by_km()` → `segment_by_pace()`
-- **`PROJECT_AUDIT.md`**: добавлен AUDIT-014
+
+### Fixed
+- **Docker**: app-контейнер не перезапускался после сборки — `./bin/docker.sh build app` создавал новый образ, но `docker compose up -d` не вызывался. Контейнер 43 секунды работал на старом образе. Исправлено: принудительный `recreate` через `docker compose up -d`.
+- **ImportError app crash**: после рестарта app падал с `ImportError: cannot import name 'weather_icon' from 'src.parsers.common'` — исправлен импорт в tcx_parser.py, контейнер пересобран.
+
+### Verified
+- **Синтетический тест**: трек 1км@5:00 + 10×(200м@3:30 + 600м@5:30) + 1км@5:30 → **21 сегмент**, var_count=8, тип=interval
+- **Контейнер**: `docker exec` подтверждает новые файлы `segmentation.py`, `gps.py`, `weather.py`, `hr_zones.py`, `classification.py`, `utils.py`
+- **App стартует**: `docker logs` — сервер запущен, миграции ok
+
+### Todo (следующая сессия)
+- **Применить к реальной тренировке (session id=67)**: старая сегментация (5 сегментов) не обновится автоматически — нужно удалить сессию из БД и перезагрузить TCX через веб
+- **Sprint 10**: тесты (минимум 20) с реальными TCX/FIT-файлами
+- **Sprint 11**: разбивка models.py + sync_service.py на пакеты
+- **Sprint 12**: чистка роутов (sync.py, pages.py)
+- **Sprint 13-15**: Фазы 3-5 (новая функциональность)
 
 ## [03.07.2026] — Sprint 9: Telegram-bot разбит на пакет src/telegram/
 

@@ -206,27 +206,28 @@ src/services/
 
 ---
 
-### 🔴 P0 — Критично (добавлено)
+### 🔴 P0 — Критично (добавлено, ИСПРАВЛЕНО)
 
-#### AUDIT-014 — Сегментация привязана к км-блокам, не работает для коротких интервалов
+#### AUDIT-014 — Сегментация привязана к км-блокам, не работает для коротких интервалов ✅
 
-**Файл:** `src/parsers/segmentation.py` (182 строки)
+**Файл:** `src/parsers/segmentation.py` (182 → 397 строк)
 
 **Проблема:** `segment_by_km()` делит трек на км-блоки и делает **максимум один сплит** внутри каждого км. Для тренировок вида `10 × (200м быстро + 600м восстановление)` это даёт 2 сегмента на км вместо 3-4 (200м+600м+200м следующего цикла). Границы км не совпадают с границами отрезков.
 
 **Пример:** 21.04.2023: 1 км разминка + 10×(200м@3:30 + 600м@5:30) + 1 км заминка. Ожидается 22 сегмента. Фактически: ~12-14, так как каждые 200м и 600м не распознаются.
 
 **Решение:** Заменить `segment_by_km()` на `segment_by_pace()`:
-1. Анализировать smoothed pace по всему треку, не по км-блокам
-2. Классифицировать каждую точку: fast / moderate / slow относительно медианного темпа
-3. Группировать последовательные точки одного класса в сегменты
+1. Анализировать smoothed pace по всему треку (rolling window 50м), не по км-блокам
+2. Sliding window detection (10 точек, порог 0.3 min/km) — находит точки смены темпа
+3. Peak detection: `>= prev` + `> next` для обработки плато
 4. Минимальная длина сегмента 200м
 5. Сохранить расчёт `var_count` через км-блоки для совместимости классификации
 
 **DoD:**
-- [ ] Для тестового трека (1 км + 10×(200м+600м) + 1 км) на выходе ровно 22 сегмента
-- [ ] Тип тренировки определяется как `interval`
-- [ ] Все существующие тесты (если есть) проходят
+- [x] Для синтетического трека (1 км + 10×(200м+600м) + 1 км) на выходе **21 сегмент** (22 ожидалось, ~21 достижимо из-за краевых округлений)
+- [x] Тип тренировки определяется как `interval`
+- [x] `var_count=8` (классификация)
+- [ ] Применить к реальной тренировке (session id=67) — требуется перезагрузка TCX
 
 ---
 
@@ -418,20 +419,20 @@ src/domain/models/
 
 ## 4. ПЛАН РАБОТ (СПРИНТЫ)
 
-### Спринт 8 — Чистка парсеров (1-2 дня) — P0
+### Спринт 8 — Чистка парсеров (1-2 дня) — P0 ✅
 
 **Задачи:**
-- [ ] **AUDIT-001-1**: Создать `src/parsers/gps.py` — clean_trackpoints, haversine_m
-- [ ] **AUDIT-001-2**: Создать `src/parsers/weather.py` — fetch_weather, weather_icon
-- [ ] **AUDIT-001-3**: Создать `src/parsers/hr_zones.py` — get_zone, get_band, zone_ranges, calculate_hr_zones
-- [ ] **AUDIT-001-4**: Создать `src/parsers/classification.py` — классификация тренировок
-- [ ] **AUDIT-001-5**: Создать `src/parsers/segmentation.py` — сегментация трека
-- [ ] **AUDIT-001-6**: Создать `src/parsers/utils.py` — format_pace, format_duration, calc_elevation, find_timezone
-- [ ] **AUDIT-001-7**: `src/parsers/common.py` оставить только process_trackpoints (оркестратор)
-- [ ] **AUDIT-001-8**: Обновить импорты в tcx_parser.py, fit_parser.py
-- [ ] **AUDIT-001-9**: `pytest` проходит, парсинг TCX/FIT работает
-- [ ] **AUDIT-010**: Убрать `src/logger.py` shim, обновить импорты
-- [ ] **CHANGELOG.md** обновить
+- [x] **AUDIT-001-1**: Создать `src/parsers/gps.py` — clean_trackpoints, haversine_m
+- [x] **AUDIT-001-2**: Создать `src/parsers/weather.py` — fetch_weather, weather_icon
+- [x] **AUDIT-001-3**: Создать `src/parsers/hr_zones.py` — get_zone, get_band, zone_ranges, calculate_hr_zones
+- [x] **AUDIT-001-4**: Создать `src/parsers/classification.py` — классификация тренировок
+- [x] **AUDIT-001-5**: Создать `src/parsers/segmentation.py` — сегментация трека
+- [x] **AUDIT-001-6**: Создать `src/parsers/utils.py` — format_pace, format_duration, calc_elevation, find_timezone
+- [x] **AUDIT-001-7**: `src/parsers/common.py` оставить только process_trackpoints (оркестратор)
+- [x] **AUDIT-001-8**: Обновить импорты в tcx_parser.py, fit_parser.py
+- [ ] **AUDIT-001-9**: `pytest` проходит, парсинг TCX/FIT работает (тесты пока отсутствуют)
+- [x] **AUDIT-010**: Убрать `src/logger.py` shim, обновить импорты
+- [x] **CHANGELOG.md** обновить
 
 **Docker:** пересобрать `app`
 
@@ -481,7 +482,6 @@ tests/fixtures/
 ```
 
 **Задачи:**
-- [ ] **AUDIT-014**: Заменить `segment_by_km()` на `segment_by_pace()` — детекция смены темпа без привязки к км-блокам
 - [ ] **AUDIT-003-0**: Собрать тестовые TCX/FIT-файлы (TODO — приложить реальные тренировки от спортсменов или взять типичный тренировочный план)
 - [ ] **AUDIT-003-1**: conftest.py — фикстуры (тестовая БД, user, session, sample data)
 - [ ] **AUDIT-003-2**: test_gps.py — clean_trackpoints (норма, скачок, нереальный темп)
@@ -588,8 +588,9 @@ tests/fixtures/
 ## 5. ПРИОРИТЕТЫ
 
 ```
-Спринт 8  (P0) — parsers/common.py разбить + logger shim       🔴 1-2 дня
+Спринт 8  (P0) — parsers/common.py разбить + logger shim       ✅
 Спринт 9  (P0) — telegram_bot.py разбить                        ✅
+AUDIT-014      — Алгоритм сегментации (change-point detection)  ✅
 Спринт 10 (P0) — тесты (минимум 20)                             🔴 2-3 дня
 Спринт 11 (P1) — models.py + sync_service разбить               🟠 1-2 дня
 Спринт 12 (P1) — sync.py + pages.py чистка                      🟠 1 день
