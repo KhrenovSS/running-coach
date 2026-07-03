@@ -3,7 +3,8 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 # Импорт общей логики обработки (Import shared processing logic)
-from .common import process_trackpoints, weather_icon
+from .common import process_trackpoints
+from .weather import weather_icon
 
 # Пространство имён Garmin TCX (Garmin TCX XML namespace)
 NS = {

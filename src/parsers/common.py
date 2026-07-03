@@ -4,7 +4,7 @@ from src.utils.logger import get_logger
 from src.parsers.gps import clean_trackpoints
 from src.parsers.weather import fetch_weather, get_weather_code_at_time, get_temp_at_time
 from src.parsers.hr_zones import get_zone
-from src.parsers.segmentation import build_time_in_zones, segment_by_km
+from src.parsers.segmentation import build_time_in_zones, segment_by_pace
 from src.parsers.classification import classify_training
 from src.parsers.utils import format_duration, calc_elevation, find_timezone
 
@@ -104,7 +104,7 @@ def process_trackpoints(trackpoints, start_time_utc, max_hr=177,
 
     time_in_zone, z4_plus_segments, total_duration_min = build_time_in_zones(trackpoints, max_hr)
 
-    segments, var_count = segment_by_km(trackpoints, max_hr, total_dist_km)
+    segments, var_count = segment_by_pace(trackpoints, max_hr, total_dist_km)
 
     t_type, segments_count = classify_training(var_count, time_in_zone, total_duration_min, max_hr, z4_plus_segments, avg_hr)
 

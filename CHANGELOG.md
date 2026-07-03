@@ -2,6 +2,18 @@
 
 All notable changes to this project are tracked here.
 
+## [03.07.2026] — Алгоритм сегментации: change-point detection вместо km-блоков
+
+### Changed
+- **`src/parsers/segmentation.py`**: `segment_by_km()` заменён на `segment_by_pace()`:
+  - Новая `_compute_per_point_pace()` — rolling window (50m) для сглаженного темпа + consecutive deltas для статистики
+  - Новая `_find_change_points()` — sliding window detection (10 точек, порог 0.3 min/km) находит точки смены темпа
+  - Новая `_merge_short_segments()` — удаляет границы, создающие сегменты < 200м
+  - Старый km-алгоритм сохранён как `_compute_km_variability()` для `var_count` (классификация)
+  - Запасной `_km_segment_fallback()` — если change-point detection не дал результатов
+- **`src/parsers/common.py`**: вызов `segment_by_km()` → `segment_by_pace()`
+- **`PROJECT_AUDIT.md`**: добавлен AUDIT-014
+
 ## [03.07.2026] — Sprint 9: Telegram-bot разбит на пакет src/telegram/
 
 ### Changed
