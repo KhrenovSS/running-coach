@@ -273,15 +273,10 @@ def calc_avg_pace(...):
 **Фаза 3Б (inline-клавиатура оценки) — ✅ выполнено.**
 **Sprint 6 (per-user sync intervals) — ✅ выполнено.**
 
-### Что сделано в этой сессии (03.07.2026 — Sprint 6: per-user sync intervals):
+### Что сделано в этой сессии (03.07.2026 — Sprint 6: per-user sync intervals + Оценка тренировки через веб):
 
-1. ✅ **6.3** `src/config/constants.py` — константы интервалов: `MIN_ACTIVITY_SYNC_INTERVAL_MIN`, `MIN_HEALTH_SYNC_INTERVAL_MIN`, `MAX_SYNC_INTERVAL_MIN`, `DEFAULT_ACTIVITY_SYNC_INTERVAL_MIN`, `DEFAULT_HEALTH_SYNC_INTERVAL_MIN`.
-2. ✅ **6.4** `src/services/sync_service.py` + `src/scheduler.py` — переведены с глобальных интервалов на tick-based (`SYNC_TICK_INTERVAL = 300`), добавлены `get_activity_interval_seconds()`, `get_health_interval_seconds()`, `_is_sync_due()`. Убран импорт `os.getenv("COROS_*")`.
-3. ✅ **6.5–6.6** `src/web/routes/pages.py` + `src/web/templates/settings.html` — поля `coros_activity_sync_interval` / `coros_health_sync_interval` в настройках с клипингом min/max.
-4. ✅ **6.7** `src/web/routes/pages.py` + `src/web/templates/index.html` — баннер для новых пользователей (есть `WatchCredential`, но 0 тренировок).
-5. ✅ **6.9** `src/telegram_bot.py` — сообщение после сохранения credentials: «Бренд Coros подключён! Открой веб-интерфейс и нажми «Синхронизация».
-6. 📝 **AGENTS.md** — обновлён: Sprint 6 помечен ✅.
-7. 📝 **CHANGELOG.md** — обновлён.
+1. ✅ **Sprint 6** — per-user sync intervals (6.3–6.9): tick-based scheduler, константы, UI-поля, баннер, Telegram-бот.
+2. ✅ **Оценка через веб** — `POST /session/{id}/feedback` + безусловный блок оценки с формой (select 0–10) на странице тренировки.
 
 ### Что сделано в этой сессии (02.07.2026 ночь):
 

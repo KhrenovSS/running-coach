@@ -2,6 +2,16 @@
 
 All notable changes to this project are tracked here.
 
+## [03.07.2026] — Оценка тренировки через веб-форму (session detail page)
+
+### Added
+- **`src/web/routes/pages.py`**: новый endpoint `POST /session/{session_id}/feedback` — Upsert оценки (0–10) с аудитом.
+- **`src/web/templates/session.html`**: безусловный блок оценки в карточке + форма `<select>` для создания/изменения оценки.
+
+### Changed
+- **`src/web/routes/pages.py`**: `session_detail()` теперь передаёт `rating` (int или None) и `session_id` в шаблон.
+- **AGENTS.md** — обновлён статус.
+
 ## [03.07.2026] — Sprint 6: Per-user sync intervals (brand-agnostic)
 
 ### Added

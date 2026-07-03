@@ -341,13 +341,15 @@ async def session_detail(request: Request, session_id: int, db: Session = Depend
         TrainingFeedback.session_id == session_id,
         TrainingFeedback.user_id == current_user.id,
     ).first()
-    rating_display = f"⭐ {fb.rating}/10" if fb else ""
+    rating = fb.rating if fb else None
+    rating_display = f"⭐ {rating}/10" if fb else "—"
 
     user_name = current_user.name or current_user.telegram_username or "Бегун"
     user_header = f"👤 {user_name} | <a href='/auth/logout'>Выйти</a>"
     return templates.TemplateResponse(request, "session.html", {
         "user_header": user_header,
         "session_id": s.id,
+        "rating": rating,
         "suspect_badge": suspect_badge,
         "suspect_detail": suspect_detail,
         "type_ru": TRAINING_TYPES_RU.get(s.training_type, s.training_type),
@@ -450,6 +452,60 @@ async def session_delete(session_id: int, db: Session = Depends(get_db),
             metadata={"training_id": session_id},
         )
     return RedirectResponse(url='/', status_code=303)
+
+
+# Сохранить оценку тренировки (Save training rating) — POST /session/{session_id}/feedback
+@router.post('/session/{session_id}/feedback')
+async def session_feedback(session_id: int, rating: int = Form(...),
+                           db: Session = Depends(get_db),
+                           current_user: User = Depends(get_current_user)):
+    # Проверяем, что тренировка принадлежит пользователю (Verify session belongs to user)
+    s = db.query(TrainingSession).filter(
+        TrainingSession.id == session_id,
+        TrainingSession.user_id == current_user.id,
+    ).first()
+    if not s:
+        return HTMLResponse("<h2>Тренировка не найдена</h2><a href='/'>Назад</a>", status_code=404)
+
+    # Клипим rating в 0–10 (Clamp rating to 0–10)
+    rating = max(0, min(10, rating))
+
+    # Upsert оценки (Upsert training feedback)
+    fb = db.query(TrainingFeedback).filter(
+        TrainingFeedback.session_id == session_id,
+        TrainingFeedback.user_id == current_user.id,
+    ).first()
+    audit = AuditService(db)
+    if fb:
+        old_rating = fb.rating
+        fb.rating = rating
+        db.commit()
+        logger.info("Оценка тренировки #%s обновлена: %s → %s (Rating updated)", session_id, old_rating, rating)
+        audit.log_event(
+            event_type="feedback.updated",
+            message=f"Session #{session_id} rating updated: {old_rating} → {rating}",
+            severity="info",
+            user_id=current_user.id,
+            metadata={"session_id": session_id, "old_rating": old_rating, "new_rating": rating},
+        )
+    else:
+        fb = TrainingFeedback(
+            session_id=session_id,
+            user_id=current_user.id,
+            rating=rating,
+        )
+        db.add(fb)
+        db.commit()
+        logger.info("Оценка тренировки #%s сохранена: %s (Rating created)", session_id, rating)
+        audit.log_event(
+            event_type="feedback.created",
+            message=f"Session #{session_id} rating created: {rating}/10",
+            severity="info",
+            user_id=current_user.id,
+            metadata={"session_id": session_id, "rating": rating},
+        )
+
+    return RedirectResponse(url=f'/session/{session_id}', status_code=303)
 
 
 @router.post('/settings')
