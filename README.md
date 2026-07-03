@@ -413,8 +413,8 @@ LOG_FORMAT=text                  # Формат: text или json
 LOGS_DIR=logs                    # Папка логов
 SLOW_REQUEST_MS=1000            # Порог медленного запроса для лога
 GITHUB_TOKEN=                    # Токен для пуша в GitHub
-COROS_HEALTH_SYNC_INTERVAL=360  # Интервал синхронизации метрик здоровья (мин) — глобальный, будет заменён per-user в Sprint 6
-COROS_ACTIVITY_SYNC_INTERVAL=60 # Интервал синхронизации тренировок (мин) — глобальный, будет заменён per-user в Sprint 6
+COROS_HEALTH_SYNC_INTERVAL=360  # (Устарело — заменён per-user интервалами в WatchCredential, Sprint 6)
+COROS_ACTIVITY_SYNC_INTERVAL=60 # (Устарело — заменён per-user интервалами в WatchCredential, Sprint 6)
 ```
 
 ### Запуск через Docker Compose (рекомендуется)
@@ -488,7 +488,8 @@ python run_telegram_bot.py
 
 ### ⬜ В работе / запланировано
 - [ ] **Шаг 0 (п.15)** (TECH_DEBT.md): часовой пояс daily weight reminder
-- [ ] **Sprint 6** (TECH_DEBT.md): настраиваемая частота синхронизации per-user, баннер для новых пользователей
+- [x] **Sprint 6** (TECH_DEBT.md): настраиваемая частота синхронизации per-user, баннер для новых пользователей
+- [x] **Оценка через веб-форму**: POST /session/{id}/feedback + select 0–10 на странице тренировки
 - [ ] **Фаза 3**: фильтр по типу тренировки на главной, общая дистанция/время за неделю/месяц
 - [ ] **Фаза 4**: выбор бренда часов при регистрации (multi-brand onboarding), заглушки для Polar/Garmin/Suunto
 - [ ] **Модуль аналитики** — 8 этапов из `decision_module_design.md`
@@ -623,4 +624,4 @@ sudo docker volume rm running-coach_pgdata
 
 ---
 
-*Последнее обновление: 03.07.2026 — Sprint 4.5 + Sprint 4 + Фаза 1 + Фаза 3Б выполнены*
+*Последнее обновление: 03.07.2026 — Sprint 6 + Оценка тренировки через веб-форму выполнены*
