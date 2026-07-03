@@ -2,7 +2,7 @@
 import os
 from fastapi import FastAPI
 from src.models import SessionLocal, User, get_settings, init_db, WeightMeasurement, utcnow
-from src.logger import get_logger
+from src.utils.logger import get_logger
 from src.api.middleware import register_middleware
 from src.api.routes.health import router as health_router
 from src.api.routes.auth import router as auth_router

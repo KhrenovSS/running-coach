@@ -1,7 +1,7 @@
 # Фоновый планировщик автосинхронизации (Background auto-sync scheduler — per-user intervals)
 import time
 import threading
-from src.logger import get_logger
+from src.utils.logger import get_logger
 from src.services.sync_service import SYNC_TICK_INTERVAL, auto_sync_health, auto_sync_activities
 
 logger = get_logger("app")

@@ -5,13 +5,14 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from sqlalchemy.orm import Session
 from src.models import get_db, User, TrainingSession, DailyMetrics, WeightMeasurement, DeletedTraining, WatchCredential, TrainingFeedback, get_settings
-from src.logger import get_logger
+from src.utils.logger import get_logger
 from src.deps import templates, local_dt
 from src.api.deps import get_current_user
 from src.config import settings
 from src.services.auth import check_telegram_login_token
 from src.services.audit import AuditService
-from src.parsers.common import weather_icon, format_pace, format_duration
+from src.parsers.weather import weather_icon
+from src.parsers.utils import format_pace, format_duration
 from src.services.stats import fmt_duration, calc_stats, render_zone_bars, render_type_row, build_nav_html, MONTHS_RU, MONTHS_RU_SHORT
 from src.services.recovery_view import hrv_status, tired_label, readiness_label, load_label
 from src.services.sync_service import _auto_sync_status, _auto_sync_status_lock

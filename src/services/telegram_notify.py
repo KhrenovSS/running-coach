@@ -4,7 +4,7 @@ import os
 import httpx
 from src.models import SessionLocal, User
 from src.services.audit import AuditService
-from src.logger import get_logger
+from src.utils.logger import get_logger
 
 logger = get_logger("app")
 

@@ -13,8 +13,8 @@ from sqlalchemy.orm import Session
 from src.models import get_db, User, TrainingSession, DeletedTraining, get_settings
 from src.parsers.tcx_parser import parse_tcx
 from src.parsers.fit_parser import parse_fit
-from src.parsers.common import format_pace, format_duration
-from src.logger import get_logger
+from src.parsers.utils import format_pace, format_duration
+from src.utils.logger import get_logger
 from src.api.deps import get_current_user
 from src.services.audit import AuditService
 from src.services.telegram_notify import telegram_notify

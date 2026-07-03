@@ -1,7 +1,7 @@
 import os
 import re
 from cryptography.fernet import Fernet
-from src.logger import get_logger
+from src.utils.logger import get_logger
 
 logger = get_logger("crypto")
 

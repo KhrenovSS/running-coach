@@ -2,6 +2,40 @@
 
 All notable changes to this project are tracked here.
 
+## [03.07.2026] — Sprint 9: Telegram-bot разбит на пакет src/telegram/
+
+### Changed
+- **`src/telegram_bot.py`** (1142 строк) удалён, разбит на пакет `src/telegram/` (12 файлов):
+  - `main.py` — `run_bot`, Application сборка
+  - `config.py` — константы состояний (EMAIL, PASSWORD, NEW_PASSWORD)
+  - `state.py` — `_awaiting_weight`
+  - `utils.py` — `get_user()`, `_get_web_app_url()`
+  - `sync_runner.py` — `run_sync_in_thread()` (выделен из inline-кода)
+  - `handlers/start.py` — регистрация, диалоги
+  - `handlers/sync.py` — /sync
+  - `handlers/stats.py` — /stats, StatsPages, stats_callback
+  - `handlers/trainings.py` — /trainings, trainings_callback
+  - `handlers/weight.py` — /weight, handle_weight_message
+  - `handlers/account.py` — /delete_me, /login_info, /reset_password
+  - `handlers/feedback.py` — feedback_callback
+  - `jobs/weight.py` — daily_weight_job
+  - `jobs/recovery.py` — daily_recovery_check_job
+- **`run_telegram_bot.py`**: импорт изменён с `src.telegram_bot` на `src.telegram`
+
+## [03.07.2026] — Sprint 8: Парсеры разбиты, logger shim удалён
+
+### Changed
+- **`src/parsers/common.py`** (690→241 строки): разбит на 6 модулей:
+  - `gps.py` — `haversine_m()`, `clean_trackpoints()`
+  - `weather.py` — `WMO_ICONS`, `fetch_weather()`, `get_weather_code_at_time()`, `get_temp_at_time()`, `weather_icon()`
+  - `hr_zones.py` — `get_zone()`, `get_band()`
+  - `segmentation.py` — `build_time_in_zones()`, `segment_by_km()`
+  - `classification.py` — `classify_training()`
+  - `utils.py` — `format_pace()`, `format_duration()`, `calc_elevation()`, `find_timezone()`
+- **`src/logger.py`** удалён; 11 файлов переведены на `from src.utils.logger import get_logger`
+- **`src/parsers/__init__.py`** реэкспортирует `process_trackpoints()` для обратной совместимости
+- Обновлены импорты в `pages.py`, `uploads.py`, `sync.py`
+
 ## [03.07.2026] — План: Фаза 5 — факторы самочувствия после тренировки
 
 ### Added (plan)

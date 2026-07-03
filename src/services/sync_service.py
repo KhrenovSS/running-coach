@@ -7,7 +7,7 @@ import threading
 from datetime import timedelta, date, datetime, timezone
 from typing import Optional
 
-from src.logger import get_logger
+from src.utils.logger import get_logger
 from src.services.audit import AuditService
 from src.crypto import decrypt
 from src.config.constants import (

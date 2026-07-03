@@ -11,8 +11,8 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from src.models import SessionLocal, get_db, User, TrainingSession, DailyMetrics, DeletedTraining, WatchCredential
 from src.parsers.fit_parser import parse_fit
-from src.parsers.common import format_pace, format_duration
-from src.logger import get_logger
+from src.parsers.utils import format_pace, format_duration
+from src.utils.logger import get_logger
 from src.crypto import decrypt
 from src.api.deps import get_current_user
 from src.services.audit import AuditService

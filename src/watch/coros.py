@@ -6,7 +6,7 @@ from typing import Optional
 import bcrypt
 import httpx
 
-from src.logger import get_logger
+from src.utils.logger import get_logger
 from src.watch.base import BaseWatchClient
 
 logger = get_logger("watch.coros")
