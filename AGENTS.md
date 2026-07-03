@@ -268,25 +268,20 @@ def calc_avg_pace(...):
   2. **Сделать commit (если есть незакоммиченные изменения) + push** в GitHub. Это «итог дня».
   3. Сообщить пользователю, что изменения сохранены и запушены.
 
-## Текущее состояние (Session — 03.07.2026 — inline-клавиатура оценки 0-10 + отображение в веб)
+## Текущее состояние (Session — 03.07.2026 — Sprint 6: per-user sync intervals)
 
-**Sprint 4 + Фаза 1 — ✅ выполнено.**
-**🐛 Баг (lookback-буфер) — ✅ исправлен.**
-**Sprint 4.5 Фаза 7 — ✅ проверка пройдена.**
-**🐛 save_dashboard_data (async без await) — ✅ исправлен.**
-**📝 Telegram-уведомления при загрузке TCX/FIT — ✅ добавлены.**
-**📝 Дата/время тренировки в уведомлениях — ✅ добавлены.**
+**Фаза 3Б (inline-клавиатура оценки) — ✅ выполнено.**
+**Sprint 6 (per-user sync intervals) — ✅ выполнено.**
 
-### Что сделано в этой сессии (03.07.2026 — inline-клавиатура оценки 0-10 + отображение в веб):
+### Что сделано в этой сессии (03.07.2026 — Sprint 6: per-user sync intervals):
 
-1. ✅ **Фаза 3Б.1** `src/services/sync_service.py` — per-training сообщения: в цикле сбора активностей добавлен `new_trainings` список, после `db.commit()` каждое уведомление отправляется отдельным сообщением с inline_keyboard `0–10`.
-2. ✅ **Фаза 3Б.2** `src/web/routes/uploads.py` — три вызова `telegram_notify()` (upload, confirm, confirm_deleted) дополнены `reply_markup` с двухрядной inline-клавиатурой.
-3. ✅ **Фаза 3Б.3** `src/web/routes/pages.py` — импортирован `TrainingFeedback`; в `render_page()` построена `feedback_map` по всем тренировкам на странице; в `session_detail()` прочитана оценка и передана `rating_display` в шаблон.
-4. ✅ **Фаза 3Б.4** `src/web/templates/session.html` — добавлен блок `⭐ Оценка: X/10`.
-5. ✅ **Фаза 3Б.5** `src/web/templates/index.html` — добавлена колонка `Оценка` в таблицу.
-6. 📝 **AGENTS.md** — обновлён раздел «Что запланировано»: Фаза 3Б помечена ✅.
-7. 📝 **TECH_DEBT.md** — Фаза 3Б перенесена перед Sprint 6, помечена как выполненная.
-8. 📝 **CHANGELOG.md** — обновлён.
+1. ✅ **6.3** `src/config/constants.py` — константы интервалов: `MIN_ACTIVITY_SYNC_INTERVAL_MIN`, `MIN_HEALTH_SYNC_INTERVAL_MIN`, `MAX_SYNC_INTERVAL_MIN`, `DEFAULT_ACTIVITY_SYNC_INTERVAL_MIN`, `DEFAULT_HEALTH_SYNC_INTERVAL_MIN`.
+2. ✅ **6.4** `src/services/sync_service.py` + `src/scheduler.py` — переведены с глобальных интервалов на tick-based (`SYNC_TICK_INTERVAL = 300`), добавлены `get_activity_interval_seconds()`, `get_health_interval_seconds()`, `_is_sync_due()`. Убран импорт `os.getenv("COROS_*")`.
+3. ✅ **6.5–6.6** `src/web/routes/pages.py` + `src/web/templates/settings.html` — поля `coros_activity_sync_interval` / `coros_health_sync_interval` в настройках с клипингом min/max.
+4. ✅ **6.7** `src/web/routes/pages.py` + `src/web/templates/index.html` — баннер для новых пользователей (есть `WatchCredential`, но 0 тренировок).
+5. ✅ **6.9** `src/telegram_bot.py` — сообщение после сохранения credentials: «Бренд Coros подключён! Открой веб-интерфейс и нажми «Синхронизация».
+6. 📝 **AGENTS.md** — обновлён: Sprint 6 помечен ✅.
+7. 📝 **CHANGELOG.md** — обновлён.
 
 ### Что сделано в этой сессии (02.07.2026 ночь):
 
@@ -375,14 +370,13 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 - [x] 3Б.4 `session.html` — отображать ⭐ Оценка: X/10
 - [x] 3Б.5 `index.html` — колонка Оценка в таблице тренировок
 
-**Фаза 2 — Sprint 6: Per-user частота синхронизации (бренд-независимая):**
-- [ ] 6.1–6.2: колонки `activity_sync_interval`, `health_sync_interval` в `WatchCredential` + Alembic-миграция *(модель уже готова)*
-- [ ] 6.3: константы интервалов в `src/config/constants.py`
-- [ ] 6.4: индивидуальные интервалы в `sync_service.py`
-- [ ] 6.5–6.6: UI-поля в настройках для каждого бренда
-- [ ] 6.7: баннер для новых пользователей
-- [ ] 6.8: статус автосинхронизации per-brand на главной
-- [ ] 6.9–6.10: Telegram-бот + CHANGELOG
+**Фаза 2 — Sprint 6: Per-user частота синхронизации ✅:**
+- [x] 6.1–6.2: колонки `activity_sync_interval`, `health_sync_interval` в `WatchCredential` (миграция `b6c7d8e9f0a1` уже есть)
+- [x] 6.3: константы интервалов в `src/config/constants.py`
+- [x] 6.4: индивидуальные интервалы в `sync_service.py` + `scheduler.py` (tick-based)
+- [x] 6.5–6.6: UI-поля в настройках (activity + health interval с клипингом)
+- [x] 6.7: баннер для новых пользователей на главной
+- [x] 6.9: Telegram-бот — сообщение «Бренд Coros подключён!»
 
 **Фаза 3 — Мелкие фичи:**
 - [ ] Фильтр по типу тренировки на главной (Все / Бег / Ходьба)
@@ -412,7 +406,7 @@ set -a && source /home/nimda/projects/running-coach/.env && set +a && cd /home/n
 ### Следующие шаги (по порядку выполнения):
 1. ~~**Фаза 1** — остатки Sprint 4 (п.12+14.9) + Sprint 4.5 проверки~~ ✅
 2. ~~**🐛 БАГ: Потеря тренировок при задержке Coros API** — lookback-буфер в `sync_activities_for_user()`~~ ✅
-3. **Фаза 2** — Sprint 6: per-user частота синхронизации (бренд-независимая), баннер для новых пользователей
+3. ~~**Фаза 2** — Sprint 6: per-user частота синхронизации (бренд-независимая), баннер для новых пользователей~~ ✅
 4. **Фаза 3** — фильтр по типу тренировки на главной, общая дистанция/время за неделю/месяц
 5. **Фаза 4** — выбор бренда часов при регистрации (multi-brand onboarding), заглушки для Polar/Garmin/Suunto
 6. **Модуль аналитики** — 8 этапов из `decision_module_design.md`

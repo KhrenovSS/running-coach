@@ -76,6 +76,12 @@
         <h2 style="margin:0;">🏃 AI Running Coach</h2>
         <div>{{ user_header|safe }}</div>
     </div>
+    {% if new_user_banner %}
+    <div style='background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:10px 16px;margin:10px 0;font-size:15px;'>
+        👋 Нажмите <b>«🔄 Coros Sync»</b> или <b>«❤️ Health Sync»</b>, чтобы загрузить тренировки и метрики здоровья.
+        После первой синхронизации это сообщение исчезнет.
+    </div>
+    {% endif %}
 
     <div class='settings'>
         <span><b>ЧССмакс:</b> {{ max_hr }} уд/мин</span>

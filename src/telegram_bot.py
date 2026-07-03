@@ -255,10 +255,10 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
     await update.message.reply_text(
-        f"✅ Готово! Аккаунт Coros привязан.\n\n"
+        f"✅ Бренд Coros подключён!\n\n"
         f"Email: {email}\n"
         f"Пароль: 🔒 получен (сообщение удалено из чата)\n\n"
-        f"🔗 Ссылка для входа в веб-интерфейс:\n"
+        f"🔗 Открой веб-интерфейс и нажми «Синхронизация»:\n"
         f"{login_link}\n\n"
         f"/sync — синхронизировать тренировки\n"
         f"/stats — статистика\n"

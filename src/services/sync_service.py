@@ -10,6 +10,13 @@ from typing import Optional
 from src.logger import get_logger
 from src.services.audit import AuditService
 from src.crypto import decrypt
+from src.config.constants import (
+    MIN_ACTIVITY_SYNC_INTERVAL_MIN,
+    MIN_HEALTH_SYNC_INTERVAL_MIN,
+    MAX_SYNC_INTERVAL_MIN,
+    DEFAULT_ACTIVITY_SYNC_INTERVAL_MIN,
+    DEFAULT_HEALTH_SYNC_INTERVAL_MIN,
+)
 from src.models import SessionLocal, User, DailyMetrics, TrainingSession, DeletedTraining, WatchCredential
 from src.services.telegram_notify import telegram_notify
 from src.watch import get_watch_client, BaseWatchClient
@@ -23,9 +30,28 @@ _auto_sync_status = {
 }
 _auto_sync_status_lock = threading.Lock()
 
-# Интервалы синхронизации из переменных окружения (Env-based sync intervals, will be per-credential in Sprint 6)
-health_sync_interval = int(os.getenv("COROS_HEALTH_SYNC_INTERVAL", "21600"))
-activity_sync_interval = int(os.getenv("COROS_ACTIVITY_SYNC_INTERVAL", "1800"))
+# Базовый интервал тика планировщика (Scheduler tick interval — 5 минут)
+SYNC_TICK_INTERVAL: int = 300
+
+
+# Получить эффективный интервал синхронизации тренировок для учётной записи (Get effective activity sync interval for credential)
+def get_activity_interval_seconds(cred: WatchCredential) -> int:
+    minutes = cred.activity_sync_interval or DEFAULT_ACTIVITY_SYNC_INTERVAL_MIN
+    return max(MIN_ACTIVITY_SYNC_INTERVAL_MIN, min(minutes, MAX_SYNC_INTERVAL_MIN)) * 60
+
+
+# Получить эффективный интервал синхронизации здоровья для учётной записи (Get effective health sync interval for credential)
+def get_health_interval_seconds(cred: WatchCredential) -> int:
+    minutes = cred.health_sync_interval or DEFAULT_HEALTH_SYNC_INTERVAL_MIN
+    return max(MIN_HEALTH_SYNC_INTERVAL_MIN, min(minutes, MAX_SYNC_INTERVAL_MIN)) * 60
+
+
+# Проверить, пора ли синхронизироваться по интервалу (Check if sync is due based on interval)
+def _is_sync_due(last_sync_at, interval_seconds: int) -> bool:
+    if last_sync_at is None:
+        return True  # Никогда не синхронизировалось — пора (Never synced — due)
+    elapsed = (datetime.now(timezone.utc) - last_sync_at).total_seconds()
+    return elapsed >= interval_seconds
 
 
 # Создать клиента для бренда по WatchCredential (Create a brand client from WatchCredential)
@@ -332,13 +358,14 @@ async def sync_activities_for_user(cred: WatchCredential, brand: str) -> int:
             pass
 
 
-# Автосинхронизация здоровья всех пользователей (Auto health sync for all users)
+# Автосинхронизация здоровья всех пользователей с per-user интервалами (Auto health sync with per-user intervals)
 def auto_sync_health():
     import asyncio
     with _auto_sync_status_lock:
         _auto_sync_status['health']['status'] = 'syncing'
         _auto_sync_status['health']['message'] = 'Синхронизация...'
     try:
+        now = datetime.now(timezone.utc)
         db = SessionLocal()
         try:
             credentials = db.query(WatchCredential).filter(
@@ -353,22 +380,33 @@ def auto_sync_health():
             with _auto_sync_status_lock:
                 s = _auto_sync_status['health']
                 s['status'] = 'ok'
-                s['last_run'] = datetime.now(timezone.utc)
+                s['last_run'] = now
                 s['message'] = 'Нет учётных данных'
-                s['next_run'] = s['last_run'] + timedelta(seconds=health_sync_interval)
+                s['next_run'] = now + timedelta(seconds=SYNC_TICK_INTERVAL)
             return
 
         total_synced = 0
         total_empty = 0
         total_failed = 0
+        # Минимальное время до следующей синхронизации (Minimum time to next sync)
+        min_next = None
         for cred in credentials:
+            interval = get_health_interval_seconds(cred)
+            if not _is_sync_due(cred.last_health_sync_at, interval):
+                # Рассчитываем, когда будет пора синхронизироваться (Calculate when sync is due)
+                due = (cred.last_health_sync_at + timedelta(seconds=interval) - now).total_seconds()
+                if min_next is None or due < min_next:
+                    min_next = due
+                continue
             try:
                 result = asyncio.run(sync_health_for_user(cred, cred.brand))
                 if result > 0:
                     total_synced += result
+                    cred.last_health_sync_at = datetime.now(timezone.utc)
                     logger.info("Health sync: brand=%s user=%s synced=%d", cred.brand, cred.user_id, result)
                 elif result == 0:
                     total_empty += 1
+                    cred.last_health_sync_at = datetime.now(timezone.utc)
                     logger.info("Health sync: brand=%s user=%s — нет новых данных", cred.brand, cred.user_id)
                 elif result == -1:
                     total_failed += 1
@@ -380,7 +418,7 @@ def auto_sync_health():
         with _auto_sync_status_lock:
             s = _auto_sync_status['health']
             s['status'] = 'ok'
-            s['last_run'] = datetime.now(timezone.utc)
+            s['last_run'] = now
             if total_synced > 0:
                 s['message'] = f'✓ Синхронизировано: {total_synced}'
             elif total_empty > 0 and total_failed == 0:
@@ -389,25 +427,28 @@ def auto_sync_health():
                 s['message'] = f'⚠ Ошибок: {total_failed}, пусто: {total_empty}'
             else:
                 s['message'] = 'Нет учётных данных'
-            s['next_run'] = s['last_run'] + timedelta(seconds=health_sync_interval)
-        logger.info("Health sync: итого — synced=%d, empty=%d, failed=%d", total_synced, total_empty, total_failed)
+            # Следующий запуск — через минимальный интервал (Next run — at minimum interval)
+            next_seconds = min_next if min_next is not None else SYNC_TICK_INTERVAL
+            s['next_run'] = now + timedelta(seconds=int(next_seconds))
+        logger.info("Health sync: итого — synced=%d, empty=%d, failed=%d, next=%ds", total_synced, total_empty, total_failed, int(next_seconds))
     except Exception as e:
         logger.exception("Health sync: глобальная ошибка")
         with _auto_sync_status_lock:
             s = _auto_sync_status['health']
             s['status'] = 'error'
-            s['last_run'] = datetime.now(timezone.utc)
+            s['last_run'] = now
             s['message'] = str(e)[:80]
-            s['next_run'] = s['last_run'] + timedelta(seconds=health_sync_interval)
+            s['next_run'] = now + timedelta(seconds=SYNC_TICK_INTERVAL)
 
 
-# Автосинхронизация активностей всех пользователей (Auto activity sync for all users)
+# Автосинхронизация активностей всех пользователей с per-user интервалами (Auto activity sync with per-user intervals)
 def auto_sync_activities():
     import asyncio
     with _auto_sync_status_lock:
         _auto_sync_status['activity']['status'] = 'syncing'
         _auto_sync_status['activity']['message'] = 'Синхронизация...'
     try:
+        now = datetime.now(timezone.utc)
         db = SessionLocal()
         try:
             credentials = db.query(WatchCredential).filter(
@@ -422,15 +463,22 @@ def auto_sync_activities():
             with _auto_sync_status_lock:
                 s = _auto_sync_status['activity']
                 s['status'] = 'ok'
-                s['last_run'] = datetime.now(timezone.utc)
+                s['last_run'] = now
                 s['message'] = 'Нет учётных данных'
-                s['next_run'] = s['last_run'] + timedelta(seconds=activity_sync_interval)
+                s['next_run'] = now + timedelta(seconds=SYNC_TICK_INTERVAL)
             return
 
         total_synced = 0
         total_empty = 0
         total_failed = 0
+        min_next = None
         for cred in credentials:
+            interval = get_activity_interval_seconds(cred)
+            if not _is_sync_due(cred.last_activity_sync_at, interval):
+                due = (cred.last_activity_sync_at + timedelta(seconds=interval) - now).total_seconds()
+                if min_next is None or due < min_next:
+                    min_next = due
+                continue
             try:
                 result = asyncio.run(sync_activities_for_user(cred, cred.brand))
                 if result > 0:
@@ -449,7 +497,7 @@ def auto_sync_activities():
         with _auto_sync_status_lock:
             s = _auto_sync_status['activity']
             s['status'] = 'ok'
-            s['last_run'] = datetime.now(timezone.utc)
+            s['last_run'] = now
             if total_synced > 0:
                 s['message'] = f'✓ Синхронизировано: {total_synced}'
             elif total_empty > 0 and total_failed == 0:
@@ -458,13 +506,14 @@ def auto_sync_activities():
                 s['message'] = f'⚠ Ошибок: {total_failed}, пусто: {total_empty}'
             else:
                 s['message'] = 'Нет учётных данных'
-            s['next_run'] = s['last_run'] + timedelta(seconds=activity_sync_interval)
-        logger.info("Activity sync: итого — synced=%d, empty=%d, failed=%d", total_synced, total_empty, total_failed)
+            next_seconds = min_next if min_next is not None else SYNC_TICK_INTERVAL
+            s['next_run'] = now + timedelta(seconds=int(next_seconds))
+        logger.info("Activity sync: итого — synced=%d, empty=%d, failed=%d, next=%ds", total_synced, total_empty, total_failed, int(next_seconds))
     except Exception as e:
         logger.exception("Activity sync: глобальная ошибка")
         with _auto_sync_status_lock:
             s = _auto_sync_status['activity']
             s['status'] = 'error'
-            s['last_run'] = datetime.now(timezone.utc)
+            s['last_run'] = now
             s['message'] = str(e)[:80]
-            s['next_run'] = s['last_run'] + timedelta(seconds=activity_sync_interval)
+            s['next_run'] = now + timedelta(seconds=SYNC_TICK_INTERVAL)

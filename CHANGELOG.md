@@ -2,6 +2,23 @@
 
 All notable changes to this project are tracked here.
 
+## [03.07.2026] — Sprint 6: Per-user sync intervals (brand-agnostic)
+
+### Added
+- **Sprint 6.3** `src/config/constants.py` — константы: `MIN_ACTIVITY_SYNC_INTERVAL_MIN (15)`, `MIN_HEALTH_SYNC_INTERVAL_MIN (30)`, `MAX_SYNC_INTERVAL_MIN (1440)`, `DEFAULT_ACTIVITY_SYNC_INTERVAL_MIN (60)`, `DEFAULT_HEALTH_SYNC_INTERVAL_MIN (480)`.
+- **Sprint 6.4** `src/services/sync_service.py` — per-user интервалы: `get_activity_interval_seconds()`, `get_health_interval_seconds()`, `_is_sync_due()`.
+- **Sprint 6.4** `src/scheduler.py` — tick-based планировщик (`SYNC_TICK_INTERVAL = 300`), каждая функция сама решает, какие credentials готовы.
+- **Sprint 6.5–6.6** `src/web/routes/pages.py` + `src/web/templates/settings.html` — UI-поля `coros_activity_sync_interval` / `coros_health_sync_interval` с клипингом min/max.
+- **Sprint 6.7** `src/web/routes/pages.py` + `src/web/templates/index.html` — баннер для новых пользователей (есть WatchCredential, но 0 тренировок).
+- **Sprint 6.9** `src/telegram_bot.py` — обновлено сообщение после сохранения: «Бренд Coros подключён! Открой веб-интерфейс и нажми «Синхронизация».
+
+### Changed
+- **`src/services/sync_service.py`** — `auto_sync_health()` и `auto_sync_activities()` фильтруют credentials по per-user интервалам, а не по глобальным.
+- **`src/scheduler.py`** — убран импорт `os.getenv("COROS_HEALTH_SYNC_INTERVAL")` и `os.getenv("COROS_ACTIVITY_SYNC_INTERVAL")`.
+- **`src/web/routes/settings.py`** — сохранение настроек теперь включает `activity_sync_interval` / `health_sync_interval` в аудит-лог.
+- **TECH_DEBT.md** — Sprint 6 помечен как выполненный.
+- **AGENTS.md** — обновлён план работ (Sprint 6 ✅).
+
 ## [03.07.2026] — Фаза 3Б: inline-клавиатура оценки 0-10 + отображение в веб
 
 ### Added

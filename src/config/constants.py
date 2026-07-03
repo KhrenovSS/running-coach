@@ -50,6 +50,13 @@ SYNC_HEALTH_INTERVAL: Final[int] = 21600
 SYNC_ACTIVITY_INTERVAL: Final[int] = 3600
 JITTER_FACTOR: Final[float] = 0.2
 
+# Интервалы синхронизации per-user (Per-user sync interval settings)
+MIN_ACTIVITY_SYNC_INTERVAL_MIN: Final[int] = 15
+MIN_HEALTH_SYNC_INTERVAL_MIN: Final[int] = 30
+MAX_SYNC_INTERVAL_MIN: Final[int] = 1440
+DEFAULT_ACTIVITY_SYNC_INTERVAL_MIN: Final[int] = 60
+DEFAULT_HEALTH_SYNC_INTERVAL_MIN: Final[int] = 480
+
 
 # Утилиты для расчёта пульсовых зон (Utilities for HR zone calculation)
 def calculate_hr_zones(max_hr: int) -> dict[str, tuple[int, int]]:

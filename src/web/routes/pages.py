@@ -74,6 +74,14 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
     ).all()
     feedback_map = {fb.session_id: fb.rating for fb in feedbacks}
 
+    # Баннер для нового пользователя (New user banner — has credentials but no training sessions)
+    has_creds = db.query(WatchCredential).filter(
+        WatchCredential.user_id == user_id,
+        WatchCredential.is_active == True,
+    ).first()
+    has_trainings = db.query(TrainingSession).filter(TrainingSession.user_id == user_id).first()
+    new_user_banner = bool(has_creds and not has_trainings)
+
     rows = ""
     for s in filtered:
         if s.begin_ts:
@@ -183,6 +191,7 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
         "auto_activity_next": fmt_next_sync(as_activity['next_run']),
         "auto_activity_status": as_activity['status'],
         "auto_activity_msg": as_activity['message'],
+        "new_user_banner": new_user_banner,
     }
 
 
@@ -375,6 +384,9 @@ async def settings_page(request: Request, current_user: User = Depends(get_curre
     ).first()
     coros_email = cred.encrypted_user if cred else ''
     pw_placeholder = '********' if cred and cred.encrypted_password else ''
+    # Значения интервалов синхронизации (Sync interval values)
+    coros_activity_interval = cred.activity_sync_interval if cred and cred.activity_sync_interval else ''
+    coros_health_interval = cred.health_sync_interval if cred and cred.health_sync_interval else ''
     user_name = current_user.name or current_user.telegram_username or "Бегун"
     user_header = f"👤 {user_name} | <a href='/auth/logout'>Выйти</a>"
     return templates.TemplateResponse(request, "settings.html", {
@@ -385,6 +397,8 @@ async def settings_page(request: Request, current_user: User = Depends(get_curre
         "min_hr_for_fast_pace": settings.min_hr_for_fast_pace,
         "coros_email": coros_email,
         "coros_password": pw_placeholder,
+        "coros_activity_sync_interval": coros_activity_interval,
+        "coros_health_sync_interval": coros_health_interval,
     })
 
 
@@ -445,6 +459,8 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
                         min_hr_for_fast_pace: int = Form(130),
                         coros_email: str = Form(''),
                         coros_password: str = Form(''),
+                        coros_activity_sync_interval: int = Form(None),
+                        coros_health_sync_interval: int = Form(None),
                         db: Session = Depends(get_db),
                         current_user: User = Depends(get_current_user)):
     from src.models import User, WeightMeasurement, WatchCredential
@@ -486,6 +502,12 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
         cred.encrypted_user = coros_email
         if coros_password and coros_password != '********':
             cred.encrypted_password = encrypt(coros_password)
+        # Сохраняем интервалы синхронизации (Save sync intervals)
+        from src.config.constants import MIN_ACTIVITY_SYNC_INTERVAL_MIN, MIN_HEALTH_SYNC_INTERVAL_MIN, MAX_SYNC_INTERVAL_MIN
+        if coros_activity_sync_interval is not None and coros_activity_sync_interval > 0:
+            cred.activity_sync_interval = max(MIN_ACTIVITY_SYNC_INTERVAL_MIN, min(coros_activity_sync_interval, MAX_SYNC_INTERVAL_MIN))
+        if coros_health_sync_interval is not None and coros_health_sync_interval > 0:
+            cred.health_sync_interval = max(MIN_HEALTH_SYNC_INTERVAL_MIN, min(coros_health_sync_interval, MAX_SYNC_INTERVAL_MIN))
     else:
         cred = db.query(WatchCredential).filter(
             WatchCredential.user_id == current_user.id,
