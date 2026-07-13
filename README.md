@@ -222,30 +222,32 @@ training_sessions.id                     │
 ## 📂 Структура проекта
 
 ```
-/home/nimda/projects/running-coach/
+running-coach/
 ├── main.py                          # 7 строк — create_app() + uvicorn.run()
 ├── run_telegram_bot.py              # Запуск Telegram‑бота
 ├── bin/
-│   └── docker.sh                    # Защищённая обёртка docker compose (права 700)
+│   └── docker.sh                    # Защищённая обёртка docker compose (права 700, в .gitignore — создать вручную)
 ├── src/
 │   ├── startup.py                   # create_app() фабрика + startup-событие
 │   ├── scheduler.py                 # AutoSyncScheduler (одиночка)
 │   ├── deps.py                      # Jinja2Templates (общие зависимости)
 │   ├── telegram/                     # Пакет Telegram‑бота (handlers, jobs, config, state)
+│   │   ├── __init__.py              #   экспорт run_bot
 │   │   ├── main.py                   #   run_bot, Application сборка
 │   │   ├── config.py                 #   Константы состояний
 │   │   ├── state.py                  #   _awaiting_weight
 │   │   ├── utils.py                  #   get_user, _get_web_app_url
 │   │   ├── sync_runner.py            #   run_sync_in_thread
-│   │   ├── handlers/                 #   Обработчики команд: start, sync, stats, trainings, weight, account, feedback
-│   │   └── jobs/                     #   Фоновые задачи: weight, recovery
+│   │   ├── handlers/                 #   start, sync, stats, trainings, weight, account, feedback
+│   │   └── jobs/                     #   weight, recovery
 │   ├── models.py                    # SQLAlchemy‑модели (User, TrainingSession, WatchCredential, …)
 │   ├── watch/                       # Мульти-брендовая абстракция часов
+│   │   ├── __init__.py              #   register("coros", CorosWatchClient)
 │   │   ├── base.py                  #   BaseWatchClient(ABC)
 │   │   ├── coros.py                 #   CorosWatchClient на httpx.AsyncClient
 │   │   └── factory.py               #   Реестр брендов (register / get_watch_client)
 │   ├── crypto.py                    # Шифрование паролей (Fernet, требует CRED_KEY)
-│   ├── exceptions.py                # Типизированные исключения приложения (WatchAPIError, WatchAuthError, …)
+│   ├── exceptions.py                # WatchAPIError, WatchAuthError, NotFoundError, …
 │   ├── api/
 │   │   ├── __init__.py              # re-export: register_middleware, get_db
 │   │   ├── deps.py                  # get_current_user dependency (session-cookie)
@@ -256,43 +258,44 @@ training_sessions.id                     │
 │   ├── config/
 │   │   ├── __init__.py              # Экспортирует settings + constants
 │   │   ├── settings.py              # pydantic-settings BaseSettings (env vars)
-│   │   └── constants.py             # Плоские module-level константы (HR зоны, API URLs, пороги)
+│   │   └── constants.py             # Плоские module-level константы
 │   ├── parsers/
-│   │   ├── common.py                # Оркестратор: process_trackpoints, вызывает gps/segmentation/classification
-│   │   ├── gps.py                   # Очистка GPS‑ошибок, фильтрация скачков
+│   │   ├── __init__.py              # реэкспорт process_trackpoints()
+│   │   ├── common.py                # Оркестратор: process_trackpoints
+│   │   ├── gps.py                   # Очистка GPS‑ошибок, haversine_m
 │   │   ├── segmentation.py          # Сегментация по темпу (change-point detection)
-│   │   ├── classification.py        # Автоклассификация тренировок (interval/tempo/long/recovery)
-│   │   ├── hr_zones.py              # Расчёт пульсовых зон Z1–Z5
-│   │   ├── weather.py               # Погода и температура (Open‑Meteo API, httpx)
-│   │   ├── utils.py                 # Вспомогательные функции парсеров
-│   │   ├── tcx_parser.py            # Парсинг TCX‑файлов (XML)
-│   │   └── fit_parser.py            # Парсинг FIT‑файлов (бинарный)
+│   │   ├── classification.py        # Автоклассификация (interval/tempo/long/recovery)
+│   │   ├── hr_zones.py              # Пульсовые зоны Z1–Z5
+│   │   ├── weather.py               # Погода (Open‑Meteo API, httpx)
+│   │   ├── utils.py                 # format_pace, format_duration, calc_elevation, find_timezone
+│   │   ├── tcx_parser.py            # Парсинг TCX (XML)
+│   │   └── fit_parser.py            # Парсинг FIT (бинарный)
 │   ├── services/
-│   │   ├── audit.py                 # AuditService (события в БД + файл)
-│   │   ├── auth.py                  # Генерация/верификация токенов входа, bcrypt
-│   │   ├── telegram_notify.py       # Отправка уведомлений в Telegram
-│   │   ├── sync_service.py          # Brand-agnostic sync (оркестрация auto_sync + run_sync_for_user)
-│   │   ├── async_utils.py           # run_async_in_thread(coro) — единый helper для async-from-thread
-│   │   ├── watch_credentials.py     # upsert_watch_credential() — шифрование + upsert
+│   │   ├── audit.py                 # AuditService (БД + файл)
+│   │   ├── auth.py                  # bcrypt, токены входа
+│   │   ├── async_utils.py           # run_async_in_thread(coro)
+│   │   ├── sync_service.py          # Brand-agnostic sync (оркестрация + run_sync_for_user)
+│   │   ├── watch_credentials.py     # upsert_watch_credential()
 │   │   ├── training_service.py      # delete_training(), upsert_feedback()
-│   │   ├── stats.py                 # calc_stats, fmt_duration, build_nav_html, пульсовые зоны
-│   │   └── recovery_view.py         # hrv_status, tired_label, readiness_label, load_label
+│   │   ├── stats.py                 # calc_stats, fmt_duration, zone_ranges
+│   │   ├── recovery_view.py         # hrv_status, tired_label, readiness_label
+│   │   └── telegram_notify.py       # Отправка уведомлений в Telegram
 │   ├── web/
-│   │   ├── state.py                 # Глобальное состояние (_pending, _sync_tasks, TRAINING_TYPES_RU)
-│   │   ├── templates/               # 6 Jinja2-шаблонов (base, index, login, register, session, settings)
+│   │   ├── state.py                 # Глобальное состояние (_pending, _sync_tasks)
+│   │   ├── templates/               # 6 Jinja2-шаблонов + __init__.py
 │   │   └── routes/
 │   │       ├── __init__.py          # web_router = pages + uploads + sync + logs
 │   │       ├── pages/               # Пакет: auth (48), index (184), session (177), settings (118)
 │   │       ├── uploads.py           # POST /upload, /upload/confirm, /upload/confirm_deleted
-│   │       ├── sync.py              # POST /sync/{brand}/run, /sync/{brand}/health (93 строки)
+│   │       ├── sync.py              # POST /sync/{brand}/run, /sync/{brand}/health
 │   │       └── logs.py              # GET /logs
 │   └── utils/
-│       └── logger.py                # Структурированное логирование, ежедневная ротация
+│       └── logger.py                # Структурированное логирование, ротация
 ├── alembic/
 │   ├── env.py
 │   ├── script.py.mako
 │   └── versions/                    # Миграции (fresh baseline f75d2362cf9f)
-├── docs/
+├── docs/                            # 13 документов
 │   ├── ARCHITECTURE.md
 │   ├── CODE_GUIDELINES.md
 │   ├── API_ROUTES_GUIDE.md
@@ -300,29 +303,26 @@ training_sessions.id                     │
 │   ├── NAMING_CONVENTIONS.md
 │   ├── TESTING.md
 │   ├── LOGGING.md
+│   ├── DEVELOPMENT_GUIDELINES.md
 │   ├── CHECKLIST_API.md
 │   ├── CHECKLIST_FEATURE.md
 │   ├── CHECKLIST_MIGRATION.md
 │   ├── CHECKLIST_NEW_PROVIDER.md    # Чеклист: новый бренд часов
-│   ├── coros_health_metrics.md
-│   └── DEVELOPMENT_GUIDELINES.md
+│   └── coros_health_metrics.md
 ├── tests/                           # Pytest‑тесты
-├── uploads/                         # Временные загруженные файлы (.tcx, .fit)
+├── uploads/                         # Загруженные файлы (.tcx, .fit)
+├── screenshots/                     # Скриншоты интерфейса
 ├── logs/                            # Ротируемые лог-файлы
-│   ├── app_YYYY-MM-DD.log
-│   └── audit_YYYY-MM-DD.log
-├── Dockerfile                       # Python 3.13-slim, зависимости, копирование кода
+├── Dockerfile                       # Python 3.13-slim
 ├── docker-compose.yml               # 3 сервиса: db, app, bot
-├── .dockerignore                    # Исключения для Docker-образа
-├── pyproject.toml                   # Манифест зависимостей (version 2.0.0)
-├── alembic.ini                      # Конфигурация Alembic
-├── pytest.ini                       # Конфигурация pytest
-├── .env                             # Переменные окружения (в .gitignore)
+├── pyproject.toml                   # Зависимости (version 2.0.0)
+├── alembic.ini
+├── pytest.ini
 ├── .env.example                     # Шаблон переменных окружения
-├── CHANGELOG.md                     # История изменений (датированная)
+├── CHANGELOG.md
 ├── AGENTS.md                        # Контекст для ИИ‑агента
 ├── BACKLOG.md                       # Парковка TODO/идей/вопросов
-├── PROJECT_AUDIT.md                 # Аудит проекта и план рефакторинга
+├── PROJECT_AUDIT.md                 # Аудит и план рефакторинга
 └── decision_module_design.md        # Архитектура модуля аналитики
 ```
 
@@ -335,9 +335,10 @@ training_sessions.id                     │
 - **Long / Recovery** – 0 вариативных километров (определяется по ЧСС и длительности)
 
 ### Сегментация
-- По умолчанию – каждый километр = отдельный сегмент (км‑блоки)
-- Для интервальных тренировок – сплит вариативных километров на быстрый/медленный сегмент
-- Минимальная длина сегмента – 200 м
+- Change-point detection: анализ smoothed tempo по всему треку (rolling window 50м)
+- Слайдящее окно находит точки смены темпа, пиковая детекция для обработки плато
+- Минимальная длина сегмента — 200м
+- Fallback: км-блоки (если change-point detection не дал результатов)
 
 ---
 
@@ -363,7 +364,7 @@ training_sessions.id                     │
 - **Уведомления** – при автосинхронизации и ручном `/sync`
 
 ### Автоматические напоминания
-- **Ежедневный опрос веса** – в 9:00 (APScheduler)
+- **Ежедневный опрос веса** – в 9:00 (python-telegram-bot JobQueue)
 - **Проверка данных о сне** – запускается в 10:00:
   - Если данные за последние 12 часов **есть** – следующая проверка в 18:00
   - Если данных **нет** – проверка каждые 2 часа (12:00, 14:00, 16:00, 18:00)
@@ -440,20 +441,22 @@ COROS_ACTIVITY_SYNC_INTERVAL=60 # (Устарело — заменён per-user 
 
 3 контейнера: `db` (PostgreSQL 16), `app` (FastAPI/uvicorn), `bot` (Telegram-бот).
 
+> **Примечание:** `bin/docker.sh` — защищённая обёртка (права 700, пароль из .env). Не отслеживается git — создать вручную по образцу из `.env.example` или использовать `docker compose` напрямую.
+
 ```bash
-# Запуск (через защищённую обёртку bin/docker.sh)
-cd /home/nimda/projects/running-coach && ./bin/docker.sh up -d
+# Запуск
+docker compose up -d
 
 # Остановка
-./bin/docker.sh down
+docker compose down
 
 # Статус
-./bin/docker.sh ps
+docker compose ps
 
 # Логи
-sudo docker logs running-coach-app-1 --tail 50
-sudo docker logs running-coach-bot-1 --tail 50
-sudo docker logs running-coach-db-1 --tail 50
+docker compose logs app --tail 50
+docker compose logs bot --tail 50
+docker compose logs db --tail 50
 ```
 
 Архитектура:
@@ -557,8 +560,6 @@ python run_telegram_bot.py
 
 ---
 
----
-
 ## 🧹 Технический долг
 
 > Полный список технического долга, план рефакторинга и статус спринтов — в [`PROJECT_AUDIT.md`](PROJECT_AUDIT.md).
@@ -592,13 +593,13 @@ LOGS_DIR=logs
 ### Очистка БД (PostgreSQL в Docker)
 ```bash
 # Остановить контейнеры
-./bin/docker.sh down
+docker compose down
 
 # Удалить volume с данными PostgreSQL
 sudo docker volume rm running-coach_pgdata
 
 # Запустить заново (БД создастся с нуля)
-./bin/docker.sh up -d
+docker compose up -d
 ```
 
 ---
