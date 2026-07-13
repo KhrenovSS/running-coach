@@ -14,7 +14,6 @@ class Settings(BaseSettings):
     # Пути (Paths)
     log_file: str = "app.log"
     upload_dir: str = "uploads"
-    db_path: str = "running_coach.db"
 
     # Тайминги (Timing)
     http_timeout: int = 15

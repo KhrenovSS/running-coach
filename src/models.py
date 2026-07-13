@@ -240,6 +240,8 @@ def get_engine():
             max_overflow=20,
         )
     elif DATABASE_URL.startswith("sqlite"):
+        # test-only: SQLite engine для in-memory тестов (conftest.py устанавливает DATABASE_URL=sqlite:///:memory:)
+        # test-only: SQLite engine for in-memory tests (conftest.py sets DATABASE_URL=sqlite:///:memory:)
         _engine = create_engine(
             DATABASE_URL,
             connect_args={"check_same_thread": False, "timeout": 30},

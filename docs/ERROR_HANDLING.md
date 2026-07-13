@@ -18,7 +18,8 @@ Exception
         ├── NotFoundError          # 404
         ├── ValidationError        # 400
         ├── AuthenticationError    # 401
-        ├── CorosAPIError          # 502
+        ├── WatchAPIError          # 502
+        ├── WatchAuthError         # 401
         ├── FileProcessingError    # 422
         ├── DatabaseError          # 500
         └── RateLimitError         # 429
@@ -31,7 +32,8 @@ Exception
 | `NotFoundError(resource, id)` | 404 | Ресурс не найден в БД |
 | `ValidationError(field, reason)` | 400 | Невалидные входные данные |
 | `AuthenticationError(reason)` | 401 | Проблема аутентификации |
-| `CorosAPIError(endpoint, status)` | 502 | Ошибка Coros API |
+| `WatchAPIError(message, brand, status)` | 502 | Ошибка API часов (brand-agnostic) |
+| `WatchAuthError(message, brand)` | 401 | Ошибка аутентификации часов |
 | `FileProcessingError(filename, reason)` | 422 | Ошибка парсинга файла |
 | `DatabaseError(operation, details)` | 500 | Ошибка базы данных |
 | `RateLimitError(message, retry_after)` | 429 | Превышен лимит запросов |
@@ -65,7 +67,7 @@ def get_training(db: Session, training_id: int) -> TrainingSession:
 ```python
 import httpx
 from src.config import CONFIG
-from src.exceptions import CorosAPIError
+from src.exceptions import WatchAPIError
 from src.utils.logger import logger
 
 async def fetch_activities(access_token: str):
@@ -78,11 +80,11 @@ async def fetch_activities(access_token: str):
             response.raise_for_status()
             return response.json()
     except httpx.HTTPStatusError as e:
-        logger.error(f"Coros API HTTP error: {url} → {e.response.status_code}")
-        raise CorosAPIError(CONFIG.COROS.ACTIVITIES_ENDPOINT, e.response.status_code)
+        logger.error(f"Watch API HTTP error: {url} → {e.response.status_code}")
+        raise WatchAPIError(str(e), brand="coros", status=e.response.status_code)
     except httpx.RequestError as e:
-        logger.error(f"Coros API network error: {url} → {e}")
-        raise CorosAPIError(CONFIG.COROS.ACTIVITIES_ENDPOINT, 0)
+        logger.error(f"Watch API network error: {url} → {e}")
+        raise WatchAPIError(str(e), brand="coros")
 ```
 
 ### 3. Обработка файла
@@ -136,7 +138,7 @@ try:
     result = await fetch_data()
 except httpx.RequestError as e:
     logger.error(f"Network error: {e}")
-    raise CorosAPIError("/endpoint", 0)
+    raise WatchAPIError(str(e), brand="coros")
 ```
 
 ### ❌ Голый `raise Exception`

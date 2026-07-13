@@ -9,6 +9,7 @@ from typing import Optional
 
 from src.utils.logger import get_logger
 from src.services.audit import AuditService
+from src.services.async_utils import run_async_in_thread
 from src.crypto import decrypt
 from src.config.constants import (
     MIN_ACTIVITY_SYNC_INTERVAL_MIN,
@@ -479,16 +480,6 @@ async def sync_activities_for_user(cred: WatchCredential, brand: str,
             pass
 
 
-# Запустить корутину в новом event loop (тред-безопасно) / Run a coroutine in a fresh event loop (thread-safe)
-def _run_async(coro):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
-
-
 # Единая точка входа для синхронизации из web и Telegram (Unified sync entry point for web and Telegram)
 def run_sync_for_user(user_id: int, brand: str, sync_type: str,
                       progress: dict | None = None,
@@ -554,7 +545,6 @@ def run_sync_for_user(user_id: int, brand: str, sync_type: str,
 
 # Автосинхронизация здоровья всех пользователей с per-user интервалами (Auto health sync with per-user intervals)
 def auto_sync_health():
-    import asyncio
     with _auto_sync_status_lock:
         _auto_sync_status['health']['status'] = 'syncing'
         _auto_sync_status['health']['message'] = 'Синхронизация...'
@@ -593,7 +583,7 @@ def auto_sync_health():
                     min_next = due
                 continue
             try:
-                result = asyncio.run(sync_health_for_user(cred, cred.brand))
+                result = run_async_in_thread(sync_health_for_user(cred, cred.brand))
                 if result > 0:
                     total_synced += result
                     cred.last_health_sync_at = datetime.now(timezone.utc)
@@ -637,7 +627,6 @@ def auto_sync_health():
 
 # Автосинхронизация активностей всех пользователей с per-user интервалами (Auto activity sync with per-user intervals)
 def auto_sync_activities():
-    import asyncio
     with _auto_sync_status_lock:
         _auto_sync_status['activity']['status'] = 'syncing'
         _auto_sync_status['activity']['message'] = 'Синхронизация...'
@@ -674,7 +663,7 @@ def auto_sync_activities():
                     min_next = due
                 continue
             try:
-                result = asyncio.run(sync_activities_for_user(cred, cred.brand))
+                result = run_async_in_thread(sync_activities_for_user(cred, cred.brand))
                 if result > 0:
                     total_synced += result
                     logger.info("Activity sync: brand=%s user=%s synced=%d", cred.brand, cred.user_id, result)

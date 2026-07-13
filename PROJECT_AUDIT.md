@@ -1,6 +1,6 @@
 # PROJECT AUDIT — Running Coach
 
-**Дата:** 03.07.2026 (аудит v3 — 13.07.2026; Фаза B — 13.07.2026)  
+**Дата:** 03.07.2026 (аудит v3 — 13.07.2026; Фаза B — 13.07.2026; Фаза C — 13.07.2026)  
 **Версия:** 3.1  
 **Формат:** Architecture Refactoring Backlog + Tech Debt Registry
 
@@ -622,6 +622,9 @@ tests/fixtures/
 Спринт 8  (P0) — parsers/common.py разбить + logger shim       ✅
 Спринт 9  (P0) — telegram_bot.py разбить                        ✅
 AUDIT-014      — Алгоритм сегментации (change-point detection)  ✅
+Фаза A    (P0) — Починить Telegram-бот (сломанные импорты)      ✅
+Фаза B    (P1) — Тонкие роуты + мульти-бренд settings           ✅
+Фаза C    (P2) — Cleanup и унификация                            ✅
 Спринт 10 (P0) — тесты (минимум 20)                             🔴 2-3 дня
 Спринт 11 (P1) — models.py + sync_service разбить               🟠 1-2 дня
 Спринт 12 (P1) — sync.py + pages.py чистка                      🟠 1 день
@@ -819,14 +822,14 @@ grep -rn "SyncLog\|SyncService\|full_sync\|TrainingSession.start_time" src/ | wc
 **DoD:** `wc -l src/web/routes/sync.py` = 93 < 200 ✅; `pages/*.py` max 184 < 250 ✅.
 **Доп.:** `pages.py` (601) разбит на пакет `pages/` (auth 48, index 184, session 177, settings 118) — AUDIT-013 закрыт.
 
-### Фаза C — P2: Cleanup и унификация
+### Фаза C — P2: Cleanup и унификация ✅
 
-**C.1** Мёртвые зависимости в `pyproject.toml`: убрать `"APScheduler==3.11.3"` (стр. 11) и `"requests==2.34.2"` (стр. 16) — не импортируются.
-**C.2** Дублирование HR-zone math: `src/config/constants.py:62–79` (`calculate_hr_zones`, `get_hr_zone`) vs `src/parsers/hr_zones.py` (`get_zone`, `get_band`). Перенести math в `hr_zones.py`, из `constants.py` — удалить (или re-export).
-**C.3** `src/exceptions.py:63`: `CorosAPIError` → `WatchAPIError` (мульти-бренд), обновить docstring (стр. 8, 11).
-**C.4** `src/config/settings.py`: удалить мёртвое поле `db_path = "running_coach.db"` (SQLite удалён).
-**C.5** AUDIT-008 — унификация async-from-thread: один helper `run_async_in_thread(coro_func, *args)` для scheduler/web/telegram.
-**C.6** `src/models.py:242–247`: SQLite-ветка `get_engine()` (для тестов) — пометить комментарием "test-only".
+**C.1** Мёртвые зависимости в `pyproject.toml`: убрать `"APScheduler==3.11.3"` и `"requests==2.34.2"`. ✅ `weather.py` мигрирован на `httpx` (sync), обе зависимости удалены.
+**C.2** Дублирование HR-zone math: `calculate_hr_zones`, `get_hr_zone` + 10 констант `Z*_PCT` удалены из `constants.py`. Единый источник — `src/parsers/hr_zones.py`. ✅
+**C.3** `CorosAPIError` → `WatchAPIError` (brand-agnostic). `CorosAuthError` → `WatchAuthError`. Вынесены в `exceptions.py`. `coros.py` импортирует из `exceptions.py`, все 12 `raise` обновлены с `brand="coros"`. ✅
+**C.4** `db_path = "running_coach.db"` удалён из `settings.py`. ✅
+**C.5** AUDIT-008 — создан `src/services/async_utils.py` с `run_async_in_thread(coro)`. Заменены `_run_async` и `asyncio.run` в `sync_service.py` и `sync_runner.py`. ✅
+**C.6** SQLite-ветка `get_engine()` помечена bilingual-комментарием "test-only". ✅
 
 ### Фаза D — Документация: good practices из «Бот_изучения_английского»
 

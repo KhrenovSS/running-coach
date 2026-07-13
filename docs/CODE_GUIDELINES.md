@@ -369,18 +369,18 @@ except:
 
 ```python
 import httpx
-from src.exceptions import CorosAPIError
+from src.exceptions import WatchAPIError
 from src.utils.logger import logger
 
 try:
     result = await httpx.AsyncClient().get(url, timeout=CONFIG.TIMING.HTTP_TIMEOUT)
     result.raise_for_status()
 except httpx.HTTPStatusError as e:
-    logger.error(f"Coros API error: {url} → {e.response.status_code}")
-    raise CorosAPIError(url, e.response.status_code)
+    logger.error(f"Watch API error: {url} → {e.response.status_code}")
+    raise WatchAPIError(str(e), brand="coros", status=e.response.status_code)
 except httpx.RequestError as e:
-    logger.error(f"Coros API network error: {url} → {e}")
-    raise CorosAPIError(url, 0)
+    logger.error(f"Watch API network error: {url} → {e}")
+    raise WatchAPIError(str(e), brand="coros")
 ```
 
 ### Исключения проекта
@@ -389,7 +389,8 @@ except httpx.RequestError as e:
 from src.exceptions import (
     NotFoundError,      # 404
     ValidationError,    # 400
-    CorosAPIError,      # 502
+    WatchAPIError,      # 502
+    WatchAuthError,     # 401
     AuthenticationError,# 401
     DatabaseError,      # 500
     FileProcessingError,# 422
@@ -398,7 +399,7 @@ from src.exceptions import (
 # Примеры использования:
 raise NotFoundError("training", training_id)
 raise ValidationError("max_hr", "must be between 100 and 220")
-raise CorosAPIError("/activities/list", 503)
+raise WatchAPIError("Not authenticated", brand="coros")
 ```
 
 ### Обработка в сервисах

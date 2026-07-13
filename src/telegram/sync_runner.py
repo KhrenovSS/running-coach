@@ -15,13 +15,13 @@ call and builds a summary. Migrating to the unified entry point would require
 run_sync_for_user_all_brands(chat_id) — separate task.
 """
 
-import asyncio
 from datetime import datetime, timezone
 
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.models import SessionLocal, User, WatchCredential
 from src.services.audit import AuditService
+from src.services.async_utils import run_async_in_thread
 from src.services.sync_service import (
     sync_activities_for_user,
     sync_health_for_user,
@@ -29,16 +29,6 @@ from src.services.sync_service import (
 from src.utils.logger import get_logger
 
 logger = get_logger("telegram.sync_runner")
-
-
-def _run_async(coro):
-    """Запустить корутину в новом event loop (тред-безопасно) / Run a coroutine in a fresh event loop (thread-safe)."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
 
 
 def run_sync_in_thread(chat_id: int) -> tuple[bool, str]:
@@ -77,7 +67,7 @@ def run_sync_in_thread(chat_id: int) -> tuple[bool, str]:
 
             # Health sync / Синхронизация метрик здоровья
             try:
-                new_health = _run_async(sync_health_for_user(cred, brand))
+                new_health = run_async_in_thread(sync_health_for_user(cred, brand))
                 if new_health >= 0:
                     total_new_health += new_health
             except Exception as e:
@@ -86,7 +76,7 @@ def run_sync_in_thread(chat_id: int) -> tuple[bool, str]:
 
             # Activity sync / Синхронизация тренировок
             try:
-                new_activities = _run_async(sync_activities_for_user(cred, brand))
+                new_activities = run_async_in_thread(sync_activities_for_user(cred, brand))
                 if new_activities >= 0:
                     total_new_activities += new_activities
             except Exception as e:

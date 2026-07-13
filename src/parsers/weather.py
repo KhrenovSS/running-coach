@@ -1,5 +1,5 @@
 from datetime import datetime
-import requests
+import httpx
 from src.utils.logger import get_logger
 
 logger = get_logger("parsers.weather")
@@ -34,7 +34,7 @@ def fetch_weather(lat, lon, date):
         "timezone": "UTC",
     }
     try:
-        r = requests.get(url, params=params, timeout=10)
+        r = httpx.get(url, params=params, timeout=10)
         data = r.json()
         if "hourly" in data:
             result = {
@@ -45,7 +45,7 @@ def fetch_weather(lat, lon, date):
             }
             _weather_cache[key] = result
             return result
-    except (KeyError, requests.exceptions.RequestException, ValueError) as e:
+    except (KeyError, httpx.HTTPError, ValueError) as e:
         logger.debug("Weather fetch error: %s", e)
     return None
 

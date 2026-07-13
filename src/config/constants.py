@@ -1,18 +1,6 @@
 # Фиксированные константы проекта (Fixed project constants — not env-configurable)
 from typing import Final
 
-# Пульсовые зоны — проценты от max_hr (Heart rate zones — % of max_hr)
-Z1_MIN_PCT: Final[int] = 60
-Z1_MAX_PCT: Final[int] = 70
-Z2_MIN_PCT: Final[int] = 70
-Z2_MAX_PCT: Final[int] = 80
-Z3_MIN_PCT: Final[int] = 80
-Z3_MAX_PCT: Final[int] = 87
-Z4_MIN_PCT: Final[int] = 87
-Z4_MAX_PCT: Final[int] = 93
-Z5_MIN_PCT: Final[int] = 93
-Z5_MAX_PCT: Final[int] = 100
-
 # Пороги темпа и сегментации (Pace and segmentation thresholds)
 MAX_CREDIBLE_PACE: Final[float] = 3.0
 MIN_SEGMENT_DISTANCE_KM: Final[float] = 0.2
@@ -56,24 +44,3 @@ MIN_HEALTH_SYNC_INTERVAL_MIN: Final[int] = 30
 MAX_SYNC_INTERVAL_MIN: Final[int] = 1440
 DEFAULT_ACTIVITY_SYNC_INTERVAL_MIN: Final[int] = 60
 DEFAULT_HEALTH_SYNC_INTERVAL_MIN: Final[int] = 480
-
-
-# Утилиты для расчёта пульсовых зон (Utilities for HR zone calculation)
-def calculate_hr_zones(max_hr: int) -> dict[str, tuple[int, int]]:
-    zones_config = {
-        "Z1": (int(max_hr * Z1_MIN_PCT / 100), int(max_hr * Z1_MAX_PCT / 100)),
-        "Z2": (int(max_hr * Z2_MIN_PCT / 100), int(max_hr * Z2_MAX_PCT / 100)),
-        "Z3": (int(max_hr * Z3_MIN_PCT / 100), int(max_hr * Z3_MAX_PCT / 100)),
-        "Z4": (int(max_hr * Z4_MIN_PCT / 100), int(max_hr * Z4_MAX_PCT / 100)),
-        "Z5": (int(max_hr * Z5_MIN_PCT / 100), int(max_hr * Z5_MAX_PCT / 100)),
-    }
-    return zones_config
-
-
-def get_hr_zone(hr: int, max_hr: int) -> str:
-    zones = calculate_hr_zones(max_hr)
-    for zone_name in reversed(["Z5", "Z4", "Z3", "Z2", "Z1"]):
-        zone_min, zone_max = zones[zone_name]
-        if hr >= zone_min:
-            return zone_name
-    return "below"

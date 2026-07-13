@@ -8,6 +8,7 @@ import httpx
 
 from src.utils.logger import get_logger
 from src.watch.base import BaseWatchClient
+from src.exceptions import WatchAPIError, WatchAuthError
 
 logger = get_logger("watch.coros")
 
@@ -31,16 +32,6 @@ BROWSER_HEADERS = {
 SPORT_TYPE_RUNNING = 100
 SPORT_TYPE_TRAIL_RUNNING = 101
 SPORT_TYPES_RUN = {SPORT_TYPE_RUNNING, SPORT_TYPE_TRAIL_RUNNING}
-
-
-# Ошибка аутентификации Coros (Coros authentication error)
-class CorosAuthError(Exception):
-    pass
-
-
-# Ошибка API Coros (Coros API error)
-class CorosAPIError(Exception):
-    pass
 
 
 # Хэш пароля Coros: MD5 + bcrypt (Coros password hash: MD5 + bcrypt)
@@ -75,14 +66,14 @@ class CorosWatchClient(BaseWatchClient):
             resp.raise_for_status()
             data = resp.json()
             if data.get("result") != "0000":
-                raise CorosAuthError(f"Auth failed: {data.get('message', 'Unknown error')}")
+                raise WatchAuthError(f"Auth failed: {data.get('message', 'Unknown error')}", brand="coros")
             self.accesstoken = data["data"]["accessToken"]
             self.user_id = str(data["data"]["userId"])
             self.client.cookies["CPL-coros-token"] = self.accesstoken
             logger.info("Coros auth successful for %s", self.email)
             return True
         except httpx.RequestError as e:
-            raise CorosAuthError(f"Network error: {e}") from e
+            raise WatchAuthError(f"Network error: {e}", brand="coros") from e
 
     # Заголовки авторизации для API-запросов (Authorization headers for API requests)
     def _auth_headers(self) -> dict:
@@ -94,13 +85,13 @@ class CorosWatchClient(BaseWatchClient):
     # Получить список активностей с пагинацией (Get activity list with pagination)
     async def list_activities(self, since: Optional[datetime] = None) -> list[dict]:
         if not self.accesstoken:
-            raise CorosAPIError("Not authenticated")
+            raise WatchAPIError("Not authenticated", brand="coros")
         params = {"size": 200, "pageNumber": 1, "modeList": ""}
         resp = await self.client.get(ACTIVITIES_URL, params=params, headers=self._auth_headers())
         resp.raise_for_status()
         data = resp.json()
         if data.get("result") != "0000":
-            raise CorosAPIError(f"API error: {data.get('message')}")
+            raise WatchAPIError(f"API error: {data.get('message')}", brand="coros")
 
         total_pages = data.get("data", {}).get("totalPage", 1)
         all_items = list(data.get("data", {}).get("dataList", []))
@@ -140,44 +131,44 @@ class CorosWatchClient(BaseWatchClient):
     # Получить данные дашборда — HRV за последние 7 дней (Get dashboard data — HRV for last 7 days)
     async def get_dashboard(self) -> dict:
         if not self.accesstoken:
-            raise CorosAPIError("Not authenticated")
+            raise WatchAPIError("Not authenticated", brand="coros")
         headers = {k: v for k, v in self._auth_headers().items() if k != "Content-Type"}
         resp = await self.client.get(DASHBOARD_URL, headers=headers)
         resp.raise_for_status()
         body = resp.json()
         if body.get("result") != "0000":
-            raise CorosAPIError(f"Dashboard API error: {body.get('message')}")
+            raise WatchAPIError(f"Dashboard API error: {body.get('message')}", brand="coros")
         return body.get("data", {})
 
     # Получить ежедневные метрики за период (Get daily health metrics for date range)
     async def get_daily_metrics(self, start_day: str, end_day: str) -> list[dict]:
         if not self.accesstoken:
-            raise CorosAPIError("Not authenticated")
+            raise WatchAPIError("Not authenticated", brand="coros")
         headers = self._auth_headers()
         params = {"startDay": start_day, "endDay": end_day}
         resp = await self.client.get(ANALYSE_DETAIL_URL, params=params, headers=headers)
         body = resp.json()
         if body.get("result") != "0000":
-            raise CorosAPIError(f"Analyse API error: {body.get('message')}")
+            raise WatchAPIError(f"Analyse API error: {body.get('message')}", brand="coros")
         return body.get("data", {}).get("dayList", [])
 
     # Получить аналитику за 12 недель — VO2max, LTHR, LTSP, stamina trend (Get 12-week analytics)
     async def get_analytics(self) -> list[dict]:
         if not self.accesstoken:
-            raise CorosAPIError("Not authenticated")
+            raise WatchAPIError("Not authenticated", brand="coros")
         headers = self._auth_headers()
         params = {"sportType": 100}
         resp = await self.client.get(ANALYSE_QUERY_URL, params=params, headers=headers)
         resp.raise_for_status()
         body = resp.json()
         if body.get("result") != "0000":
-            raise CorosAPIError(f"Analyse query API error: {body.get('message')}")
+            raise WatchAPIError(f"Analyse query API error: {body.get('message')}", brand="coros")
         return body.get("data", {}).get("dayList", [])
 
     # Скачать FIT-файл активности в файл (Download activity FIT file to path)
     async def download_fit_to_file(self, activity_id: str, sport_type: int, output_path: str) -> bool:
         if not self.accesstoken:
-            raise CorosAPIError("Not authenticated")
+            raise WatchAPIError("Not authenticated", brand="coros")
         params = {"labelId": activity_id, "sportType": sport_type, "fileType": 4}
         resp = await self.client.get(DOWNLOAD_URL, params=params, headers=self._auth_headers())
         resp.raise_for_status()
@@ -197,7 +188,7 @@ class CorosWatchClient(BaseWatchClient):
     # Скачать FIT-файл активности (Download activity FIT file) — возвращает байты
     async def download_activity(self, activity_id: str, sport_type: int) -> Optional[bytes]:
         if not self.accesstoken:
-            raise CorosAPIError("Not authenticated")
+            raise WatchAPIError("Not authenticated", brand="coros")
         params = {"labelId": activity_id, "sportType": sport_type, "fileType": 4}
         resp = await self.client.get(DOWNLOAD_URL, params=params, headers=self._auth_headers())
         resp.raise_for_status()

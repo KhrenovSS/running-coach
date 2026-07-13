@@ -113,7 +113,7 @@ running-coach/
 | Pydantic схемы | `src/schemas/<domain>.py` | `src/schemas/training.py` |
 | SQLAlchemy модели | `src/models.py` | `class TrainingSession` |
 | Новая константа | `src/config/constants.py` | `CONFIG.PACE.MAX_CREDIBLE_PACE` |
-| Новое исключение | `src/exceptions.py` | `class CorosAPIError` |
+| Новое исключение | `src/exceptions.py` | `class WatchAPIError` |
 | Утилита общего назначения | `src/utils/` | `src/utils/date_format.py` |
 | Тест | `tests/unit/`, `tests/integration/` | `tests/unit/test_classification.py` |
 | Миграция БД | `alembic/versions/` | `c3f51ae84837_baseline.py` |

@@ -2,6 +2,37 @@
 
 All notable changes to this project are tracked here.
 
+## [13.07.2026] — Фаза C: cleanup и унификация
+
+### Changed
+- **`src/parsers/weather.py`**: миграция с `requests` на `httpx` (sync API). `import requests` → `import httpx`; `requests.get(...)` → `httpx.get(...)`; `requests.exceptions.RequestException` → `httpx.HTTPError`.
+- **`pyproject.toml`**: удалены мёртвые зависимости `"APScheduler==3.11.3"` и `"requests==2.34.2"` — планировщик свой (threading.Thread), HTTP-клиент — httpx.
+- **`src/config/constants.py`**: удалены мёртвые функции `calculate_hr_zones()` и `get_hr_zone()` + 10 констант `Z*_PCT` (стр. 5-14). Единый источник HR-zone логики — `src/parsers/hr_zones.py`.
+- **`src/exceptions.py`**: `CorosAPIError` → `WatchAPIError` (brand-agnostic, конструктор: message, brand, status, response_text). Добавлен `WatchAuthError` (message, brand).
+- **`src/watch/coros.py`**: удалены локальные `class CorosAPIError(Exception)` и `class CorosAuthError(Exception)`. Импорт `WatchAPIError, WatchAuthError` из `src.exceptions`. Все 12 `raise` обновлены с `brand="coros"`.
+- **`src/config/settings.py`**: удалено мёртвое поле `db_path = "running_coach.db"` (SQLite удалён в Sprint 4.5).
+- **`src/services/async_utils.py`** (новый файл): `run_async_in_thread(coro)` — единый helper для запуска корутин из синхронных потоков.
+- **`src/services/sync_service.py`**: удалён локальный `_run_async()`. `asyncio.run(...)` в `auto_sync_health()` и `auto_sync_activities()` заменён на `run_async_in_thread(...)`. Убраны `import asyncio` изнутри функций.
+- **`src/telegram/sync_runner.py`**: удалён локальный `_run_async()`. Заменён на импорт `run_async_in_thread` из `async_utils`. Убран `import asyncio`.
+- **`src/models.py`**: SQLite-ветка `get_engine()` помечена bilingual-комментарием "test-only".
+
+### Verified
+- `grep -rn "import requests" src/` → 0
+- `grep -rn "APScheduler\|apscheduler" src/` → 0
+- `grep -rn "CorosAPIError\|CorosAuthError" src/` → 0
+- `grep -rn "calculate_hr_zones\|get_hr_zone" src/` → 0
+- `grep -rn "db_path" src/` → 0
+- `grep -rn "asyncio.run(" src/services/` → 0
+- `grep -rn "Z1_MIN_PCT" src/` → 0
+- Все изменённые файлы проходят `py_compile`
+
+### Notes
+- **Docker**: пересобрать `app` и `bot` (изменились weather.py, exceptions.py, coros.py, sync_service.py, sync_runner.py, pyproject.toml).
+- **AUDIT-008**: паттерн async-from-thread унифицирован — один helper `run_async_in_thread` в `async_utils.py`.
+- **AUDIT-011**: COROS_SYNC_* константы уже были удалены в Фазе A (audit.py).
+
+---
+
 ## [13.07.2026] — Фаза B: тонкие роуты, мульти-бренд settings, единый sync entry point
 
 ### Added

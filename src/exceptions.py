@@ -5,10 +5,10 @@
 Typed exceptions for consistent error handling.
 
 Использование (Usage):
-    from src.exceptions import NotFoundError, CorosAPIError
+    from src.exceptions import NotFoundError, WatchAPIError
     
     raise NotFoundError("training", training_id)
-    raise CorosAPIError("/activities/list", 503)
+    raise WatchAPIError("/activities/list", 503)
 """
 
 
@@ -60,19 +60,41 @@ class ValidationError(AppError):
         )
 
 
-class CorosAPIError(AppError):
+class WatchAPIError(AppError):
     """
-    Ошибка Coros API (Coros API error)
-    
+    Ошибка API часов (Watch API error) — brand-agnostic, для всех брендов часов.
+    Brand-agnostic watch API exception for all watch brands.
+
     Пример (Example):
-        raise CorosAPIError("/activities/list", 503)
+        raise WatchAPIError("Not authenticated", brand="coros")
+        raise WatchAPIError(f"API error: {msg}", brand="coros", status=503)
     """
-    
-    def __init__(self, endpoint: str, status: int, response_text: str = ""):
+
+    def __init__(self, message: str, brand: str = "", status: int = 0,
+                 response_text: str = ""):
+        prefix = f"{brand.capitalize()} API" if brand else "Watch API"
         super().__init__(
-            message=f"Coros API {endpoint} failed with status {status}",
+            message=f"{prefix}: {message}",
             status_code=502,
-            details={"endpoint": endpoint, "status": status, "response": response_text[:500]}
+            details={"brand": brand, "message": message, "status": status,
+                     "response": response_text[:500]}
+        )
+
+
+class WatchAuthError(AppError):
+    """
+    Ошибка аутентификации часов (Watch authentication error) — brand-agnostic.
+    Brand-agnostic watch authentication error.
+
+    Пример (Example):
+        raise WatchAuthError("Invalid credentials", brand="coros")
+    """
+
+    def __init__(self, message: str = "Watch authentication failed", brand: str = ""):
+        super().__init__(
+            message=f"{brand.capitalize()}: {message}" if brand else message,
+            status_code=401,
+            details={"brand": brand, "reason": message}
         )
 
 
