@@ -8,6 +8,34 @@ DEFAULT_HR_LAG_SEC: int = 5                 # сек — лаг пульса
 DEFAULT_MIN_OSCILLATIONS: int = 3           # мин. число осцилляций для interval
 
 
+def _estimate_base_pace(paces: list[float]) -> float:
+    """
+    Оценка «лёгкого» темпа (easy pace) через 60-й процентиль.
+    Устойчив к выбросам быстрых work-фаз.
+    Easy pace estimate via 60th percentile — robust to fast work phases.
+    """
+    if len(paces) < 3:
+        return sum(paces) / len(paces) if paces else 5.0
+    sorted_paces = sorted(paces)
+    idx = int(len(sorted_paces) * 0.6)
+    return sorted_paces[min(idx, len(sorted_paces) - 1)]
+
+
+def _adaptive_pace_gap(paces: list[float], user_gap: float) -> float:
+    """
+    Адаптивный pace_gap: используем переданный пользователем,
+    но не больше разницы между 25-м и 75-м процентилем (data-driven).
+    Adaptive pace gap: capped by data-driven 25th-75th percentile gap.
+    """
+    if len(paces) < 10:
+        return max(0.3, user_gap)
+    sorted_paces = sorted(paces)
+    p25 = sorted_paces[len(sorted_paces) // 4]
+    p75 = sorted_paces[3 * len(sorted_paces) // 4]
+    data_gap = max(0.05, p75 - p25)
+    return max(0.3, min(user_gap, data_gap))
+
+
 def detect_pace_oscillations(
     smoothed_paces: list[float],
     times: list[float],
@@ -19,12 +47,14 @@ def detect_pace_oscillations(
     Count work→recovery cycles using threshold relative to easy pace.
 
     Алгоритм:
-    1. base_pace = средний темп «лёгких» участков (mean of paces >= overall mean)
-    2. work_threshold = base_pace - pace_gap
-    3. Темп < work_threshold → work-фаза (ускорение)
-    4. Темп >= work_threshold → recovery-фаза (отдых/разминка/заминка)
-    5. Объединить смежные фазы, отфильтровать короткие
-    6. Подсчитать число полных work→recovery циклов
+    1. base_pace = 60-й процентиль (устойчивая оценка easy pace)
+    2. pace_gap адаптивный: min(пользовательский, data-driven разброс)
+    3. work_threshold = base_pace - effective_gap
+    4. Темп <= work_threshold → work-фаза (ускорение)
+    5. Темп > work_threshold → recovery-фаза (отдых/разминка/заминка)
+    6. Отфильтровать короткие фазы
+    7. Объединить смежные однотипные фазы
+    8. Подсчитать число полных work→recovery циклов
 
     Args:
         smoothed_paces: сглаженный темп (мин/км) для каждой точки
@@ -38,27 +68,23 @@ def detect_pace_oscillations(
     if len(smoothed_paces) < 5 or len(times) < 5:
         return 0, []
 
-    # 1. Базовый темп = средний темп «лёгких» участков (Base pace = easy pace estimate)
-    # Используем среднее темпов >= общего среднего — это оценка темпа разминки/заминки/recovery,
-    # не искажённая быстрыми work-фазами.
-    # (Mean of paces >= overall mean — estimates warmup/cooldown/recovery pace,
-    # not skewed by fast work phases.)
-    overall_mean = sum(smoothed_paces) / len(smoothed_paces)
-    easy_paces = [p for p in smoothed_paces if p >= overall_mean]
-    base_pace = sum(easy_paces) / len(easy_paces) if easy_paces else overall_mean
+    # 1. База: 60-й процентиль (устойчив к быстрым work-фазам)
+    base_pace = _estimate_base_pace(smoothed_paces)
 
-    # 2. Порог work-фазы (Work phase threshold)
-    threshold = base_pace - pace_gap
+    # 2. Адаптивный pace_gap: не больше data-driven разброса
+    effective_gap = _adaptive_pace_gap(smoothed_paces, pace_gap)
 
-    # 3. Классифицировать каждую точку (Classify each point)
+    # 3. Порог work-фазы (Work phase threshold)
+    threshold = base_pace - effective_gap
+
+    # 4. Классифицировать каждую точку (Classify each point)
     raw_phases = []
-    current_type = 'work' if smoothed_paces[0] < threshold else 'recovery'
+    current_type = 'work' if smoothed_paces[0] <= threshold else 'recovery'
     phase_start = 0
 
     for i in range(1, len(smoothed_paces)):
-        point_type = 'work' if smoothed_paces[i] < threshold else 'recovery'
+        point_type = 'work' if smoothed_paces[i] <= threshold else 'recovery'
         if point_type != current_type:
-            # Смена фазы — сохранить предыдущую (Phase change — save previous)
             duration_sec = times[i] - times[phase_start]
             avg_pace = sum(smoothed_paces[phase_start:i]) / max(1, i - phase_start)
             raw_phases.append({
@@ -83,13 +109,24 @@ def detect_pace_oscillations(
             'duration_sec': round(duration_sec, 1),
         })
 
-    # 4. Отфильтровать короткие фазы (Filter short phases)
+    # 5. Отфильтровать короткие фазы (Filter short phases)
     filtered_phases = [p for p in raw_phases if p['duration_sec'] >= min_phase_duration_sec]
+
+    # 6. Объединить смежные однотипные фазы (после удаления коротких)
+    if filtered_phases:
+        merged = [filtered_phases[0]]
+        for p in filtered_phases[1:]:
+            if merged[-1]['type'] == p['type']:
+                merged[-1]['end_idx'] = p['end_idx']
+                merged[-1]['duration_sec'] = round(merged[-1]['duration_sec'] + p['duration_sec'], 1)
+            else:
+                merged.append(p)
+        filtered_phases = merged
 
     if len(filtered_phases) < 2:
         return 0, filtered_phases
 
-    # 5. Подсчитать полные циклы work→recovery (Count full work→recovery cycles)
+    # 7. Подсчитать полные циклы work→recovery (Count full work→recovery cycles)
     oscillation_count = 0
     for i in range(len(filtered_phases) - 1):
         if filtered_phases[i]['type'] == 'work' and filtered_phases[i+1]['type'] == 'recovery':

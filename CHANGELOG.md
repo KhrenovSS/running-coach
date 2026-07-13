@@ -2,6 +2,29 @@
 
 All notable changes to this project are tracked here.
 
+## [13.07.2026] — Сегментация: distance-based change points + adaptive fallback
+
+### Added
+- **`src/analysis/segment.py`** — distance-based change point detection (`CHANGE_POINT_WINDOW_M=200` вместо point-based `CHANGE_POINT_WINDOW=10`): окно поиска смены темпа теперь в метрах, а не в точках — не зависит от частоты GPS
+- **`src/analysis/segment.py`** — `_adaptive_min_diff()`: порог смены темпа теперь адаптивный (`max(0.3, 0.25 * pace_range)`), а не фиксированный 0.5 — для монотонных порог выше, для интервалов ниже
+- **`src/analysis/segment.py`** — `_compute_per_point_pace()`: убран хардкод `3.0 < pace < 12.0` → теперь `max_credible_pace < pace < 15.0` (значение из настроек пользователя)
+- **`src/analysis/segment.py`** — защита oscillation-сегментов от km fallback: если осцилляции нашли реальные work/recovery с Z4+ и разбросом темпа ≥ 0.5 мин/км, km fallback не срабатывает; для шума (все Z2-Z3) — fallback на км-блоки
+- **`src/analysis/segment.py`** — km fallback для монотонных: если change-points дали ≤2 сегментов И осцилляций нет → км-блоки (6×1.0км + последний неполный)
+- **`src/analysis/oscillation.py`** — `_estimate_base_pace()`: 60-й процентиль вместо `mean(paces >= overall_mean)` — устойчивее к выбросам быстрых work-фаз
+- **`src/analysis/oscillation.py`** — `_adaptive_pace_gap()`: pace_gap теперь адаптивный (`min(user_gap, p75-p25)`), а не всегда пользовательский — подстраивается под реальный разброс темпа
+- **`src/analysis/oscillation.py`** — сравнение темпа `<= threshold` вместо `< threshold` — ловит граничные work-фазы
+- **`src/analysis/oscillation.py`** — merge смежных однотипных фаз после фильтрации коротких — длинные work-фазы (1.2км) не дробятся
+- **`src/analysis/__init__.py`** — `_is_km_segmentation()`: детекция км-блоков — если сегменты ~1.0км, сбрасываются сигналы интервалов (var_count, oscillation_count, hr_correlated)
+- **`BACKLOG.md`** — #20: Chart.js формат темпа M:СС вместо десятичных минут
+
+### Fixed
+- **`src/analysis/segment.py`** — oscillation fallback перетирал km fallback: change-point давал 1 сегмент → осцилляции находили 11 сегментов-шума → возвращались раньше `count_off` проверки. Исправлено: проверка `count_off` теперь и внутри oscillation-ветки
+- **`src/analysis/segment.py`** — второй `count_off` (после oscillation) перехватывал интервальные сегменты: добавлена проверка `max_zone >= 4 and pace_spread >= 0.5` — реальные интервалы не fallback'ятся
+- **`src/analysis/__init__.py`** — монотонная тренировка #73 (6.2км) классифицировалась как "interval" из-за var_count ≥ 3 при км-блоках. Исправлено: `_is_km_segmentation` сбрасывает сигналы интервалов
+
+### Tests
+- +16 тестов: `TestAdaptiveMinDiff` (3), `TestFindChangePoints` (2), `TestKmSegmentFallback` (2), новые кейсы `TestSegmentByPace` (2), `TestEstimateBasePace` (3), `TestAdaptivePaceGap` (3). Всего 56 тестов
+
 ## [13.07.2026] — Отладка и улучшение алгоритма анализа (баги, fallback, 40 тестов)
 
 ### Fixed

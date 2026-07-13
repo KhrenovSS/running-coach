@@ -128,7 +128,7 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 ```
 Пароль/токен отдельно не спрашивать — брать из `.env`.
 
-## Текущее состояние (Session — 13.07.2026 — Модуль анализа + отладка алгоритма)
+## Текущее состояние (Session — 13.07.2026 — Сегментация: distance-based + adaptive fallback)
 
 **Фаза A ✅:** Починены сломанные импорты в `src/telegram/` (AUDIT-015), удалены `COROS_SYNC_*` константы (AUDIT-011).
 **Фаза B ✅:** Тонкие роуты (sync.py 444→93), мульти-бренд settings, единый `run_sync_for_user`, пакет `pages/`.
@@ -137,27 +137,21 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 **Модуль анализа ✅:** Новый пакет `src/analysis/` (классификация, сегментация, пульсовые зоны, утилиты).
 **Алгоритм интервалов ✅:** `src/analysis/oscillation.py` — детекция по базовому темпу (easy pace) + HR-lag корреляция.
 **Отладка анализа ✅:** Исправлены баги: base_pace self-defeating, HR-lag инверсия, time units, NameError. Добавлен умный fallback: км-блоки если сегменты похожи или число отлично от км. 40 тестов, 29 тренировок пересчитаны (27/29 ✓).
+**Сегментация ✅:** Distance-based change points + адаптивный порог + защита oscillation-сегментов + km fallback для монотонных.
 
 ### Что сделано в этой сессии (13.07.2026):
-1. Создан `src/analysis/` (6 файлов): `__init__.py` (оркестратор process_trackpoints), `oscillation.py` (easy_pace + pace_gap детекция + HR-lag), `classify.py`, `segment.py`, `hr_zones.py`, `utils.py`
-2. Удалены старые модули из `src/parsers/`: `common.py`, `segmentation.py`, `classification.py`, `hr_zones.py`, `utils.py`
-3. `src/models.py`: `TrainingSession.training_type_override` + `trackpoints_json`; `User`: `interval_pace_threshold`, `interval_min_phase_duration`, `interval_hr_lag_sec`, `interval_min_oscillations`
-4. Alembic миграции: `d1e2f3a4b5c6` (6 колонок) + `e5f6a7b8c9d0` (rename amplitude → pace_threshold)
-5. `src/services/reanalyze.py`: пересчёт тренировок из сохранённых трекпоинтов с override типа
-6. `POST /session/{id}/reanalyze`: эндпоинт + dropdown типа в `session.html`
-7. `src/config/constants.py`: `DEFAULT_PACE_THRESHOLD=1.0`, `DEFAULT_MIN_PHASE_DURATION_SEC=15`, `DEFAULT_HR_LAG_SEC=5`, `DEFAULT_MIN_OSCILLATIONS=3`
-8. `settings.html`: настройки интервалов — порог ускорения (ввод в секундах, отображение X:XX мин/км)
-9. `trackpoints_json` сохраняется при загрузке TCX/FIT и синхронизации с часов
-10. Новый алгоритм oscillation: `base_pace = easy_pace`, `threshold = base_pace - pace_gap`, work = темп < threshold, recovery = темп >= threshold
-11. **Отладка анализа (13.07.2026):**
-    - `oscillation.py`: base_pace self-defeating → `mean(paces >= overall_mean)` 
-    - `oscillation.py`: HR-lag инверсия → `pace_change = -(p_cur - p_prev)`
-    - `segment.py`: CHANGE_POINT_MIN_DIFF 0.3 → 0.5 + умный fallback
-    - `segment.py`: time units bug в _km_segment_fallback
-    - `reanalyze.py`: NameError _run_async → run_async_in_thread
-    - `reanalyze.py`: _restore_trackpoints добавлены недостающие ключи
-    - `analysis/__init__.py`: _serialize_trackpoints сохраняет None
-    - Добавлены 40 тестов (tests/)
+1. `segment.py`: distance-based change points (`CHANGE_POINT_WINDOW_M=200` вместо 10 точек)
+2. `segment.py`: адаптивный порог `_adaptive_min_diff(max(0.3, 0.25*range))`
+3. `segment.py`: убран хардкод `3.0 < pace < 12.0` → `max_credible_pace < pace < 15.0`
+4. `segment.py`: защита oscillation-сегментов от km fallback (только если Z4+ и разброс ≥ 0.5)
+5. `segment.py`: km fallback для монотонных (≤2 сегментов и нет осцилляций → км-блоки)
+6. `segment.py`: count_off проверка внутри oscillation-ветки + защита реальных интервалов
+7. `oscillation.py`: `_estimate_base_pace()` через 60-й процентиль вместо mean
+8. `oscillation.py`: `_adaptive_pace_gap()` — data-driven gap, capped by user setting
+9. `oscillation.py`: `<= threshold` вместо `<` + merge смежных однотипных фаз
+10. `analysis/__init__.py`: `_is_km_segmentation()` — сброс сигналов интервалов при км-блоках
+11. Проверка на реальных тренировках: #73 (6.2км монотонная → км-блоки), #102 (темп), #101 (интервалы 12 сегментов)
+12. +16 тестов (56 всего), Docker rebuild app
 
 ### Коммиты:
 - `cda4a0a` Sprint 8+9: разбивка parsers/common.py и telegram_bot.py на пакеты

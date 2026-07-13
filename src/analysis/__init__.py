@@ -15,6 +15,32 @@ from src.analysis.utils import format_duration, calc_elevation, find_timezone
 logger = get_logger("analysis")
 
 
+def _is_km_segmentation(segments: list[dict], total_dist_km: float) -> bool:
+    """
+    Проверить, являются ли сегменты км-блоками.
+    Check if segments are km-based blocks.
+    Км-блок: все сегменты ~1.0км (±0.15), последний может быть короче.
+    """
+    if not segments:
+        return False
+    num_km = max(1, int(total_dist_km))
+    # Если сегментов примерно столько же, сколько км (±1)
+    if abs(len(segments) - num_km) > 1 and abs(len(segments) - (num_km + 1)) > 1:
+        return False
+    # Проверяем расстояния
+    for i, s in enumerate(segments):
+        d = s.get('distance_km', 0)
+        if i < len(segments) - 1:
+            # Полные км: 0.85-1.15
+            if d < 0.85 or d > 1.15:
+                return False
+        else:
+            # Последний сегмент может быть любым (< 1.15)
+            if d > 1.15:
+                return False
+    return True
+
+
 def process_trackpoints(trackpoints: list[dict], start_time_utc: datetime,
                          max_hr: int = 177, max_credible_pace: float = 3.0,
                          max_gps_jump_m: float = 100.0, min_hr_for_fast_pace: int = 130,
@@ -100,6 +126,7 @@ def process_trackpoints(trackpoints: list[dict], start_time_utc: datetime,
         min_oscillations=interval_min_oscillations,
         pace_gap=pace_gap,
         min_phase_duration_sec=interval_min_phase_duration,
+        max_credible_pace=max_credible_pace,
     )
 
     # НОВОЕ: осцилляции темпа + HR-lag корреляция
@@ -131,6 +158,14 @@ def process_trackpoints(trackpoints: list[dict], start_time_utc: datetime,
             _, hr_correlated = compute_hr_lag_correlation(
                 times, filled_paces, hrs, lag_sec=interval_hr_lag_sec,
             )
+
+    # Проверка: если сегменты — км-блоки (все ~1.0км, кроме последнего),
+    # то это не интервальная тренировка — сбрасываем сигналы интервалов
+    # (Check: if segments are km-based blocks, don't classify as interval)
+    if _is_km_segmentation(segments, total_dist_km):
+        var_count = 0
+        oscillation_count = 0
+        hr_correlated = False
 
     t_type, segments_count = classify_training(
         var_count, time_in_zone, total_duration_min, max_hr,
