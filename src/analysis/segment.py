@@ -9,7 +9,7 @@ from src.analysis.oscillation import detect_pace_oscillations
 MIN_SEGMENT_DIST_M = 200
 PACE_SMOOTH_WINDOW = 5
 CHANGE_POINT_WINDOW = 10
-CHANGE_POINT_MIN_DIFF = 0.3
+CHANGE_POINT_MIN_DIFF = 0.5
 
 
 def build_time_in_zones(trackpoints: list[dict], max_hr: int) -> tuple[dict, list[dict], float]:
@@ -307,6 +307,17 @@ def segment_by_pace(trackpoints: list[dict], max_hr: int, total_dist_km: float,
 
     segments = _build_segments_from_boundaries(boundaries, points, max_hr)
 
+    # Проверка: если сегменты слишком похожи по темпу или их число
+    # сильно отличается от числа км — это шум. Fallback на км-блоки.
+    # (Check: if segments have similar pace or count is far from km count — noise.
+    # Fall back to km-based segmentation.)
+    num_kms = max(1, int(total_dist_km))
+    seg_paces = [s['pace_min_km'] for s in segments if s.get('pace_min_km') is not None]
+    all_similar = seg_paces and (max(seg_paces) - min(seg_paces)) < 0.5
+    count_off = len(segments) < num_kms * 0.5 or len(segments) > num_kms * 1.5
+    if len(segments) > 2 and (all_similar or count_off):
+        segments, _ = _km_segment_fallback(trackpoints, max_hr, total_dist_km)
+
     # НОВОЕ: если change-point detection не дал достаточно сегментов —
     # использовать осцилляции как границы (If change-point detection yields
     # too few segments — use oscillations as boundaries)
@@ -327,6 +338,12 @@ def segment_by_pace(trackpoints: list[dict], max_hr: int, total_dist_km: float,
             osc_segments = _build_segments_from_boundaries(osc_boundaries, points, max_hr)
             if len(osc_segments) > len(segments):
                 segments = osc_segments
+
+    # Если сегментов мало по сравнению с км — fallback на км-блоки
+    # (If too few segments relative to km count — fall back to km-based)
+    num_kms = max(1, int(total_dist_km))
+    if len(segments) < num_kms * 0.5 and total_dist_km >= 1.0:
+        segments, _ = _km_segment_fallback(trackpoints, max_hr, total_dist_km)
 
     # Fallback: км-сегменты (Fallback: km-based segments)
     if not segments:
@@ -358,7 +375,7 @@ def _km_segment_fallback(trackpoints: list[dict], max_hr: int, total_dist_km: fl
             if not (prev['time'] and cur['time'] and prev['dist'] is not None and cur['dist'] is not None):
                 prev = cur
                 continue
-            d_delta = (cur['time'] - prev['time']).total_seconds() / 60
+            d_delta = (cur['time'] - prev['time']).total_seconds()
             d_dist = max(0, cur['dist'] - prev['dist'])
             if d_dist > 0 and d_delta > 0:
                 points_data.append({'dist_delta': d_dist, 'time_delta_sec': d_delta, 'hr': prev['hr'], 'cad': prev['cad'], 'alt': prev['alt']})

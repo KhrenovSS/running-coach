@@ -101,12 +101,17 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
 def _restore_trackpoints(trackpoints_json: list[dict]) -> list[dict] | None:
     """
     Восстановить трекпоинты из JSON (Restore trackpoints from JSON)
-    Конвертирует строковые времена обратно в datetime объекты
+    Конвертирует строковые времена обратно в datetime объекты,
+    добавляет отсутствующие ключи с None (для обратной совместимости).
     """
     try:
+        _expected_keys = ('time', 'hr', 'dist', 'alt', 'lat', 'lon', 'cad')
+        from datetime import datetime, timezone
         for tp in trackpoints_json:
+            for key in _expected_keys:
+                if key not in tp:
+                    tp[key] = None
             if tp.get('time') and isinstance(tp['time'], str):
-                from datetime import datetime, timezone
                 tp['time'] = datetime.fromisoformat(tp['time'].replace('Z', '+00:00'))
         return trackpoints_json
     except Exception as e:

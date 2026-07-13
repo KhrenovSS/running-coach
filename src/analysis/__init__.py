@@ -336,7 +336,8 @@ def _build_hr_pace_series(times: list[float], hrs: list[int], dists: list[float]
 def _serialize_trackpoints(trackpoints: list[dict]) -> list[dict]:
     """
     Сериализовать трекпоинты для JSON-хранилища (Serialize trackpoints for JSON storage)
-    Конвертирует datetime → ISO-строку для JSON
+    Конвертирует datetime → ISO-строку для JSON. Сохраняет None-значения
+    для обратной совместимости при восстановлении.
     """
     result = []
     for tp in trackpoints:
@@ -344,7 +345,7 @@ def _serialize_trackpoints(trackpoints: list[dict]) -> list[dict]:
         for k, v in tp.items():
             if hasattr(v, 'isoformat'):
                 serialized[k] = v.isoformat()
-            elif v is not None:
+            else:
                 serialized[k] = v
         result.append(serialized)
     return result

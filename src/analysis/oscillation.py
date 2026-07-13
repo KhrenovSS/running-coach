@@ -15,11 +15,11 @@ def detect_pace_oscillations(
     min_phase_duration_sec: int = DEFAULT_MIN_PHASE_DURATION_SEC,
 ) -> tuple[int, list[dict]]:
     """
-    Подсчёт work→recovery циклов по порогу относительно среднего темпа.
-    Count work→recovery cycles using threshold relative to average pace.
+    Подсчёт work→recovery циклов по порогу относительно темпа лёгких участков.
+    Count work→recovery cycles using threshold relative to easy pace.
 
     Алгоритм:
-    1. base_pace = средний темп всей пробежки
+    1. base_pace = средний темп «лёгких» участков (mean of paces >= overall mean)
     2. work_threshold = base_pace - pace_gap
     3. Темп < work_threshold → work-фаза (ускорение)
     4. Темп >= work_threshold → recovery-фаза (отдых/разминка/заминка)
@@ -38,8 +38,14 @@ def detect_pace_oscillations(
     if len(smoothed_paces) < 5 or len(times) < 5:
         return 0, []
 
-    # 1. Базовый темп = средний темп пробежки (Base pace = average run pace)
-    base_pace = sum(smoothed_paces) / len(smoothed_paces)
+    # 1. Базовый темп = средний темп «лёгких» участков (Base pace = easy pace estimate)
+    # Используем среднее темпов >= общего среднего — это оценка темпа разминки/заминки/recovery,
+    # не искажённая быстрыми work-фазами.
+    # (Mean of paces >= overall mean — estimates warmup/cooldown/recovery pace,
+    # not skewed by fast work phases.)
+    overall_mean = sum(smoothed_paces) / len(smoothed_paces)
+    easy_paces = [p for p in smoothed_paces if p >= overall_mean]
+    base_pace = sum(easy_paces) / len(easy_paces) if easy_paces else overall_mean
 
     # 2. Порог work-фазы (Work phase threshold)
     threshold = base_pace - pace_gap
@@ -102,8 +108,11 @@ def compute_hr_lag_correlation(
     Корреляция changes(pace) с changes(HR) со сдвигом lag_sec.
     Correlation of pace changes with HR changes (shifted by lag_sec).
 
-    Высокая положительная корреляция означает: когда темп растёт —
-    пульс растёт через lag_sec секунд (классический паттерн интервалов).
+    Инвертируем темп: pace_eff = -pace, поэтому pace_eff растёт когда бегун ускоряется.
+    Высокая положительная корреляция означает: ускорение → рост пульса через lag_sec
+    (классический паттерн интервалов).
+    Invert pace so that pace_eff increases when runner speeds up.
+    Positive correlation = speed-up → HR increase after lag_sec (classic interval pattern).
 
     Args:
         times: время (сек) для каждой точки
@@ -130,7 +139,7 @@ def compute_hr_lag_correlation(
         dt = t_cur - t_prev
         if dt <= 0:
             continue
-        pace_change = p_cur - p_prev  # отрицательный = быстрее
+        pace_change = -(p_cur - p_prev)  # инвертируем: положительный = ускорение
 
         hr_lag = None
         for j in range(i, len(valid)):

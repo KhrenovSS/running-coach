@@ -510,9 +510,9 @@ def run_sync_for_user(user_id: int, brand: str, sync_type: str,
         audit.log_sync_started(brand=brand, user_id=user_id, source=f"web_{brand}_sync")
 
         if sync_type == 'activity':
-            result = _run_async(sync_activities_for_user(cred, brand, progress=progress, pending=pending))
+            result = run_async_in_thread(sync_activities_for_user(cred, brand, progress=progress, pending=pending))
         elif sync_type == 'health':
-            result = _run_async(sync_health_for_user(cred, brand, progress=progress))
+            result = run_async_in_thread(sync_health_for_user(cred, brand, progress=progress))
         else:
             if progress is not None:
                 progress['step'] = 'error'
