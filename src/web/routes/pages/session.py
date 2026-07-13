@@ -15,6 +15,7 @@ from src.parsers.weather import weather_icon
 from src.services.stats import fmt_duration
 from src.services.recovery_view import hrv_status, tired_label, readiness_label, load_label
 from src.services.training_service import delete_training, upsert_feedback
+from src.services.reanalyze import reanalyze_training
 from src.web.state import TRAINING_TYPES_RU
 from src.utils.logger import get_logger
 
@@ -175,4 +176,16 @@ async def session_feedback(session_id: int, rating: int = Form(...),
     fb = upsert_feedback(db, current_user.id, session_id, rating)
     if not fb:
         return HTMLResponse("<h2>Тренировка не найдена</h2><a href='/'>Назад</a>", status_code=404)
+    return RedirectResponse(url=f'/session/{session_id}', status_code=303)
+
+
+@router.post('/session/{session_id}/reanalyze')
+async def session_reanalyze(session_id: int,
+                             training_type_override: str = Form(''),
+                             db: Session = Depends(get_db),
+                             current_user: User = Depends(get_current_user)):
+    """Пересчитать тренировку с возможностью смены типа (Reanalyze training with type override)"""
+    result = reanalyze_training(db, session_id, current_user.id, training_type_override)
+    if result is None:
+        return HTMLResponse("<h2>Ошибка пересчёта</h2><p>Нет трекпоинтов или тренировка не найдена.</p><a href='/'>Назад</a>", status_code=400)
     return RedirectResponse(url=f'/session/{session_id}', status_code=303)

@@ -11,6 +11,8 @@ from src.deps import templates
 from src.api.deps import get_current_user
 from src.services.audit import AuditService
 from src.services.watch_credentials import upsert_watch_credential
+from src.config.constants import (DEFAULT_PACE_THRESHOLD, DEFAULT_MIN_PHASE_DURATION_SEC,
+                                   DEFAULT_HR_LAG_SEC, DEFAULT_MIN_OSCILLATIONS)
 from src.utils.logger import get_logger
 
 logger = get_logger("app")
@@ -46,6 +48,7 @@ async def settings_page(request: Request, current_user: User = Depends(get_curre
         })
     user_name = current_user.name or current_user.telegram_username or "Бегун"
     user_header = f"👤 {user_name} | <a href='/auth/logout'>Выйти</a>"
+    pace_threshold_min = current_user.interval_pace_threshold or DEFAULT_PACE_THRESHOLD
     return templates.TemplateResponse(request, "settings.html", {
         "user_header": user_header,
         "max_hr": m, "weight": settings.weight, "z1": z1, "z2": z2, "z3": z3, "z4": z4, "z5": z5,
@@ -53,6 +56,10 @@ async def settings_page(request: Request, current_user: User = Depends(get_curre
         "max_gps_jump_m": settings.max_gps_jump_m,
         "min_hr_for_fast_pace": settings.min_hr_for_fast_pace,
         "watch_creds": watch_creds,
+        "interval_pace_threshold_sec": round(pace_threshold_min * 60),
+        "interval_min_phase_duration": current_user.interval_min_phase_duration or DEFAULT_MIN_PHASE_DURATION_SEC,
+        "interval_hr_lag_sec": current_user.interval_hr_lag_sec or DEFAULT_HR_LAG_SEC,
+        "interval_min_oscillations": current_user.interval_min_oscillations or DEFAULT_MIN_OSCILLATIONS,
     })
 
 
@@ -61,6 +68,10 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
                         max_credible_pace: float = Form(3.0),
                         max_gps_jump_m: float = Form(100.0),
                         min_hr_for_fast_pace: int = Form(130),
+                        interval_pace_threshold: float = Form(DEFAULT_PACE_THRESHOLD),
+                        interval_min_phase_duration: int = Form(DEFAULT_MIN_PHASE_DURATION_SEC),
+                        interval_hr_lag_sec: int = Form(DEFAULT_HR_LAG_SEC),
+                        interval_min_oscillations: int = Form(DEFAULT_MIN_OSCILLATIONS),
                         watch_brand: str = Form(''),
                         watch_email: str = Form(''),
                         watch_password: str = Form(''),
@@ -90,6 +101,10 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
     user.max_credible_pace = max_credible_pace
     user.max_gps_jump_m = max_gps_jump_m
     user.min_hr_for_fast_pace = min_hr_for_fast_pace
+    user.interval_pace_threshold = interval_pace_threshold / 60.0  # сек → мин/км
+    user.interval_min_phase_duration = interval_min_phase_duration
+    user.interval_hr_lag_sec = interval_hr_lag_sec
+    user.interval_min_oscillations = interval_min_oscillations
 
     # Сохраняем credentials через сервис (Save credentials via service — brand-agnostic)
     if watch_brand:

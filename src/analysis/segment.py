@@ -1,11 +1,29 @@
-from src.parsers.hr_zones import get_zone, get_band
-from src.parsers.utils import format_duration, format_pace, calc_elevation
+# Сегментация тренировок: time-in-zones, сегментация по темпу, осцилляции
+# Training segmentation: time-in-zones, pace-based segmentation, oscillations
 
+from src.analysis.hr_zones import get_zone, get_band
+from src.analysis.utils import format_duration, format_pace, calc_elevation
+from src.analysis.oscillation import detect_pace_oscillations
+
+# Константы сегментации (Segmentation constants)
 MIN_SEGMENT_DIST_M = 200
 PACE_SMOOTH_WINDOW = 5
+CHANGE_POINT_WINDOW = 10
+CHANGE_POINT_MIN_DIFF = 0.3
 
 
-def build_time_in_zones(trackpoints, max_hr):
+def build_time_in_zones(trackpoints: list[dict], max_hr: int) -> tuple[dict, list[dict], float]:
+    """
+    Рассчитать время в пульсовых зонах и найти длинные Z4+ сегменты.
+    Calculate time in HR zones and find long Z4+ segments.
+
+    Args:
+        trackpoints: список трекпоинтов [{time, hr, dist, ...}]
+        max_hr: максимальный пульс
+
+    Returns:
+        (time_in_zone, z4_plus_segments, total_duration_min)
+    """
     time_in_zone = {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0}
     z4_plus_segments = []
     in_z4 = False
@@ -47,20 +65,18 @@ def build_time_in_zones(trackpoints, max_hr):
     return time_in_zone, z4_plus_segments, total_duration_min
 
 
-def _compute_per_point_pace(trackpoints, window_m=50):
+def _compute_per_point_pace(trackpoints: list[dict], window_m: int = 50) -> list[dict]:
     """
     Вычислить темп для каждой точки через скользящее окно.
-    dist_delta / time_delta_sec — consecutive (для суммы), pace — rolling (для классификации).
-    (Per-point pace: raw deltas for stats, rolling window pace for classification)
+    Calculate per-point pace using a rolling window.
     """
     points = []
     n = len(trackpoints)
-    # Предвычисляем consecutive разницу между соседними точками (Pre-compute consecutive point diffs)
     raw_dd = [0.0]
     raw_dt = [0.0]
     for i in range(1, n):
-        dd = max(0, trackpoints[i]['dist'] - trackpoints[i - 1]['dist']) if trackpoints[i]['dist'] is not None and trackpoints[i - 1]['dist'] is not None else 0
-        dt = (trackpoints[i]['time'] - trackpoints[i - 1]['time']).total_seconds() if trackpoints[i]['time'] and trackpoints[i - 1]['time'] else 0
+        dd = max(0, trackpoints[i]['dist'] - trackpoints[i-1]['dist']) if trackpoints[i]['dist'] is not None and trackpoints[i-1]['dist'] is not None else 0
+        dt = (trackpoints[i]['time'] - trackpoints[i-1]['time']).total_seconds() if trackpoints[i]['time'] and trackpoints[i-1]['time'] else 0
         raw_dd.append(dd)
         raw_dt.append(dt)
 
@@ -87,21 +103,23 @@ def _compute_per_point_pace(trackpoints, window_m=50):
             'cad': cur['cad'],
             'alt': cur.get('alt'),
             'pace': pace,
+            'time': cur['time'],
         })
     return points
 
 
-def _smooth(values, window):
+def _smooth(values: list[float], window: int) -> list[float]:
     """Скользящее среднее (Moving average smoothing)"""
     return [sum(values[max(0, i - window):min(len(values), i + window + 1)]) /
             (min(len(values), i + window + 1) - max(0, i - window))
             for i in range(len(values))]
 
 
-def _find_change_points(values, window=10, min_diff=0.5):
+def _find_change_points(values: list[float], window: int = CHANGE_POINT_WINDOW,
+                         min_diff: float = CHANGE_POINT_MIN_DIFF) -> list[int]:
     """
     Поиск точек смены темпа через скользящее окно.
-    (Find pace change points using a sliding window)
+    Find pace change points using a sliding window.
     """
     n = len(values)
     if n < window * 2 + 1:
@@ -112,16 +130,15 @@ def _find_change_points(values, window=10, min_diff=0.5):
         right_avg = sum(values[i:i + window]) / window
         diff = abs(right_avg - left_avg)
         diffs.append({'idx': i, 'diff': diff})
-    # Оставляем только пики: diff > порога и больше соседей (Keep only peaks above threshold)
     peaks = []
     for j in range(1, len(diffs) - 1):
-        if diffs[j]['diff'] >= diffs[j - 1]['diff'] and diffs[j]['diff'] > diffs[j + 1]['diff']:
+        if diffs[j]['diff'] >= diffs[j-1]['diff'] and diffs[j]['diff'] > diffs[j+1]['diff']:
             if diffs[j]['diff'] >= min_diff:
                 peaks.append(diffs[j]['idx'])
     return peaks
 
 
-def _build_segment_stats(chunk_points, max_hr):
+def _build_segment_stats(chunk_points: list[dict], max_hr: int) -> dict | None:
     """Собрать статистику сегмента из точек (Build segment stats from points)"""
     if len(chunk_points) < 2:
         return None
@@ -162,8 +179,8 @@ def _build_segment_stats(chunk_points, max_hr):
     }
 
 
-def _compute_km_variability(trackpoints, total_dist_km):
-    """Подсчёт вариативных км для классификации (Count variable km chunks for classification)"""
+def _compute_km_variability(trackpoints: list[dict], total_dist_km: float) -> int:
+    """Подсчёт вариативных км для классификации (Count variable km chunks)"""
     var_count = 0
     if total_dist_km < 0.1:
         return var_count
@@ -180,7 +197,7 @@ def _compute_km_variability(trackpoints, total_dist_km):
             continue
         intervals = []
         prev_tp = chunk[0]
-        for idx, tp in enumerate(chunk[1:], 1):
+        for tp in chunk[1:]:
             if not (prev_tp['time'] and tp['time'] and prev_tp['dist'] is not None and tp['dist'] is not None):
                 prev_tp = tp
                 continue
@@ -215,8 +232,8 @@ def _compute_km_variability(trackpoints, total_dist_km):
     return var_count
 
 
-def _merge_short_segments(boundaries, min_dist_m, points):
-    """Удалить границы, создающие сегменты короче min_dist_m (Remove boundaries creating short segments)"""
+def _merge_short_segments(boundaries: list[int], min_dist_m: int, points: list[dict]) -> list[int]:
+    """Удалить границы, создающие сегменты короче min_dist_m"""
     if not boundaries:
         return boundaries
     bounds = [0] + sorted(boundaries) + [len(points) - 1]
@@ -225,29 +242,57 @@ def _merge_short_segments(boundaries, min_dist_m, points):
         changed = False
         i = 0
         while i < len(bounds) - 1:
-            seg_dist = points[bounds[i + 1]]['dist'] - points[bounds[i]]['dist']
+            seg_dist = points[bounds[i+1]]['dist'] - points[bounds[i]]['dist']
             if seg_dist < min_dist_m and len(bounds) > 2:
                 if i == 0:
                     bounds.pop(1)
                 elif i >= len(bounds) - 2:
                     bounds.pop(len(bounds) - 2)
                 else:
-                    left_dist = points[bounds[i]]['dist'] - points[bounds[i - 1]]['dist']
-                    right_dist = points[bounds[i + 2]]['dist'] - points[bounds[i + 1]]['dist']
+                    left_dist = points[bounds[i]]['dist'] - points[bounds[i-1]]['dist']
+                    right_dist = points[bounds[i+2]]['dist'] - points[bounds[i+1]]['dist']
                     if left_dist <= right_dist:
                         bounds.pop(i)
                     else:
-                        bounds.pop(i + 1)
+                        bounds.pop(i+1)
                 changed = True
                 break
             i += 1
     return bounds[1:-1]
 
 
-def segment_by_pace(trackpoints, max_hr, total_dist_km):
+def _build_segments_from_boundaries(boundaries: list[int], points: list[dict], max_hr: int) -> list[dict]:
+    """Построить сегменты из списка границ (Build segments from boundary list)"""
+    segments = []
+    all_bounds = sorted([0] + boundaries + [len(points)])
+    for i in range(len(all_bounds) - 1):
+        start = all_bounds[i]
+        end = all_bounds[i+1]
+        if end - start < 3:
+            continue
+        chunk_points = points[start:end]
+        stats = _build_segment_stats(chunk_points, max_hr)
+        if stats:
+            segments.append(stats)
+    return segments
+
+
+def segment_by_pace(trackpoints: list[dict], max_hr: int, total_dist_km: float,
+                     min_oscillations: int = 3, pace_gap: float = 1.0,
+                     min_phase_duration_sec: int = 15) -> tuple[list[dict], int]:
     """
-    Сегментация трека по смене темпа через change-point detection.
-    Возвращает (segments, var_count), где var_count — число вариативных км для классификации.
+    Сегментация трека по смене темпа через change-point detection + осцилляции.
+    Track segmentation via pace change-point detection + oscillations.
+
+    Алгоритм:
+    1. Вычислить темп для каждой точки (скользящее окно 50м)
+    2. Сгладить темп (скользящее среднее)
+    3. Найти change-points (скользящее окно, порог 0.3 мин/км)
+    4. НОВОЕ: если мало сегментов — использовать осцилляции как границы
+    5. Построить сегменты между границами
+
+    Returns:
+        (segments, var_count) — список сегментов и число вариативных км
     """
     points = _compute_per_point_pace(trackpoints)
     if len(points) < 10:
@@ -256,27 +301,34 @@ def segment_by_pace(trackpoints, max_hr, total_dist_km):
     paces = [p['pace'] for p in points]
     smoothed = _smooth(paces, PACE_SMOOTH_WINDOW)
 
-    # Находим точки смены темпа (Find pace change points)
-    change_points = _find_change_points(smoothed, window=10, min_diff=0.3)
+    # Поиск change-points (Change-point detection)
+    change_points = _find_change_points(smoothed, window=CHANGE_POINT_WINDOW, min_diff=CHANGE_POINT_MIN_DIFF)
     boundaries = _merge_short_segments(change_points, MIN_SEGMENT_DIST_M, points)
 
-    # Строим сегменты между границами (Build segments between boundaries)
-    segments = []
-    start = 0
-    for cp in sorted(boundaries):
-        if cp - start < 3:
-            continue
-        chunk_points = points[start:cp + 1]
-        stats = _build_segment_stats(chunk_points, max_hr)
-        if stats:
-            segments.append(stats)
-        start = cp
-    chunk_points = points[start:]
-    stats = _build_segment_stats(chunk_points, max_hr)
-    if stats:
-        segments.append(stats)
+    segments = _build_segments_from_boundaries(boundaries, points, max_hr)
 
-    # Если change-point detection не дал сегментов — падаем на km-сегментацию
+    # НОВОЕ: если change-point detection не дал достаточно сегментов —
+    # использовать осцилляции как границы (If change-point detection yields
+    # too few segments — use oscillations as boundaries)
+    if len(segments) <= 2:
+        times_sec = []
+        for p in points:
+            if p['time'] and points[0]['time']:
+                times_sec.append((p['time'] - points[0]['time']).total_seconds())
+            else:
+                times_sec.append(0.0)
+        osc_count, osc_phases = detect_pace_oscillations(
+            smoothed, times_sec, pace_gap=pace_gap,
+            min_phase_duration_sec=min_phase_duration_sec,
+        )
+        if osc_phases and len(osc_phases) >= min_oscillations:
+            osc_boundaries = [p['end_idx'] for p in osc_phases if p['end_idx'] < len(points)]
+            osc_boundaries = _merge_short_segments(osc_boundaries, MIN_SEGMENT_DIST_M, points)
+            osc_segments = _build_segments_from_boundaries(osc_boundaries, points, max_hr)
+            if len(osc_segments) > len(segments):
+                segments = osc_segments
+
+    # Fallback: км-сегменты (Fallback: km-based segments)
     if not segments:
         return _km_segment_fallback(trackpoints, max_hr, total_dist_km)
 
@@ -284,7 +336,7 @@ def segment_by_pace(trackpoints, max_hr, total_dist_km):
     return segments, var_count
 
 
-def _km_segment_fallback(trackpoints, max_hr, total_dist_km):
+def _km_segment_fallback(trackpoints: list[dict], max_hr: int, total_dist_km: float) -> tuple[list[dict], int]:
     """Запасной вариант: сегментация по км-блокам (Fallback: km-based segmentation)"""
     segments = []
     if total_dist_km < 0.1:

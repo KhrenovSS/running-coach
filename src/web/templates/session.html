@@ -56,6 +56,21 @@
             </form>
         </div>
 
+        <!-- Форма смены типа тренировки (Training type override form) -->
+        <div style='background:#fff8e1;border:1px solid #ffe082;border-radius:8px;padding:10px;margin:0 0 15px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;'>
+            <span style='font-weight:bold;color:#f57f17;'>🔄 Тип тренировки:</span>
+            <form action='/session/{{ session_id }}/reanalyze' method='post' style='display:flex;align-items:center;gap:8px;margin:0;'>
+                <select name='training_type_override' style='padding:6px;font-size:15px;border-radius:4px;border:1px solid #ccc;'>
+                    <option value=''>Авто ({{ type_ru }})</option>
+                    <option value='interval'>Интервальная</option>
+                    <option value='tempo'>Темповая</option>
+                    <option value='long'>Длинная</option>
+                    <option value='recovery'>Восстановительная</option>
+                </select>
+                <button type='submit' class='btn' style='padding:6px 16px;background:#f57f17;color:white;border:none;border-radius:4px;cursor:pointer;'>Пересчитать</button>
+            </form>
+        </div>
+
         <h3>Пульс и темп</h3>
         <canvas id='hrPaceChart' height='100'></canvas>
         <script>

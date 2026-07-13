@@ -270,7 +270,7 @@ async def sync_activities_for_user(cred: WatchCredential, brand: str,
     pending  — dict для кэширования pending-deleted тренировок (web UI); None для автосинхронизации.
     """
     from src.parsers.fit_parser import parse_fit
-    from src.parsers.utils import format_pace, format_duration
+    from src.analysis.utils import format_pace, format_duration
 
     async def _download_parse(act):
         """Скачать FIT и распарсить; вернуть data dict или None (Download+parse FIT; return data or None)."""

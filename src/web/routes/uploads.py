@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from src.models import get_db, User, TrainingSession, DeletedTraining, get_settings
 from src.parsers.tcx_parser import parse_tcx
 from src.parsers.fit_parser import parse_fit
-from src.parsers.utils import format_pace, format_duration
+from src.analysis.utils import format_pace, format_duration
 from src.utils.logger import get_logger
 from src.api.deps import get_current_user
 from src.services.audit import AuditService
@@ -160,12 +160,15 @@ async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(
         if not exists:
             cleaning_log_val = data.pop('cleaning_log', None)
             flags_val = data.pop('suspect_flags', None)
+            trackpoints_json_val = data.pop('trackpoints_json', None)
             session = TrainingSession(**data)
             session.user_id = current_user.id
             if cleaning_log_val:
                 session.cleaning_log = cleaning_log_val
             if flags_val:
                 session.suspect_flags = flags_val
+            if trackpoints_json_val:
+                session.trackpoints_json = trackpoints_json_val
             db.add(session)
             db.commit()
             db.refresh(session)
@@ -231,12 +234,15 @@ async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db
     if not exists:
         cleaning_log_val = data.pop('cleaning_log', None)
         flags_val = data.pop('suspect_flags', None)
+        trackpoints_json_val = data.pop('trackpoints_json', None)
         session = TrainingSession(**data)
         session.user_id = current_user.id
         if cleaning_log_val:
             session.cleaning_log = cleaning_log_val
         if flags_val:
             session.suspect_flags = flags_val
+        if trackpoints_json_val:
+            session.trackpoints_json = trackpoints_json_val
         db.add(session)
         db.commit()
         db.refresh(session)

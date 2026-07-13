@@ -36,6 +36,10 @@ class User(Base):
     min_hr_for_fast_pace = Column(Integer, default=130)
     is_active = Column(Boolean, default=True)
     timezone = Column(String(50), nullable=True)  # Часовой пояс пользователя (User timezone, e.g. "Europe/Moscow")
+    interval_pace_threshold = Column(Float, nullable=True)        # Порог темпа: разница с базовым (мин/км)
+    interval_min_phase_duration = Column(Integer, nullable=True)  # Мин. длительность фазы (сек)
+    interval_hr_lag_sec = Column(Integer, nullable=True)          # Лаг пульса (сек)
+    interval_min_oscillations = Column(Integer, nullable=True)    # Мин. число осцилляций для interval
     created_at = Column(DateTime(timezone=True), default=utcnow)
     registered_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -79,6 +83,8 @@ class TrainingSession(Base):
     avg_heart_rate = Column(Integer)
     max_heart_rate = Column(Integer)
     training_type = Column(String(50))
+    training_type_override = Column(String(50), nullable=True)  # Ручная установка типа (NULL = авто)
+    trackpoints_json = Column(JSON, nullable=True)              # Сырые трекпоинты для пересчёта
     segments_count = Column(Integer, default=1)
     duration_minutes = Column(Float, default=0)
     segments_json = Column(JSON, default=list)

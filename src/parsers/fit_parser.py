@@ -1,6 +1,6 @@
 import fitdecode
 from datetime import datetime
-from .common import process_trackpoints
+from src.analysis import process_trackpoints
 
 # Константа для конвертации полуокружностей в градусы (Semicircles to degrees)
 SEMICIRCLE_TO_DEG = 180.0 / 2**31

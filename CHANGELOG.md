@@ -2,6 +2,73 @@
 
 All notable changes to this project are tracked here.
 
+## [13.07.2026] — Новый алгоритм детекции интервалов (base_pace + pace_gap)
+
+### Changed
+- **`src/analysis/oscillation.py`** — полностью переписан алгоритм `detect_pace_oscillations()`:
+  - Старый: пики/впадины относительно среднего (mean ± amplitude/2)
+  - Новый: `base_pace = mean(paces)`, `threshold = base_pace - pace_gap`; темп < threshold → work-фаза
+  - Удалены `_find_peaks()` и `_find_troughs()` — больше не нужны
+  - Work-фаза = любой участок где темп ≥ pace_gap быстрее среднего темпа пробежки
+  - Recovery = темп вернулся к среднему (включая разминку/заминку)
+- **`src/config/constants.py`** — `DEFAULT_OSCILLATION_AMPLITUDE` → `DEFAULT_PACE_THRESHOLD = 1.0` (мин/км), `DEFAULT_MIN_PHASE_DURATION_SEC` → 15 (сек)
+- **`src/models.py`** — User: `interval_oscillation_amplitude` → `interval_pace_threshold` (Float)
+- **`src/analysis/__init__.py`** — параметры: `interval_oscillation_amplitude` → `pace_gap`
+- **`src/analysis/segment.py`** — `segment_by_pace()`: `min_amplitude` → `pace_gap`
+- **`src/services/reanalyze.py`** — передаёт `pace_gap` вместо `amp`
+- **`src/web/templates/settings.html`** — поле «порог ускорения»: ввод в секундах (60=1:00, 90=1:30, 120=2:00), min=30, max=180
+- **`src/web/routes/pages/settings.py`** — GET: конвертация min→sec для шаблона; POST: sec→min перед сохранением
+
+### Added
+- **Alembic миграция `e5f6a7b8c9d0`** — rename `interval_oscillation_amplitude` → `interval_pace_threshold`, обновление данных (0.3→1.0, 10→15)
+
+### Verified
+- Все импорты в Docker OK
+- Alembic миграция `e5f6a7b8c9d0` применена успешно
+- Тест на синтетических данных: 3 work→recovery цикла корректно определены
+- App запускается без ошибок
+
+## [13.07.2026] — Модуль анализа: осцилляции темпа, интервал-детекция, reanalyze
+
+### Added
+- **`src/analysis/`** — новый пакет анализа тренировок (6 файлов):
+  - `__init__.py` — оркестратор `process_trackpoints()` с пайплайном: GPS → кумулятивная дистанция → HR зоны → сегментация → классификация → осцилляции → погода
+  - `oscillation.py` — детекция work→recovery циклов по базовому темпу (base_pace = средний темп пробежки) и HR-lag корреляция
+  - `classify.py` — классификация с поддержкой `oscillation_count` + `hr_correlated` для интервалов
+  - `segment.py` — сегментация по темпу с fallback на осцилляции
+  - `hr_zones.py` — пульсовые зоны (перенесено из parsers/)
+  - `utils.py` — утилиты: `format_pace`, `format_duration`, `haversine_m`, `calc_elevation`, `find_timezone` (перенесено из parsers/)
+- **`src/services/reanalyze.py`** — сервис пересчёта тренировок из сохранённых трекпоинтов с поддержкой override типа
+- **Alembic миграция `d1e2f3a4b5c6`** — 6 новых колонок:
+  - `training_sessions.training_type_override` (VARCHAR 50, nullable) — ручная установка типа
+  - `training_sessions.trackpoints_json` (JSON, nullable) — сырые трекпоинты для пересчёта
+  - `users.interval_oscillation_amplitude` (FLOAT, nullable)
+  - `users.interval_min_phase_duration` (INTEGER, nullable)
+  - `users.interval_hr_lag_sec` (INTEGER, nullable)
+  - `users.interval_min_oscillations` (INTEGER, nullable)
+- **Эндпоинт `POST /session/{id}/reanalyze`** — пересчёт тренировки с возможностью смены типа
+- **Dropdown типа тренировки** в `session.html` — выбор интервальная/темповая/long/recovery + кнопка «Пересчитать»
+- **Настройки интервалов** в `settings.html` — амплитуда осцилляций, мин. длительность фазы, лаг пульса, мин. число осцилляций
+- **`trackpoints_json`** сохраняется при загрузке TCX/FIT и синхронизации с часов
+
+### Changed
+- **`src/parsers/`** — удалены `common.py`, `segmentation.py`, `classification.py`, `hr_zones.py`, `utils.py`; логика вынесена в `src/analysis/`
+- **`src/parsers/__init__.py`** — очищен от циклического импорта `src.analysis`
+- **`src/parsers/tcx_parser.py`** — импорт `process_trackpoints` из `src.analysis`
+- **`src/parsers/fit_parser.py`** — импорт `process_trackpoints` из `src.analysis`
+- **`src/web/routes/uploads.py`** — сохранение `trackpoints_json` при загрузке (upload + confirm + deleted)
+- **`src/services/sync_service.py`** — `trackpoints_json` проходит через `TrainingSession(**data)`
+- **`src/web/routes/pages/session.py`** — добавлен `POST /session/{id}/reanalyze` эндпоинт
+- **`src/web/routes/pages/settings.py`** — GET/POST handler: новые поля interval threshold
+- **`src/models.py`** — `TrainingSession`: `training_type_override`, `trackpoints_json`; `User`: 4 interval threshold поля
+- **`src/config/constants.py`** — 4 константы: `DEFAULT_PACE_THRESHOLD`, `DEFAULT_MIN_PHASE_DURATION_SEC`, `DEFAULT_HR_LAG_SEC`, `DEFAULT_MIN_OSCILLATIONS`
+
+### Verified
+- Все импорты в Docker: analysis, tcx, fit, reanalyze, session_reanalyze — OK
+- Alembic миграция `d1e2f3a4b5c6` применена успешно
+- Колонки `trackpoints_json`, `training_type_override` в `training_sessions` — OK
+- App запускается без ошибок, health sync работает
+
 ## [13.07.2026] — Фаза D: документация
 
 ### Added

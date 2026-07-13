@@ -29,6 +29,17 @@
             <label><b>Мин. пульс для быстрого темпа:</b> если пульс ниже, а темп быстрее — ошибка</label>
             <input type='number' name='min_hr_for_fast_pace' value='{{ min_hr_for_fast_pace }}' min='90' max='180'>
             <hr>
+            <h4>Настройки определения интервалов (Interval detection)</h4>
+            <label><b>Порог ускорения (секунд на км):</b> разница с базовым темпом (средний темп пробежки). Участки быстрее этого порога = work-фаза.</label>
+            <input type='number' name='interval_pace_threshold' value='{{ interval_pace_threshold_sec }}' min='30' max='180' step='5'>
+            <div style='font-size:12px;color:#888;margin-top:4px'>Например: 60 = 1:00 мин/км, 90 = 1:30 мин/км, 120 = 2:00 мин/км</div>
+            <label><b>Мин. длительность фазы (сек):</b> короче этого — шум, не фаза</label>
+            <input type='number' name='interval_min_phase_duration' value='{{ interval_min_phase_duration }}' min='5' max='60'>
+            <label><b>Лаг пульса (сек):</b> задержка пульса после смены темпа</label>
+            <input type='number' name='interval_hr_lag_sec' value='{{ interval_hr_lag_sec }}' min='1' max='15'>
+            <label><b>Мин. число осцилляций:</b> столько циклов work→recovery = интервал</label>
+            <input type='number' name='interval_min_oscillations' value='{{ interval_min_oscillations }}' min='2' max='10'>
+            <hr>
             {% if watch_creds %}
             {% for cred in watch_creds %}
             <h4>Синхронизация {{ cred.brand_display }} ({{ cred.brand }} sync)</h4>

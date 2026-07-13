@@ -38,6 +38,12 @@ SYNC_HEALTH_INTERVAL: Final[int] = 21600
 SYNC_ACTIVITY_INTERVAL: Final[int] = 3600
 JITTER_FACTOR: Final[float] = 0.2
 
+# Настройки детекции интервалов (Interval detection settings)
+DEFAULT_PACE_THRESHOLD: Final[float] = 1.0          # мин/км — разница между базовым темпом и work-фазой
+DEFAULT_MIN_PHASE_DURATION_SEC: Final[int] = 15     # сек — мин. длительность фазы
+DEFAULT_HR_LAG_SEC: Final[int] = 5                  # сек — лаг пульса
+DEFAULT_MIN_OSCILLATIONS: Final[int] = 3            # мин. число осцилляций для interval
+
 # Интервалы синхронизации per-user (Per-user sync interval settings)
 MIN_ACTIVITY_SYNC_INTERVAL_MIN: Final[int] = 15
 MIN_HEALTH_SYNC_INTERVAL_MIN: Final[int] = 30
