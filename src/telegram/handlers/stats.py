@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from src.database import SessionLocal
+from src.models import SessionLocal
 from src.models import User, TrainingSession, DailyMetrics, WeightMeasurement
 from src.telegram.utils import get_user
 from src.services.audit import AuditService
@@ -49,7 +49,7 @@ class StatsPages:
 
         last_session = db.query(TrainingSession).filter(
             TrainingSession.user_id == user_id,
-        ).order_by(TrainingSession.start_time.desc()).first()
+        ).order_by(TrainingSession.begin_ts.desc()).first()
 
         text = (
             f"📊 *Общая статистика для {self.user.email}*\n\n"
@@ -62,7 +62,7 @@ class StatsPages:
                 f"\n*Последняя тренировка:*\n"
                 f"  {last_session.sport or 'N/A'}: {float(last_session.distance_km or 0):.1f} км, "
                 f"{self._format_duration(last_session.duration_seconds or 0)}\n"
-                f"  📅 {last_session.start_time.strftime('%d.%m.%Y %H:%M') if last_session.start_time else 'N/A'}"
+                f"  📅 {last_session.begin_ts.strftime('%d.%m.%Y %H:%M') if last_session.begin_ts else 'N/A'}"
             )
         return text
 
@@ -73,8 +73,8 @@ class StatsPages:
 
         sessions = db.query(TrainingSession).filter(
             TrainingSession.user_id == user_id,
-            TrainingSession.start_time >= since,
-        ).order_by(TrainingSession.start_time.desc()).all()
+            TrainingSession.begin_ts >= since,
+        ).order_by(TrainingSession.begin_ts.desc()).all()
 
         if not sessions:
             return f"📊 Нет тренировок за последний(юю) {label}."
@@ -92,7 +92,7 @@ class StatsPages:
         )
 
         for s in sessions[:5]:
-            d = s.start_time
+            d = s.begin_ts
             date_str = d.strftime("%d.%m") if d else "N/A"
             text += f"• {date_str} {s.sport or 'N/A'}: {float(s.distance_km or 0):.1f} км, {self._format_duration(s.duration_seconds or 0)}\n"
 

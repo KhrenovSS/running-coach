@@ -1,7 +1,7 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from src.database import SessionLocal
+from src.models import SessionLocal
 from src.models import TrainingFeedback
 from src.telegram.utils import get_user
 from src.utils.logger import get_logger

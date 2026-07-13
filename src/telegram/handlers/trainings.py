@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from src.database import SessionLocal
+from src.models import SessionLocal
 from src.models import User, TrainingSession
 from src.telegram.utils import get_user
 from src.utils.logger import get_logger
@@ -22,7 +22,7 @@ def trainings_keyboard(user_id: int) -> InlineKeyboardMarkup:
             since = now - timedelta(days=days)
             count = db.query(TrainingSession).filter(
                 TrainingSession.user_id == user_id,
-                TrainingSession.start_time >= since,
+                TrainingSession.begin_ts >= since,
             ).count()
             label = {7: "неделя", 14: "2 недели", 30: "месяц"}[days]
             keyboard.append([
@@ -66,8 +66,8 @@ async def trainings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         since = datetime.now(ZoneInfo("Europe/Moscow")) - timedelta(days=days)
         sessions = db.query(TrainingSession).filter(
             TrainingSession.user_id == user.id,
-            TrainingSession.start_time >= since,
-        ).order_by(TrainingSession.start_time.desc()).all()
+            TrainingSession.begin_ts >= since,
+        ).order_by(TrainingSession.begin_ts.desc()).all()
 
         if not sessions:
             await query.edit_message_text(
@@ -79,7 +79,7 @@ async def trainings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         label = {7: "7 дней", 14: "14 дней", 30: "30 дней"}[days]
         text = f"📋 *Тренировки за {label}*\n\n"
         for s in sessions:
-            d = s.start_time
+            d = s.begin_ts
             date_str = d.strftime("%d.%m %H:%M") if d else "N/A"
             dur_str = f"{s.duration_seconds // 60} мин" if s.duration_seconds else "N/A"
             dist_str = f"{float(s.distance_km or 0):.1f} км"

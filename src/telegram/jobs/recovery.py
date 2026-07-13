@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 from telegram.ext import ContextTypes
 
-from src.database import SessionLocal
+from src.models import SessionLocal
 from src.models import User, DailyMetrics
 from src.services.audit import AuditService
 from src.utils.logger import get_logger

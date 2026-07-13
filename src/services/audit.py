@@ -35,9 +35,6 @@ class AuditService:
     # Типы событий (Event types)
     TRAINING_UPLOADED = "training.uploaded"
     TRAINING_DELETED = "training.deleted"
-    COROS_SYNC_STARTED = "coros.sync.started"  # deprecated — use SYNC_STARTED
-    COROS_SYNC_COMPLETED = "coros.sync.completed"  # deprecated — use SYNC_COMPLETED
-    COROS_SYNC_FAILED = "coros.sync.failed"  # deprecated — use SYNC_FAILED
     SYNC_STARTED = "sync.{brand}.started"
     SYNC_COMPLETED = "sync.{brand}.completed"
     SYNC_FAILED = "sync.{brand}.failed"
@@ -144,37 +141,6 @@ class AuditService:
             metadata={"training_id": training_id, **extra},
         )
     
-    def log_coros_sync_started(self, user_id: int, **extra) -> None:
-        """Аудит: начата синхронизация Coros (Audit: Coros sync started)"""
-        self.log_event(
-            event_type=self.COROS_SYNC_STARTED,
-            message="Coros sync started",
-            severity="info",
-            user_id=user_id,
-            metadata=extra,
-        )
-
-    def log_coros_sync_completed(self, user_id: int, found: int = 0, processed: int = 0, **extra) -> None:
-        """Аудит: синхронизация Coros завершена (Audit: Coros sync completed)"""
-        metadata = {"found": found, "processed": processed, **extra}
-        self.log_event(
-            event_type=self.COROS_SYNC_COMPLETED,
-            message=f"Coros sync completed: found={found}, processed={processed}",
-            severity="info",
-            user_id=user_id,
-            metadata=metadata,
-        )
-
-    def log_coros_sync_failed(self, user_id: int, error: str, **extra) -> None:
-        """Аудит: синхронизация Coros не удалась (Audit: Coros sync failed)"""
-        self.log_event(
-            event_type=self.COROS_SYNC_FAILED,
-            message=f"Coros sync failed: {error}",
-            severity="error",
-            user_id=user_id,
-            metadata={"error": error, **extra},
-        )
-
     # Brand-agnostic sync audit methods (Brand-agnostic sync audit methods)
     def log_sync_started(self, brand: str, user_id: int, **extra) -> None:
         """Аудит: начата синхронизация (Audit: sync started)"""

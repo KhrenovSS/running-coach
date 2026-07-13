@@ -1,18 +1,45 @@
-import asyncio
-import threading
-import time
+"""
+Запуск синхронизации в отдельном потоке для Telegram-бота
+Run sync in a dedicated thread for the Telegram bot.
 
-from src.database import SessionLocal
-from src.models import User, SyncLog
-from src.services.sync_service import SyncService
+Заменяет изначальный вариант, ссылавшийся на несуществующие SyncService/SyncLog/full_sync.
+Replaces the original version that referenced non-existent SyncService/SyncLog/full_sync.
+"""
+
+import asyncio
+from datetime import datetime, timezone
+
+from sqlalchemy.exc import SQLAlchemyError
+
+from src.models import SessionLocal, User, WatchCredential
 from src.services.audit import AuditService
+from src.services.sync_service import (
+    sync_activities_for_user,
+    sync_health_for_user,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger("telegram.sync_runner")
 
 
+def _run_async(coro):
+    """Запустить корутину в новом event loop (тред-безопасно) / Run a coroutine in a fresh event loop (thread-safe)."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
 def run_sync_in_thread(chat_id: int) -> tuple[bool, str]:
-    """Запускает синхронизацию в отдельном треде и возвращает результат"""
+    """
+    Полная синхронизация (activity + health) для всех активных WatchCredential пользователя.
+    Full sync (activity + health) for all active WatchCredential of a user.
+
+    Возвращает (success, message) — успех и человеческое сообщение для Telegram.
+    Returns (success, message) for display in Telegram.
+    """
     db = SessionLocal()
     audit = AuditService(db)
     try:
@@ -20,40 +47,69 @@ def run_sync_in_thread(chat_id: int) -> tuple[bool, str]:
         if not user:
             return False, "❌ Пользователь не найден."
 
-        sync_log = SyncLog(user_id=user.id, status="in_progress")
-        db.add(sync_log)
-        db.commit()
-        log_id = sync_log.id
+        creds = (
+            db.query(WatchCredential)
+            .filter(
+                WatchCredential.user_id == user.id,
+                WatchCredential.is_active.is_(True),
+            )
+            .all()
+        )
+        if not creds:
+            return False, "❌ Нет активных учётных данных часов. Добавь их через /start."
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            service = SyncService(db)
-            result = loop.run_until_complete(service.full_sync(user.id))
-        finally:
-            loop.close()
+        total_new_activities = 0
+        total_new_health = 0
+        errors: list[str] = []
 
-        sync_log = db.query(SyncLog).filter(SyncLog.id == log_id).first()
-        if sync_log:
-            sync_log.status = "completed" if result["success"] else "failed"
-            sync_log.completed_at = db.func.now()
-            db.commit()
+        for cred in creds:
+            brand = cred.brand
+            audit.log_sync_started(brand=brand, user_id=user.id, source="telegram")
 
-        if result["success"]:
-            audit.log_sync_completed(user_id=user.id, source="telegram_runner")
-            msg = f"✅ Синхронизация завершена!\n"
-            new_activities = result.get("new_activities", 0)
-            new_health_days = result.get("new_health_days", 0)
-            if new_activities:
-                msg += f"  🏃 Тренировок: {new_activities}\n"
-            if new_health_days:
-                msg += f"  📊 Дней здоровья: {new_health_days}"
-            return True, msg.strip()
-        else:
-            audit.log_sync_failed(user_id=user.id, error=result.get("error", "Unknown"), source="telegram_runner")
-            return False, f"❌ Ошибка синхронизации: {result.get('error', 'Неизвестная ошибка')}"
+            # Health sync / Синхронизация метрик здоровья
+            try:
+                new_health = _run_async(sync_health_for_user(cred, brand))
+                if new_health >= 0:
+                    total_new_health += new_health
+            except Exception as e:
+                logger.warning("Health sync failed (brand=%s user=%s): %s", brand, user.id, e)
+                errors.append(f"{brand} health: {e}")
+
+            # Activity sync / Синхронизация тренировок
+            try:
+                new_activities = _run_async(sync_activities_for_user(cred, brand))
+                if new_activities >= 0:
+                    total_new_activities += new_activities
+            except Exception as e:
+                logger.warning("Activity sync failed (brand=%s user=%s): %s", brand, user.id, e)
+                errors.append(f"{brand} activity: {e}")
+
+            audit.log_sync_completed(
+                brand=brand,
+                user_id=user.id,
+                found=total_new_activities,
+                processed=total_new_activities,
+                source="telegram",
+            )
+
+        # Итоговое сообщение / Summary message
+        lines = ["✅ Синхронизация завершена!"]
+        if total_new_activities:
+            lines.append(f"  🏃 Новых тренировок: {total_new_activities}")
+        if total_new_health:
+            lines.append(f"  📊 Дней здоровья: {total_new_health}")
+        if errors and not (total_new_activities or total_new_health):
+            return False, "❌ " + "; ".join(errors)
+        if errors:
+            lines.append(f"  ⚠️ Частичные ошибки: {'; '.join(errors)}")
+        return True, "\n".join(lines)
+
+    except SQLAlchemyError as e:
+        logger.error("DB error during sync (chat_id=%s): %s", chat_id, e)
+        db.rollback()
+        return False, f"❌ Ошибка базы данных: {e}"
     except Exception as e:
-        logger.error("Sync error for %s: %s", chat_id, e)
+        logger.error("Sync error (chat_id=%s): %s", chat_id, e)
         db.rollback()
         return False, f"❌ Ошибка: {e}"
     finally:

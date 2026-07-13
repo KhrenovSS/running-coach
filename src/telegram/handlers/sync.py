@@ -35,7 +35,7 @@ async def cmd_sync(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if success:
         db = None
         try:
-            from src.database import SessionLocal
+            from src.models import SessionLocal
             from src.models import User, TrainingSession
             db = SessionLocal()
             user_db = db.query(User).filter(User.telegram_chat_id == str(chat_id)).first()
@@ -43,7 +43,7 @@ async def cmd_sync(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 today_start = datetime.now(ZoneInfo("Europe/Moscow")).replace(hour=0, minute=0, second=0, microsecond=0)
                 today_count = db.query(TrainingSession).filter(
                     TrainingSession.user_id == user_db.id,
-                    TrainingSession.start_time >= today_start,
+                    TrainingSession.begin_ts >= today_start,
                 ).count()
                 if today_count:
                     await update.message.reply_text(f"📊 Сегодняшних тренировок: {today_count}")

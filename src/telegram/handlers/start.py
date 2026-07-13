@@ -3,9 +3,9 @@ import secrets
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 
-from src.database import SessionLocal
+from src.models import SessionLocal
 from src.models import User
-from src.auth import hash_password
+from src.services.auth import hash_password
 from src.services.audit import AuditService
 from src.config import settings
 from src.telegram.config import EMAIL, PASSWORD

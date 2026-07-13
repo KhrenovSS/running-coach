@@ -1,7 +1,7 @@
 # PROJECT AUDIT — Running Coach
 
-**Дата:** 03.07.2026  
-**Версия:** 2.0  
+**Дата:** 03.07.2026 (аудит v3 — 13.07.2026)  
+**Версия:** 3.0  
 **Формат:** Architecture Refactoring Backlog + Tech Debt Registry
 
 ---
@@ -101,9 +101,10 @@ src/parsers/
 
 ---
 
-#### AUDIT-002 — `src/telegram_bot.py` превышал лимит в 2 раза (1142 строки) ✅
+#### AUDIT-002 — `src/telegram_bot.py` превышал лимит в 2 раза (1142 строки) ⚠️ reopen
 
 **Файл:** `src/telegram_bot.py` (1142 строк) — **удалён, разбит на пакет `src/telegram/`**
+> ⚠️ Пакет создан, но не запускается из-за сломанных импортов — см. **AUDIT-015**.
 
 **Решение:** Разбит на пакет `src/telegram/`:
 ```
@@ -228,6 +229,34 @@ src/services/
 - [x] Тип тренировки определяется как `interval`
 - [x] `var_count=8` (классификация)
 - [ ] Применить к реальной тренировке (session id=67) — требуется перезагрузка TCX
+
+---
+
+#### AUDIT-015 — `src/telegram/` пакет не запускается (сломанные импорты) 🔴 P0 — найдено в аудите v3
+
+**Файлы:** 11 файлов в `src/telegram/`, `src/services/audit.py`
+
+**Проблема:** Sprint 9 помечен `✅`, но `py_compile` проверяет только синтаксис. Реально пакет невозможно импортировать — `ModuleNotFoundError`. Три класса проблем:
+
+1. **`from src.database import SessionLocal`** (11 файлов) — `src/database.py` **не существует**. `SessionLocal`/`get_db` уже экспортируются из `src.models`.
+   - `src/telegram/sync_runner.py:5`, `utils.py:5`, `jobs/recovery.py:6`, `jobs/weight.py:6`, `handlers/{account,start,sync,trainings,stats,weight,feedback}.py`
+
+2. **`from src.auth import hash_password`** (2 файла) — модуль `src.auth` не существует, парольная логика в `src.services.auth`.
+   - `src/telegram/handlers/account.py:8`, `start.py:8`
+
+3. **Мёртвые ссылки в `sync_runner.py`** — `SyncLog` (нет модели), `SyncService` (нет класса), `service.full_sync()` (нет метода), `db.func.now()` (`db` — это `Session`, не `sqlalchemy.func`). Реальные API: `sync_activities_for_user(cred, brand)` и `sync_health_for_user(cred, brand)` из `sync_service.py`.
+
+4. **`TrainingSession.start_time`** — несуществующая колонка (реально `begin_ts`, `models.py:77`). `AttributeError` при использовании:
+   - `handlers/sync.py:46`, `handlers/trainings.py:25,69,70,82`, `handlers/stats.py:52,65`
+
+**Решение (Фаза A):** см. раздел 7 «План рефакторинга v3».
+
+**DoD:**
+- [ ] `python -c "from src.telegram.main import run_bot; print('OK')"` — без `ModuleNotFoundError`
+- [ ] `grep -rn "from src.database" src/` → 0
+- [ ] `grep -rn "src.auth import\|SyncLog\|SyncService\|full_sync\|TrainingSession.start_time" src/` → 0
+- [ ] AUDIT-011 (устаревшие `COROS_SYNC_*` константы) выполнен
+- [ ] Smoke-тест: бот стартует, `/start` отвечает
 
 ---
 
@@ -438,7 +467,7 @@ src/domain/models/
 
 ---
 
-### Спринт 9 — Разделение telegram_bot.py (1-2 дня) — P0 ✅
+### Спринт 9 — Разделение telegram_bot.py (1-2 дня) — P0 ⚠️ reopen
 
 **Задачи:**
 - [x] **AUDIT-002-1**: Создать `src/telegram/` пакет
@@ -451,10 +480,12 @@ src/domain/models/
 - [x] **AUDIT-002-8**: `src/telegram/sync_runner.py` — sync в отдельном треде
 - [x] **AUDIT-002-9**: `src/telegram/state.py` — _awaiting_weight
 - [x] **AUDIT-007**: Заменить прямой импорт `CorosWatchClient` на `get_watch_client()`
-- [x] **AUDIT-011**: Удалить `COROS_SYNC_*` константы из audit.py
+- [ ] **AUDIT-011**: Удалить `COROS_SYNC_*` константы из audit.py — *помечено выполнено, фактически нет*
 - [x] `src/telegram_bot.py` удалён
 - [x] `run_telegram_bot.py` обновлён на `from src.telegram import run_bot`
-- [x] Все 12 файлов проходят синтаксическую проверку
+- [x] Все 12 файлов проходят py_compile — *py_compile недостаточен (см. AUDIT-015)*
+
+> ⚠️ **Reopen:** Спринт помечен `✅`, но пакет невозможно импортировать — сломанные импорты (AUDIT-015). `py_compile` проверяет только синтаксис, не разрешение импортов. Проверка спринта должна быть **поведенческой**: импорт запускается, бот отвечает на `/start`.
 
 **Docker:** пересобрать `bot`
 
@@ -727,3 +758,100 @@ tests/
 
 **Итого:** 15 спринтов (8 рефакторинг + 3 новые фичи + 1 админка + 3 модуль аналитики).  
 Критические (P0): Спринты 8-10 — примерно 4-7 дней.
+
+---
+
+## 7. ПЛАН РЕФАКТОРИНГА v3 (13.07.2026)
+
+Ниже — пошаговый план, консолидирующий находки аудита v3 и хорошие практики из референс-проекта `Бот_изучения_английского` (5-файловая документационная система: TZ / AGENTS / SPRINTS / CHECKLISTS / BACKLOG). Выполняется по фазам A→D с проверкой и коммитом после каждой.
+
+### Фаза A — P0: Починить Telegram-бот (критические баги)
+
+**A.1 Сломанные импорты `from src.database` → `from src.models`** (11 файлов):
+
+| Файл:строка | Замена |
+|---|---|
+| `src/telegram/sync_runner.py:5` | `from src.models import SessionLocal` |
+| `src/telegram/utils.py:5` | `from src.models import get_db` |
+| `src/telegram/jobs/recovery.py:6` | `from src.models import SessionLocal` |
+| `src/telegram/jobs/weight.py:6` | то же |
+| `src/telegram/handlers/account.py:6` | то же |
+| `src/telegram/handlers/account.py:8` | `from src.services.auth import hash_password` |
+| `src/telegram/handlers/start.py:6` | `from src.models import SessionLocal` |
+| `src/telegram/handlers/start.py:8` | `from src.services.auth import hash_password` |
+| `src/telegram/handlers/sync.py:38` | `from src.models import SessionLocal` |
+| `src/telegram/handlers/trainings.py:7` | `from src.models import SessionLocal` |
+| `src/telegram/handlers/stats.py:9` | то же |
+| `src/telegram/handlers/weight.py:9` | то же |
+| `src/telegram/handlers/feedback.py:4` | то же |
+
+**A.2 Переписать `sync_runner.py`** — заменить мёртвые `SyncService`/`SyncLog`/`full_sync` на реальные `sync_activities_for_user(cred, brand)` и `sync_health_for_user(cred, brand)` из `src/services/sync_service.py`. Логика: найти `User` → все активные `WatchCredential` → новый event loop → вызвать обе async-функции для каждого креда → суммировать результат → `AuditService.log_sync_*`. `db.func.now()` → `datetime.now(timezone.utc)`.
+
+**A.3 `TrainingSession.start_time` → `begin_ts`** (3 файла, 7 ссылок):
+`handlers/sync.py:46`, `handlers/trainings.py:25,69,70,82`, `handlers/stats.py:52,65`.
+
+**A.4 AUDIT-011 — удалить `COROS_SYNC_*`** из `src/services/audit.py`:
+- строки 38–40 (3 константы) — заменить на `SYNC_STARTED/COMPLETED/FAILED` (41–43)
+- строки 147–176 (3 метода `log_coros_sync_*`) — удалить
+
+**Проверка фазы A (поведенческая, по аналогии с референс-проектом):**
+```bash
+python -c "from src.telegram.main import run_bot; print('import OK')"
+grep -rn "from src.database" src/ | wc -l    # → 0
+grep -rn "SyncLog\|SyncService\|full_sync\|TrainingSession.start_time" src/ | wc -l  # → 0
+```
++ smoke-тест: запуск бота, `/start` отвечает.
+
+### Фаза B — P1: Тонкие роуты + мульти-бренд в settings
+
+**B.1 `pages.py` хардкод `"coros"`** (строки 386, 517–520, 536, 547, 550, 555, 571, 585–586): `settings_save` использует `coros_email`/`coros_password`/`coros_activity_sync_interval`/`coros_health_sync_interval` + фильтр `brand == 'coros'`. Изменить: параметр `brand` из формы, переменные `email`/`password`/`*_interval`; перебор всех кредов пользователя. Правки в шаблоне `settings.html`.
+
+**B.2 Бизнес-логика из роутов в сервисы:**
+- `pages.py:20` — `from src.crypto import encrypt` (прямой вызов шифрования в роуте) → вынести в сервисный слой
+- `pages.py`: 14 `db.add/commit/delete/flush` + `DeletedTraining(...)` (420–435) → в сервис
+- `web/routes/sync.py`: 10 `db.add/commit` + `TrainingSession(**data)` во внутренних `_run()` → в `sync_service.py`
+
+**B.3 AUDIT-006 — единый entry point `run_sync_for_user(cred_id, sync_type)`:**
+в `sync_service.py`. Web и Telegram вызывают только его. Заодно исправить расхождения:
+- Web sync `since=None` (`sync.py:92`) → `since = last_sync - 2h` (как `sync_service.py:248`)
+- Web sync не шлёт Telegram-уведомления → добавить (равноправный UX)
+
+**DoD:** `wc -l src/web/routes/sync.py` < 200; `wc -l src/web/routes/pages.py` < 250.
+
+### Фаза C — P2: Cleanup и унификация
+
+**C.1** Мёртвые зависимости в `pyproject.toml`: убрать `"APScheduler==3.11.3"` (стр. 11) и `"requests==2.34.2"` (стр. 16) — не импортируются.
+**C.2** Дублирование HR-zone math: `src/config/constants.py:62–79` (`calculate_hr_zones`, `get_hr_zone`) vs `src/parsers/hr_zones.py` (`get_zone`, `get_band`). Перенести math в `hr_zones.py`, из `constants.py` — удалить (или re-export).
+**C.3** `src/exceptions.py:63`: `CorosAPIError` → `WatchAPIError` (мульти-бренд), обновить docstring (стр. 8, 11).
+**C.4** `src/config/settings.py`: удалить мёртвое поле `db_path = "running_coach.db"` (SQLite удалён).
+**C.5** AUDIT-008 — унификация async-from-thread: один helper `run_async_in_thread(coro_func, *args)` для scheduler/web/telegram.
+**C.6** `src/models.py:242–247`: SQLite-ветка `get_engine()` (для тестов) — пометить комментарием "test-only".
+
+### Фаза D — Документация: good practices из «Бот_изучения_английского»
+
+**D.1 Создать `BACKLOG.md`** — парковка идей/фиксов/вопросов с тегами `[Идея|Фикс|Вопрос]`. Правило: «Заметил мелочь — строка в BACKLOG, обратно к задаче. Не чини "заодно".»
+
+**D.2 Создать `docs/CHECKLIST_NEW_PROVIDER.md`** — чеклист «новый бренд часов»: реализация в `src/watch/<brand>.py`, тот же ABC-метод, регистрация в `factory.py` (не `if/else`), ключ из config, smoke-test:
+```bash
+python -c "from src.watch.factory import get_watch_client; c = get_watch_client('coros'); print(type(c).__name__)"
+```
+
+**D.3 Усилить `AGENTS.md`** — добавить раздел «Дисциплина работы ИИ-агента» (по AGENTS.md референса):
+- потолок ~400 строк/файл с обоснованием AI-поведения («модель дописывает в существующий файл; потолок этому противодействует»)
+- backlog-дисциплина
+- секреты («нет ключа — остановись и спроси, не выдумывай плейсхолдер»)
+- проверка спринта — behavioral test, не `py_compile`
+- таблица Docker rebuild (что изменено → что пересобрать)
+- протокол конца сессии (commit → чекбоксы → отчёт)
+
+**D.4 `PROJECT_AUDIT.md` правки:** AUDIT-011 уже возвращён в открытые (выполнено выше); Sprint 9 → reopen. Заморозить дальние спринты (13–15 + 7 + аналитика) как заголовки — детализировать только перед стартом (план не устареет).
+
+**D.5 `README.md` правки:** секция «Парсеры» (≈стр. 35) — обновить список модулей; секция настроек — кадрировать как мульти-бренд после B.1; обновить дату; убрать дублирование roadmap/спринт-плана (sprint-трекинг — в PROJECT_AUDIT, README — product features).
+
+---
+
+### Порядок выполнения
+1. **Фаза A** → проверка → коммит → отчёт → пауза (ждать разрешения на B)
+2. **Фаза B** → проверка → коммит → отчёт → пауза
+3. **Фаза C** → проверка → коммит → отчёт → пауза
+4. **Фаза D** → проверка → коммит → итоговый отчёт

@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 from telegram.ext import ContextTypes
 
-from src.database import SessionLocal
+from src.models import SessionLocal
 from src.models import User, WeightMeasurement
 from src.telegram.state import _awaiting_weight
 from src.services.audit import AuditService
