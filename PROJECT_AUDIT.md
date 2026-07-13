@@ -1,7 +1,7 @@
 # PROJECT AUDIT — Running Coach
 
-**Дата:** 03.07.2026 (аудит v3 — 13.07.2026)  
-**Версия:** 3.0  
+**Дата:** 03.07.2026 (аудит v3 — 13.07.2026; Фаза B — 13.07.2026)  
+**Версия:** 3.1  
 **Формат:** Architecture Refactoring Backlog + Tech Debt Registry
 
 ---
@@ -540,7 +540,7 @@ tests/fixtures/
 - [ ] **AUDIT-004-1**: Создать `src/services/sync_activities.py`
 - [ ] **AUDIT-004-2**: Создать `src/services/sync_health.py`
 - [ ] **AUDIT-004-3**: Создать `src/services/sync_utils.py`
-- [ ] **AUDIT-006**: Единый entry point `run_sync_for_user()` в sync_service.py
+- [x] **AUDIT-006**: Единый entry point `run_sync_for_user()` в sync_service.py (web; Telegram — TODO, обоснованно)
 - [ ] Все импорты обновлены
 - [ ] Alembic миграции работают
 - [ ] Docker пересобран
@@ -551,8 +551,8 @@ tests/fixtures/
 ### Спринт 12 — Чистка роутов + web (1 день) — P1
 
 **Задачи:**
-- [ ] **AUDIT-009**: sync.py (444 → <200 строк)
-- [ ] **AUDIT-013**: pages.py (591 → разбить)
+- [x] **AUDIT-009**: sync.py (444 → 93 строк)
+- [x] **AUDIT-013**: pages.py (601 → пакет pages/, max 184 строк)
 - [ ] **AUDIT-008**: Threading review — хотя бы зафиксировать known issues
 - [ ] **CHANGELOG.md** обновить
 
@@ -802,21 +802,22 @@ grep -rn "SyncLog\|SyncService\|full_sync\|TrainingSession.start_time" src/ | wc
 ```
 + smoke-тест: запуск бота, `/start` отвечает.
 
-### Фаза B — P1: Тонкие роуты + мульти-бренд в settings
+### Фаза B — P1: Тонкие роуты + мульти-бренд в settings ✅
 
-**B.1 `pages.py` хардкод `"coros"`** (строки 386, 517–520, 536, 547, 550, 555, 571, 585–586): `settings_save` использует `coros_email`/`coros_password`/`coros_activity_sync_interval`/`coros_health_sync_interval` + фильтр `brand == 'coros'`. Изменить: параметр `brand` из формы, переменные `email`/`password`/`*_interval`; перебор всех кредов пользователя. Правки в шаблоне `settings.html`.
+**B.1 `pages.py` хардкод `"coros"`** — ✅ выполнено: `settings_save` параметр `watch_brand`/`watch_email`/`watch_password`/`activity_sync_interval`/`health_sync_interval`, перебор всех кредов пользователя, шаблон `settings.html` перебирает бренды через `{% for cred in watch_creds %}`.
 
-**B.2 Бизнес-логика из роутов в сервисы:**
-- `pages.py:20` — `from src.crypto import encrypt` (прямой вызов шифрования в роуте) → вынести в сервисный слой
-- `pages.py`: 14 `db.add/commit/delete/flush` + `DeletedTraining(...)` (420–435) → в сервис
-- `web/routes/sync.py`: 10 `db.add/commit` + `TrainingSession(**data)` во внутренних `_run()` → в `sync_service.py`
+**B.2 Бизнес-логика из роутов в сервисы** — ✅ выполнено:
+- `encrypt()` из роутов удалён → `src/services/watch_credentials.py` (`upsert_watch_credential`) ✅
+- `DeletedTraining(...)` и `TrainingFeedback(...)` из роутов → `src/services/training_service.py` (`delete_training`, `upsert_feedback`) ✅
+- `web/routes/sync.py`: `db.add/commit` + `TrainingSession(**data)` → `sync_service.run_sync_for_user` ✅
 
-**B.3 AUDIT-006 — единый entry point `run_sync_for_user(cred_id, sync_type)`:**
-в `sync_service.py`. Web и Telegram вызывают только его. Заодно исправить расхождения:
-- Web sync `since=None` (`sync.py:92`) → `since = last_sync - 2h` (как `sync_service.py:248`)
-- Web sync не шлёт Telegram-уведомления → добавить (равноправный UX)
+**B.3 AUDIT-006 — единый entry point `run_sync_for_user(user_id, brand, sync_type)`:** ✅ в `sync_service.py`. Web вызывает только его. Заодно исправлено:
+- Web sync `since=None` → `since = last_sync - 2h` (как autosync) ✅
+- Web sync шлёт Telegram-уведомления через `telegram_notify` в `sync_activities_for_user` ✅
+- Telegram `sync_runner.py` — TODO: использует прямой вызов (обоснованно: все бренды + сводный отчёт). Миграция на `run_sync_for_user_all_brands(chat_id)` — отдельная задача.
 
-**DoD:** `wc -l src/web/routes/sync.py` < 200; `wc -l src/web/routes/pages.py` < 250.
+**DoD:** `wc -l src/web/routes/sync.py` = 93 < 200 ✅; `pages/*.py` max 184 < 250 ✅.
+**Доп.:** `pages.py` (601) разбит на пакет `pages/` (auth 48, index 184, session 177, settings 118) — AUDIT-013 закрыт.
 
 ### Фаза C — P2: Cleanup и унификация
 

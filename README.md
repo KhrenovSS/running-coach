@@ -231,7 +231,14 @@ training_sessions.id                     │
 │   ├── startup.py                   # create_app() фабрика + startup-событие
 │   ├── scheduler.py                 # AutoSyncScheduler (одиночка)
 │   ├── deps.py                      # Jinja2Templates (общие зависимости)
-│   ├── telegram_bot.py              # Telegram‑бот (регистрация, sync, stats, daily weight)
+│   ├── telegram/                     # Пакет Telegram‑бота (handlers, jobs, config, state)
+│   │   ├── main.py                   #   run_bot, Application сборка
+│   │   ├── config.py                 #   Константы состояний
+│   │   ├── state.py                  #   _awaiting_weight
+│   │   ├── utils.py                  #   get_user, _get_web_app_url
+│   │   ├── sync_runner.py            #   run_sync_in_thread
+│   │   ├── handlers/                 #   Обработчики команд: start, sync, stats, trainings, weight, account, feedback
+│   │   └── jobs/                     #   Фоновые задачи: weight, recovery
 │   ├── models.py                    # SQLAlchemy‑модели (User, TrainingSession, WatchCredential, …)
 │   ├── watch/                       # Мульти-брендовая абстракция часов
 │   │   ├── base.py                  #   BaseWatchClient(ABC)
@@ -239,7 +246,6 @@ training_sessions.id                     │
 │   │   └── factory.py               #   Реестр брендов (register / get_watch_client)
 │   ├── crypto.py                    # Шифрование паролей Coros (Fernet, требует COROS_CRED_KEY)
 │   ├── exceptions.py                # Типизированные исключения приложения
-│   ├── logger.py                    # re-export → src.utils.logger (обратная совместимость)
 │   ├── api/
 │   │   ├── __init__.py              # re-export: register_middleware, get_db
 │   │   ├── deps.py                  # get_current_user dependency (session-cookie)
@@ -252,7 +258,13 @@ training_sessions.id                     │
 │   │   ├── settings.py              # pydantic-settings BaseSettings (env vars)
 │   │   └── constants.py             # Плоские module-level константы (HR зоны, API URLs, пороги)
 │   ├── parsers/
-│   │   ├── common.py                # Очистка треков, сегментация, классификация, погода
+│   │   ├── common.py                # Оркестратор: process_trackpoints, вызывает gps/segmentation/classification
+│   │   ├── gps.py                   # Очистка GPS‑ошибок, фильтрация скачков
+│   │   ├── segmentation.py          # Сегментация по темпу (change-point detection)
+│   │   ├── classification.py        # Автоклассификация тренировок (interval/tempo/long/recovery)
+│   │   ├── hr_zones.py              # Расчёт пульсовых зон Z1–Z5
+│   │   ├── weather.py               # Погода и температура (Open‑Meteo API)
+│   │   ├── utils.py                 # Вспомогательные функции парсеров
 │   │   ├── tcx_parser.py            # Парсинг TCX‑файлов (XML)
 │   │   └── fit_parser.py            # Парсинг FIT‑файлов (бинарный)
 │   ├── services/
@@ -326,7 +338,7 @@ training_sessions.id                     │
 
 ## 📱 Telegram‑бот
 
-Бот управляется через `/src/telegram_bot.py`. Запускается в отдельном Docker-контейнере `bot` (см. `docker-compose.yml`). Для локальной разработки — `python run_telegram_bot.py`.
+Бот управляется через пакет `src/telegram/`. Запускается в отдельном Docker-контейнере `bot` (см. `docker-compose.yml`). Для локальной разработки — `python run_telegram_bot.py`.
 
 ### Доступные команды
 - `/start` – регистрация (Coros email + пароль, пароль удаляется после ввода) или вход (если уже зарегистрирован)
@@ -622,4 +634,4 @@ sudo docker volume rm running-coach_pgdata
 
 ---
 
-*Последнее обновление: 03.07.2026 — Sprint 6 + Оценка тренировки через веб-форму выполнены*
+*Последнее обновление: 13.07.2026 — Sprint 8+9: разбивка parsers и telegram, документация актуализирована*

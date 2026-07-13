@@ -261,7 +261,9 @@ async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db
             training_type=session.training_type,
             source="confirm_deleted",
         )
-    Path(pending.get('path', '')).unlink(missing_ok=True)
+    _path = pending.get('path')
+    if _path:
+        Path(_path).unlink(missing_ok=True)
     audit.log_event(
         event_type="training.confirm_deleted",
         message="Previously deleted training re-imported",

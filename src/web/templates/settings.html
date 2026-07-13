@@ -29,19 +29,37 @@
             <label><b>Мин. пульс для быстрого темпа:</b> если пульс ниже, а темп быстрее — ошибка</label>
             <input type='number' name='min_hr_for_fast_pace' value='{{ min_hr_for_fast_pace }}' min='90' max='180'>
             <hr>
-            <h4>Синхронизация Coros (Coros sync)</h4>
-            <label><b>Email Coros Training Hub:</b></label>
-            <input type='email' name='coros_email' value='{{ coros_email }}' style='width:250px;padding:6px;font-size:14px'>
-            <label><b>Пароль Coros:</b></label>
-            <input type='password' name='coros_password' placeholder='{{ coros_password }}' style='width:250px;padding:6px;font-size:14px'>
+            {% if watch_creds %}
+            {% for cred in watch_creds %}
+            <h4>Синхронизация {{ cred.brand_display }} ({{ cred.brand }} sync)</h4>
+            <input type='hidden' name='watch_brand' value='{{ cred.brand }}'>
+            <label><b>Email {{ cred.brand_display }} Training Hub:</b></label>
+            <input type='email' name='watch_email' value='{{ cred.email }}' style='width:250px;padding:6px;font-size:14px'>
+            <label><b>Пароль {{ cred.brand_display }}:</b></label>
+            <input type='password' name='watch_password' placeholder='{{ cred.pw_placeholder }}' style='width:250px;padding:6px;font-size:14px'>
             <div style='font-size:12px;color:#888;margin-top:4px'>Пароль хранится в зашифрованном виде (Fernet). Оставьте пустым, чтобы не менять.</div>
             <h4>Частота синхронизации (Sync interval)</h4>
             <label><b>Тренировки (мин):</b></label>
-            <input type='number' name='coros_activity_sync_interval' value='{{ coros_activity_sync_interval }}' min='15' max='1440' style='width:120px;padding:8px;font-size:16px'>
+            <input type='number' name='activity_sync_interval' value='{{ cred.activity_sync_interval }}' min='15' max='1440' style='width:120px;padding:8px;font-size:16px'>
             <div style='font-size:12px;color:#888;margin-top:4px'>По умолчанию 60 мин. Мин. 15, макс. 1440 (24 ч).</div>
             <label><b>Метрики здоровья (мин):</b></label>
-            <input type='number' name='coros_health_sync_interval' value='{{ coros_health_sync_interval }}' min='30' max='1440' style='width:120px;padding:8px;font-size:16px'>
+            <input type='number' name='health_sync_interval' value='{{ cred.health_sync_interval }}' min='30' max='1440' style='width:120px;padding:8px;font-size:16px'>
             <div style='font-size:12px;color:#888;margin-top:4px'>По умолчанию 480 мин (8 ч). Мин. 30, макс. 1440 (24 ч).</div>
+            {% endfor %}
+            {% else %}
+            <h4>Синхронизация часов (Watch sync)</h4>
+            <input type='hidden' name='watch_brand' value='coros'>
+            <label><b>Email Training Hub:</b></label>
+            <input type='email' name='watch_email' value='' style='width:250px;padding:6px;font-size:14px'>
+            <label><b>Пароль:</b></label>
+            <input type='password' name='watch_password' placeholder='' style='width:250px;padding:6px;font-size:14px'>
+            <div style='font-size:12px;color:#888;margin-top:4px'>Пароль хранится в зашифрованном виде (Fernet).</div>
+            <h4>Частота синхронизации (Sync interval)</h4>
+            <label><b>Тренировки (мин):</b></label>
+            <input type='number' name='activity_sync_interval' value='' min='15' max='1440' style='width:120px;padding:8px;font-size:16px'>
+            <label><b>Метрики здоровья (мин):</b></label>
+            <input type='number' name='health_sync_interval' value='' min='30' max='1440' style='width:120px;padding:8px;font-size:16px'>
+            {% endif %}
             <br>
             <button type='submit' class='btn'>Сохранить</button>
             <a href='/' class='btn' style='background:#888;'>&larr; Назад</a>

@@ -2,8 +2,17 @@
 Запуск синхронизации в отдельном потоке для Telegram-бота
 Run sync in a dedicated thread for the Telegram bot.
 
-Заменяет изначальный вариант, ссылавшийся на несуществующие SyncService/SyncLog/full_sync.
+Заменяющий изначальный вариант, ссылавшийся на несуществующие SyncService/SyncLog/full_sync.
 Replaces the original version that referenced non-existent SyncService/SyncLog/full_sync.
+
+TODO: AUDIT-006 — Telegram вызывает sync_activities_for_user/sync_health_for_user напрямую,
+а не единый run_sync_for_user из sync_service.py. Это обоснованно: Telegram синхронизирует
+все бренды пользователя за один вызов и формирует сводный отчёт. При миграции на единый entry point
+потребуется run_sync_for_user_all_brands(chat_id) — отдельная задача.
+TODO: AUDIT-006 — Telegram calls sync_activities_for_user/sync_health_for_user directly instead
+of the unified run_sync_for_user. This is intentional: Telegram syncs all user brands in one
+call and builds a summary. Migrating to the unified entry point would require
+run_sync_for_user_all_brands(chat_id) — separate task.
 """
 
 import asyncio

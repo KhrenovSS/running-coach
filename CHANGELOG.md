@@ -2,6 +2,43 @@
 
 All notable changes to this project are tracked here.
 
+## [13.07.2026] — Фаза B: тонкие роуты, мульти-бренд settings, единый sync entry point
+
+### Added
+- **`src/services/watch_credentials.py`** — `upsert_watch_credential(db, user_id, brand, email, password, activity_sync_interval, health_sync_interval)`: инкапсулирует шифрование пароля и логику upsert/удаления WatchCredential.
+- **`src/services/training_service.py`** — `delete_training(db, user_id, session_id)` и `upsert_feedback(db, user_id, session_id, rating)`: бизнес-логика удаления тренировок и оценки, вынесенная из роутов.
+- **`src/web/routes/pages/`** — пакет (замена монолитного `pages.py`):
+  - `__init__.py` — сборка `router` через `include_router`
+  - `auth.py` (48 строк) — `/login`, `/register`
+  - `index.py` (184) — `render_page` + `/`
+  - `session.py` (177) — `/session/{id}`, `/session/{id}/delete`, `/session/{id}/feedback` (тонкие роуты → `training_service`)
+  - `settings.py` (118) — `/settings` GET+POST (через `upsert_watch_credential`)
+- **`sync_service.run_sync_for_user(user_id, brand, sync_type, progress, pending)`** — единая точка входа для web-синхронизации (AUDIT-006).
+
+### Changed
+- **`src/web/routes/sync.py`** (444 → 93 строки): роуты делегируют в `run_sync_for_user`. Передаёт `pending=_pending` для activity-синхронизации (AUDIT-009).
+- **`src/web/routes/pages/settings.py`**: хардкод `coros_email`/`coros_password` → `watch_brand`/`watch_email`/`watch_password`; перебор всех активных кредов пользователя (B.1).
+- **`src/web/templates/settings.html`**: `{% for cred in watch_creds %}` — мульти-бренд форма.
+- **`sync_activities_for_user`**: добавлен параметр `pending`; удалённые тренировки парсятся (FIT) и кэшируются в `pending` для `confirm_deleted`; общий хелпер `_download_parse` — устраняет дублирование download+parse.
+
+### Fixed
+- **NameError в `settings_save`**: `encrypt()` вызывался без импорта (после рефакторинга) → заменён на `upsert_watch_credential`.
+- **Регрессия pending-deleted**: web-sync не кэшировал удалённые тренировки в `_pending` → переимпорт. Теперь `sync.py` передаёт `pending=_pending`.
+- **`confirm_deleted`**: `Path('').unlink()` падал с `IsADirectoryError` → guard на пустой `path`.
+
+### Verified
+- `python -c "from src.web.routes.pages import router"` — OK
+- `python -c "from src.startup import create_app"` — OK
+- `grep -rn "encrypt(" src/web/routes/` → 0
+- `grep -rn "WatchCredential(" src/web/routes/` → 0
+- `grep -rn "DeletedTraining(" src/web/routes/` → 0
+- `wc -l src/web/routes/sync.py` = 93 < 200
+- `wc -l src/web/routes/pages/*.py` max 184 < 250
+
+### Notes
+- **AUDIT-006 Telegram TODO**: `sync_runner.py` вызывает `sync_activities_for_user`/`sync_health_for_user` напрямую, а не `run_sync_for_user` (обоснованно: все бренды + сводный отчёт). Миграция на `run_sync_for_user_all_brands(chat_id)` — отдельная задача (TODO в коде).
+- **Docker**: после применения — пересобрать `app` и `bot`.
+
 ## [03.07.2026] — Сегментация: fix change-point detection + Docker rebuild + tcx_parser import
 
 ### Changed
