@@ -2,6 +2,28 @@
 
 All notable changes to this project are tracked here.
 
+## [13.07.2026] — Отладка и улучшение алгоритма анализа (баги, fallback, 40 тестов)
+
+### Fixed
+- **`src/analysis/oscillation.py`** — `base_pace` self-defeating: теперь `mean(paces >= overall_mean)` вместо `mean(all paces)` — быстрые work-фазы не искажают базовый темп
+- **`src/analysis/oscillation.py`** — HR-lag корреляция инвертирована: `pace_change = -(p_cur - p_prev)` — положительный = ускорение
+- **`src/analysis/segment.py`** — `CHANGE_POINT_MIN_DIFF` 0.3 → 0.5 + пост-проверка: если сегменты похожи по темпу (max-min < 0.5) или число сильно отличается от км (±50%) — fallback на км-блоки
+- **`src/analysis/segment.py`** — time units bug: `_km_segment_fallback` делил секунды на 60 дважды (хранил минуты, потом делил снова)
+- **`src/services/reanalyze.py`** — `NameError: _run_async` → `run_async_in_thread`
+- **`src/services/reanalyze.py`** — `_restore_trackpoints`: добавлены недостающие ключи (`hr`, `alt`, `lat`, `lon`, `cad`) с `None` по умолчанию
+- **`src/analysis/__init__.py`** — `_serialize_trackpoints`: сохраняет `None`-значения для обратной совместимости
+
+### Added
+- **`tests/helpers.py`** — фабрики синтетических трекпоинтов (interval, tempo, long, recovery, GPS-errors)
+- **6 файлов тестов** (40 тестов): `test_oscillation.py` (9), `test_classify.py` (9), `test_segment.py` (4), `test_hr_zones.py` (9), `test_process_trackpoints.py` (6), `helpers.py`
+
+### Verified
+- 40/40 тестов проходят
+- 29/29 тренировок пересчитаны без ошибок
+- 27/29 имеют корректное число сегментов (1.0-1.3x км)
+- 2 edge cases (0.1км, 0км recovery) — корректное поведение
+- Docker app пересобран
+
 ## [13.07.2026] — Новый алгоритм детекции интервалов (base_pace + pace_gap)
 
 ### Changed
