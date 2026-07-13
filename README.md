@@ -20,8 +20,8 @@
 - **⭐ Оценка тренировок** – inline-клавиатура 0–10 в Telegram после каждой синхронизации (авто, ручная, загрузка); отображение оценки в веб-интерфейсе
 - **💤 Мониторинг восстановления** – ежедневная проверка данных о сне (10:00 → 18:00 или каждые 2 часа при отсутствии данных)
 - **📊 Корректное удаление** – отслеживание удалённых тренировок с подтверждением перед повторной загрузкой
-- **🔐 Шифрование** – пароли Coros шифруются Fernet‑ключом перед сохранением в БД
-- **🔔 Автоматическая синхронизация** – фоновая проверка новых данных каждые 30 мин (тренировки) и 6 часов (метрики здоровья)
+- **🔐 Шифрование** – пароли часов шифруются Fernet‑ключом перед сохранением в БД
+- **🔔 Автоматическая синхронизация** – фоновая проверка новых данных по настроенному интервалу для каждого бренда (тренировки + метрики здоровья)
 - **🔑 Telegram‑аутентификация** – одноразовые токены для регистрации, bcrypt-хеширование паролей, вход по email+паролю, session-cookie в веб-интерфейсе
 - **📝 Структурированное логирование и аудит** – ежедневная ротация, JSON/text формат, запись событий аудита в БД и файл
 
@@ -32,8 +32,8 @@
 ### Стек
 - **Backend**: Python + FastAPI + SQLAlchemy + PostgreSQL 16 (через Docker Compose)
 - **Frontend**: HTML/CSS/JS (Vanilla) + Chart.js
-- **Парсеры**: `parsers/tcx_parser.py` (XML), `parsers/fit_parser.py` (бинарный), `parsers/common.py` (общая обработка)
-- **Интеграции**: Coros Training Hub (неофициальное API), Open‑Meteo (погода), Telegram Bot API
+- **Парсеры**: `parsers/` — 9 модулей: `common.py` (оркестратор), `tcx_parser.py` (XML), `fit_parser.py` (бинарный), `gps.py` (очистка), `segmentation.py` (change-point detection), `classification.py` (автоопределение типа), `hr_zones.py` (пульсовые зоны), `weather.py` (Open‑Meteo API), `utils.py`
+- **Интеграции**: Coros Training Hub (неофициальное API), Open‑Meteo (погода), Telegram Bot API. Мульти-бренд: `BaseWatchClient` ABC + `factory.py` реестр.
 - **Аутентификация**: email+пароль (bcrypt), одноразовые токены регистрации (`secrets`), session-cookie (`SessionMiddleware`)
 - **Логирование**: структурированное, ежедневная ротация (`TimedRotatingFileHandler`), JSON/text
 - **Аудит**: события в БД (`audit_events`) + файл (`logs/audit_*.log`)
@@ -244,8 +244,8 @@ training_sessions.id                     │
 │   │   ├── base.py                  #   BaseWatchClient(ABC)
 │   │   ├── coros.py                 #   CorosWatchClient на httpx.AsyncClient
 │   │   └── factory.py               #   Реестр брендов (register / get_watch_client)
-│   ├── crypto.py                    # Шифрование паролей Coros (Fernet, требует COROS_CRED_KEY)
-│   ├── exceptions.py                # Типизированные исключения приложения
+│   ├── crypto.py                    # Шифрование паролей (Fernet, требует CRED_KEY)
+│   ├── exceptions.py                # Типизированные исключения приложения (WatchAPIError, WatchAuthError, …)
 │   ├── api/
 │   │   ├── __init__.py              # re-export: register_middleware, get_db
 │   │   ├── deps.py                  # get_current_user dependency (session-cookie)
@@ -263,7 +263,7 @@ training_sessions.id                     │
 │   │   ├── segmentation.py          # Сегментация по темпу (change-point detection)
 │   │   ├── classification.py        # Автоклассификация тренировок (interval/tempo/long/recovery)
 │   │   ├── hr_zones.py              # Расчёт пульсовых зон Z1–Z5
-│   │   ├── weather.py               # Погода и температура (Open‑Meteo API)
+│   │   ├── weather.py               # Погода и температура (Open‑Meteo API, httpx)
 │   │   ├── utils.py                 # Вспомогательные функции парсеров
 │   │   ├── tcx_parser.py            # Парсинг TCX‑файлов (XML)
 │   │   └── fit_parser.py            # Парсинг FIT‑файлов (бинарный)
@@ -271,7 +271,10 @@ training_sessions.id                     │
 │   │   ├── audit.py                 # AuditService (события в БД + файл)
 │   │   ├── auth.py                  # Генерация/верификация токенов входа, bcrypt
 │   │   ├── telegram_notify.py       # Отправка уведомлений в Telegram
-│   │   ├── sync_service.py          # Brand-agnostic sync (замена coros_sync_auto.py)
+│   │   ├── sync_service.py          # Brand-agnostic sync (оркестрация auto_sync + run_sync_for_user)
+│   │   ├── async_utils.py           # run_async_in_thread(coro) — единый helper для async-from-thread
+│   │   ├── watch_credentials.py     # upsert_watch_credential() — шифрование + upsert
+│   │   ├── training_service.py      # delete_training(), upsert_feedback()
 │   │   ├── stats.py                 # calc_stats, fmt_duration, build_nav_html, пульсовые зоны
 │   │   └── recovery_view.py         # hrv_status, tired_label, readiness_label, load_label
 │   ├── web/
@@ -279,9 +282,9 @@ training_sessions.id                     │
 │   │   ├── templates/               # 6 Jinja2-шаблонов (base, index, login, register, session, settings)
 │   │   └── routes/
 │   │       ├── __init__.py          # web_router = pages + uploads + sync + logs
-│   │       ├── pages.py             # GET /, /login, /register, /session/{id}, /settings (7 роутов)
+│   │       ├── pages/               # Пакет: auth (48), index (184), session (177), settings (118)
 │   │       ├── uploads.py           # POST /upload, /upload/confirm, /upload/confirm_deleted
-│   │       ├── sync.py              # POST /sync/{brand}/run, /sync/{brand}/health, /sync/status/{id}
+│   │       ├── sync.py              # POST /sync/{brand}/run, /sync/{brand}/health (93 строки)
 │   │       └── logs.py              # GET /logs
 │   └── utils/
 │       └── logger.py                # Структурированное логирование, ежедневная ротация
@@ -300,6 +303,7 @@ training_sessions.id                     │
 │   ├── CHECKLIST_API.md
 │   ├── CHECKLIST_FEATURE.md
 │   ├── CHECKLIST_MIGRATION.md
+│   ├── CHECKLIST_NEW_PROVIDER.md    # Чеклист: новый бренд часов
 │   ├── coros_health_metrics.md
 │   └── DEVELOPMENT_GUIDELINES.md
 ├── tests/                           # Pytest‑тесты
@@ -317,6 +321,7 @@ training_sessions.id                     │
 ├── .env.example                     # Шаблон переменных окружения
 ├── CHANGELOG.md                     # История изменений (датированная)
 ├── AGENTS.md                        # Контекст для ИИ‑агента
+├── BACKLOG.md                       # Парковка TODO/идей/вопросов
 ├── PROJECT_AUDIT.md                 # Аудит проекта и план рефакторинга
 └── decision_module_design.md        # Архитектура модуля аналитики
 ```
@@ -341,8 +346,8 @@ training_sessions.id                     │
 Бот управляется через пакет `src/telegram/`. Запускается в отдельном Docker-контейнере `bot` (см. `docker-compose.yml`). Для локальной разработки — `python run_telegram_bot.py`.
 
 ### Доступные команды
-- `/start` – регистрация (Coros email + пароль, пароль удаляется после ввода) или вход (если уже зарегистрирован)
-- `/sync` – полная синхронизация с Coros (тренировки + метрики здоровья)
+- `/start` – регистрация (email + пароль часов, пароль удаляется после ввода) или вход (если уже зарегистрирован)
+- `/sync` – полная синхронизация со всеми подключёнными брендами (тренировки + метрики здоровья)
 - `/stats` – статистика за всё время и за 7 дней
 - `/trainings` – последние 5 тренировок с деталями
 - `/weight <кг>` – ручной ввод веса (например, `/weight 75.5`)
@@ -368,11 +373,13 @@ training_sessions.id                     │
 
 ---
 
-## 🔄 Интеграция с Coros
+## 🔄 Интеграция с часами (Watch Integration)
+
+### Архитектура
+Мульти-брендовая абстракция: `BaseWatchClient` (ABC) + `factory.py` (реестр брендов). Currently: `CorosWatchClient`. Adding new brands — см. `docs/CHECKLIST_NEW_PROVIDER.md`.
 
 ### Автоматическая синхронизация
-- **Тренировки** – каждые ~30 минут (настраивается через `activity_sync_interval` в `sync_service.py`)
-- **Метрики здоровья** – каждые ~6 часов (настраивается через `health_sync_interval` в `sync_service.py`)
+- **Тренировки** и **метрики здоровья** — по настроенному интервалу для каждого пользователя (per-user в `WatchCredential`)
 - **Jitter ±20%** – чтобы избежать одновременных запросов
 - **Graceful error handling** – ошибки API не роняют планировщик
 
@@ -405,7 +412,7 @@ training_sessions.id                     │
 - **max_credible_pace** – максимально правдоподобный темп (для очистки GPS‑ошибок)
 - **max_gps_jump_m** – максимальный скачок GPS между точками
 - **min_hr_for_fast_pace** – минимальный пульс для быстрого темпа (проверка правдоподобия)
-- **coros_email / coros_password** – учётные данные Coros (хранятся в WatchCredential, шифруются Fernet)
+- **Учётные данные часов** – для каждого подключённого бренда (Coros, Polar, Garmin, …): email/логин + пароль (шифруются Fernet), интервал синхронизации тренировок и здоровья (per-user)
 
 ---
 
@@ -416,8 +423,8 @@ training_sessions.id                     │
 TELEGRAM_BOT_TOKEN=              # Токен бота от @BotFather
 SECRET_KEY=                      # Ключ для session-cookie (itsdangerous)
 WEB_APP_URL=http://192.168.1.101:8000  # URL веб-приложения для ссылок из бота
-CRED_KEY=                        # Ключ шифрования паролей часов (32‑байтовый base64, замена COROS_CRED_KEY)
-# COROS_CRED_KEY=                # Deprecated, работает как fallback
+CRED_KEY=                          # Ключ шифрования паролей часов (32‑байтовый base64)
+# COROS_CRED_KEY=                  # Deprecated, работает как fallback
 POSTGRES_PASSWORD=               # Пароль PostgreSQL (для Docker Compose)
 DATABASE_URL=                    # postgresql://running_coach:...@db:5432/running_coach
 LOG_LEVEL=info                   # Уровень логирования
@@ -483,31 +490,28 @@ python run_telegram_bot.py
 - [x] Очистка GPS‑ошибок, подтверждение сомнительных тренировок
 - [x] График пульса/темпа (Chart.js)
 - [x] Интеграция с Coros (автосинхронизация тренировок)
-- [x] Метрики здоровья Coros (HRV, RHR, tiredness, readiness, нагрузка)
+- [x] Метрики здоровья (HRV, RHR, tiredness, readiness, нагрузка)
 - [x] Telegram‑бот (регистрация, синхронизация, статистика, ежедневный вес)
 - [x] Проверка данных о сне (10:00 → 18:00 / каждые 2 часа)
-- [x] Шифрование паролей Coros (Fernet)
+- [x] Шифрование паролей часов (Fernet)
 - [x] Отслеживание удалённых тренировок (избежание дублирования)
 - [x] Миграции схемы БД через Alembic (автоматически при старте)
-- [x] Структурированное логирование и аудит (Level 2 observability)
+- [x] Структурированное логирование и аудит
 - [x] Аутентификация: email+пароль (bcrypt), Telegram-токены, session-cookie
 - [x] PostgreSQL + Docker Compose (3 контейнера: db, app, bot)
-- [x] **Sprint 3**: декомпозиция main.py (2776 → 7 строк), Jinja2‑шаблонизация (6 шаблонов), pydantic‑settings
-- [x] **Sprint 4.5**: полный отказ от SQLite, переход на PostgreSQL + `TIMESTAMP WITH TIME ZONE`
-- [x] **Sprint 4**: мульти-брендовая архитектура (`BaseWatchClient`, `WatchCredential`, `sync_service`), Coros-клиент на httpx
-- [x] **Фаза 1**: удаление старых полей `coros_email`/`coros_password`/`last_coros_sync` из `User`
-- [x] **Фаза 3Б**: inline-клавиатура оценки 0–10 для каждой тренировки + отображение в веб-интерфейсе
+- [x] Мульти-брендовая архитектура (`BaseWatchClient`, `WatchCredential`, `factory.py`)
+- [x] Оценка тренировок 0–10 (Telegram inline + веб-форма)
+- [x] Per-user интервалы синхронизации
+- [x] Рефакторинг: main.py 2776→7, parsers разбиты на 9 модулей, telegram разбит на 12 файлов, тонкие роуты
 
-### ⬜ В работе / запланировано
-- [x] **Шаг 0 (п.15)**: часовой пояс daily weight reminder
-- [x] **Sprint 6**: настраиваемая частота синхронизации per-user, баннер для новых пользователей
-- [x] **Оценка через веб-форму**: POST /session/{id}/feedback + select 0–10 на странице тренировки
-- [ ] **Фаза 3**: фильтр по типу тренировки на главной, общая дистанция/время за неделю/месяц
-- [ ] **Фаза 4**: выбор бренда часов при регистрации (multi-brand onboarding), заглушки для Polar/Garmin/Suunto
-- [ ] **Фаза 5**: факторы самочувствия после тренировки — вопрос «Что повлияло на ощущения?» с multi-select (ноги, дыхание, пульс, жара, недосып, стресс, другое), адаптивные подсказки, хранение в БД для аналитики
-- [ ] **Модуль аналитики** — 8 этапов из `decision_module_design.md`
-- [ ] **Sprint 7**: панель администрирования — дашборд, управление пользователями, просмотр аудита, принудительный sync
-- [ ] Мобильное PWA (Progressive Web App)
+### ⬜ Запланировано
+- [ ] Тесты (минимум 20, реальные TCX/FIT-файлы)
+- [ ] Разбивка models.py + sync_service.py на пакеты
+- [ ] Фильтр по типу тренировки, общая дистанция/время за неделю/месяц
+- [ ] Multi-brand onboarding (выбор бренда при регистрации)
+- [ ] Факторы самочувствия после тренировки
+- [ ] Панель администрирования
+- [ ] Модуль аналитики и рекомендаций (8 этапов, `decision_module_design.md`)
 
 ---
 
@@ -557,34 +561,7 @@ python run_telegram_bot.py
 
 ## 🧹 Технический долг
 
-> **Анализ проекта выполнен моделью Cloud Opus 4.8 (29.06.2026).**
-
-Перед разработкой модуля аналитики и рекомендаций необходимо устранить накопившийся
-технический долг — иначе новый модуль не сможет нормально развиваться (блокировки SQLite,
-расхождение настроек между веб и ботом, невозможность писать тесты на формулы).
-
-**Краткий список (по приоритету):**
-
-🟡 **Средне — техдолг:**
-- ~~Coros-клиент на синхронном `requests`, без TTL токена~~ → `CorosWatchClient(BaseWatchClient)` на `httpx.AsyncClient`, токен кэшируется в `WatchCredential` — **Sprint 4**
-
-✅ **Решено (Sprint 1–3 + Sprint 4.5 + Sprint 4):**
-- ~~Путаница UTC vs локальное время в `DateTime`-полях~~ → Все 14 колонок `TIMESTAMP WITH TIME ZONE`, все `.replace(tzinfo=None)` удалены
-- ~~Telegram-бот запускался через `subprocess.Popen` из `main.py`~~ → Вынесен в отдельный процесс (Docker-контейнер `bot`)
-- ~~Два источника правды для настроек: `UserSettings` (веб) vs `User` (бот)~~ → модель `UserSettings` удалена, всё на `User`
-- ~~SQLite без WAL~~ → PostgreSQL 16 в Docker (SQLite — fallback для локальной разработки с WAL)
-- ~~Ручные `ALTER TABLE` в `startup()`~~ → Alembic, fresh baseline `f75d2362cf9f`
-- ~~Нет тестов и манифеста зависимостей~~ → `pyproject.toml`, `tests/` (3 теста моделей)
-- ~~23 места с `except Exception: pass`~~ → заменены на явные типы с логгированием
-- ~~Ручное управление сессиями БД в эндпоинтах~~ → `get_db()` через `Depends` в 9 эндпоинтах
-- ~~Нет структурированного логирования~~ → `src/utils/logger.py` с ежедневной ротацией, JSON/text
-- ~~Нет аудита событий~~ → `AuditService`, таблица `audit_events`, покрытие всех ключевых операций
-- ~~Веб захардкожен на одного пользователя~~ → email+пароль (bcrypt), session-cookie, `get_current_user` Depends
-- ~~Монолитный `main.py` на ~2650 строк~~ → 7 строк (`create_app()` + `uvicorn.run()`), вся логика в `src/web/routes/` и `src/services/` — **Sprint 3**
-- ~~Inline-HTML на f-строках (~94 места)~~ → 6 Jinja2-шаблонов в `src/web/templates/` — **Sprint 3**
-- ~~Конфигурация разбросана; ключ шифрования автогенерируется~~ → `pydantic-settings`, `src/config/settings.py`, `crypto.py` требует явного `COROS_CRED_KEY` — **Sprint 3**
-
-Все спринты рефакторинга (1–6) выполнены. Оставшиеся задачи — в `PROJECT_AUDIT.md`.
+> Полный список технического долга, план рефакторинга и статус спринтов — в [`PROJECT_AUDIT.md`](PROJECT_AUDIT.md).
 
 ---
 
@@ -634,4 +611,4 @@ sudo docker volume rm running-coach_pgdata
 
 ---
 
-*Последнее обновление: 13.07.2026 — Sprint 8+9: разбивка parsers и telegram, документация актуализирована*
+*Последнее обновление: 13.07.2026 — Фаза D: документация (BACKLOG, чеклисты, AGENTS, README актуализированы)*

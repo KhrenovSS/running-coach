@@ -2,6 +2,29 @@
 
 All notable changes to this project are tracked here.
 
+## [13.07.2026] — Фаза D: документация
+
+### Added
+- **`BACKLOG.md`** — парковка TODO/идей/вопросов с тегами `[Идея]` `[Фикс]` `[Вопрос]`. 16 пунктов: FIXME из кода + пункты из аудита.
+- **`docs/CHECKLIST_NEW_PROVIDER.md`** — пошаговый чеклист добавления нового бренда часов: клиент (ABC), регистрация в `factory.py`, конфигурация, исключения, smoke-тест, интеграция.
+
+### Changed
+- **`AGENTS.md`**: добавлен раздел «Дисциплина работы ИИ-агента» (6 пунктов):
+  1. Потолок ~400 строк/файл (обоснование AI-поведения)
+  2. Backlog-дисциплина (заметил мелочь → BACKLOG.md)
+  3. Секреты (нет ключа → остановись и спроси)
+  4. Проверка спринта — behavioral test, не `py_compile`
+  5. Таблица Docker rebuild (что изменено → что пересобрать)
+  6. Протокол конца сессии (commit → чекбоксы → отчёт)
+- **`AGENTS.md`**: обновлена структура файлов (pages/ пакет, watch_credentials.py, training_service.py, async_utils.py)
+- **`AGENTS.md`**: добавлена ссылка на `docs/CHECKLIST_NEW_PROVIDER.md` в таблицу документации
+- **`PROJECT_AUDIT.md`**: AUDIT-011 → ✅ (выполнено в Фазе A), Sprint 9 reopen (AUDIT-015), спринты 13-15/7/аналитика заморожены
+- **`README.md`**: обновлено дерево файлов (pages/ пакет, watch_credentials.py, training_service.py, async_utils.py, CHECKLIST_NEW_PROVIDER.md)
+- **`README.md`**: мульти-бренд в секциях «Настройки», «Интеграция с часами», «Telegram-бот»
+- **`README.md`**: убрана секция «Технический долг» → ссылка на `PROJECT_AUDIT.md`
+- **`README.md`**: обновлена секция Roadmap (product features, без дублирования спринт-плана)
+- **`README.md`**: обновлена дата
+
 ## [13.07.2026] — Фаза C: cleanup и унификация
 
 ### Changed
