@@ -1,13 +1,10 @@
 from datetime import datetime, timedelta
-from decimal import Decimal
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from src.models import SessionLocal
-from src.models import User, WeightMeasurement
+from src.models import SessionLocal, User, WeightMeasurement, utcnow
 from src.telegram.utils import get_user
 from src.telegram.state import _awaiting_weight
 from src.services.audit import AuditService
@@ -86,8 +83,8 @@ async def handle_weight_message(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         measurement = WeightMeasurement(
             user_id=user.id,
-            weight_kg=Decimal(str(weight)),
-            measured_at=datetime.now(ZoneInfo("Europe/Moscow")),
+            weight_kg=weight,
+            measured_at=utcnow(),
         )
         db.add(measurement)
         db.commit()
@@ -100,7 +97,7 @@ async def handle_weight_message(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(f"✅ Вес {weight:.1f} кг сохранён! Спасибо! 🙌")
     except Exception as e:
         db.rollback()
-        logger.error("Weight save error: %s", e)
+        logger.error("Weight save error for user=%s: %s", user.id, e, exc_info=True)
         await update.message.reply_text("😔 Ошибка при сохранении веса.")
     finally:
         db.close()
