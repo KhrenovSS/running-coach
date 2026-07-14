@@ -1,6 +1,6 @@
 # Модели метрик здоровья и веса (Health metrics and weight models)
 
-from sqlalchemy import Column, Integer, Float, String, DateTime, Date, Text, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, Float, String, DateTime, Date, JSON, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from src.domain.models.base import Base, utcnow
@@ -12,7 +12,7 @@ class DailyMetrics(Base):
         UniqueConstraint('user_id', 'date', name='uq_user_date'),
     )
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
     date = Column(Date, nullable=False)
     avg_sleep_hrv = Column(Float, nullable=True)
     sleep_hrv_baseline = Column(Float, nullable=True)
@@ -34,7 +34,7 @@ class DailyMetrics(Base):
     form_score = Column(Float, nullable=True)  # Coros "Базовая форма"
     load_impact = Column(Float, nullable=True)  # Coros "Влияние нагрузки"
     intensity_trend = Column(Float, nullable=True)  # Coros "Тренд интенсивности"
-    sleep_hrv_interval_list = Column(Text, nullable=True)  # Coros HRV intervals JSON [min, low, normal_start, normal_end]
+    sleep_hrv_interval_list = Column(JSON, nullable=True)  # Coros HRV intervals [min, low, normal_start, normal_end]
     source_brand = Column(String(50), nullable=True)  # e.g. 'coros', 'garmin' (source of metric)
 
     user = relationship("User", back_populates="daily_metrics")
@@ -43,7 +43,7 @@ class DailyMetrics(Base):
 class WeightMeasurement(Base):
     __tablename__ = 'weight_measurements'
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
     weight_kg = Column(Float, nullable=False)
     measured_at = Column(DateTime(timezone=True), default=utcnow)
 

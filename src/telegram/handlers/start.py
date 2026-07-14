@@ -1,3 +1,4 @@
+import re
 import secrets
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -38,7 +39,7 @@ async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     email = update.message.text.strip()
     chat_id = update.effective_chat.id
 
-    if "@" not in email or "." not in email:
+    if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
         await update.message.reply_text("❌ Непохоже на email. Попробуй ещё раз:")
         return EMAIL
 

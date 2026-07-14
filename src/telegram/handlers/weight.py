@@ -73,7 +73,7 @@ async def handle_weight_message(update: Update, context: ContextTypes.DEFAULT_TY
     text = update.message.text.strip().replace(",", ".")
     try:
         weight = float(text)
-        if weight < 20 or weight > 300:
+        if weight < 30 or weight > 250:
             raise ValueError
     except ValueError:
         await update.message.reply_text(

@@ -10,7 +10,7 @@ class TrainingSession(Base):
     __tablename__ = 'training_sessions'
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)  # Для обратной совместимости nullable
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
     begin_ts = Column(DateTime(timezone=True), default=utcnow)
     total_distance_km = Column(Float)
     avg_heart_rate = Column(Integer)
@@ -41,7 +41,7 @@ class TrainingSession(Base):
 class DeletedTraining(Base):
     __tablename__ = 'deleted_trainings'
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
     begin_ts = Column(DateTime(timezone=True), nullable=False)
     total_distance_km = Column(Float, nullable=True)
     avg_heart_rate = Column(Integer, nullable=True)
@@ -64,7 +64,7 @@ class TrainingFeedback(Base):
     __tablename__ = 'training_feedback'
     id = Column(Integer, primary_key=True)
     session_id = Column(Integer, ForeignKey('training_sessions.id'), nullable=False, index=True)
-    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
     rating = Column(Integer, nullable=False)  # 0–10 (тяжесть тренировки)
     notes = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)

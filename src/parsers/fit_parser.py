@@ -7,14 +7,14 @@ from src.config import settings
 SEMICIRCLE_TO_DEG = 180.0 / 2**31
 
 # Парсинг FIT-файла (FIT file parsing)
-def parse_fit(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130):
+def parse_fit(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130, coros_cadence_workaround=False):
     if max_hr is None:
         max_hr = settings.default_max_hr
     trackpoints = []
     start_time_utc = None
     calories = None
 
-    with fitdecode.FitReader(file_path, check_crc=False) as fit:
+    with fitdecode.FitReader(file_path, check_crc=True) as fit:
         for frame in fit:
             if frame.frame_type != fitdecode.FIT_FRAME_DATA:
                 continue
@@ -28,7 +28,7 @@ def parse_fit(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.
                 dist = data.get('distance')
                 alt = data.get('enhanced_altitude') or data.get('altitude')
                 cad = data.get('cadence')
-                if cad is not None and cad < 100:
+                if cad is not None and cad < 100 and coros_cadence_workaround:
                     cad = cad * 2
                 lat = None
                 lon = None

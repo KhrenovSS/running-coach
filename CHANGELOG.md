@@ -2,6 +2,37 @@
 
 All notable changes to this project are tracked here.
 
+## [14.07.2026] — Sprint 17: Data Integrity
+
+### Changed
+- **DI-01** `src/domain/models/training.py`, `health.py`, `audit.py` — nullable FK → NOT NULL + ON DELETE CASCADE для `user_id` во всех моделях (TrainingSession, DeletedTraining, TrainingFeedback, DailyMetrics, WeightMeasurement, AuditEvent)
+- **DI-02** `src/domain/models/health.py` — `sleep_hrv_interval_list`: Text → JSON (PostgreSQL native JSON)
+- **DI-03** `src/domain/models/audit.py` — `metadata_json`: Text → JSON
+- **DI-04** `src/parsers/fit_parser.py` — `check_crc=False` → `True` (повреждённые FIT отбрасываются)
+- **DI-05** `src/parsers/fit_parser.py` — cadence heuristic `cad < 100: cad * 2` вынесен в параметр `coros_cadence_workaround` (default `False`); передан `True` в `src/services/sync/activities.py` для Coros-синхронизации
+- **DI-06** `src/services/auth.py` — `cleanup_expired_tokens()` теперь удаляет все просроченные токены (а не только used + >1day)
+- **DI-07** Input validation:
+  - `src/web/routes/uploads.py` — проверка размера файла ≤50MB (read + check before write)
+  - `src/telegram/handlers/start.py` — email проверка через regex (`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
+  - `src/telegram/handlers/weight.py` — bounds 20-300 → 30-250 кг
+- **DI-08** `src/analysis/hr_zones.py` — защита от `max_hr=0` (ZeroDivisionError): возврат Z1
+- **DI-09** `src/parsers/gps.py` — `sqrt(min(a, 1))` → `sqrt(max(0, min(a, 1)))` защита от negative float в haversine
+
+### Added
+- **Alembic миграция `f7g8h9i0j1k2`** — data integrity: NOT NULL FKs + ON DELETE CASCADE + Text→JSON. Включает удаление orphan-записей. Downgrade/upgrade идемпотентен.
+
+### Verified
+- `python -c "from src.telegram.main import run_bot"` — OK
+- `python -c "from src.startup import create_app"` — OK (с SECRET_KEY)
+- `grep -rn "from src.database" src/` → 0
+- `grep -rn "except: pass\|except Exception: pass" src/` → 0
+- `grep -rn "nullable=True.*user_id" src/domain/models/` → 0
+- `grep -rn "check_crc=False" src/` → 0
+- `alembic upgrade head` — OK
+- `alembic downgrade -1 && alembic upgrade head` — OK (идетмпотентен)
+- `pytest tests/ -v -k "not test_models"` → 53 passed
+- **Docker**: пересобрать `app` (изменены модели, fit_parser, hr_zones, gps, auth, uploads, миграция)
+
 ## [14.07.2026] — Sprint 16: Config Consolidation
 
 ### Changed

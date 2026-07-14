@@ -149,7 +149,7 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 ```
 Пароль/токен отдельно не спрашивать — брать из `.env`.
 
-## Текущее состояние (Session — 14.07.2026 — Sprint 16: Config Consolidation)
+## Текущее состояние (Session — 14.07.2026 — Sprint 17: Data Integrity)
 
 **Фаза A ✅:** Починены сломанные импорты в `src/telegram/` (AUDIT-015), удалены `COROS_SYNC_*` константы (AUDIT-011).
 **Фаза B ✅:** Тонкие роуты (sync.py 444→93), мульти-бренд settings, единый `run_sync_for_user`, пакет `pages/`.
@@ -170,6 +170,22 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 **Sprint 15 ✅:** Observability — `fix_logger_after_uvicorn` для всех 3 логгеров; Alembic hard fail (`raise SystemExit(1)`); silent failures → `exc_info=True` (activities, health); `except: pass` → `logger.warning`; weather ошибки → WARNING; `get_logger` в api/deps.py; лог удаления temp-файлов; сброс `_awaiting_weight` при ошибке.
 
 **Sprint 16 ✅:** Config Consolidation — `max_hr=177` → `settings.default_max_hr` (5 файлов); `days=120` → `HEALTH_SYNC_DAYS`; `7*24*60*60` → `settings.session_ttl_days`; `timeout=15` → `settings.http_timeout`; `Europe/Moscow` → `settings.timezone` (13 мест); удалены `COROS_*` из `constants.py`; удалён sentinel `'********'`; HR-зоны вынесены в `constants.py`; опечатка `Окторябрь` → `Октябрь`. 56 тестов зелёные.
+
+**Sprint 17 ✅:** Data Integrity — nullable FK → NOT NULL + ON DELETE CASCADE (6 таблиц); Text→JSON для `sleep_hrv_interval_list` и `metadata_json`; `fit_parser.py`: `check_crc=True`, cadence workaround как `coros_cadence_workaround` параметр; `auth.py`: cleanup удаляет expired+неиспользованные токены; валидация ввода: размер файла ≤50MB, email regex, вес 30-250кг; защита `max_hr=0` и `sqrt(negative)` в gps.py. 53/53 тестов зелёные.
+
+### Что сделано в сессии (14.07.2026) — Sprint 17 / Data Integrity:
+
+1. **DI-01**: `src/domain/models/training.py`, `health.py`, `audit.py` — `user_id` FK: `nullable=True` → `nullable=False`, добавлен `ondelete='CASCADE'`
+2. **DI-02**: `src/domain/models/health.py` — `sleep_hrv_interval_list`: `Text` → `JSON`
+3. **DI-03**: `src/domain/models/audit.py` — `metadata_json`: `Text` → `JSON`
+4. **DI-04**: `src/parsers/fit_parser.py` — `check_crc=False` → `True`
+5. **DI-05**: `src/parsers/fit_parser.py` — cadence heuristic `cad < 100: cad*2` → параметр `coros_cadence_workaround` (default `False` для generic, `True` в Coros sync)
+6. **DI-06**: `src/services/auth.py` — `cleanup_expired_tokens()`: теперь удаляет **все** просроченные токены (а не только used + >1day)
+7. **DI-07**: `src/web/routes/uploads.py` — проверка размера файла (≤50MB); `src/telegram/handlers/start.py` — email regex; `src/telegram/handlers/weight.py` — bounds 30-250кг
+8. **DI-08**: `src/analysis/hr_zones.py` — защита `ZeroDivisionError` при `max_hr=0`
+9. **DI-09**: `src/parsers/gps.py` — `sqrt(min(a, 1))` → `sqrt(max(0, min(a, 1)))` защита от negative float
+10. **Alembic миграция `f7g8h9i0j1k2`** — удаление orphan-записей, NOT NULL + CASCADE, Text→JSON. Downgrade/upgrade идемпотентен.
+11. Поведенческие проверки: импорты OK, `from src.database` → 0, `except:pass` → 0, 53/53 тестов зелёные, миграция применена
 
 ### Что сделано в сессии (13.07.2026) — модуль анализа:
 1. `segment.py`: distance-based change points (`CHANGE_POINT_WINDOW_M=200` вместо 10 точек)
@@ -244,10 +260,10 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 - `3b4dd34` fix segmentation and tcx_parser import
 - `f1a60fa` feat: модуль анализа + новый алгоритм детекции интервалов
 - `99be684` fix: отладка и улучшение алгоритма анализа (40 тестов, 29 тренировок пересчитаны)
+- (текущий) Sprint 17: Data Integrity — NOT NULL FKs, cascade, JSON, валидация
 
 ### Следующие шаги (подготовка к модулю аналитики):
 Порядок выполнения — строго последовательный. Каждый спринт = behavioral test + CHANGELOG + commit.
-- **Sprint 17** (Data Integrity): nullable FK → NOT NULL, Text → JSON, FIT check_crc, input validation
 - **Sprint 18** (Architecture Cleanup): DRY (orchestrator, uploads, pace/weather helpers), split <400 files, graceful shutdown
 - **Sprint 19** (Documentation & Types): ARCHITECTURE.md, CODE_GUIDELINES.md, TypedDicts, type hints
 - **Sprint 20** (Tests): conftest, fixtures, ≥30 тестов

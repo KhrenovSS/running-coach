@@ -37,7 +37,8 @@ async def sync_activities_for_user(cred, brand: str,
             return parse_fit(tmp_path, max_hr=us.max_hr,
                              max_credible_pace=us.max_credible_pace,
                              max_gps_jump_m=us.max_gps_jump_m,
-                             min_hr_for_fast_pace=us.min_hr_for_fast_pace)
+                             min_hr_for_fast_pace=us.min_hr_for_fast_pace,
+                             coros_cadence_workaround=True)
         except Exception:
             logger.warning("Parse error for %s", act.get('name'), exc_info=True)
             return None

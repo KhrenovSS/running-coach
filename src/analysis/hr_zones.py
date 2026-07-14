@@ -13,6 +13,8 @@ def get_zone(hr: int, max_hr: int) -> int:
     Определить пульсовую зону (1-5) по пульсу и максимальному пульсу
     Determine HR zone (1-5) from heart rate and max HR
     """
+    if max_hr <= 0:
+        return 1
     pct = hr / max_hr * 100
     if pct <= HR_ZONE_1_MAX_PCT * 100:
         return 1

@@ -110,16 +110,13 @@ def check_telegram_login_token(db: Session, token: str) -> Optional[User]:
 
 def cleanup_expired_tokens(db: Session) -> int:
     """
-    Удалить просроченные использованные токены
-    Delete expired used tokens
+    Удалить просроченные (использованные и неиспользованные) токены
+    Delete expired tokens (both used and unused)
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=1)
+    now = datetime.now(timezone.utc)
     deleted = (
         db.query(AuthToken)
-        .filter(
-            AuthToken.used_at.isnot(None),
-            AuthToken.used_at < cutoff,
-        )
+        .filter(AuthToken.expires_at < now)
         .delete(synchronize_session=False)
     )
     db.commit()

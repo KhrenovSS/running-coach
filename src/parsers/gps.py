@@ -8,7 +8,7 @@ def haversine_m(lat1, lon1, lat2, lon2):
     dlat = radians(lat2 - lat1)
     dlon = radians(lon2 - lon1)
     a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
-    return 6371000 * 2 * asin(sqrt(min(a, 1)))
+    return 6371000 * 2 * asin(sqrt(max(0, min(a, 1))))
 
 
 def clean_trackpoints(trackpoints, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130):

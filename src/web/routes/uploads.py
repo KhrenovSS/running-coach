@@ -42,8 +42,15 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
         ext = os.path.splitext(file.filename or '')[1].lower()
         suffix = ".fit" if ext == ".fit" else ".tcx"
         uploaded_filenames.append(file.filename or "unknown")
+
+        contents = await file.read()
+        if len(contents) > 50 * 1024 * 1024:
+            logger.warning("Upload: file too large — %s (%d bytes)", file.filename, len(contents))
+            parse_errors.append(file.filename or "unknown")
+            continue
+
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            shutil.copyfileobj(file.file, tmp)
+            tmp.write(contents)
             tmp_path = tmp.name
         if ext == ".fit":
             data = parse_fit(tmp_path, max_hr=settings.max_hr,
