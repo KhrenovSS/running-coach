@@ -13,12 +13,6 @@ from src.config import settings
 logger = get_logger("telegram.handlers.sync")
 
 
-def _get_progress_message(step: str, progress: float) -> str:
-    filled = int(progress * 10)
-    bar = "█" * filled + "░" * (10 - filled)
-    return f"🔄 Синхронизация...\n{bar} {step}"
-
-
 async def cmd_sync(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user = get_user(chat_id)

@@ -2,6 +2,37 @@
 
 All notable changes to this project are tracked here.
 
+## [14.07.2026] — Sprint 18: Architecture Cleanup
+
+### Changed
+- **ARC-01** `src/services/sync/orchestrator.py` — DRY: `auto_sync_health` + `auto_sync_activities` → единая `_auto_sync(sync_type)` через `SYNC_CONFIG` (убрано ~150 строк дубляжа)
+- **ARC-02** `src/web/routes/uploads.py` — DRY: общий `_save_session_from_data()` + `_notify_new_session()` + `_build_rating_keyboard()` — тройное создание TrainingSession в одном месте
+- **ARC-03** `src/analysis/utils.py` — DRY: `compute_rolling_pace()` — rolling pace helper (250м окно), использован в `__init__.py` вместо 2 inline-циклов
+- **ARC-04** `src/analysis/segment_km.py` — DRY: `_chunk_by_km()` — km-chunking helper для `compute_km_variability` + `km_segment_fallback`
+- **ARC-05** `src/parsers/weather.py` — DRY: `_get_nearest()` — единый lookup вместо двух идентичных функций
+- **ARC-06** `src/analysis/segment.py` (436→312) + новый `src/analysis/segment_km.py` (140) — km-функции (_build_segment_stats, _compute_km_variability, _km_segment_fallback) вынесены в отдельный модуль
+- **ARC-07** `src/analysis/__init__.py` (387→227) — 6 helper-функций вынесены в `src/analysis/utils.py` (233): `interpolate_paces`, `smooth_paces`, `build_hr_pace_series`, `serialize_trackpoints`, `is_km_segmentation`, `compute_rolling_pace`
+- **ARC-08** `src/scheduler.py` — graceful shutdown: `_stop = threading.Event()`, `stop()` метод, `_stop.wait(SYNC_TICK_INTERVAL)` вместо `time.sleep`; `src/startup.py` — добавлен `on_shutdown()` с вызовом `AutoSyncScheduler().stop()`
+- **ARC-09** `run_telegram_bot.py`, `alembic/env.py` — `sys.path.insert` → `pip install -e .` (пакет установлен в .venv)
+- **ARC-10** `src/services/stats.py` — HTML-рендер (`render_zone_bars`, `render_type_row`, `build_nav_html`) → функции данных (`get_zone_bars_data`, `get_nav_data`); `src/web/templates/index.html` — Jinja2 loops для зон + навигации вместо `|safe`
+- **ARC-11** Dead code cleanup: `_get_progress_message` (sync.py), `ZONE_COLORS` (stats.py), `ValidationError` import (auth.py), `from datetime import timezone` (training_service.py)
+- `src/telegram/handlers/sync.py` — удалён мёртвый `_get_progress_message`
+- `src/web/routes/pages/index.py` — добавлен `_format_type_row` для форматирования типов тренировок
+
+### Fixed
+- Импорт `_km_segment_fallback` в `tests/test_segment.py` → `km_segment_fallback` из `segment_km`
+
+### Verified
+- `python -c "from src.telegram.main import run_bot"` — OK
+- `pip install -e .` — OK (пакет установлен в .venv)
+- `grep -rn "from src.database" src/` → 0
+- `grep -rn "except: pass\|except Exception: pass" src/` → 0
+- `grep -rn "Окторябрь" src/` → 0
+- `wc -l src/analysis/segment.py` ≤ 400
+- `wc -l src/analysis/__init__.py` ≤ 400
+- `pytest tests/ -v` → 56 passed
+- **Docker**: пересобрать `app` (изменены почти все модули)
+
 ## [14.07.2026] — Sprint 17: Data Integrity
 
 ### Changed

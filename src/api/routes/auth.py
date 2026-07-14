@@ -21,7 +21,6 @@ from src.services.auth import (
     authenticate_user,
 )
 from src.services.audit import AuditService
-from src.exceptions import ValidationError
 from src.utils.logger import get_logger
 from src.utils.rate_limit import rate_limit
 

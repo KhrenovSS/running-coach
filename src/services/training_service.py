@@ -5,7 +5,6 @@
 Encapsulates business logic extracted from pages.py routes (Phase B / AUDIT-013).
 """
 
-from datetime import timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session

@@ -11,6 +11,7 @@ class AutoSyncScheduler:
     _instance = None
     _lock = threading.Lock()
     _started = threading.Event()
+    _stop = threading.Event()
 
     def __new__(cls):
         if cls._instance is None:
@@ -24,14 +25,20 @@ class AutoSyncScheduler:
             if self._started.is_set():
                 return
             self._started.set()
+            self._stop.clear()
         thread = threading.Thread(target=self._loop, daemon=True, name="auto-sync-scheduler")
         thread.start()
         logger.info("Автосинхронизация: фоновый поток запущен (per-user intervals)")
 
+    def stop(self):
+        """Сигнал остановки планировщика (Signal scheduler to stop)"""
+        logger.info("Автосинхронизация: получен сигнал остановки")
+        self._stop.set()
+
     def _loop(self):
         logger.info("Автосинхронизация: запуск планировщика (tick=%dс, per-user intervals)", SYNC_TICK_INTERVAL)
         time.sleep(30)
-        while True:
+        while not self._stop.is_set():
             try:
                 auto_sync_health()
             except Exception:
@@ -40,4 +47,5 @@ class AutoSyncScheduler:
                 auto_sync_activities()
             except Exception:
                 logger.exception("Автосинхронизация: ошибка activity sync")
-            time.sleep(SYNC_TICK_INTERVAL)
+            # Ожидание с проверкой stop-сигнала (Wait with stop signal check)
+            self._stop.wait(SYNC_TICK_INTERVAL)

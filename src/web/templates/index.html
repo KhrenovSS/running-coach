@@ -209,7 +209,13 @@
                 <span>⏱ {{ week_dur }}</span>
             </div>
             <div style='font-size:12px;color:#888;margin-bottom:4px'>Пульс</div>
-            <div>{{ week_bars|safe }}</div>
+            {% for z in week_zones %}
+            <div style='display:flex;align-items:center;gap:6px;margin:3px 0;white-space:nowrap'>
+                <div style='width:90px;font-size:12px'>{{ z.label }} уд/мин</div>
+                <div style='height:20px;width:{{ z.pct }}%;background:{{ z.color }};border-radius:4px;min-width:4px'></div>
+                <div style='font-size:12px;color:#666;margin-left:4px'>{{ z.duration }}</div>
+            </div>
+            {% endfor %}
             <div style='font-size:13px;color:#555;margin-top:6px'>{{ week_types }}</div>
         </div>
         <div class='stats-card'>
@@ -219,7 +225,13 @@
                 <span>⏱ {{ month_dur }}</span>
             </div>
             <div style='font-size:12px;color:#888;margin-bottom:4px'>Пульс</div>
-            <div>{{ month_bars|safe }}</div>
+            {% for z in month_zones %}
+            <div style='display:flex;align-items:center;gap:6px;margin:3px 0;white-space:nowrap'>
+                <div style='width:90px;font-size:12px'>{{ z.label }} уд/мин</div>
+                <div style='height:20px;width:{{ z.pct }}%;background:{{ z.color }};border-radius:4px;min-width:4px'></div>
+                <div style='font-size:12px;color:#666;margin-left:4px'>{{ z.duration }}</div>
+            </div>
+            {% endfor %}
             <div style='font-size:13px;color:#555;margin-top:6px'>{{ month_types }}</div>
         </div>
         <div class='stats-card' id='recoveryCard' onclick='toggleRecoveryChart()' style='cursor:pointer'>
@@ -507,7 +519,19 @@
     </script>
 {% endraw %}
 
-    {{ nav_html|safe }}
+    <div class="ym-nav">
+        <div class="year-row">
+        {% for y in nav_years.keys() %}
+            <a href="/?year={{ y }}" class="ym-pill{% if y == nav_sel_year %} active-year{% endif %}">{{ y }}</a>
+        {% endfor %}
+        </div>
+        <div class="month-row">
+        {% for m in nav_years.get(nav_sel_year, []) %}
+            <a href="/?year={{ nav_sel_year }}&month={{ m }}" class="ym-pill{% if m == nav_sel_month %} active-month{% endif %}">{{ ['', 'Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'][m] }}</a>
+        {% endfor %}
+        </div>
+        <div class="ym-title">{{ nav_title }}</div>
+    </div>
     <table>
             <thead>
                 <tr><th>Дата</th><th>Длительность</th><th>Дист., км</th><th>Пульс, уд/мин</th><th>Тип</th><th>Каденс</th><th>Набор</th><th>Энергозатраты, ккал</th><th>Оценка</th></tr>

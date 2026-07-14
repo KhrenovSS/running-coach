@@ -1,12 +1,9 @@
 # Роуты для загрузки TCX/FIT-файлов (Upload TCX/FIT file routes)
 
 import os
-import json
-import shutil
 import tempfile
 import time
 import uuid
-import logging
 from pathlib import Path
 from fastapi import APIRouter, Depends, Form, Request, UploadFile, File
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -19,11 +16,60 @@ from src.utils.logger import get_logger
 from src.api.deps import get_current_user
 from src.services.audit import AuditService
 from src.services.telegram_notify import telegram_notify
-from src.web.state import _pending, _pending_lock, PENDING_DIR, _cleanup_stale_pending
+from src.web.state import _pending, _pending_lock, _cleanup_stale_pending
 from src.utils.rate_limit import rate_limit
 
 logger = get_logger("app")
 router = APIRouter()
+
+
+def _build_rating_keyboard(session_id: int) -> dict:
+    """Inline-клавиатура для оценки тренировки (Inline keyboard for training rating)"""
+    row1 = [{"text": str(i), "callback_data": f"feedback:{session_id}:{i}"} for i in range(0, 6)]
+    row2 = [{"text": str(i), "callback_data": f"feedback:{session_id}:{i}"} for i in range(6, 11)]
+    return {"inline_keyboard": [row1, row2]}
+
+
+def _save_session_from_data(data: dict, db: Session, current_user: User,
+                             pending: dict | None = None) -> TrainingSession:
+    """
+    Создать и сохранить TrainingSession из данных трекпоинтов.
+    Create and save a TrainingSession from trackpoint data.
+    """
+    cleaning_log_val = data.pop('cleaning_log', None)
+    flags_val = data.pop('suspect_flags', None)
+    trackpoints_json_val = data.pop('trackpoints_json', None)
+    session = TrainingSession(**data)
+    session.user_id = current_user.id
+    if cleaning_log_val:
+        session.cleaning_log = cleaning_log_val
+    if flags_val:
+        session.suspect_flags = flags_val
+    if trackpoints_json_val:
+        session.trackpoints_json = trackpoints_json_val
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def _notify_new_session(session: TrainingSession, current_user: User,
+                         source: str = "upload", filename: str = "unknown"):
+    """Отправить уведомление о новой тренировке в Telegram (Notify Telegram about new training)"""
+    type_labels = {'interval': 'Интервальная', 'tempo': 'Темповая', 'long': 'Длинная', 'recovery': 'Восстановительная'}
+    t_type = type_labels.get(session.training_type, session.training_type or '—')
+    telegram_notify(
+        user_id=current_user.id,
+        text=f"🏃 *Тренировка {'восстановлена!' if source == 'confirm_deleted' else 'загружена!'}*\n"
+             f"📅 {session.begin_ts.strftime('%d.%m.%Y %H:%M')}\n"
+             f"▫️ {session.total_distance_km:.1f} км\n"
+             f"▫️ {t_type}\n"
+             f"📂 {filename}\n\n"
+             f"Насколько тяжёлой была тренировка?\n"
+             f"`0` — легко\n"
+             f"`10` — очень тяжело",
+        reply_markup=_build_rating_keyboard(session.id),
+    )
 
 
 @router.post('/upload')
@@ -107,37 +153,14 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
             TrainingSession.user_id == current_user.id
         ).first()
         if not exists:
-            cleaning_log_val = data.pop('cleaning_log', None)
-            flags_val = data.pop('suspect_flags', None)
-            session = TrainingSession(**data)
-            session.user_id = current_user.id
-            if cleaning_log_val:
-                session.cleaning_log = cleaning_log_val
-            if flags_val:
-                session.suspect_flags = flags_val
             tz = data.get('timezone')
             if tz:
                 db_user = db.query(User).filter(User.id == current_user.id).first()
                 if db_user and not db_user.timezone:
                     db_user.timezone = tz
-            db.add(session)
-            db.commit()
-            db.refresh(session)
+            session = _save_session_from_data(data, db, current_user)
             saved += 1
-            row1 = [{"text": str(i), "callback_data": f"feedback:{session.id}:{i}"} for i in range(0, 6)]
-            row2 = [{"text": str(i), "callback_data": f"feedback:{session.id}:{i}"} for i in range(6, 11)]
-            telegram_notify(
-                user_id=current_user.id,
-                text=f"🏃 *Тренировка загружена!*\n"
-                     f"📅 {session.begin_ts.strftime('%d.%m.%Y %H:%M')}\n"
-                     f"▫️ {session.total_distance_km:.1f} км\n"
-                     f"▫️ {session.training_type or '—'}\n"
-                     f"📂 {file.filename or 'unknown'}\n\n"
-                     f"Насколько тяжёлой была тренировка?\n"
-                     f"`0` — легко\n"
-                     f"`10` — очень тяжело",
-                reply_markup={"inline_keyboard": [row1, row2]},
-            )
+            _notify_new_session(session, current_user, filename=file.filename or "unknown")
             audit.log_training_uploaded(
                 user_id=current_user.id,
                 training_id=session.id,
@@ -178,34 +201,10 @@ async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(
             TrainingSession.user_id == current_user.id
         ).first()
         if not exists:
-            cleaning_log_val = data.pop('cleaning_log', None)
-            flags_val = data.pop('suspect_flags', None)
-            trackpoints_json_val = data.pop('trackpoints_json', None)
-            session = TrainingSession(**data)
-            session.user_id = current_user.id
-            if cleaning_log_val:
-                session.cleaning_log = cleaning_log_val
-            if flags_val:
-                session.suspect_flags = flags_val
-            if trackpoints_json_val:
-                session.trackpoints_json = trackpoints_json_val
-            db.add(session)
-            db.commit()
-            db.refresh(session)
+            session = _save_session_from_data(data, db, current_user, pending)
             confirmed += 1
-            row1 = [{"text": str(i), "callback_data": f"feedback:{session.id}:{i}"} for i in range(0, 6)]
-            row2 = [{"text": str(i), "callback_data": f"feedback:{session.id}:{i}"} for i in range(6, 11)]
-            telegram_notify(
-                user_id=current_user.id,
-                text=f"🏃 *Тренировка восстановлена!*\n"
-                     f"📅 {session.begin_ts.strftime('%d.%m.%Y %H:%M')}\n"
-                     f"▫️ {session.total_distance_km:.1f} км\n"
-                     f"📂 {pending.get('filename', 'unknown')}\n\n"
-                     f"Насколько тяжёлой была тренировка?\n"
-                     f"`0` — легко\n"
-                     f"`10` — очень тяжело",
-                reply_markup={"inline_keyboard": [row1, row2]},
-            )
+            _notify_new_session(session, current_user, source="confirm_upload",
+                                filename=pending.get('filename', 'unknown'))
             audit.log_training_uploaded(
                 user_id=current_user.id,
                 training_id=session.id,
@@ -253,32 +252,9 @@ async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db
         TrainingSession.user_id == current_user.id
     ).first()
     if not exists:
-        cleaning_log_val = data.pop('cleaning_log', None)
-        flags_val = data.pop('suspect_flags', None)
-        trackpoints_json_val = data.pop('trackpoints_json', None)
-        session = TrainingSession(**data)
-        session.user_id = current_user.id
-        if cleaning_log_val:
-            session.cleaning_log = cleaning_log_val
-        if flags_val:
-            session.suspect_flags = flags_val
-        if trackpoints_json_val:
-            session.trackpoints_json = trackpoints_json_val
-        db.add(session)
-        db.commit()
-        db.refresh(session)
-        row1 = [{"text": str(i), "callback_data": f"feedback:{session.id}:{i}"} for i in range(0, 6)]
-        row2 = [{"text": str(i), "callback_data": f"feedback:{session.id}:{i}"} for i in range(6, 11)]
-        telegram_notify(
-            user_id=current_user.id,
-            text=f"🏃 *Ранее удалённая тренировка восстановлена!*\n"
-                 f"📅 {session.begin_ts.strftime('%d.%m.%Y %H:%M')}\n"
-                 f"▫️ {session.total_distance_km:.1f} км\n\n"
-                 f"Насколько тяжёлой была тренировка?\n"
-                 f"`0` — легко\n"
-                 f"`10` — очень тяжело",
-            reply_markup={"inline_keyboard": [row1, row2]},
-        )
+        session = _save_session_from_data(data, db, current_user, pending)
+        _notify_new_session(session, current_user, source="confirm_deleted",
+                            filename=pending.get('filename', 'unknown'))
         logger.info("Удалённая тренировка от %s повторно импортирована (Deleted training re-imported)", bt)
         audit.log_training_uploaded(
             user_id=current_user.id,

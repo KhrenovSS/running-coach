@@ -16,8 +16,6 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Метаданные моделей для autogenerate (Model metadata for autogenerate)
-import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.models import Base
 target_metadata = Base.metadata
 

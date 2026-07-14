@@ -50,35 +50,28 @@ def fetch_weather(lat, lon, date):
     return None
 
 
-def get_weather_code_at_time(weather, dt_local):
+def _get_nearest(weather, dt_local, key, cast=None):
+    """Найти ближайшее по времени значение в погодных данных (Find nearest value in weather data)"""
     if not weather:
         return None
     target_ts = dt_local.timestamp()
     best = None
     best_diff = float('inf')
-    for t, code in zip(weather["times"], weather["codes"]):
-        if code is None:
+    values = weather.get(key, [])
+    for t, val in zip(weather["times"], values):
+        if val is None:
             continue
         t_dt = datetime.fromisoformat(t)
         diff = abs(t_dt.timestamp() - target_ts)
         if diff < best_diff:
             best_diff = diff
-            best = int(code)
+            best = int(val) if cast == int else round(val)
     return best
+
+
+def get_weather_code_at_time(weather, dt_local):
+    return _get_nearest(weather, dt_local, "codes", cast=int)
 
 
 def get_temp_at_time(weather, dt_local):
-    if not weather:
-        return None
-    target_ts = dt_local.timestamp()
-    best = None
-    best_diff = float('inf')
-    for t, temp in zip(weather["times"], weather["temps"]):
-        if temp is None:
-            continue
-        t_dt = datetime.fromisoformat(t)
-        diff = abs(t_dt.timestamp() - target_ts)
-        if diff < best_diff:
-            best_diff = diff
-            best = round(temp)
-    return best
+    return _get_nearest(weather, dt_local, "temps")

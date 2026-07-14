@@ -74,4 +74,11 @@ def create_app():
     app.include_router(web_router)
     os.makedirs("uploads", exist_ok=True)
     app.on_event("startup")(on_startup)
+    app.on_event("shutdown")(on_shutdown)
     return app
+
+
+def on_shutdown():
+    """Graceful shutdown: остановка планировщика (Stop scheduler gracefully)"""
+    from src.scheduler import AutoSyncScheduler
+    AutoSyncScheduler().stop()

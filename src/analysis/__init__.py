@@ -10,36 +10,14 @@ from src.analysis.hr_zones import get_zone
 from src.analysis.segment import build_time_in_zones, segment_by_pace
 from src.analysis.classify import classify_training
 from src.analysis.oscillation import detect_pace_oscillations, compute_hr_lag_correlation
-from src.analysis.utils import format_duration, calc_elevation, find_timezone
+from src.analysis.utils import (
+    format_duration, calc_elevation, find_timezone,
+    compute_rolling_pace, interpolate_paces, smooth_paces,
+    is_km_segmentation, serialize_trackpoints, build_hr_pace_series,
+)
 from src.config import settings
 
 logger = get_logger("analysis")
-
-
-def _is_km_segmentation(segments: list[dict], total_dist_km: float) -> bool:
-    """
-    Проверить, являются ли сегменты км-блоками.
-    Check if segments are km-based blocks.
-    Км-блок: все сегменты ~1.0км (±0.15), последний может быть короче.
-    """
-    if not segments:
-        return False
-    num_km = max(1, int(total_dist_km))
-    # Если сегментов примерно столько же, сколько км (±1)
-    if abs(len(segments) - num_km) > 1 and abs(len(segments) - (num_km + 1)) > 1:
-        return False
-    # Проверяем расстояния
-    for i, s in enumerate(segments):
-        d = s.get('distance_km', 0)
-        if i < len(segments) - 1:
-            # Полные км: 0.85-1.15
-            if d < 0.85 or d > 1.15:
-                return False
-        else:
-            # Последний сегмент может быть любым (< 1.15)
-            if d > 1.15:
-                return False
-    return True
 
 
 def process_trackpoints(trackpoints: list[dict], start_time_utc: datetime,
@@ -130,28 +108,14 @@ def process_trackpoints(trackpoints: list[dict], start_time_utc: datetime,
         max_credible_pace=max_credible_pace,
     )
 
-    # НОВОЕ: осцилляции темпа + HR-lag корреляция
-    # (NEW: pace oscillations + HR lag correlation)
+    # Осцилляции темпа + HR-lag корреляция (Pace oscillations + HR lag correlation)
     oscillation_count = 0
     hr_correlated = False
     if len(times) >= 10:
-        # Сгладить темп для осцилляций (Smooth pace for oscillation detection)
-        raw_pace_for_osc = [None] * len(times)
-        pace_dist = 250
-        for i in range(len(times)):
-            lo = i
-            while lo >= 0 and dists[i] - dists[lo] < pace_dist:
-                lo -= 1
-            lo = max(0, lo)
-            d_dist = dists[i] - dists[lo]
-            d_time = times[i] - times[lo]
-            if d_time >= 10 and d_dist >= 100:
-                raw_pace_for_osc[i] = (d_time / 60) / (d_dist / 1000)
-
-        # Заполнить пропуски линейной интерполяцией (Fill gaps with linear interpolation)
-        filled_paces = _interpolate_paces(raw_pace_for_osc)
+        raw_pace_for_osc = compute_rolling_pace(times, dists)
+        filled_paces = interpolate_paces(raw_pace_for_osc)
         if filled_paces:
-            smoothed_osc = _smooth_paces_for_oscillation(filled_paces)
+            smoothed_osc = smooth_paces(filled_paces)
             oscillation_count, _ = detect_pace_oscillations(
                 smoothed_osc, times, pace_gap=pace_gap,
                 min_phase_duration_sec=interval_min_phase_duration,
@@ -160,10 +124,9 @@ def process_trackpoints(trackpoints: list[dict], start_time_utc: datetime,
                 times, filled_paces, hrs, lag_sec=interval_hr_lag_sec,
             )
 
-    # Проверка: если сегменты — км-блоки (все ~1.0км, кроме последнего),
-    # то это не интервальная тренировка — сбрасываем сигналы интервалов
+    # Проверка: если сегменты — км-блоки, сбрасываем сигналы интервалов
     # (Check: if segments are km-based blocks, don't classify as interval)
-    if _is_km_segmentation(segments, total_dist_km):
+    if is_km_segmentation(segments, total_dist_km):
         var_count = 0
         oscillation_count = 0
         hr_correlated = False
@@ -176,7 +139,7 @@ def process_trackpoints(trackpoints: list[dict], start_time_utc: datetime,
         min_oscillations=interval_min_oscillations,
     )
 
-    hr_pace_series = _build_hr_pace_series(times, hrs, dists, var_count)
+    hr_pace_series = build_hr_pace_series(times, hrs, dists, var_count)
 
     positions = [(tp['lat'], tp['lon']) for tp in trackpoints if tp['lat'] is not None and tp['lon'] is not None]
     tz_name = find_timezone(positions)
@@ -227,7 +190,7 @@ def process_trackpoints(trackpoints: list[dict], start_time_utc: datetime,
         'elevation_loss': total_elevation_loss,
         'avg_cadence': avg_cadence,
         'timezone': tz_name,
-        'trackpoints_json': _serialize_trackpoints(trackpoints),
+        'trackpoints_json': serialize_trackpoints(trackpoints),
     }
 
     if cleaning_log:
@@ -261,127 +224,4 @@ def _empty_result(start_time_utc: datetime, cleaning_log: list) -> dict:
     }
 
 
-def _interpolate_paces(raw_paces: list[float | None]) -> list[float]:
-    """Линейная интерполяция пропусков в темпе (Linear interpolation for pace gaps)"""
-    result = list(raw_paces)
-    for i in range(len(result)):
-        if result[i] is None:
-            prev_val = None
-            next_val = None
-            for j in range(i-1, -1, -1):
-                if result[j] is not None:
-                    prev_val = result[j]
-                    break
-            for j in range(i+1, len(result)):
-                if result[j] is not None:
-                    next_val = result[j]
-                    break
-            if prev_val is not None and next_val is not None:
-                result[i] = (prev_val + next_val) / 2
-            elif prev_val is not None:
-                result[i] = prev_val
-            elif next_val is not None:
-                result[i] = next_val
-    return [p if p is not None else 5.0 for p in result]
 
-
-def _smooth_paces_for_oscillation(paces: list[float], window: int = 5) -> list[float]:
-    """Сглаживание темпа для детекции осцилляций (Smooth pace for oscillation detection)"""
-    n = len(paces)
-    return [sum(paces[max(0, i-window):min(n, i+window+1)]) /
-            (min(n, i+window+1) - max(0, i-window))
-            for i in range(n)]
-
-
-def _build_hr_pace_series(times: list[float], hrs: list[int], dists: list[float],
-                           var_count: int) -> list[dict]:
-    """Построить двойную сглаженную серию пульс/темп для графика"""
-    if len(times) < 2:
-        return []
-
-    hr_window = 5 if var_count >= 3 else 40
-    smoothed_hrs = list(hrs)
-    for i in range(len(hrs)):
-        weighted_sum = 0.0
-        total_weight = 0.0
-        for j in range(len(hrs)):
-            dt = abs(times[i] - times[j])
-            if dt < hr_window:
-                w = 1.0 - dt / hr_window
-                weighted_sum += hrs[j] * w
-                total_weight += w
-        if total_weight > 0:
-            smoothed_hrs[i] = round(weighted_sum / total_weight, 1)
-
-    raw_pace = [None] * len(times)
-    pace_dist = 250
-    for i in range(len(times)):
-        lo = i
-        while lo >= 0 and dists[i] - dists[lo] < pace_dist:
-            lo -= 1
-        lo = max(0, lo)
-        d_dist = dists[i] - dists[lo]
-        d_time = times[i] - times[lo]
-        if d_time >= 10 and d_dist >= 100:
-            raw_pace[i] = (d_time / 60) / (d_dist / 1000)
-
-    pace_window = 45
-    smoothed_pace = [None] * len(times)
-    for i in range(len(times)):
-        if raw_pace[i] is None:
-            continue
-        weighted_sum = 0.0
-        total_weight = 0.0
-        for j in range(len(times)):
-            if raw_pace[j] is None:
-                continue
-            dt = abs(times[i] - times[j])
-            if dt < pace_window:
-                w = 1.0 - dt / pace_window
-                weighted_sum += raw_pace[j] * w
-                total_weight += w
-        if total_weight > 0:
-            smoothed_pace[i] = weighted_sum / total_weight
-
-    hr_pace_series = []
-    for i in range(len(times)):
-        if smoothed_pace[i] is None:
-            continue
-        weighted_sum = 0.0
-        total_weight = 0.0
-        for j in range(len(times)):
-            if smoothed_pace[j] is None:
-                continue
-            dt = abs(times[i] - times[j])
-            if dt < pace_window:
-                w = 1.0 - dt / pace_window
-                weighted_sum += smoothed_pace[j] * w
-                total_weight += w
-        if total_weight > 0:
-            pace_val = weighted_sum / total_weight
-            if 3.0 < pace_val < 10.0:
-                hr_pace_series.append({
-                    'dist_km': round(dists[i] / 1000, 3),
-                    'hr': smoothed_hrs[i],
-                    'pace': round(pace_val, 2),
-                })
-
-    return hr_pace_series
-
-
-def _serialize_trackpoints(trackpoints: list[dict]) -> list[dict]:
-    """
-    Сериализовать трекпоинты для JSON-хранилища (Serialize trackpoints for JSON storage)
-    Конвертирует datetime → ISO-строку для JSON. Сохраняет None-значения
-    для обратной совместимости при восстановлении.
-    """
-    result = []
-    for tp in trackpoints:
-        serialized = {}
-        for k, v in tp.items():
-            if hasattr(v, 'isoformat'):
-                serialized[k] = v.isoformat()
-            else:
-                serialized[k] = v
-        result.append(serialized)
-    return result

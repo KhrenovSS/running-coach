@@ -173,6 +173,24 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 
 **Sprint 17 ✅:** Data Integrity — nullable FK → NOT NULL + ON DELETE CASCADE (6 таблиц); Text→JSON для `sleep_hrv_interval_list` и `metadata_json`; `fit_parser.py`: `check_crc=True`, cadence workaround как `coros_cadence_workaround` параметр; `auth.py`: cleanup удаляет expired+неиспользованные токены; валидация ввода: размер файла ≤50MB, email regex, вес 30-250кг; защита `max_hr=0` и `sqrt(negative)` в gps.py. 53/53 тестов зелёные.
 
+**Sprint 18 ✅:** Architecture Cleanup — DRY orchestrator (2 × 150 строк → 1 параметризованная `_auto_sync`), DRY uploads (общий `_save_session_from_data`), rolling pace window helper (compute_rolling_pace), km-chunking helper (`_chunk_by_km`), weather lookup DRY (`_get_nearest`). split segment.py (436→312) + segment_km.py (140). split analysis/__init__.py (387→227) — 6 helpers в utils.py (233). graceful shutdown (scheduler stop Event). pip install -e . вместо sys.path.insert (2 файла). HTML из stats.py в Jinja2 шаблоны (zone bars, nav). dead code cleanup (4 элемента). 56/56 тестов зелёные.
+
+### Что сделано в сессии (14.07.2026) — Sprint 18 / Architecture Cleanup:
+
+1. **ARC-01**: `src/services/sync/orchestrator.py` — `auto_sync_health` + `auto_sync_activities` → единая `_auto_sync(sync_type)` через `SYNC_CONFIG` словарь (~150 строк дубляжа убрано)
+2. **ARC-02**: `src/web/routes/uploads.py` — общий `_save_session_from_data()` + `_notify_new_session()` + `_build_rating_keyboard()` — тройной дубль создания TrainingSession убран
+3. **ARC-03**: `src/analysis/utils.py` — `compute_rolling_pace()` — rolling pace helper (250м окно), использован в `__init__.py` (2 места)
+4. **ARC-04**: `src/analysis/segment_km.py` — `_chunk_by_km()` — km-chunking helper, использован в `compute_km_variability` + `km_segment_fallback`
+5. **ARC-05**: `src/parsers/weather.py` — `_get_nearest()` — единый lookup для `get_weather_code_at_time` + `get_temp_at_time`
+6. **ARC-06**: `src/analysis/segment.py` (436→312) + новый `src/analysis/segment_km.py` (140) — km-функции вынесены в отдельный модуль
+7. **ARC-07**: `src/analysis/__init__.py` (387→227) — 6 helper-функций (`_interpolate_paces`, `_smooth_paces_for_oscillation`, `_build_hr_pace_series`, `_serialize_trackpoints`, `_is_km_segmentation`) вынесены в `src/analysis/utils.py` (233)
+8. **ARC-08**: `src/scheduler.py` — `_stop = threading.Event()`, `stop()`, `_stop.wait()`; `src/startup.py` — `on_shutdown()` + `AutoSyncScheduler().stop()`
+9. **ARC-09**: `run_telegram_bot.py` + `alembic/env.py` — `sys.path.insert` → `pip install -e .`
+10. **ARC-10**: `src/services/stats.py` — `render_zone_bars` + `render_type_row` + `build_nav_html` → `get_zone_bars_data` + `get_nav_data` (данные, не HTML); `src/web/templates/index.html` — Jinja2 loops для зон + навигации
+11. **ARC-11**: Dead code cleanup — `_get_progress_message` (sync.py), `ZONE_COLORS` (stats.py), `ValidationError` import (auth.py), `from datetime import timezone` (training_service.py)
+12. **ARC-12**: Проверено: опечатка `Окторябрь` — уже исправлена в Sprint 16
+13. Поведенческие проверки: импорты OK, `from src.database` → 0, `except:pass` → 0, Окторябрь → 0, 56/56 тестов зелёные, pip install -e . работает
+
 ### Что сделано в сессии (14.07.2026) — Sprint 17 / Data Integrity:
 
 1. **DI-01**: `src/domain/models/training.py`, `health.py`, `audit.py` — `user_id` FK: `nullable=True` → `nullable=False`, добавлен `ondelete='CASCADE'`
@@ -264,7 +282,6 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 
 ### Следующие шаги (подготовка к модулю аналитики):
 Порядок выполнения — строго последовательный. Каждый спринт = behavioral test + CHANGELOG + commit.
-- **Sprint 18** (Architecture Cleanup): DRY (orchestrator, uploads, pace/weather helpers), split <400 files, graceful shutdown
 - **Sprint 19** (Documentation & Types): ARCHITECTURE.md, CODE_GUIDELINES.md, TypedDicts, type hints
 - **Sprint 20** (Tests): conftest, fixtures, ≥30 тестов
 

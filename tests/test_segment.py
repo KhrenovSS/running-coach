@@ -1,9 +1,10 @@
 # Тесты сегментации тренировок (Segmentation tests)
 from datetime import datetime, timedelta, timezone
 from src.analysis.segment import (
-    segment_by_pace, build_time_in_zones, _km_segment_fallback,
+    segment_by_pace, build_time_in_zones,
     _adaptive_min_diff, _find_change_points,
 )
+from src.analysis.segment_km import km_segment_fallback
 from tests.helpers import (
     build_interval_trackpoints, build_tempo_trackpoints,
     build_recovery_trackpoints,
@@ -66,7 +67,7 @@ class TestKmSegmentFallback:
         """Км-fallback: полные км + последний неполный"""
         start = datetime(2026, 7, 1, 8, 0, 0, tzinfo=timezone.utc)
         tps = build_tempo_trackpoints(pace=5.0, distance_km=7.3, hr=140, start_time=start)
-        segments, var_count = _km_segment_fallback(tps, max_hr=177, total_dist_km=7.3)
+        segments, var_count = km_segment_fallback(tps, max_hr=177, total_dist_km=7.3)
         assert len(segments) == 8  # 7 полных + 1 неполный
         total_dist = sum(s['distance_km'] for s in segments)
         assert abs(total_dist - 7.3) < 0.2
@@ -75,7 +76,7 @@ class TestKmSegmentFallback:
         """Короткая тренировка < 1 км → 1 сегмент"""
         start = datetime(2026, 7, 1, 8, 0, 0, tzinfo=timezone.utc)
         tps = build_tempo_trackpoints(pace=5.0, distance_km=0.7, hr=130, start_time=start)
-        segments, var_count = _km_segment_fallback(tps, max_hr=177, total_dist_km=0.7)
+        segments, var_count = km_segment_fallback(tps, max_hr=177, total_dist_km=0.7)
         assert len(segments) == 1
         assert segments[0]['distance_km'] > 0
 

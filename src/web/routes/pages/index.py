@@ -12,13 +12,24 @@ from sqlalchemy.orm import Session
 from src.models import get_db, User, TrainingSession, DailyMetrics, WeightMeasurement, WatchCredential, TrainingFeedback, get_settings
 from src.deps import templates
 from src.api.deps import get_current_user
-from src.services.stats import fmt_duration, calc_stats, render_zone_bars, render_type_row, build_nav_html
+from src.services.stats import fmt_duration, calc_stats, get_zone_bars_data, get_nav_data
 from src.config import settings
 from src.services.recovery_view import hrv_status, tired_label, readiness_label
 from src.services.sync import get_auto_sync_status_snapshot
 from src.web.state import TRAINING_TYPES_RU
 
 router = APIRouter()
+
+
+def _format_type_row(type_count):
+    """Форматировать строку с типами тренировок (Format training type row)"""
+    labels = {'interval': 'Интервальная', 'tempo': 'Темповая', 'long': 'Длинная', 'recovery': 'Восстановительная'}
+    parts = []
+    for key, label in labels.items():
+        c = type_count.get(key, 0)
+        if c:
+            parts.append(f"{label}: {c}")
+    return ", ".join(parts) if parts else "—"
 
 
 def render_page(db, user_id: int, user_name: str = "Бегун", year=None, month=None, tz_str=None):
@@ -40,12 +51,11 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
         week_stats = calc_stats(week_sessions)
         month_stats = calc_stats(month_sessions)
 
-    nav_html = ""
+    nav_years = {}
+    nav_title = ""
     sel_year, sel_month = year, month
     if all_sessions:
-        nav_result = build_nav_html(all_sessions, sel_year, sel_month)
-        if nav_result:
-            nav_html, sel_year, sel_month = nav_result
+        nav_years, sel_year, sel_month, nav_title = get_nav_data(all_sessions, sel_year, sel_month)
 
     if sel_year and sel_month:
         filtered = [s for s in all_sessions if s.begin_ts and s.begin_ts.year == sel_year and s.begin_ts.month == sel_month]
@@ -102,10 +112,10 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
     if not rows:
         rows = "<tr><td colspan='9' style='color:#888;padding:30px;'>Нет тренировок за выбранный период</td></tr>"
 
-    week_bars = render_zone_bars(week_stats['zone_min'], week_stats['total_min'], settings.max_hr) if week_stats else ""
-    month_bars = render_zone_bars(month_stats['zone_min'], month_stats['total_min'], settings.max_hr) if month_stats else ""
-    week_types = render_type_row(week_stats['type_count']) if week_stats else ""
-    month_types = render_type_row(month_stats['type_count']) if month_stats else ""
+    week_zones = get_zone_bars_data(week_stats['zone_min'], week_stats['total_min'], settings.max_hr) if week_stats else []
+    month_zones = get_zone_bars_data(month_stats['zone_min'], month_stats['total_min'], settings.max_hr) if month_stats else []
+    week_types = _format_type_row(week_stats['type_count']) if week_stats else ""
+    month_types = _format_type_row(month_stats['type_count']) if month_stats else ""
 
     latest_rm = recovery_metrics[0] if recovery_metrics else None
     if latest_rm:
@@ -147,17 +157,20 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
     user_header = f"👤 {user_name} | <a href='/auth/logout'>Выйти</a>"
     return {
         "rows": rows,
-        "nav_html": nav_html,
+        "nav_years": nav_years,
+        "nav_sel_year": sel_year,
+        "nav_sel_month": sel_month,
+        "nav_title": nav_title,
         "user_header": user_header,
         "max_hr": settings.max_hr,
         "weight": settings.weight,
         "week_km": week_stats['total_km'] if week_stats else 0,
         "week_dur": week_stats['total_dur'] if week_stats else "",
-        "week_bars": week_bars,
+        "week_zones": week_zones,
         "week_types": week_types,
         "month_km": month_stats['total_km'] if month_stats else 0,
         "month_dur": month_stats['total_dur'] if month_stats else "",
-        "month_bars": month_bars,
+        "month_zones": month_zones,
         "month_types": month_types,
         "weight_json": weight_json,
         "recovery_json": recovery_json,
