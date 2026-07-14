@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from src.models import get_db, User, WatchCredential
 from src.api.deps import get_current_user
-from src.services.sync_service import run_sync_for_user
+from src.services.sync import run_sync_for_user
 from src.web.state import _pending, _sync_tasks, _sync_tasks_lock
 
 from src.utils.logger import get_logger

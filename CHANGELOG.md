@@ -2,6 +2,42 @@
 
 All notable changes to this project are tracked here.
 
+## [14.07.2026] — Sprint 11: Разбивка models.py + sync_service.py на пакеты
+
+### Changed
+- **`src/domain/`** — новый доменный слой (AUDIT-005):
+  - `src/domain/models/base.py` — `Base`, `utcnow`, `get_engine`, `SessionLocal`, `get_db`, `init_db`
+  - `src/domain/models/user.py` — модель `User`
+  - `src/domain/models/training.py` — `TrainingSession`, `TrainingFeedback`, `DeletedTraining`
+  - `src/domain/models/watch.py` — `WatchCredential`
+  - `src/domain/models/health.py` — `DailyMetrics`, `WeightMeasurement`
+  - `src/domain/models/auth.py` — `AuthToken`
+  - `src/domain/models/audit.py` — `AuditEvent`
+  - `src/domain/models/__init__.py` — реэкспорт всех моделей для обратной совместимости
+- **`src/models.py`** — конвертирован в shim (реэкспорт из `src.domain.models` + хелперы `get_settings`, `get_user_by_telegram`, `get_or_create_user_by_telegram`, `get_user`)
+- **`src/services/sync/`** — новый пакет синхронизации (AUDIT-004):
+  - `src/services/sync/utils.py` — `SYNC_TICK_INTERVAL`, `_auto_sync_status`, `_auto_sync_status_lock`, `get_activity_interval_seconds`, `get_health_interval_seconds`, `_is_sync_due`, `_make_client`
+  - `src/services/sync/health.py` — `save_dashboard_data`, `sync_health_for_user`
+  - `src/services/sync/activities.py` — `sync_activities_for_user`
+  - `src/services/sync/orchestrator.py` — `run_sync_for_user`, `auto_sync_health`, `auto_sync_activities`
+  - `src/services/sync/__init__.py` — реэкспорт для обратной совместимости
+- **`src/services/sync_service.py`** — заменён на shim с `DeprecationWarning`
+
+### Updated imports
+- `src/scheduler.py` — `from src.services.sync import ...`
+- `src/web/routes/sync.py` — `from src.services.sync import run_sync_for_user`
+- `src/web/routes/pages/index.py` — `from src.services.sync import _auto_sync_status, _auto_sync_status_lock`
+- `src/telegram/sync_runner.py` — `from src.services.sync.health import ...; from src.services.sync.activities import ...`
+
+### Verified
+- `python -c "from src.models import SessionLocal, User; print('OK')"` — shim работает
+- `python -c "from src.domain.models.user import User; print('OK')"` — domain работает
+- `python -c "from src.services.sync import run_sync_for_user; print('OK')"` — sync package работает
+- `GET /health/` — database=ok, migrations=ok
+- Docker app пересобран и запущен
+
+---
+
 ## [14.07.2026] — Bugfix: Weight save через Telegram (полный цикл исправлений)
 
 ### Fixed

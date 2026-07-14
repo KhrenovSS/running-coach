@@ -250,7 +250,17 @@ running-coach/
 │   │   ├── sync_runner.py            #   run_sync_in_thread
 │   │   ├── handlers/                 #   start, sync, stats, trainings, weight, account, feedback
 │   │   └── jobs/                     #   weight, recovery
-│   ├── models.py                    # SQLAlchemy‑модели (User, TrainingSession, WatchCredential, …)
+│   ├── models.py                    # Shim: реэкспорт из src/domain/models/ + хелперы
+│   ├── domain/
+│   │   └── models/                  # Доменные модели (User, TrainingSession, WatchCredential, …)
+│   │       ├── __init__.py          #   реэкспорт всех моделей
+│   │       ├── base.py              #   Base, utcnow, get_engine, SessionLocal, get_db, init_db
+│   │       ├── user.py              #   User
+│   │       ├── training.py          #   TrainingSession, TrainingFeedback, DeletedTraining
+│   │       ├── watch.py             #   WatchCredential
+│   │       ├── health.py            #   DailyMetrics, WeightMeasurement
+│   │       ├── auth.py              #   AuthToken
+│   │       └── audit.py             #   AuditEvent
 │   ├── watch/                       # Мульти-брендовая абстракция часов
 │   │   ├── __init__.py              #   register("coros", CorosWatchClient)
 │   │   ├── base.py                  #   BaseWatchClient(ABC)
@@ -286,7 +296,13 @@ running-coach/
 │   │   ├── audit.py                 # AuditService (БД + файл)
 │   │   ├── auth.py                  # bcrypt, токены входа
 │   │   ├── async_utils.py           # run_async_in_thread(coro)
-│   │   ├── sync_service.py          # Brand-agnostic sync (оркестрация + run_sync_for_user)
+│   │   ├── sync/                    # Пакет синхронизации
+│   │   │   ├── __init__.py          #   реэкспорт (run_sync_for_user, etc.)
+│   │   │   ├── utils.py             #   SYNC_TICK_INTERVAL, интервалы, _make_client
+│   │   │   ├── health.py            #   save_dashboard_data, sync_health_for_user
+│   │   │   ├── activities.py        #   sync_activities_for_user
+│   │   │   └── orchestrator.py      #   run_sync_for_user, auto_sync_health, auto_sync_activities
+│   │   ├── sync_service.py          # Shim: DeprecationWarning (обратная совместимость)
 │   │   ├── watch_credentials.py     # upsert_watch_credential()
 │   │   ├── training_service.py      #   delete_training(), upsert_feedback()
 │   │   ├── reanalyze.py             #   пересчёт тренировок из trackpoints_json

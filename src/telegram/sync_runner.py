@@ -22,10 +22,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from src.models import SessionLocal, User, WatchCredential
 from src.services.audit import AuditService
 from src.services.async_utils import run_async_in_thread
-from src.services.sync_service import (
-    sync_activities_for_user,
-    sync_health_for_user,
-)
+from src.services.sync.health import sync_health_for_user
+from src.services.sync.activities import sync_activities_for_user
 from src.utils.logger import get_logger
 
 logger = get_logger("telegram.sync_runner")

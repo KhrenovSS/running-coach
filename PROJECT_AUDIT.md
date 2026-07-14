@@ -180,9 +180,9 @@ tests/
 
 ---
 
-#### AUDIT-004 — `src/services/sync_service.py` God Object (518 строк)
+#### AUDIT-004 — `src/services/sync_service.py` God Object (518 строк) ✅ Sprint 11
 
-**Файл:** `src/services/sync_service.py` (518 строк)
+**Файл:** `src/services/sync_service.py` (518 строк → shim с DeprecationWarning)
 
 **Проблема:** Мешает:
 - Activity sync
@@ -192,18 +192,19 @@ tests/
 - Dashboard data
 - Audit events
 
-**Решение:** Разбить по доменам:
+**Решение:** Разбить по доменам: ✅ выполнено в Sprint 11.
 ```
-src/services/
-  sync_service.py     (только оркестрация: auto_sync_health, auto_sync_activities)
-  sync_health.py      (sync_health_for_user, save_dashboard_data)
-  sync_activities.py  (sync_activities_for_user)
-  sync_utils.py       (get_activity_interval_seconds, get_health_interval_seconds,
-                       _is_sync_due, _make_client)
+src/services/sync/           # Пакет синхронизации
+  utils.py                   # SYNC_TICK_INTERVAL, интервалы, _make_client
+  health.py                  # save_dashboard_data, sync_health_for_user
+  activities.py              # sync_activities_for_user
+  orchestrator.py            # run_sync_for_user, auto_sync_health, auto_sync_activities
+  __init__.py                # реэкспорт
 ```
 
 **DoD:**
-- [ ] `wc -l src/services/sync_service*.py` каждый < 200 строк
+- [x] `wc -l src/services/sync/*.py` каждый < 200 строк
+- [x] shim с DeprecationWarning для обратной совместимости
 
 ---
 
@@ -262,30 +263,30 @@ src/services/
 
 ### 🟠 P1 — Важно
 
-#### AUDIT-005 — `src/models.py` God Object (344 строки)
+#### AUDIT-005 — `src/models.py` God Object (344 строки) ✅ Sprint 11
 
-**Файл:** `src/models.py` (344 строки, 9+ моделей, 8 функций)
+**Файл:** `src/models.py` (344 строки → shim с реэкспортами + хелперы)
 
 **Проблема:** Все ORM модели + вспомогательные функции в одном файле.
 
-**Решение:** Разделить по доменам:
+**Решение:** Разделить по доменам: ✅ выполнено в Sprint 11.
 ```
 src/domain/models/
-  __init__.py
-  base.py            (Base, utcnow, get_engine, SessionLocal, get_db, init_db)
-  user.py            (User)
-  training.py        (TrainingSession, TrainingFeedback, DeletedTraining)
-  watch.py           (WatchCredential)
-  health.py          (DailyMetrics, WeightMeasurement)
-  auth.py            (AuthToken, AuthEvent -> AuditEvent)
-  audit.py           (AuditEvent)
+  __init__.py        # реэкспорт всех моделей
+  base.py            # Base, utcnow, get_engine, SessionLocal, get_db, init_db
+  user.py            # User
+  training.py        # TrainingSession, TrainingFeedback, DeletedTraining
+  watch.py           # WatchCredential
+  health.py          # DailyMetrics, WeightMeasurement
+  auth.py            # AuthToken
+  audit.py           # AuditEvent
 ```
 
 **DoD:**
-- [ ] `src/models.py` удалён или пустой
-- [ ] Все импорты обновлены
-- [ ] Alembic миграции работают
-- [ ] Docker пересобран
+- [x] `src/models.py` конвертирован в shim (реэкспорт + хелперы get_settings, get_user, etc.)
+- [x] Все импорты обновлены (алиасы сохранены для обратной совместимости)
+- [x] Alembic миграции работают (shim сохраняет `from src.models import Base`)
+- [x] Docker пересобран
 
 ---
 
@@ -526,25 +527,26 @@ tests/fixtures/
 
 ---
 
-### Спринт 11 — Разделение models.py + sync_service (1-2 дня) — P1
+### Спринт 11 — Разделение models.py + sync_service (1-2 дня) — P1 ✅
 
 **Задачи:**
-- [ ] **AUDIT-005-1**: Создать `src/domain/` пакет
-- [ ] **AUDIT-005-2**: `src/domain/models/base.py` — Base, utcnow, get_engine, SessionLocal, get_db, init_db
-- [ ] **AUDIT-005-3**: `src/domain/models/user.py` — User
-- [ ] **AUDIT-005-4**: `src/domain/models/training.py` — TrainingSession, TrainingFeedback, DeletedTraining
-- [ ] **AUDIT-005-5**: `src/domain/models/watch.py` — WatchCredential
-- [ ] **AUDIT-005-6**: `src/domain/models/health.py` — DailyMetrics, WeightMeasurement
-- [ ] **AUDIT-005-7**: `src/domain/models/auth.py` — AuthToken
-- [ ] **AUDIT-005-8**: `src/domain/models/audit.py` — AuditEvent
-- [ ] **AUDIT-004-1**: Создать `src/services/sync_activities.py`
-- [ ] **AUDIT-004-2**: Создать `src/services/sync_health.py`
-- [ ] **AUDIT-004-3**: Создать `src/services/sync_utils.py`
+- [x] **AUDIT-005-1**: Создать `src/domain/` пакет
+- [x] **AUDIT-005-2**: `src/domain/models/base.py` — Base, utcnow, get_engine, SessionLocal, get_db, init_db
+- [x] **AUDIT-005-3**: `src/domain/models/user.py` — User
+- [x] **AUDIT-005-4**: `src/domain/models/training.py` — TrainingSession, TrainingFeedback, DeletedTraining
+- [x] **AUDIT-005-5**: `src/domain/models/watch.py` — WatchCredential
+- [x] **AUDIT-005-6**: `src/domain/models/health.py` — DailyMetrics, WeightMeasurement
+- [x] **AUDIT-005-7**: `src/domain/models/auth.py` — AuthToken
+- [x] **AUDIT-005-8**: `src/domain/models/audit.py` — AuditEvent
+- [x] **AUDIT-004-1**: Создать `src/services/sync/activities.py`
+- [x] **AUDIT-004-2**: Создать `src/services/sync/health.py`
+- [x] **AUDIT-004-3**: Создать `src/services/sync/utils.py`
+- [x] **AUDIT-004-4**: Создать `src/services/sync/orchestrator.py`
 - [x] **AUDIT-006**: Единый entry point `run_sync_for_user()` в sync_service.py (web; Telegram — TODO, обоснованно)
-- [ ] Все импорты обновлены
-- [ ] Alembic миграции работают
-- [ ] Docker пересобран
-- [ ] **CHANGELOG.md** обновить
+- [x] Все импорты обновлены (4 файла: scheduler, sync routes, pages/index, telegram/sync_runner)
+- [x] Alembic миграции работают (shim сохраняет `from src.models import Base`)
+- [x] Docker пересобран
+- [x] **CHANGELOG.md** обновить
 
 ---
 
@@ -633,7 +635,7 @@ AUDIT-014      — Алгоритм сегментации (change-point detecti
 Фаза C    (P2) — Cleanup и унификация                            ✅
 Фаза D         — Документация (BACKLOG, чеклисты, AGENTS)        ✅
 Спринт 10 (P0) — тесты (минимум 20)                             🔴 2-3 дня
-Спринт 11 (P1) — models.py + sync_service разбить               🟠 1-2 дня
+Спринт 11 (P1) — models.py + sync_service разбить               ✅ 14.07.2026
 Спринт 12 (P1) — sync.py + pages.py чистка                      🟠 1 день
 Спринт 13      — Фаза 3: фильтры + статистика                   ⏸️ заморожено
 Спринт 14      — Фаза 4: multi-brand onboarding                  ⏸️ заморожено
@@ -685,10 +687,13 @@ src/
       logs.py                     # GET /logs
 
   services/                       # Business logic (старый слой, но разделённый)
-    sync_service.py               # оркестрация auto_sync
-    sync_activities.py            # sync_activities_for_user
-    sync_health.py                # sync_health_for_user, save_dashboard_data
-    sync_utils.py                 # _is_sync_due, _make_client, интервалы
+    sync/                          # Пакет синхронизации (Sprint 11)
+      __init__.py                  # реэкспорт (run_sync_for_user, etc.)
+      utils.py                     # SYNC_TICK_INTERVAL, интервалы, _make_client
+      health.py                    # save_dashboard_data, sync_health_for_user
+      activities.py                # sync_activities_for_user
+      orchestrator.py              # run_sync_for_user, auto_sync_health, auto_sync_activities
+    sync_service.py               # shim: DeprecationWarning (обратная совместимость)
     audit.py                      # AuditService
     auth.py                       # hash/verify/tokens
     stats.py                      # calc_stats, fmt_duration, zone_ranges

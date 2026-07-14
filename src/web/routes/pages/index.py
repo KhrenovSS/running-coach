@@ -14,7 +14,7 @@ from src.deps import templates
 from src.api.deps import get_current_user
 from src.services.stats import fmt_duration, calc_stats, render_zone_bars, render_type_row, build_nav_html
 from src.services.recovery_view import hrv_status, tired_label, readiness_label
-from src.services.sync_service import _auto_sync_status, _auto_sync_status_lock
+from src.services.sync import _auto_sync_status, _auto_sync_status_lock
 from src.web.state import TRAINING_TYPES_RU
 
 router = APIRouter()
