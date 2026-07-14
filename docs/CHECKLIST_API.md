@@ -67,5 +67,5 @@ pytest tests/ -v
 python -c "from main import app; print('OK')"
 
 # Проверить импорты (Check imports)
-python -c "from src.config import CONFIG; print(CONFIG.TIMING.HTTP_TIMEOUT)"
+python -c "from src.config import settings; print(settings.http_timeout)"
 ```

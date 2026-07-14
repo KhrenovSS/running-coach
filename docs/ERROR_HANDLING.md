@@ -66,16 +66,16 @@ def get_training(db: Session, training_id: int) -> TrainingSession:
 
 ```python
 import httpx
-from src.config import CONFIG
+from src.config import settings
 from src.exceptions import WatchAPIError
 from src.utils.logger import logger
 
-async def fetch_activities(access_token: str):
+async def fetch_activities(access_token: str, api_base: str, endpoint: str):
     """Загрузить список активностей (Fetch activities)"""
-    url = f"{CONFIG.COROS.BASE_URL}{CONFIG.COROS.ACTIVITIES_ENDPOINT}"
+    url = f"{api_base}{endpoint}"
     
     try:
-        async with httpx.AsyncClient(timeout=CONFIG.TIMING.HTTP_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=settings.http_timeout) as client:
             response = await client.get(url, headers={"Authorization": access_token})
             response.raise_for_status()
             return response.json()

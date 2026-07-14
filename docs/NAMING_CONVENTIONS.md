@@ -86,10 +86,11 @@ dur = 45
 
 ```python
 # ✅
-from src.config import CONFIG
+from src.config import settings
+from src.config.constants import MAX_CREDIBLE_PACE
 
-timeout = CONFIG.TIMING.HTTP_TIMEOUT
-max_hr = CONFIG.HR_ZONES.DEFAULT_MAX_HR
+timeout = settings.http_timeout
+max_hr = settings.default_max_hr
 
 # ❌
 TIMEOUT = 15

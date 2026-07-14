@@ -1,10 +1,9 @@
 # Классификация метрик здоровья для отображения (Health metrics display helpers)
 
-def hrv_status(hrv, baseline, sd, intervals=None):
-    """Классификация HRV: Повышенная/Норма/Пониженная/Низкая (Classify HRV level)"""
+def hrv_status(hrv: float | None, baseline: float | None, sd: float | None,
+               intervals: list[float] | None = None) -> tuple[str | None, str]:
     if hrv is None:
         return None, ''
-    # Если есть Coros-интервалы [min, low, normal_start, normal_end] — используем их (Use Coros intervals when available)
     if intervals and len(intervals) >= 4:
         if hrv < intervals[0]:
             return 'very_low', '🔴 Низкая ({:.0f})'.format(hrv)
@@ -14,7 +13,6 @@ def hrv_status(hrv, baseline, sd, intervals=None):
             return 'normal', '🟢 Норма ({:.0f})'.format(hrv)
         else:
             return 'elevated', '🟣 Повышенная ({:.0f})'.format(hrv)
-    # Fallback: SD-based классификация (SD-based classification)
     if baseline is None or baseline == 0:
         return None, '{:.0f}'.format(hrv)
     if sd is None or sd == 0:
@@ -28,8 +26,8 @@ def hrv_status(hrv, baseline, sd, intervals=None):
     else:
         return 'very_low', '🔴 Низкая ({:.0f})'.format(hrv)
 
-def tired_label(tired_rate):
-    """Классификация уровня усталости (Classify tiredness level)"""
+
+def tired_label(tired_rate: int | None) -> str:
     if tired_rate is None:
         return ''
     if tired_rate <= -5:
@@ -39,8 +37,9 @@ def tired_label(tired_rate):
     else:
         return '🔴 Высокая'
 
-def readiness_label(performance, recovery_pct=None, training_load_ratio=None):
-    """Классификация готовности к нагрузкам (Classify readiness)"""
+
+def readiness_label(performance: float | None, recovery_pct: float | None = None,
+                    training_load_ratio: float | None = None) -> str:
     if recovery_pct is not None:
         if recovery_pct >= 70:
             return '🟢 Готов к тренировкам'
@@ -64,8 +63,8 @@ def readiness_label(performance, recovery_pct=None, training_load_ratio=None):
     else:
         return '🔴 Требуется отдых'
 
-def load_label(training_load):
-    """Классификация тренировочной нагрузки (Classify training load)"""
+
+def load_label(training_load: float | None) -> str:
     if training_load is None:
         return ''
     if training_load < 50:

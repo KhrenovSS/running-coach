@@ -9,8 +9,8 @@ from src.domain.models.base import Base, utcnow
 class TrainingSession(Base):
     __tablename__ = 'training_sessions'
 
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    id = Column(Integer, primary_key=True)                    # ID тренировки (training session ID)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)  # ID владельца (owner ID)
     begin_ts = Column(DateTime(timezone=True), default=utcnow)
     total_distance_km = Column(Float)
     avg_heart_rate = Column(Integer)
@@ -40,8 +40,8 @@ class TrainingSession(Base):
 
 class DeletedTraining(Base):
     __tablename__ = 'deleted_trainings'
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    id = Column(Integer, primary_key=True)                    # ID удалённой записи (deleted record ID)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)  # ID владельца (owner ID)
     begin_ts = Column(DateTime(timezone=True), nullable=False)
     total_distance_km = Column(Float, nullable=True)
     avg_heart_rate = Column(Integer, nullable=True)
@@ -62,9 +62,9 @@ class DeletedTraining(Base):
 
 class TrainingFeedback(Base):
     __tablename__ = 'training_feedback'
-    id = Column(Integer, primary_key=True)
-    session_id = Column(Integer, ForeignKey('training_sessions.id'), nullable=False, index=True)
-    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    id = Column(Integer, primary_key=True)                    # ID оценки (feedback ID)
+    session_id = Column(Integer, ForeignKey('training_sessions.id'), nullable=False, index=True)  # ID тренировки (session ID)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)  # ID владельца (owner ID)
     rating = Column(Integer, nullable=False)  # 0–10 (тяжесть тренировки)
     notes = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)

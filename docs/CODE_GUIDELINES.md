@@ -22,7 +22,7 @@
 
 ### Правило
 
-**Все** числа, строки, URL, пороги — через `from src.config import CONFIG`.
+**Все** числа, строки, URL, пороги — через `from src.config import settings` (env-настройки) или `from src.config.constants import NAME` (фиксированные константы).
 
 ### ❌ До
 
@@ -46,27 +46,28 @@ resp = httpx.get(url, timeout=15)
 ### ✅ После
 
 ```python
-from src.config import CONFIG
+from src.config import settings
+from src.config.constants import HR_ZONE_1_MAX_PCT, HR_ZONE_2_MAX_PCT
 
 def classify_hr(hr: int, max_hr: int) -> str:
-    zones = calculate_hr_zones(max_hr)  # CONFIG.HR_ZONES.*
-    return get_hr_zone(hr, max_hr)
+    return get_hr_zone(hr, max_hr)  # пороги из constants.py
 
-resp = httpx.get(url, timeout=CONFIG.TIMING.HTTP_TIMEOUT)
+resp = httpx.get(url, timeout=settings.http_timeout)
 ```
 
 ### Где брать константы
 
 | Вместо | Используй |
 |--------|-----------|
-| `177` | `CONFIG.HR_ZONES.DEFAULT_MAX_HR` |
-| `15` (timeout) | `CONFIG.TIMING.HTTP_TIMEOUT` |
-| `3.0` (мин/км) | `CONFIG.PACE.MAX_CREDIBLE_PACE` |
-| `0.2` (км) | `CONFIG.PACE.MIN_SEGMENT_DISTANCE_KM` |
-| `1.0` (вариативность) | `CONFIG.PACE.VARIABILITY_THRESHOLD` |
-| `21600` (health sync) | `CONFIG.TIMING.SYNC_HEALTH_INTERVAL` |
-| `3600` (activity sync) | `CONFIG.TIMING.SYNC_ACTIVITY_INTERVAL` |
-| `"https://traininghub.coros.com"` | `CONFIG.COROS.BASE_URL` |
+| `177` | `settings.default_max_hr` |
+| `15` (timeout) | `settings.http_timeout` |
+| `3.0` (мин/км) | `MAX_CREDIBLE_PACE` (constants.py) |
+| `0.2` (км) | `MIN_SEGMENT_DISTANCE_KM` (constants.py) |
+| `1.0` (вариативность) | `VARIABILITY_THRESHOLD` (constants.py) |
+| `21600` (health sync) | `SYNC_HEALTH_INTERVAL` (constants.py) |
+| `180` (дней) | `HEALTH_SYNC_DAYS` (constants.py) |
+| `7` (TTL сессии) | `settings.session_ttl_days` |
+| `"UTC"` | `settings.timezone` |
 
 ### Когда добавлять новую константу
 
@@ -75,7 +76,7 @@ resp = httpx.get(url, timeout=CONFIG.TIMING.HTTP_TIMEOUT)
 2. Может меняться (настройка, env)
 3. Неочевидно без контекста
 
-→ добавляй в `src/config/constants.py`.
+→ добавляй в `src/config/constants.py` (фиксированные) или `src/config/settings.py` (env).
 
 ---
 
@@ -87,9 +88,9 @@ resp = httpx.get(url, timeout=CONFIG.TIMING.HTTP_TIMEOUT)
 |-----|-----|
 | HTTP endpoint | `src/api/routes/<domain>.py` |
 | Бизнес-логика | `src/services/<domain>/` |
-| Pydantic схемы | `src/schemas/<domain>.py` |
-| SQLAlchemy модели | `src/models.py` |
+| SQLAlchemy модели | `src/domain/models/<domain>.py` |
 | Константы | `src/config/constants.py` |
+| Настройки из env | `src/config/settings.py` |
 | Исключения | `src/exceptions.py` |
 | Утилиты общего назначения | `src/utils/` |
 
@@ -138,7 +139,7 @@ class TrainingUploadService:
 
 ### Размер файла
 
-- **Максимум ~500 строк**. Если больше — разбивай.
+- **Максимум ~400 строк**. Если больше — разбивай на модули.
 - **Роут — максимум ~80 строк**. Если больше — логика уходит в сервис.
 
 ---
@@ -221,7 +222,7 @@ async def delete_training(training_id: int, db: Session = Depends(get_db)):
 from typing import Generator
 from fastapi import Depends
 from sqlalchemy.orm import Session
-from src.models import SessionLocal
+from src.domain.models.base import SessionLocal
 
 def get_db() -> Generator[Session, None, None]:
     """Сессия БД (DB session)"""
@@ -240,7 +241,7 @@ def get_db() -> Generator[Session, None, None]:
 
 1. **Только Alembic** для изменения схемы
 2. **Параметризованные запросы** — никаких f-string в SQL
-3. **Модели в `src/models.py`**
+3. **Модели в `src/domain/models/`** (по доменам: user.py, training.py, health.py и т.д.)
 4. **Индексы** для частых `WHERE`/`JOIN`
 
 ### ❌ До
@@ -369,11 +370,12 @@ except:
 
 ```python
 import httpx
+from src.config import settings
 from src.exceptions import WatchAPIError
 from src.utils.logger import logger
 
 try:
-    result = await httpx.AsyncClient().get(url, timeout=CONFIG.TIMING.HTTP_TIMEOUT)
+    result = await httpx.AsyncClient().get(url, timeout=settings.http_timeout)
     result.raise_for_status()
 except httpx.HTTPStatusError as e:
     logger.error(f"Watch API error: {url} → {e.response.status_code}")
@@ -513,21 +515,29 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 # 3. Внутренние модули
-from src.config import CONFIG
-from src.models import TrainingSession, get_db
+from src.config import settings
+from src.config.constants import HEALTH_SYNC_DAYS
+from src.domain.models.training import TrainingSession
+from src.domain.models.base import get_db
 from src.utils.logger import logger
 ```
 
-### Импорт CONFIG
+### Импорт настроек и констант
 
 ```python
-# ✅ Правильно
-from src.config import CONFIG
+# ✅ Правильно (env-настройки)
+from src.config import settings
 
-timeout = CONFIG.TIMING.HTTP_TIMEOUT
+timeout = settings.http_timeout
 
-# ❌ Неправильно
-from src.config.constants import CONFIG as C
+# ✅ Правильно (фиксированные константы)
+from src.config.constants import HEALTH_SYNC_DAYS, MAX_CREDIBLE_PACE
+
+days = HEALTH_SYNC_DAYS
+
+# ❌ Неправильно — старый способ, используйте settings / constants
+timeout = 15
+max_hr = 177
 ```
 
 ---
@@ -538,7 +548,7 @@ from src.config.constants import CONFIG as C
 
 - [ ] Нет `except: pass`
 - [ ] Нет `print()` — используется `logger`
-- [ ] Нет hardcoded значений — используется `CONFIG`
+- [ ] Нет hardcoded значений — используются `settings.*` / `constants.*`
 - [ ] Комментарии bilingual (RU/EN)
 - [ ] Типизация (type hints)
 - [ ] Тесты проходят: `pytest tests/ -v`
@@ -559,4 +569,4 @@ from src.config.constants import CONFIG as C
 
 ---
 
-**Последнее обновление:** 30.06.2026
+**Последнее обновление:** 14.07.2026 (Sprint 19)

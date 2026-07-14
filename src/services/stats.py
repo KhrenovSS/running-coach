@@ -1,5 +1,7 @@
 # Вспомогательные функции для статистики и отображения (Statistics and display helpers)
 
+from typing import Any
+
 from src.config.constants import (
     HR_ZONE_1_MAX_PCT,
     HR_ZONE_2_MAX_PCT,
@@ -8,14 +10,13 @@ from src.config.constants import (
 )
 
 # Названия месяцев (Month names in Russian)
-MONTHS_RU = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
-             'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
-MONTHS_RU_SHORT = ['', 'Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн',
-                   'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
+MONTHS_RU: list[str] = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+                         'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
+MONTHS_RU_SHORT: list[str] = ['', 'Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн',
+                              'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
 
 
-# Форматирование длительности в человекочитаемый вид (Format duration for display)
-def fmt_duration(minutes):
+def fmt_duration(minutes: float | None) -> str:
     if not minutes:
         return ""
     m = int(minutes)
@@ -26,12 +27,11 @@ def fmt_duration(minutes):
     return f"{m}мин"
 
 
-# Расчёт статистики по списку тренировок (Calculate statistics for a list of sessions)
-def calc_stats(sessions):
+def calc_stats(sessions: list[Any]) -> dict[str, Any]:
     total_km = 0.0
     total_duration_min = 0.0
-    zone_min = {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0}
-    type_count = {}
+    zone_min: dict[int, float] = {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0}
+    type_count: dict[str, int] = {}
     for s in sessions:
         total_km += s.total_distance_km or 0
         total_duration_min += s.duration_minutes or 0
@@ -51,9 +51,8 @@ def calc_stats(sessions):
     }
 
 
-# Расчёт диапазонов пульсовых зон (Calculate heart rate zone ranges)
-def zone_ranges(max_hr):
-    r = {}
+def zone_ranges(max_hr: int) -> dict[int, str]:
+    r: dict[int, str] = {}
     r[1] = f"≤{round(HR_ZONE_1_MAX_PCT * max_hr)}"
     r[2] = f"{round(HR_ZONE_1_MAX_PCT * max_hr) + 1}–{round(HR_ZONE_2_MAX_PCT * max_hr)}"
     r[3] = f"{round(HR_ZONE_2_MAX_PCT * max_hr) + 1}–{round(HR_ZONE_3_MAX_PCT * max_hr)}"
@@ -62,14 +61,12 @@ def zone_ranges(max_hr):
     return r
 
 
-# Данные пульсовых зон для шаблона (HR zone data for template)
-def get_zone_bars_data(zone_min, total_min, max_hr):
-    """Вернуть список зон с процентами и цветами (Return zone list with pct and colors)"""
+def get_zone_bars_data(zone_min: dict[int, float], total_min: float, max_hr: int) -> list[dict[str, Any]]:
     if not total_min:
         return []
-    colors = {1: '#e8f5e9', 2: '#c8e6c9', 3: '#fff3e0', 4: '#ffccbc', 5: '#ffcdd2'}
+    colors: dict[int, str] = {1: '#e8f5e9', 2: '#c8e6c9', 3: '#fff3e0', 4: '#ffccbc', 5: '#ffcdd2'}
     zr = zone_ranges(max_hr)
-    zones = []
+    zones: list[dict[str, Any]] = []
     for z in range(1, 6):
         val = zone_min.get(z, 0)
         pct = round(val / total_min * 100) if total_min else 0
@@ -83,8 +80,7 @@ def get_zone_bars_data(zone_min, total_min, max_hr):
     return zones
 
 
-# Типы тренировок с русскими названиями (Training types with Russian labels)
-TRAINING_TYPE_LABELS = {
+TRAINING_TYPE_LABELS: dict[str, str] = {
     'interval': 'Интервальная',
     'tempo': 'Темповая',
     'long': 'Длинная',
@@ -92,16 +88,8 @@ TRAINING_TYPE_LABELS = {
 }
 
 
-# Построить навигацию по годам/месяцам (Build year/month navigation)
-def get_nav_data(all_sessions, sel_year, sel_month):
-    """
-    Вернуть данные для навигации по годам/месяцам.
-    Return navigation data for year/month navigation.
-
-    Returns: (years_data, sel_year, sel_month, title)
-    years_data = {year: sorted_months_list}
-    """
-    years = {}
+def get_nav_data(all_sessions: list[Any], sel_year: int | None, sel_month: int | None) -> tuple[dict[int, list[int]], int | None, int | None, str]:
+    years: dict[int, set[int]] = {}
     for s in all_sessions:
         if s.begin_ts is None:
             continue
@@ -127,5 +115,5 @@ def get_nav_data(all_sessions, sel_year, sel_month):
     else:
         title = 'Все тренировки'
 
-    years_data = {y: sorted(years[y]) for y in sorted_years}
+    years_data: dict[int, list[int]] = {y: sorted(years[y]) for y in sorted_years}
     return years_data, sel_year, sel_month, title

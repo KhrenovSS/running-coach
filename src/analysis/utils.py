@@ -2,8 +2,42 @@
 # Analysis utilities: formatting, elevation, timezone, rolling pace
 
 from datetime import datetime
+from typing import TypedDict
 from zoneinfo import ZoneInfo
 from timezonefinder import TimezoneFinder
+
+
+class TrackpointDict(TypedDict, total=False):
+    """Трекпоинт: точка записи с данными датчиков (Trackpoint: sensor data point)"""
+    time: datetime | None
+    hr: int | None
+    dist: float | None        # Накопительная дистанция в метрах (cumulative distance in meters)
+    lat: float | None
+    lon: float | None
+    alt: float | None
+    cad: int | None            # Каденс (cadence, spm)
+
+
+class AnalysisResult(TypedDict, total=False):
+    """Результат process_trackpoints (process_trackpoints result)"""
+    begin_ts: datetime
+    total_distance_km: float
+    avg_heart_rate: int
+    max_heart_rate: int
+    training_type: str
+    segments_count: int
+    duration_minutes: float
+    segments_json: list[dict]
+    hr_pace_series: list[dict]
+    avg_temperature: int | None
+    weather_code: int | None
+    elevation_gain: int | None
+    elevation_loss: int | None
+    avg_cadence: int | None
+    timezone: str | None
+    trackpoints_json: list[dict]
+    cleaning_log: list[dict] | None
+    suspect_flags: list[str] | None
 
 _tf = TimezoneFinder()
 

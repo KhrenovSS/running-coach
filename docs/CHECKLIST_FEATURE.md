@@ -6,13 +6,13 @@
 
 - [ ] DRY — нет дублирования кода
 - [ ] Код организован по доменам (`src/services/<domain>/`)
-- [ ] Файл не больше ~500 строк (если больше — вынести)
+- [ ] Файл не больше ~400 строк (если больше — вынести)
 - [ ] Нет циклических импортов
 
 ## Константы (Constants)
 
-- [ ] Нет hardcoded значений — используются из `CONFIG`
-- [ ] Новые настройки добавлены в `src/config/constants.py`
+- [ ] Нет hardcoded значений — используются `settings.*` (env) / `constants.*` (фикс)
+- [ ] Новые настройки добавлены в `src/config/constants.py` (фиксированные) или `src/config/settings.py` (env)
 - [ ] Магические числа заменены на именованные константы
 
 ## Код (Code)
@@ -62,7 +62,7 @@ python -m py_compile src/**/*.py
 python -c "from main import app; print('OK')"
 
 # Константы доступны (Constants available)
-python -c "from src.config import CONFIG; print(CONFIG.TIMING.HTTP_TIMEOUT)"
+python -c "from src.config import settings; print(settings.http_timeout)"
 ```
 
 ## Антипаттерны — НЕ ДЕЛАЙ (Anti-patterns — DON'T)
@@ -70,9 +70,9 @@ python -c "from src.config import CONFIG; print(CONFIG.TIMING.HTTP_TIMEOUT)"
 | ❌ Нельзя | ✅ Правильно |
 |-----------|-------------|
 | `except: pass` | `except ValueError as e: logger.error(...)` |
-| `max_hr = 177` | `CONFIG.HR_ZONES.DEFAULT_MAX_HR` |
+| `max_hr = 177` | `settings.default_max_hr` |
 | `f"SELECT * WHERE id={id}"` | `db.query().filter(User.id == id)` |
 | `print("debug")` | `logger.debug("message")` |
 | Бизнес-логика в роуте | Бизнес-логика в `services/` |
-| Один файл 1000+ строк | Разбить на модули |
+| Один файл 1000+ строк | Разбить на модули (≤400 строк) |
 | Глобальные мутабельные | Dependency injection |

@@ -14,19 +14,20 @@ from src.analysis.utils import (
     format_duration, calc_elevation, find_timezone,
     compute_rolling_pace, interpolate_paces, smooth_paces,
     is_km_segmentation, serialize_trackpoints, build_hr_pace_series,
+    TrackpointDict, AnalysisResult,
 )
 from src.config import settings
 
 logger = get_logger("analysis")
 
 
-def process_trackpoints(trackpoints: list[dict], start_time_utc: datetime,
+def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datetime,
                          max_hr: int = 177, max_credible_pace: float = 3.0,
                          max_gps_jump_m: float = 100.0, min_hr_for_fast_pace: int = 130,
                          pace_gap: float = 1.0,
                          interval_min_phase_duration: int = 15,
                          interval_hr_lag_sec: int = 5,
-                         interval_min_oscillations: int = 3) -> dict | None:
+                         interval_min_oscillations: int = 3) -> AnalysisResult | None:
     """
     Полный пайплайн анализа тренировки из трекпоинтов.
     Full training analysis pipeline from trackpoints.
@@ -202,7 +203,7 @@ def process_trackpoints(trackpoints: list[dict], start_time_utc: datetime,
     return result
 
 
-def _empty_result(start_time_utc: datetime, cleaning_log: list) -> dict:
+def _empty_result(start_time_utc: datetime, cleaning_log: list) -> AnalysisResult:
     """Пустой результат при ошибке или слишком короткой тренировке"""
     return {
         'begin_ts': start_time_utc,

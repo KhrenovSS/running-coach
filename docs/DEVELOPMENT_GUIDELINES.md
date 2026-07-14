@@ -21,7 +21,7 @@
 ## Золотые правила (кратко)
 
 1. **DRY** — не дублируй код. Ищи существующие функции/константы.
-2. **Константы** — используй `from src.config import CONFIG`. Никаких magic numbers.
+2. **Константы** — используй `from src.config import settings` / `from src.config.constants import NAME`. Никаких magic numbers.
 3. **Исключения** — используй `src/exceptions.py`. Запрещён `except: pass`.
 4. **API** — тонкие роуты: валидация → сервис → ответ.
 5. **База данных** — миграции только через Alembic; параметризованные запросы.

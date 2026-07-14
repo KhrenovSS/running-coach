@@ -2,6 +2,34 @@
 
 All notable changes to this project are tracked here.
 
+## [14.07.2026] — Sprint 19: Documentation & Types
+
+### Added
+- **DOC-05** `src/analysis/utils.py` — TypedDict `TrackpointDict` и `AnalysisResult` для типизации трекпоинтов и результата `process_trackpoints()`
+- **DOC-05** `src/analysis/__init__.py` — обновлена сигнатура `process_trackpoints` с `list[TrackpointDict]` и `AnalysisResult | None`
+- **DOC-06** Type hints добавлены: `src/services/stats.py` (5 функций), `src/services/recovery_view.py` (4 функции), `src/deps.py`
+- **DOC-07** Bilingual-комментарии: `src/domain/models/user.py` (id, email, password_hash), `src/domain/models/training.py` (id, user_id в TrainingSession, DeletedTraining, TrainingFeedback)
+
+### Changed
+- **DOC-01** `docs/ARCHITECTURE.md` — полное обновление: SQLite→PostgreSQL, актуальная структура файлов, новые пакеты (analysis, domain, watch, telegram, web/routes), data flow, multi-user, Docker
+- **DOC-02** `docs/CODE_GUIDELINES.md` — `CONFIG.*` → `settings.*` / `constants.*`; `src/models` → `src/domain/models`; лимит 500→400 строк; import examples
+- **DOC-03** `docs/CHECKLIST_FEATURE.md` — `CONFIG` → `settings` / `constants`; 500→400 строк; антипаттерны
+- **DOC-08** `src/api/routes/health.py` — импорты (psutil, alembic, JSONResponse) перенесены из тела функции на уровень модуля
+- `docs/ERROR_HANDLING.md`, `docs/DEVELOPMENT_GUIDELINES.md`, `docs/NAMING_CONVENTIONS.md`, `docs/CHECKLIST_API.md` — CONFIG→settings/constants
+- `src/parsers/__init__.py` — уточнён комментарий (парсеры в src/parsers/, анализ в src/analysis/)
+
+### Verified
+- `python -c "from src.telegram.main import run_bot"` — OK
+- `grep -rn "from src.database" src/` → 0
+- `grep -rn "CONFIG\.\|from src.config import CONFIG" docs/` → 0
+- `grep -rn "500 строк" docs/` → 0
+- `grep -rn "except: pass\|except Exception: pass" src/` → 0
+- `grep -rn "Окторябрь" src/` → 0
+- `grep -rn "from src.logger" src/` → 0
+- `pytest tests/ -v` → 53 passed
+- TypedDict импорт: `from src.analysis.utils import TrackpointDict, AnalysisResult` — OK
+- `src/api/routes/health.py` — нет импортов в теле функции
+
 ## [14.07.2026] — Sprint 18: Architecture Cleanup
 
 ### Changed

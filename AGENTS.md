@@ -175,6 +175,8 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 
 **Sprint 18 ✅:** Architecture Cleanup — DRY orchestrator (2 × 150 строк → 1 параметризованная `_auto_sync`), DRY uploads (общий `_save_session_from_data`), rolling pace window helper (compute_rolling_pace), km-chunking helper (`_chunk_by_km`), weather lookup DRY (`_get_nearest`). split segment.py (436→312) + segment_km.py (140). split analysis/__init__.py (387→227) — 6 helpers в utils.py (233). graceful shutdown (scheduler stop Event). pip install -e . вместо sys.path.insert (2 файла). HTML из stats.py в Jinja2 шаблоны (zone bars, nav). dead code cleanup (4 элемента). 56/56 тестов зелёные.
 
+**Sprint 19 ✅:** Documentation & Types — ARCHITECTURE.md полное обновление (SQLite→PostgreSQL, актуальная структура); CODE_GUIDELINES.md (CONFIG→settings/constants, src/models→src/domain/models, 500→400 строк); CHECKLIST_FEATURE.md (CONFIG→settings, 500→400); TypedDict для трекпоинтов и результата анализа (TrackpointDict, AnalysisResult); type hints в stats.py, recovery_view.py, deps.py; bilingual-комментарии в user.py/training.py; импорты в health.py на уровень модуля. Все docs с CONFIG обновлены. 53/53 тестов зелёные.
+
 ### Что сделано в сессии (14.07.2026) — Sprint 18 / Architecture Cleanup:
 
 1. **ARC-01**: `src/services/sync/orchestrator.py` — `auto_sync_health` + `auto_sync_activities` → единая `_auto_sync(sync_type)` через `SYNC_CONFIG` словарь (~150 строк дубляжа убрано)
@@ -282,7 +284,6 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 
 ### Следующие шаги (подготовка к модулю аналитики):
 Порядок выполнения — строго последовательный. Каждый спринт = behavioral test + CHANGELOG + commit.
-- **Sprint 19** (Documentation & Types): ARCHITECTURE.md, CODE_GUIDELINES.md, TypedDicts, type hints
 - **Sprint 20** (Tests): conftest, fixtures, ≥30 тестов
 
 🚀 **После Sprint 20** — модуль аналитики (8 этапов из `decision_module_design.md`).
