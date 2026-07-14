@@ -193,6 +193,16 @@ class AuditService:
             metadata={"error": error, **extra},
         )
     
+    def log_telegram_received(self, user_id: int, message_preview: str, **extra) -> None:
+        """Аудит: сообщение получено от Telegram (Audit: Telegram message received)"""
+        self.log_event(
+            event_type="telegram.received",
+            message=f"Telegram message received: {message_preview[:50]}",
+            severity="info",
+            user_id=user_id,
+            metadata={"preview": message_preview[:100], **extra},
+        )
+
     def log_settings_changed(self, user_id: int, changes: dict[str, Any], **extra) -> None:
         """Аудит: настройки изменены (Audit: settings changed)"""
         self.log_event(

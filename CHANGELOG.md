@@ -2,13 +2,15 @@
 
 All notable changes to this project are tracked here.
 
-## [14.07.2026] — Bugfix: Weight save через Telegram (Decimal→Float, traceback)
+## [14.07.2026] — Bugfix: Weight save через Telegram (полный цикл исправлений)
 
 ### Fixed
-- **`src/telegram/handlers/weight.py`** — исправлен баг #21 «Ошибка при сохранении веса»:
+- **`src/services/audit.py`** — добавлен метод `log_telegram_received()`: отсутствовал, хотя вызывался из `weight.py` — реальная причина «Ошибка при сохранении веса» (AttributeError)
+- **`src/telegram/main.py`** — `run_once(daily_weight_job, when=dt_time(second=30))` заменён на `timedelta(seconds=30)`: `dt_time(second=30)` = `00:00:30` (полночь), job никогда не срабатывал в течение дня. Из-за этого после перезапуска бота `_awaiting_weight` не восстанавливался
+- **`src/telegram/handlers/weight.py`** — исправлен баг #21:
   - Убран `Decimal(str(weight))` → передаётся `float` напрямую (несовместимость Decimal с Float колонкой БД)
   - `measured_at` теперь использует `utcnow()` (timezone-aware UTC) вместо `ZoneInfo("Europe/Moscow")` — консистентно с моделью
-  - Добавлен `exc_info=True` в `logger.error` + user_id — traceback будет записан в app.log при падении
+  - Добавлен `exc_info=True` в `logger.error` + user_id — traceback записан в app.log при падении
   - Убран неиспользуемый импорт `Decimal`
 - **`BACKLOG.md`**: #21 помечен как ✅ Выполнено, обновлён план доработки
 

@@ -25,7 +25,7 @@
 | 18 | [Фикс] | Добавить unit-тесты для `src/analysis/oscillation.py`: `detect_pace_oscillations` + `compute_hr_lag_correlation` на синтетических данных. | `tests/` | ⬜ Sprint 10 |
 | 19 | [Фикс] | Обновить `docs/ARCHITECTURE.md`: описание нового алгоритма детекции интервалов (base_pace = средний темп, work-фаза = темп ≥ порог быстрее base_pace). | `docs/ARCHITECTURE.md` | ⬜ Открыт |
 | 20 | [Фикс] | Chart.js: темп на графике показывать в формате М:СС (мин:сек) вместо десятичных минут. Например 5.71 → 5:43. Добавить tooltip/label callback + форматирование оси Y. Пульс округлить до целого. | `src/web/templates/session.html:96-115` | ⬜ Открыт |
-| 21 | [Фикс] | Weight save через Telegram: "Ошибка при сохранении веса". Вероятные причины: Decimal→Float mismatch, tz-aware в DateTime колонку, отсутствие traceback в логах. | `src/telegram/handlers/weight.py:89-103` | ✅ Выполнено |
+| 21 | [Фикс] | Weight save через Telegram: "Ошибка при сохранении веса". Decimal→Float, tz-aware, отсутствие traceback, отсутствие метода `log_telegram_received()` в AuditService, `run_once` c `dt_time` вместо `timedelta`. | `src/telegram/handlers/weight.py:89-103`, `src/services/audit.py`, `src/telegram/main.py:77` | ✅ Выполнено |
 
 ---
 
@@ -36,16 +36,18 @@
 ### Проблема (баг #21)
 При сохранении веса через Telegram бот пользователь получает "😔 Ошибка при сохранении веса." (исключение в `handle_weight_message()`).
 
-### Коренные причины (по коду без воспроизведения)
-1. **`Decimal(str(weight))` в Float колонку.** В `weight.py:89` передаётся `Decimal` в поле `weight_kg = Column(Float)`. В некоторых конфигурациях psycopg2/psycopg3 это может упасть.
-2. **Timezone-naive/aware mismatch.** `measured_at` передаёт `ZoneInfo("Europe/Moscow")` aware datetime в колонку `DateTime()` без `timezone=True` — риск несовместимости с драйверами.
-3. **Нет traceback в логе.** `logger.error("Weight save error: %s", e)` не сохраняет traceback → невозможно диагностировать причину без воспроизведения.
-4. **Логи app.log не содержат weight-событий на 14.07** — возможно, бот не работал с тем же LOG_DIR, или был перезапуск с новым файлом.
+### Коренные причины
+1. **Отсутствует метод `log_telegram_received()` в `AuditService`.** Хендлер `weight.py` вызывал несуществующий метод — AttributeError был реальной причиной падения.
+2. **`run_once` с `dt_time(second=30)` вместо `timedelta(seconds=30)`.** `dt_time(second=30)` = `00:00:30` (полночь UTC) → job никогда не срабатывал. Из-за этого после перезапуска бота `_awaiting_weight` не восстанавливался, и сообщения пользователя игнорировались.
+3. **`Decimal(str(weight))` в Float колонку.** Потенциальная несовместимость с psycopg.
+4. **Timezone-naive/aware mismatch.** `measured_at` в колонку `DateTime(timezone=True)`.
+5. **Нет traceback в логе.** `logger.error("Weight save error: %s", e)` без `exc_info`.
 
 ### План исправлений
+- [x] Добавить метод `log_telegram_received()` в `AuditService`.
+- [x] Заменить `dt_time(second=30)` на `timedelta(seconds=30)` в `run_once`.
 - [x] Убрать Decimal: сразу `weight` (float).
-- [x] Использовать UTC: `measured_at=utcnow()` (как default в модели).
+- [x] Использовать UTC: `measured_at=utcnow()`.
 - [x] Добавить `exc_info=True` в логгер ошибки + user_id.
 - [ ] Проверить, что `LOGS_DIR` корректен в контейнере бота (`src/telegram/main.py`).
 - [ ] Убедиться, что `fix_logger_after_uvicorn()` вызывается в `startup.py`.
-- [ ] Проверить миграции: вес создаётся в baseline (есть), но мог не выполниться.

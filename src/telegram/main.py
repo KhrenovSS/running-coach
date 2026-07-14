@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, time as dt_time
+from datetime import datetime, timedelta, time as dt_time
 from zoneinfo import ZoneInfo
 
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ConversationHandler, Defaults
@@ -74,7 +74,7 @@ def run_bot():
     now = datetime.now(ZoneInfo("Europe/Moscow"))
     if now.hour >= 9 and not (now.hour == 9 and now.minute == 0 and now.second < 5):
         logger.info("Бот запущен после 9:00 MSK — запускаем напоминание веса через 30 секунд")
-        application.job_queue.run_once(daily_weight_job, when=dt_time(second=30))
+        application.job_queue.run_once(daily_weight_job, when=timedelta(seconds=30))
 
     application.job_queue.run_daily(daily_recovery_check_job, time=dt_time(hour=10, minute=0))
     logger.info("Проверка данных сна запланирована на 10:00")
