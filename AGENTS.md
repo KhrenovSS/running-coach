@@ -179,6 +179,10 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 
 **Sprint 20 ✅:** Tests — conftest.py переписан через SessionLocal приложения; helpers.py — 5 builder-функций объединены в 1 параметризованную build_trackpoints(); TCX-фикстуры (tempo_run, short_walk); новые тесты: test_gps.py (10), test_stats.py (24), test_health.py (4), edge cases в test_classify.py (4), test_hr_zones.py (5), test_oscillation.py (6), test_segment.py (4). Итого +57 тестов. 120/120 тестов зелёные.
 
+**Sprint 20b ✅:** Tech Debt Fix — DEBT-01: `_weather_cache` LRU eviction (max 500 entries); DEBT-02: index.py `all()` → `limit(200)` + `limit(365)` + раздельный nav-запрос + year/month DB-фильтр; DEBT-03: activities.py — date-filtered `existing_begin`/`all_deleted` + dict-lookup вместо O(n*m). 120/120 тестов зелёные.
+
+**Sprint 21 ⬜:** модуль аналитики, Этап 0: каркас и данные (`src/coach/`, таблицы Recommendation, PredictionLog, UserModel, Lesson), config.py, фикстуры для тестов.
+
 ### Что сделано в сессии (14.07.2026) — Sprint 20 / Tests:
 
 1. **TST-01**: `tests/conftest.py` — переписан через `SessionLocal` приложения (lazy engine, get_engine), autouse create/drop tables
@@ -193,6 +197,13 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 10. **TST-10**: `tests/helpers.py` — 5 builders → 1 параметризованная `build_trackpoints()` + aliases
 11. **TST-11**: `tests/fixtures/README.md` — описание фикстур
 12. Поведенческие проверки: импорты OK, `from src.database` → 0, `except:pass` → 0, 120/120 тестов зелёные
+
+### Что сделано в сессии (14.07.2026) — Sprint 20b / Tech Debt Fix:
+
+1. **DEBT-01**: `src/parsers/weather.py` — `_weather_cache` dict → LRU eviction при превышении `_WEATHER_CACHE_MAX=500` (pop первого элемента)
+2. **DEBT-02**: `src/web/routes/pages/index.py` — `all()` → `limit(200)` (sessions), `limit(365)` (weight); навигация через лёгкий `TrainingSession.begin_ts` запрос; year/month фильтр через DB-запрос вместо Python-фильтрации
+3. **DEBT-03**: `src/services/sync/activities.py` — `existing_begin` + `all_deleted` запросы с date-фильтром (`db_since`); `deleted_lookup` dict (1-min buckets) вместо O(n*m) итерации
+4. Поведенческие проверки: импорты OK, `from src.database` → 0, `except:pass` → 0, 120/120 тестов зелёные
 
 ### Что сделано в сессии (14.07.2026) — Sprint 18 / Architecture Cleanup:
 

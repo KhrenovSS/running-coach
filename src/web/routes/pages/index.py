@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from src.models import get_db, User, TrainingSession, DailyMetrics, WeightMeasurement, WatchCredential, TrainingFeedback, get_settings
 from src.deps import templates
 from src.api.deps import get_current_user
-from src.services.stats import fmt_duration, calc_stats, get_zone_bars_data, get_nav_data
+from src.services.stats import fmt_duration, calc_stats, get_zone_bars_data, MONTHS_RU
 from src.config import settings
 from src.services.recovery_view import hrv_status, tired_label, readiness_label
 from src.services.sync import get_auto_sync_status_snapshot
@@ -32,35 +32,77 @@ def _format_type_row(type_count):
     return ", ".join(parts) if parts else "—"
 
 
+def _build_nav(nav_items, sel_year, sel_month):
+    """Построить навигацию по годам/месяцам из списка begin_ts (Build year/month nav from begin_ts list)"""
+    years: dict[int, set[int]] = {}
+    for (begin_ts,) in nav_items:
+        y, m = begin_ts.year, begin_ts.month
+        if y not in years:
+            years[y] = set()
+        years[y].add(m)
+
+    if not years:
+        return {}, None, None, ""
+
+    sorted_years = sorted(years.keys(), reverse=True)
+    if sel_year is None or sel_year not in years:
+        sel_year = sorted_years[0]
+    if sel_month is None or sel_month not in years[sel_year]:
+        sel_month = max(years[sel_year])
+
+    if sel_year and sel_month:
+        title = f'Тренировки за {MONTHS_RU[sel_month]} {sel_year}'
+    elif sel_year:
+        title = f'Тренировки за {sel_year} год'
+    else:
+        title = 'Все тренировки'
+
+    years_data: dict[int, list[int]] = {y: sorted(years[y]) for y in sorted_years}
+    return years_data, sel_year, sel_month, title
+
+
 def render_page(db, user_id: int, user_name: str = "Бегун", year=None, month=None, tz_str=None):
-    all_sessions = db.query(TrainingSession).filter(TrainingSession.user_id == user_id).order_by(TrainingSession.begin_ts.desc()).all()
+    recent_sessions = db.query(TrainingSession).filter(
+        TrainingSession.user_id == user_id
+    ).order_by(TrainingSession.begin_ts.desc()).limit(200).all()
     settings = get_settings()
-    weight_measurements = db.query(WeightMeasurement).filter(WeightMeasurement.user_id == user_id).order_by(WeightMeasurement.measured_at).all()
+    weight_measurements = db.query(WeightMeasurement).filter(
+        WeightMeasurement.user_id == user_id
+    ).order_by(WeightMeasurement.measured_at).limit(365).all()
     recovery_metrics = db.query(DailyMetrics).filter(DailyMetrics.user_id == user_id).order_by(DailyMetrics.date.desc()).limit(30).all()
 
     weight_json = json.dumps([{'date': wm.measured_at.strftime('%Y-%m-%d'), 'weight': wm.weight_kg} for wm in weight_measurements])
     recovery_json = json.dumps([{'date': rm.date.strftime('%Y-%m-%d'), 'rhr': rm.rhr} for rm in reversed(recovery_metrics)])
 
-    latest = all_sessions[0].begin_ts if all_sessions else None
+    latest = recent_sessions[0].begin_ts if recent_sessions else None
     week_stats = month_stats = None
     if latest:
         week_cut = latest - timedelta(days=7)
         month_cut = latest - timedelta(days=30)
-        week_sessions = [s for s in all_sessions if s.begin_ts >= week_cut]
-        month_sessions = [s for s in all_sessions if s.begin_ts >= month_cut]
+        week_sessions = [s for s in recent_sessions if s.begin_ts >= week_cut]
+        month_sessions = [s for s in recent_sessions if s.begin_ts >= month_cut]
         week_stats = calc_stats(week_sessions)
         month_stats = calc_stats(month_sessions)
 
-    nav_years = {}
-    nav_title = ""
-    sel_year, sel_month = year, month
-    if all_sessions:
-        nav_years, sel_year, sel_month, nav_title = get_nav_data(all_sessions, sel_year, sel_month)
+    nav_items = db.query(TrainingSession.begin_ts).filter(
+        TrainingSession.user_id == user_id,
+        TrainingSession.begin_ts.isnot(None),
+    ).all()
+    nav_years, sel_year, sel_month, nav_title = _build_nav(nav_items, year, month)
 
     if sel_year and sel_month:
-        filtered = [s for s in all_sessions if s.begin_ts and s.begin_ts.year == sel_year and s.begin_ts.month == sel_month]
+        month_start = datetime(sel_year, sel_month, 1, tzinfo=timezone.utc)
+        if sel_month == 12:
+            month_end = datetime(sel_year + 1, 1, 1, tzinfo=timezone.utc)
+        else:
+            month_end = datetime(sel_year, sel_month + 1, 1, tzinfo=timezone.utc)
+        filtered = db.query(TrainingSession).filter(
+            TrainingSession.user_id == user_id,
+            TrainingSession.begin_ts >= month_start,
+            TrainingSession.begin_ts < month_end,
+        ).order_by(TrainingSession.begin_ts.desc()).all()
     else:
-        filtered = all_sessions[:20]
+        filtered = recent_sessions[:20]
 
     session_ids = [s.id for s in filtered]
     feedbacks = db.query(TrainingFeedback).filter(

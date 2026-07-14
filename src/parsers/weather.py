@@ -4,7 +4,8 @@ from src.utils.logger import get_logger
 
 logger = get_logger("parsers.weather")
 
-_weather_cache = {}
+_weather_cache: dict = {}
+_WEATHER_CACHE_MAX = 500
 
 WMO_ICONS = {
     0: "☀️", 1: "🌤️", 2: "⛅", 3: "☁️",
@@ -43,6 +44,8 @@ def fetch_weather(lat, lon, date):
                 "precip": data["hourly"].get("precipitation", [None] * len(data["hourly"]["time"])),
                 "codes": data["hourly"].get("weathercode", [None] * len(data["hourly"]["time"])),
             }
+            if len(_weather_cache) >= _WEATHER_CACHE_MAX:
+                _weather_cache.pop(next(iter(_weather_cache)))
             _weather_cache[key] = result
             return result
     except (KeyError, httpx.HTTPError, ValueError) as e:

@@ -83,8 +83,24 @@ async def sync_activities_for_user(cred, brand: str,
         if progress is not None:
             progress['total_found'] = len(activities)
 
-        existing_begin = {r[0] for r in db.query(TrainingSession.begin_ts).filter(TrainingSession.user_id == cred.user_id).all()}
-        all_deleted = db.query(DeletedTraining).filter(DeletedTraining.user_id == cred.user_id).all()
+        db_since = since - timedelta(days=1) if since else (datetime.now(timezone.utc) - timedelta(days=90))
+
+        existing_begin = {r[0] for r in db.query(TrainingSession.begin_ts).filter(
+            TrainingSession.user_id == cred.user_id,
+            TrainingSession.begin_ts >= db_since,
+        ).all()}
+        all_deleted = db.query(DeletedTraining).filter(
+            DeletedTraining.user_id == cred.user_id,
+            DeletedTraining.begin_ts >= db_since,
+        ).all()
+
+        deleted_lookup: dict = {}
+        for d in all_deleted:
+            if d.begin_ts:
+                key = d.begin_ts.replace(second=0, microsecond=0)
+                if key not in deleted_lookup:
+                    deleted_lookup[key] = []
+                deleted_lookup[key].append(d)
 
         new_acts = [a for a in activities if a.get('start_time') and a['start_time'] not in existing_begin]
 
@@ -94,10 +110,15 @@ async def sync_activities_for_user(cred, brand: str,
         for act in new_acts:
             bt = act.get('start_time')
             deleted_match = None
-            for d in all_deleted:
-                if d.begin_ts and abs((d.begin_ts - bt).total_seconds()) < 120:
-                    deleted_match = d
-                    break
+            if bt:
+                bt_min = bt.replace(second=0, microsecond=0)
+                for offset in range(-2, 3):
+                    for d in deleted_lookup.get(bt_min + timedelta(minutes=offset), []):
+                        if abs((d.begin_ts - bt).total_seconds()) < 120:
+                            deleted_match = d
+                            break
+                    if deleted_match:
+                        break
             if deleted_match:
                 skipped_deleted += 1
                 if pending is not None:

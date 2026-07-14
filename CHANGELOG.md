@@ -2,6 +2,42 @@
 
 All notable changes to this project are tracked here.
 
+## [14.07.2026] — Sprint 20b: Tech Debt Fix (DEBT-01, DEBT-02, DEBT-03)
+
+### Fixed
+- **DEBT-01** `src/parsers/weather.py`: `_weather_cache` — добавлен LRU eviction (max 500 entries, pop первого при переполнении), константа `_WEATHER_CACHE_MAX=500`
+- **DEBT-02** `src/web/routes/pages/index.py`: `all()` без пагинации исправлен:
+  - `all_sessions` → `recent_sessions` с `.limit(200)`
+  - `weight_measurements` → `.limit(365)`
+  - Навигация: отдельный лёгкий запрос `TrainingSession.begin_ts` + inline `_build_nav()`
+  - Year/month фильтр: DB-запрос с `month_start`/`month_end` вместо Python-фильтрации по всем сессиям
+- **DEBT-03** `src/services/sync/activities.py`: N+1 исправлен:
+  - `existing_begin` + `all_deleted` — добавлен date-фильтр (`db_since`)
+  - `deleted_lookup` dict (1-min bucket key) — O(1) lookup вместо O(n*m) итерации по всем deleted-тренировкам
+
+### Status
+- 120/120 тестов зелёные
+- Все поведенческие проверки пройдены
+- К старту Sprint 21 (модуль аналитики) готово
+
+---
+
+## [14.07.2026] — Sprint 20b: BACKLOG Sync & Tech Debt Audit
+
+### Changed
+- **BACKLOG.md**: 76+ пунктов отмечены ✅ (Security, Race, Silent, DRY, Config, Data Integrity, Architecture, Docs, Types — спринты 13–20)
+- **BACKLOG.md**: 3 новых P0-проблемы задокументированы (#139-#141)
+
+### Added
+- **Sprint 20b** задачи в AGENTS.md: DEBT-01 (weather cache LRU/TTL), DEBT-02 (pagination index.py), DEBT-03 (N+1 activities.py)
+
+### Status
+- 120/120 тестов зелёные (Sprint 20)
+- Все поведенческие проверки пройдены
+- К старту Sprint 21 (модуль аналитики) готово
+
+---
+
 ## [14.07.2026] — Sprint 20: Tests
 
 ### Added
