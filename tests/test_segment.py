@@ -195,3 +195,49 @@ class TestBuildTimeInZones:
         zones, z4_segs, total_min = build_time_in_zones(tps, max_hr=177)
         assert len(z4_segs) >= 1
         assert z4_segs[0]['duration'] >= 0.5
+
+    def test_no_hr_does_not_crash(self):
+        """Трекпоинты без HR → не падает"""
+        start = datetime(2026, 7, 1, 8, 0, 0, tzinfo=timezone.utc)
+        tps = []
+        t = start
+        for _ in range(5):
+            tps.append({
+                'time': t, 'hr': None, 'dist': 100.0, 'alt': 150.0,
+                'lat': 55.75, 'lon': 37.62, 'cad': 170,
+            })
+            t += timedelta(minutes=1)
+        zones, z4_segs, total_min = build_time_in_zones(tps, max_hr=177)
+        assert sum(zones.values()) == 0
+
+    def test_all_z4_no_gap_segments(self):
+        """Весь трек в Z4 → один длинный сегмент"""
+        start = datetime(2026, 7, 1, 8, 0, 0, tzinfo=timezone.utc)
+        tps = []
+        t = start
+        for _ in range(15):
+            tps.append({
+                'time': t, 'hr': 165, 'dist': 100.0, 'alt': 150.0,
+                'lat': 55.75, 'lon': 37.62, 'cad': 170,
+            })
+            t += timedelta(minutes=1)
+        zones, z4_segs, total_min = build_time_in_zones(tps, max_hr=177)
+        assert len(z4_segs) == 1
+
+
+class TestSegmentByPaceEdgeCases:
+    def test_empty_trackpoints(self):
+        """Пустой список → пусто"""
+        segments, var_count = segment_by_pace([], max_hr=177, total_dist_km=0)
+        assert segments == []
+        assert var_count == 0
+
+    def test_very_short_track(self):
+        """Очень короткий трек (< 10 точек после процессинга)"""
+        start = datetime(2026, 7, 1, 9, 0, 0, tzinfo=timezone.utc)
+        tps = build_tempo_trackpoints(pace=5.0, distance_km=0.3, hr=130, start_time=start)
+        segments, var_count = segment_by_pace(
+            tps, max_hr=177, total_dist_km=0.3,
+        )
+        assert isinstance(segments, list)
+        assert isinstance(var_count, int)

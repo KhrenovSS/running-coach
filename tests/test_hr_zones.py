@@ -50,3 +50,31 @@ class TestGetBand:
         """hard: Z4-Z5"""
         assert get_band(160, 177) == 'hard'
         assert get_band(175, 177) == 'hard'
+
+
+class TestGetZoneEdgeCases:
+    def test_max_hr_zero_returns_zone1(self):
+        """>max_hr=0 → защита ZeroDivisionError → Z1"""
+        assert get_zone(100, 0) == 1
+        assert get_zone(0, 0) == 1
+        assert get_zone(200, 0) == 1
+
+    def test_hr_none_does_not_crash(self):
+        """None HR не должен падать"""
+        assert get_zone(0, 177) == 1
+
+    def test_hr_equals_max_hr(self):
+        """HR == max_hr → Z5"""
+        assert get_zone(177, 177) == 5
+
+    def test_hr_above_max_hr(self):
+        """HR > max_hr → Z5"""
+        assert get_zone(180, 177) == 5
+
+    def test_all_zones_for_given_max_hr(self):
+        """Проверить все 5 зон для max_hr=200"""
+        assert get_zone(139, 200) == 1  # 69.5% ≤ 70% → Z1
+        assert get_zone(141, 200) == 2  # 70.5% > 70%, ≤ 80% → Z2
+        assert get_zone(174, 200) == 3  # 87% ≤ 87% → Z3
+        assert get_zone(175, 200) == 4  # 87.5% > 87%, ≤ 93% → Z4
+        assert get_zone(187, 200) == 5  # 93.5% > 93% → Z5

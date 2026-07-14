@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">
+  <Activities>
+    <Activity Sport="Running">
+      <Id>2026-07-01T08:00:00Z</Id>
+      <Lap>
+        <TotalTimeSeconds>1800</TotalTimeSeconds>
+        <DistanceMeters>5000</DistanceMeters>
+        <Track>
+          <Trackpoint>
+            <Time>2026-07-01T08:00:00Z</Time>
+            <Position><LatitudeDegrees>55.75</LatitudeDegrees><LongitudeDegrees>37.62</LongitudeDegrees></Position>
+            <AltitudeMeters>150.0</AltitudeMeters>
+            <HeartRateBpm><Value>130</Value></HeartRateBpm>
+            <Extensions><TPX xmlns="http://www.garmin.com/xmlschemas/ActivityExtension/v2"><RunCadence>85</RunCadence></TPX></Extensions>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2026-07-01T08:05:00Z</Time>
+            <Position><LatitudeDegrees>55.751</LatitudeDegrees><LongitudeDegrees>37.621</LongitudeDegrees></Position>
+            <AltitudeMeters>151.0</AltitudeMeters>
+            <HeartRateBpm><Value>140</Value></HeartRateBpm>
+            <Extensions><TPX xmlns="http://www.garmin.com/xmlschemas/ActivityExtension/v2"><RunCadence>86</RunCadence></TPX></Extensions>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2026-07-01T08:10:00Z</Time>
+            <Position><LatitudeDegrees>55.752</LatitudeDegrees><LongitudeDegrees>37.622</LongitudeDegrees></Position>
+            <AltitudeMeters>152.0</AltitudeMeters>
+            <HeartRateBpm><Value>145</Value></HeartRateBpm>
+            <Extensions><TPX xmlns="http://www.garmin.com/xmlschemas/ActivityExtension/v2"><RunCadence>86</RunCadence></TPX></Extensions>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2026-07-01T08:15:00Z</Time>
+            <Position><LatitudeDegrees>55.753</LatitudeDegrees><LongitudeDegrees>37.623</LongitudeDegrees></Position>
+            <AltitudeMeters>151.0</AltitudeMeters>
+            <HeartRateBpm><Value>148</Value></HeartRateBpm>
+            <Extensions><TPX xmlns="http://www.garmin.com/xmlschemas/ActivityExtension/v2"><RunCadence>87</RunCadence></TPX></Extensions>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2026-07-01T08:20:00Z</Time>
+            <Position><LatitudeDegrees>55.754</LatitudeDegrees><LongitudeDegrees>37.624</LongitudeDegrees></Position>
+            <AltitudeMeters>152.0</AltitudeMeters>
+            <HeartRateBpm><Value>150</Value></HeartRateBpm>
+            <Extensions><TPX xmlns="http://www.garmin.com/xmlschemas/ActivityExtension/v2"><RunCadence>87</RunCadence></TPX></Extensions>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2026-07-01T08:25:00Z</Time>
+            <Position><LatitudeDegrees>55.755</LatitudeDegrees><LongitudeDegrees>37.625</LongitudeDegrees></Position>
+            <AltitudeMeters>153.0</AltitudeMeters>
+            <HeartRateBpm><Value>152</Value></HeartRateBpm>
+            <Extensions><TPX xmlns="http://www.garmin.com/xmlschemas/ActivityExtension/v2"><RunCadence>88</RunCadence></TPX></Extensions>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2026-07-01T08:26:00Z</Time>
+            <Position><LatitudeDegrees>55.756</LatitudeDegrees><LongitudeDegrees>37.626</LongitudeDegrees></Position>
+            <AltitudeMeters>150.0</AltitudeMeters>
+            <HeartRateBpm><Value>140</Value></HeartRateBpm>
+            <Extensions><TPX xmlns="http://www.garmin.com/xmlschemas/ActivityExtension/v2"><RunCadence>85</RunCadence></TPX></Extensions>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2026-07-01T08:30:00Z</Time>
+            <Position><LatitudeDegrees>55.757</LatitudeDegrees><LongitudeDegrees>37.627</LongitudeDegrees></Position>
+            <AltitudeMeters>150.0</AltitudeMeters>
+            <HeartRateBpm><Value>135</Value></HeartRateBpm>
+            <Extensions><TPX xmlns="http://www.garmin.com/xmlschemas/ActivityExtension/v2"><RunCadence>84</RunCadence></TPX></Extensions>
+          </Trackpoint>
+        </Track>
+      </Lap>
+    </Activity>
+  </Activities>
+</TrainingCenterDatabase>

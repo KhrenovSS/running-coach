@@ -2,6 +2,34 @@
 
 All notable changes to this project are tracked here.
 
+## [14.07.2026] — Sprint 20: Tests
+
+### Added
+- **TST-01** `tests/conftest.py` — переписан через `SessionLocal` приложения (lazy engine, автозакрытие), вместо самодельного engine+sessionmaker
+- **TST-02** `tests/fixtures/tempo_run.tcx`, `tests/fixtures/short_walk.tcx` — реальные TCX-фикстуры для тестирования парсинга
+- **TST-03** `tests/test_gps.py` — 10 тестов: `haversine_m` (4), `clean_trackpoints` (8): норма, spike, impossible pace, none coords, cleaning log, high-HR override, too-short
+- **TST-04** `tests/test_classify.py` — 4 новых теста: zero duration crash, high var_count без oscillations, var_count=2+osc=1 без HR, recovery с Z4+ → tempo
+- **TST-05** `tests/test_segment.py` — 4 новых теста: no HR crash, all Z4 one segment, empty trackpoints, very short track
+- **TST-06** `tests/test_hr_zones.py` — 5 новых тестов: max_hr=0 ZeroDivisionError, hr=None, hr==max_hr, hr>max_hr, all zones for max_hr=200
+- **TST-07** `tests/test_oscillation.py` — 6 новых тестов: single work phase no cycle, work→recovery→work 1 cycle, steady pace with small gap, <10 points adaptive gap, <3 points estimate, empty estimate; edge cases: negative correlation, constant HR
+- **TST-08** `tests/test_stats.py` — 24 теста: `fmt_duration` (7), `calc_stats` (8), `zone_ranges` (5), `get_zone_bars_data` (4), `get_nav_data` (4)
+- **TST-09** `tests/test_health.py` — 4 интеграционных теста health endpoint через `TestClient`: 200, status, database check, application info
+- **TST-10** `tests/helpers.py` — 5 builder-функций (`build_interval_trackpoints`, `build_tempo_trackpoints`, `build_long_trackpoints`, `build_recovery_trackpoints`, `build_trackpoints_with_gps_errors`) объединены в 1 параметризованную `build_trackpoints(training_type=...)` с обратной совместимостью
+- **TST-11** `tests/fixtures/README.md` — описание тестовых фикстур
+
+### Changed
+- `tests/conftest.py` — теперь использует `get_engine()` и `SessionLocal` из `src.domain.models.base` вместо создания собственного engine+sessionmaker
+
+### Verified
+- `python -c "from src.telegram.main import run_bot"` — OK
+- `python -c "from src.startup import create_app"` — OK
+- `python -c "from src.analysis import process_trackpoints"` — OK
+- `grep -rn "from src.database" src/` → 0
+- `grep -rn "except: pass\|except Exception: pass" src/` → 0
+- `pytest tests/ -v` → 120 passed (+57 новых, 56→120)
+
+---
+
 ## [14.07.2026] — Sprint 19: Documentation & Types
 
 ### Added

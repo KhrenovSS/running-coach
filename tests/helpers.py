@@ -1,11 +1,10 @@
-# Фабрики синтетических трекпоинтов для тестов анализа
+# Фабрики синтетических трекпоинтов для тестов
 # Synthetic trackpoint factories for analysis tests
 
 from datetime import datetime, timedelta, timezone
 
 
 def _make_tp(time, dist, hr, alt=None, lat=55.75, lon=37.62, cad=None):
-    """Создать один трекпоинт (Create a single trackpoint)"""
     return {
         'time': time,
         'hr': hr,
@@ -18,40 +17,78 @@ def _make_tp(time, dist, hr, alt=None, lat=55.75, lon=37.62, cad=None):
 
 
 def _pace_to_dist_delta(pace_min_km: float, dt_sec: float) -> float:
-    """Конвертировать темп (мин/км) и время (сек) в дистанцию (м)"""
     if pace_min_km <= 0:
         return 0.0
     return (dt_sec / 60) / pace_min_km * 1000
 
 
-def build_interval_trackpoints(
+def build_trackpoints(
+    training_type: str = 'tempo',
     base_pace: float = 5.0,
+    distance_km: float | None = None,
+    duration_min: float | None = None,
+    hr: int = 140,
+    max_hr: int = 177,
+    start_time: datetime | None = None,
     work_pace: float = 4.0,
-    warmup_km: float = 1.0,
-    cooldown_km: float = 1.0,
     intervals: int = 5,
     work_dist_m: float = 400,
     recovery_dist_m: float = 400,
-    base_hr: int = 130,
-    work_hr: int = 165,
-    recovery_hr: int = 140,
-    start_time: datetime | None = None,
+    warmup_km: float = 1.0,
+    cooldown_km: float = 1.0,
+    error_indices: list[int] | None = None,
+    **kwargs,
 ) -> list[dict]:
     """
-    Интервальная тренировка: разминка + N work→recovery + заминка.
-    Interval training: warmup + N work→recovery + cooldown.
+    Универсальная фабрика синтетических трекпоинтов.
+    Universal factory for synthetic trackpoints.
+
+    Параметры (Parameters):
+        training_type: 'tempo' | 'interval' | 'long' | 'recovery' | 'gps_errors'
+        base_pace: базовый/восстановительный темп (мин/км)
+        distance_km: дистанция для tempo/gps_errors
+        duration_min: длительность для long/recovery
+        hr: средний пульс
+        max_hr: макс. пульс (для recovery)
+        start_time: время старта
+        work_pace: темп ускорений (для interval)
+        intervals: число повторений (для interval)
+        work_dist_m: дистанция ускорения, м (для interval)
+        recovery_dist_m: дистанция восстановления, м (для interval)
+        warmup_km: разминка, км (для interval)
+        cooldown_km: заминка, км (для interval)
+        error_indices: индексы точек с GPS-ошибкой (для gps_errors)
     """
     if start_time is None:
         start_time = datetime(2026, 7, 1, 8, 0, 0, tzinfo=timezone.utc)
 
+    if training_type == 'interval':
+        return _build_interval(start_time, base_pace, work_pace, warmup_km, cooldown_km,
+                                intervals, work_dist_m, recovery_dist_m, hr, max_hr)
+    elif training_type == 'tempo':
+        dist_km = distance_km or 10.0
+        return _build_tempo(start_time, base_pace, dist_km, hr)
+    elif training_type == 'long':
+        dur = duration_min or 100.0
+        return _build_long(start_time, base_pace, dur, hr)
+    elif training_type == 'recovery':
+        dur = duration_min or 25.0
+        return _build_recovery(start_time, base_pace, dur, hr, max_hr)
+    elif training_type == 'gps_errors':
+        dist_km = distance_km or 3.0
+        return _build_gps_errors(start_time, base_pace, dist_km, error_indices)
+    raise ValueError(f"Unknown training_type: {training_type}")
+
+
+def _build_interval(start_time, base_pace, work_pace, warmup_km, cooldown_km,
+                     intervals, work_dist_m, recovery_dist_m, base_hr, work_hr):
     trackpoints = []
     t = start_time
     dist = 0.0
     lat, lon = 55.75, 37.62
-
     dt_sec = 5.0
+    recovery_hr = base_hr + 10
 
-    # Разминка (warmup)
     warmup_m = warmup_km * 1000
     while dist < warmup_m:
         dd = _pace_to_dist_delta(base_pace, dt_sec)
@@ -61,9 +98,7 @@ def build_interval_trackpoints(
         lat += 0.00001
         lon += 0.00001
 
-    # Интервалы (intervals: work → recovery)
     for _ in range(intervals):
-        # Work phase
         work_end = dist + work_dist_m
         while dist < work_end:
             dd = _pace_to_dist_delta(work_pace, dt_sec)
@@ -72,7 +107,6 @@ def build_interval_trackpoints(
             t += timedelta(seconds=dt_sec)
             lat += 0.00001
 
-        # Recovery phase
         rec_end = dist + recovery_dist_m
         while dist < rec_end:
             dd = _pace_to_dist_delta(base_pace, dt_sec)
@@ -81,7 +115,6 @@ def build_interval_trackpoints(
             t += timedelta(seconds=dt_sec)
             lat += 0.00001
 
-    # Заминка (cooldown)
     cooldown_end = dist + cooldown_km * 1000
     while dist < cooldown_end:
         dd = _pace_to_dist_delta(base_pace + 0.5, dt_sec)
@@ -93,19 +126,7 @@ def build_interval_trackpoints(
     return trackpoints
 
 
-def build_tempo_trackpoints(
-    pace: float = 4.5,
-    distance_km: float = 10.0,
-    hr: int = 155,
-    start_time: datetime | None = None,
-) -> list[dict]:
-    """
-    Темповая тренировка: стабильный темп на всю дистанцию.
-    Tempo run: steady pace for entire distance.
-    """
-    if start_time is None:
-        start_time = datetime(2026, 7, 1, 8, 0, 0, tzinfo=timezone.utc)
-
+def _build_tempo(start_time, pace, distance_km, hr):
     trackpoints = []
     t = start_time
     dist = 0.0
@@ -124,27 +145,15 @@ def build_tempo_trackpoints(
     return trackpoints
 
 
-def build_long_trackpoints(
-    pace: float = 5.5,
-    duration_min: float = 100.0,
-    hr: int = 135,
-    start_time: datetime | None = None,
-) -> list[dict]:
-    """
-    Длинная тренировка: стабильный темп, низкий пульс, >= 90 мин.
-    Long run: steady pace, low HR, >= 90 min.
-    """
-    if start_time is None:
-        start_time = datetime(2026, 7, 1, 6, 0, 0, tzinfo=timezone.utc)
-
+def _build_long(start_time, pace, duration_min, hr):
     trackpoints = []
     t = start_time
     dist = 0.0
     dt_sec = 10.0
     total_sec = duration_min * 60
     lat, lon = 55.75, 37.62
-
     elapsed = 0.0
+
     while elapsed < total_sec:
         dd = _pace_to_dist_delta(pace, dt_sec)
         dist += dd
@@ -156,28 +165,15 @@ def build_long_trackpoints(
     return trackpoints
 
 
-def build_recovery_trackpoints(
-    pace: float = 6.5,
-    duration_min: float = 25.0,
-    hr: int = 110,
-    max_hr: int = 177,
-    start_time: datetime | None = None,
-) -> list[dict]:
-    """
-    Recovery тренировка: короткая, лёгкая, низкий пульс (< 75% max_hr).
-    Recovery training: short, easy, low HR (< 75% max_hr).
-    """
-    if start_time is None:
-        start_time = datetime(2026, 7, 1, 9, 0, 0, tzinfo=timezone.utc)
-
+def _build_recovery(start_time, pace, duration_min, hr, max_hr):
     trackpoints = []
     t = start_time
     dist = 0.0
     dt_sec = 10.0
     total_sec = duration_min * 60
     lat, lon = 55.75, 37.62
-
     elapsed = 0.0
+
     while elapsed < total_sec:
         dd = _pace_to_dist_delta(pace, dt_sec)
         dist += dd
@@ -189,29 +185,17 @@ def build_recovery_trackpoints(
     return trackpoints
 
 
-def build_trackpoints_with_gps_errors(
-    base_pace: float = 5.0,
-    distance_km: float = 3.0,
-    error_indices: list[int] | None = None,
-    start_time: datetime | None = None,
-) -> list[dict]:
-    """
-    Тренировка с GPS-ошибками: аномальные скачки координат.
-    Training with GPS errors: anomalous coordinate jumps.
-    """
-    if start_time is None:
-        start_time = datetime(2026, 7, 1, 8, 0, 0, tzinfo=timezone.utc)
+def _build_gps_errors(start_time, base_pace, distance_km, error_indices):
     if error_indices is None:
         error_indices = [50, 100]
-
     trackpoints = []
     t = start_time
     dist = 0.0
     dt_sec = 5.0
     target_dist = distance_km * 1000
     lat, lon = 55.75, 37.62
-
     idx = 0
+
     while dist < target_dist:
         dd = _pace_to_dist_delta(base_pace, dt_sec)
         dist += dd
@@ -225,3 +209,24 @@ def build_trackpoints_with_gps_errors(
         idx += 1
 
     return trackpoints
+
+
+# Обратная совместимость (Backward compatibility aliases)
+def build_interval_trackpoints(**kwargs):
+    return build_trackpoints(training_type='interval', **kwargs)
+
+
+def build_tempo_trackpoints(**kwargs):
+    return build_trackpoints(training_type='tempo', **kwargs)
+
+
+def build_long_trackpoints(**kwargs):
+    return build_trackpoints(training_type='long', **kwargs)
+
+
+def build_recovery_trackpoints(**kwargs):
+    return build_trackpoints(training_type='recovery', **kwargs)
+
+
+def build_trackpoints_with_gps_errors(**kwargs):
+    return build_trackpoints(training_type='gps_errors', **kwargs)

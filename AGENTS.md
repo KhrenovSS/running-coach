@@ -149,7 +149,7 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 ```
 Пароль/токен отдельно не спрашивать — брать из `.env`.
 
-## Текущее состояние (Session — 14.07.2026 — Sprint 17: Data Integrity)
+## Текущее состояние (Session — 14.07.2026 — Sprint 20: Tests)
 
 **Фаза A ✅:** Починены сломанные импорты в `src/telegram/` (AUDIT-015), удалены `COROS_SYNC_*` константы (AUDIT-011).
 **Фаза B ✅:** Тонкие роуты (sync.py 444→93), мульти-бренд settings, единый `run_sync_for_user`, пакет `pages/`.
@@ -176,6 +176,23 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 **Sprint 18 ✅:** Architecture Cleanup — DRY orchestrator (2 × 150 строк → 1 параметризованная `_auto_sync`), DRY uploads (общий `_save_session_from_data`), rolling pace window helper (compute_rolling_pace), km-chunking helper (`_chunk_by_km`), weather lookup DRY (`_get_nearest`). split segment.py (436→312) + segment_km.py (140). split analysis/__init__.py (387→227) — 6 helpers в utils.py (233). graceful shutdown (scheduler stop Event). pip install -e . вместо sys.path.insert (2 файла). HTML из stats.py в Jinja2 шаблоны (zone bars, nav). dead code cleanup (4 элемента). 56/56 тестов зелёные.
 
 **Sprint 19 ✅:** Documentation & Types — ARCHITECTURE.md полное обновление (SQLite→PostgreSQL, актуальная структура); CODE_GUIDELINES.md (CONFIG→settings/constants, src/models→src/domain/models, 500→400 строк); CHECKLIST_FEATURE.md (CONFIG→settings, 500→400); TypedDict для трекпоинтов и результата анализа (TrackpointDict, AnalysisResult); type hints в stats.py, recovery_view.py, deps.py; bilingual-комментарии в user.py/training.py; импорты в health.py на уровень модуля. Все docs с CONFIG обновлены. 53/53 тестов зелёные.
+
+**Sprint 20 ✅:** Tests — conftest.py переписан через SessionLocal приложения; helpers.py — 5 builder-функций объединены в 1 параметризованную build_trackpoints(); TCX-фикстуры (tempo_run, short_walk); новые тесты: test_gps.py (10), test_stats.py (24), test_health.py (4), edge cases в test_classify.py (4), test_hr_zones.py (5), test_oscillation.py (6), test_segment.py (4). Итого +57 тестов. 120/120 тестов зелёные.
+
+### Что сделано в сессии (14.07.2026) — Sprint 20 / Tests:
+
+1. **TST-01**: `tests/conftest.py` — переписан через `SessionLocal` приложения (lazy engine, get_engine), autouse create/drop tables
+2. **TST-02**: `tests/fixtures/tempo_run.tcx`, `tests/fixtures/short_walk.tcx` — TCX-фикстуры
+3. **TST-03**: `tests/test_gps.py` — 10 тестов (haversine_m + clean_trackpoints)
+4. **TST-04**: `tests/test_classify.py` — +4 edge case теста
+5. **TST-05**: `tests/test_segment.py` — +4 edge case теста
+6. **TST-06**: `tests/test_hr_zones.py` — +5 тестов (max_hr=0, None, границы)
+7. **TST-07**: `tests/test_oscillation.py` — +6 edge case тестов
+8. **TST-08**: `tests/test_stats.py` — 24 теста (fmt_duration, calc_stats, zone_ranges, nav)
+9. **TST-09**: `tests/test_health.py` — 4 интеграционных теста (TestClient)
+10. **TST-10**: `tests/helpers.py` — 5 builders → 1 параметризованная `build_trackpoints()` + aliases
+11. **TST-11**: `tests/fixtures/README.md` — описание фикстур
+12. Поведенческие проверки: импорты OK, `from src.database` → 0, `except:pass` → 0, 120/120 тестов зелёные
 
 ### Что сделано в сессии (14.07.2026) — Sprint 18 / Architecture Cleanup:
 
@@ -281,12 +298,12 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 - `f1a60fa` feat: модуль анализа + новый алгоритм детекции интервалов
 - `99be684` fix: отладка и улучшение алгоритма анализа (40 тестов, 29 тренировок пересчитаны)
 - (текущий) Sprint 17: Data Integrity — NOT NULL FKs, cascade, JSON, валидация
+- (текущий) Sprint 20: Tests — 57 новых тестов, conftest, helpers, фикстуры
 
 ### Следующие шаги (подготовка к модулю аналитики):
 Порядок выполнения — строго последовательный. Каждый спринт = behavioral test + CHANGELOG + commit.
-- **Sprint 20** (Tests): conftest, fixtures, ≥30 тестов
 
-🚀 **После Sprint 20** — модуль аналитики (8 этапов из `decision_module_design.md`).
+🚀 **Sprint 21** — модуль аналитики, Этап 0: каркас и данные (`src/coach/`, таблицы Recommendation, PredictionLog, UserModel, Lesson), config.py, фикстуры для тестов.
 
 ❄️ Заморожено (после аналитики): фильтры, multi-brand onboarding, факторы самочувствия, admin panel.
 

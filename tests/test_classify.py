@@ -127,3 +127,56 @@ class TestClassifyTraining:
             avg_hr=130,
         )
         assert t_type != 'long'
+
+    def test_zero_duration_does_not_crash(self):
+        """Нулевая длительность → без ошибок"""
+        t_type, _ = classify_training(
+            var_count=0,
+            time_in_zone={1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
+            total_duration_min=0,
+            max_hr=177,
+            z4_plus_segments=[],
+            avg_hr=130,
+        )
+        assert t_type in ('tempo', 'recovery')
+
+    def test_high_var_count_no_oscillations_is_interval(self):
+        """var_count >= 3, 0 осцилляций → всё ещё interval"""
+        t_type, seg_count = classify_training(
+            var_count=5,
+            time_in_zone=_default_zones(),
+            total_duration_min=60,
+            max_hr=177,
+            z4_plus_segments=[],
+            avg_hr=140,
+            oscillation_count=0,
+        )
+        assert t_type == 'interval'
+        assert seg_count == 5
+
+    def test_var_count_2_oscillation_1_not_interval(self):
+        """var_count=2, oscillation_count=1 без HR → tempo"""
+        t_type, _ = classify_training(
+            var_count=2,
+            time_in_zone=_default_zones(),
+            total_duration_min=60,
+            max_hr=177,
+            z4_plus_segments=[],
+            avg_hr=140,
+            oscillation_count=1,
+            hr_correlated=False,
+            min_oscillations=3,
+        )
+        assert t_type == 'tempo'
+
+    def test_recovery_with_long_z4_becomes_tempo(self):
+        """Recovery с Z4+ сегментом → tempo"""
+        t_type, _ = classify_training(
+            var_count=0,
+            time_in_zone=_default_zones(30),
+            total_duration_min=25,
+            max_hr=177,
+            z4_plus_segments=[{'duration': 10, 'avg_hr': 160}],
+            avg_hr=120,
+        )
+        assert t_type == 'tempo'

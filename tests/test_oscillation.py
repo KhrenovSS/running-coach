@@ -174,3 +174,80 @@ class TestAdaptivePaceGap:
         paces = [4.0] * 50 + [4.5] * 50
         gap = _adaptive_pace_gap(paces, user_gap=1.0)
         assert gap == 0.5  # data_gap=0.5 < user_gap=1.0 → 0.5
+
+    def test_fewer_than_10_points_returns_user_gap_minimum(self):
+        """< 10 точек → max(0.3, user_gap)"""
+        gap = _adaptive_pace_gap([5.0] * 5, user_gap=0.5)
+        assert gap == 0.5
+        gap = _adaptive_pace_gap([5.0] * 5, user_gap=0.2)
+        assert gap == 0.3
+
+
+class TestDetectPaceOscillationsEdgeCases:
+    def test_single_work_phase_no_full_cycle(self):
+        """Одна work-фаза в конце: work без recovery после → 0 полных циклов"""
+        n = 50
+        times = [i * 5.0 for i in range(n)]
+        paces = [5.5] * 30 + [3.5] * 20
+        count, phases = detect_pace_oscillations(
+            paces, times, pace_gap=1.0, min_phase_duration_sec=10,
+        )
+        assert count == 0
+
+    def test_work_recovery_work_one_cycle(self):
+        """work→recovery→work → 1 полный work→recovery цикл"""
+        n = 50
+        times = [i * 5.0 for i in range(n)]
+        paces = [3.5] * 10 + [5.5] * 30 + [3.5] * 10
+        count, phases = detect_pace_oscillations(
+            paces, times, pace_gap=1.0, min_phase_duration_sec=10,
+        )
+        assert count == 1
+
+    def test_steady_pace_zero_with_small_gap(self):
+        """Стабильный темп → 0 осцилляций даже с малым pace_gap"""
+        n = 50
+        times = [i * 5.0 for i in range(n)]
+        paces = [5.5] * n
+        count, phases = detect_pace_oscillations(
+            paces, times, pace_gap=0.1, min_phase_duration_sec=10,
+        )
+        assert count == 0
+
+
+class TestEstimateBasePaceEdgeCases:
+    def test_less_than_3_points_uses_mean(self):
+        """< 3 точек → mean"""
+        base = _estimate_base_pace([5.0, 6.0])
+        assert base == 5.5
+
+    def test_empty_list_returns_default(self):
+        """Пустой список → 5.0"""
+        base = _estimate_base_pace([])
+        assert base == 5.0
+
+
+class TestComputeHrLagCorrelationEdgeCases:
+    def test_negative_correlation(self):
+        """Отрицательная корреляция: пульс падает при ускорении"""
+        n = 50
+        times = [i * 5.0 for i in range(n)]
+        paces = [4.0 if (i // 10) % 2 == 0 else 5.5 for i in range(n)]
+        hrs = []
+        for i in range(n):
+            if paces[i] < 5.0:
+                hrs.append(110)
+            else:
+                hrs.append(160)
+        coeff, is_corr = compute_hr_lag_correlation(times, paces, hrs, lag_sec=5)
+        assert isinstance(coeff, float)
+
+    def test_constant_hr_returns_no_correlation(self):
+        """Постоянный пульс → std_h=0 → (0.0, False)"""
+        n = 20
+        times = [i * 5.0 for i in range(n)]
+        paces = [4.0 if (i // 5) % 2 == 0 else 5.5 for i in range(n)]
+        hrs = [140] * n
+        coeff, is_corr = compute_hr_lag_correlation(times, paces, hrs, lag_sec=5)
+        assert coeff == 0.0
+        assert is_corr is False
