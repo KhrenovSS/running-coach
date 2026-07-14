@@ -3,7 +3,7 @@ import os
 import threading
 from pathlib import Path
 
-PENDING_DIR = Path(os.getenv("PENDING_DIR", "/tmp/running_coach_uploads"))
+PENDING_DIR = Path(os.getenv("PENDING_DIR", "uploads/pending"))
 PENDING_DIR.mkdir(parents=True, exist_ok=True)
 
 _pending = {}  # temp_id -> dict with 'path', 'filename', 'data'

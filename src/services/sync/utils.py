@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from src.utils.logger import get_logger
-from src.crypto import decrypt
+from src.crypto import decrypt, safe_decrypt
 from src.config.constants import (
     MIN_ACTIVITY_SYNC_INTERVAL_MIN,
     MIN_HEALTH_SYNC_INTERVAL_MIN,
@@ -54,13 +54,14 @@ async def _make_client(cred: WatchCredential) -> Optional[BaseWatchClient]:
     plain_password = decrypt(cred.encrypted_password) if cred.encrypted_password else None
     if not plain_password:
         return None
-    client = get_watch_client(cred.brand, email=cred.encrypted_user, password=plain_password, timeout=15)
+    email = safe_decrypt(cred.encrypted_user) or cred.encrypted_user or ''
+    client = get_watch_client(cred.brand, email=email, password=plain_password, timeout=15)
     if client is None:
         logger.warning("Unknown watch brand: %s", cred.brand)
         return None
     try:
         await client.authenticate()
     except Exception as e:
-        logger.warning("Auth failed for brand=%s user=%s: %s", cred.brand, cred.encrypted_user, e)
+        logger.warning("Auth failed for brand=%s user=%s: %s", cred.brand, email, e)
         return None
     return client

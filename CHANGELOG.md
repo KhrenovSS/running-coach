@@ -2,6 +2,68 @@
 
 All notable changes to this project are tracked here.
 
+## [14.07.2026] — Sprint 13: Security & Hardening
+
+### Added
+- **`src/utils/rate_limit.py`** — новый модуль in-memory rate limiting с thread-safe bucket
+- **`src/api/middleware.py`** — `CSRFProtectMiddleware`: проверка Origin/Referer для POST/PUT/DELETE (SEC-07)
+- **`src/config/settings.py`** — `web_app_url` для CSRF-валидации
+
+### Changed
+- **SEC-01** `src/api/middleware.py:28` — `SECRET_KEY` без fallback: `os.environ["SECRET_KEY"]` — при отсутствии KeyError при старте
+- **SEC-02** Шифрование email в `encrypted_user`:
+  - `src/crypto.py` — новый `safe_decrypt()` для совместимости с plaintext
+  - `src/services/watch_credentials.py` — email шифруется Fernet перед записью
+  - `src/services/sync/utils.py` — `_make_client()` расшифровывает email перед аутентификацией
+  - `src/web/routes/pages/settings.py` — расшифровка email для отображения и audit-diff
+- **SEC-03** `src/web/state.py:6` — `PENDING_DIR` по умолчанию `uploads/pending` (вместо `/tmp/...`)
+- **SEC-04** Docker hardening:
+  - `Dockerfile` — добавлен `USER appuser`
+  - `docker-compose.yml` — порт db убран наружу, healthcheck для `app` и `bot`
+- **SEC-05** Rate-limiting:
+  - `src/api/routes/auth.py` — `/auth/login` лимит 5/60s
+  - `src/web/routes/uploads.py` — `/upload` лимит 30/60s
+  - `src/web/routes/pages/settings.py` — `/settings` лимит 10/60s
+- **SEC-06** Session fixation:
+  - `src/api/routes/auth.py` — `request.session.clear()` перед установкой user_id во всех 3 точках входа
+- **SEC-08** `src/telegram/handlers/account.py` — `except: pass` заменён на `telegram.error.TimedOut` + `logger.warning`
+- **SEC-09** `main.py:7` — убран `reload=True`
+
+### Removed
+- **SEC-01** Убран fallback `"dev-secret-key-change-in-production"` для SECRET_KEY
+
+### Verified
+- `grep -rn "dev-secret-key-change-in-production" src/` → 0
+- `grep -rn "except: pass\|except Exception: pass" src/` → 0
+- `grep -rn "PENDING_DIR.*/tmp" src/` → 0
+- Все 11 изменённых файлов проходят `ast.parse` (синтаксис корректен)
+
+### Notes
+- **Docker**: пересобрать `app` + `bot` (изменены Dockerfile, docker-compose.yml, middleware, rate limiter, crypto, watch_credentials)
+- **Требуется** `SECRET_KEY` в `.env` — без него приложение не стартует
+- **Требуется** `WEB_APP_URL` в `.env` — для корректной работы CSRF-защиты
+
+---
+
+## [14.07.2026] — Sprint 12: Чистка роутов (sync.py + pages.py)
+
+### Changed
+- **`src/web/routes/sync.py`** (444→93 строки): статус-трекинг вынесен в `src/web/state.py`, бизнес-логика делегирована сервисам (AUDIT-009)
+- **`src/web/routes/pages.py`** (601 строка): разбит на пакет `pages/`:
+  - `auth.py` (48 строк)
+  - `index.py` (184 строки)
+  - `session.py` (177 строк)
+  - `settings.py` (118 строк)
+  - `__init__.py` — сборка роутера (AUDIT-013)
+
+### Planning
+- **`AGENTS.md`**, **`BACKLOG.md`**, **`PROJECT_AUDIT.md`**, **`README.md`**: синхронизированы с актуальным состоянием проекта
+  - Sprint 12 отмечен ✅ (роуты)
+  - Sprint 12b создан (доводка + документация + мелкие фиксы)
+  - Sprint 10 возвращён в план (тесты, P0)
+  - Задачи BACKLOG привязаны к спринтам
+  - README.md: чекбокс «Разбивка models.py + sync_service.py на пакеты» ✅
+
 ## [14.07.2026] — Sprint 11: Разбивка models.py + sync_service.py на пакеты
 
 ### Changed

@@ -11,9 +11,11 @@ from src.deps import templates
 from src.api.deps import get_current_user
 from src.services.audit import AuditService
 from src.services.watch_credentials import upsert_watch_credential
+from src.crypto import safe_decrypt
 from src.config.constants import (DEFAULT_PACE_THRESHOLD, DEFAULT_MIN_PHASE_DURATION_SEC,
                                    DEFAULT_HR_LAG_SEC, DEFAULT_MIN_OSCILLATIONS)
 from src.utils.logger import get_logger
+from src.utils.rate_limit import rate_limit
 
 logger = get_logger("app")
 router = APIRouter()
@@ -40,7 +42,7 @@ async def settings_page(request: Request, current_user: User = Depends(get_curre
         watch_creds.append({
             'brand': cred.brand,
             'brand_display': cred.brand.capitalize(),
-            'email': cred.encrypted_user or '',
+            'email': safe_decrypt(cred.encrypted_user) or '',
             'has_password': bool(cred.encrypted_password),
             'pw_placeholder': '********' if cred.encrypted_password else '',
             'activity_sync_interval': cred.activity_sync_interval if cred.activity_sync_interval else '',
@@ -78,7 +80,8 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
                         activity_sync_interval: int = Form(None),
                         health_sync_interval: int = Form(None),
                         db: Session = Depends(get_db),
-                        current_user: User = Depends(get_current_user)):
+                        current_user: User = Depends(get_current_user),
+                        _: None = Depends(rate_limit(max_requests=10, window_seconds=60))):
     user = db.query(User).filter(User.id == current_user.id).first()
     audit = AuditService(db)
     if not user:
@@ -94,7 +97,7 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
             WatchCredential.user_id == current_user.id,
             WatchCredential.brand == watch_brand,
         ).first()
-        old_watch_email = old_cred.encrypted_user if old_cred else ''
+        old_watch_email = safe_decrypt(old_cred.encrypted_user) if old_cred else ''
 
     user.max_hr = max_hr
     user.weight_kg = weight

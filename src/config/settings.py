@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     # Пульсовые зоны (Heart rate zones)
     default_max_hr: int = 177
 
+    # URL веб-приложения для CSRF и ссылок (Web app URL for CSRF and links)
+    web_app_url: str = ""
+
     # Пути (Paths)
     log_file: str = "app.log"
     upload_dir: str = "uploads"

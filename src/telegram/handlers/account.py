@@ -1,5 +1,6 @@
 import asyncio
 
+import telegram
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
@@ -115,8 +116,10 @@ async def get_new_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Удаляем сообщение с паролем (Delete password message)
         try:
             await update.message.delete()
-        except Exception:
-            pass
+        except telegram.error.TimedOut:
+            logger.warning("Timed out deleting password message for user %s", user.id)
+        except Exception as e:
+            logger.warning("Could not delete password message for user %s: %s", user.id, e)
         # Показываем пароль 2 секунды затем удаляем (Show password for 2 sec then delete)
         confirmation = await update.message.reply_text(
             f"✅ Пароль установлен: {password}\n"
@@ -125,8 +128,10 @@ async def get_new_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await asyncio.sleep(2)
         try:
             await confirmation.delete()
-        except Exception:
-            pass
+        except telegram.error.TimedOut:
+            logger.warning("Timed out deleting confirmation message for user %s", user.id)
+        except Exception as e:
+            logger.warning("Could not delete confirmation message for user %s: %s", user.id, e)
         audit.log_settings_changed(
             user_id=user.id,
             changes={"password": {"action": "reset"}},

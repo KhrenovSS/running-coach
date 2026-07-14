@@ -63,3 +63,14 @@ def decrypt(ciphertext: str) -> str:
     if not ciphertext:
         return ''
     return _get_fernet().decrypt(ciphertext.encode()).decode()
+
+
+# Безопасно расшифровать — если данные не зашифрованы (например, старые plaintext email)
+# вернуть как есть (Safe decrypt — return as-is if data was not encrypted)
+def safe_decrypt(ciphertext: str | None) -> str | None:
+    if not ciphertext:
+        return ciphertext
+    try:
+        return decrypt(ciphertext)
+    except Exception:
+        return ciphertext

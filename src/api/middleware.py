@@ -16,6 +16,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from src.exceptions import AppError
 from src.utils.logger import get_requests_logger, get_logger
+from src.config import settings
 
 logger = get_logger("app")
 requests_logger = get_requests_logger()
@@ -24,7 +25,7 @@ requests_logger = get_requests_logger()
 SLOW_REQUEST_THRESHOLD_MS = 1000
 
 # Секретный ключ для session-cookie (Secret key for session cookies)
-SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
+SECRET_KEY = os.environ["SECRET_KEY"]
 
 
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -79,6 +80,48 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
         status_code=exc.status_code,
         content={"message": exc.detail},
     )
+
+
+class CSRFProtectMiddleware:
+    """
+    CSRF защита через проверку Origin/Referer заголовков.
+    CSRF protection via Origin/Referer header validation.
+    """
+    SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
+
+    def __init__(self, app: FastAPI):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["method"] in self.SAFE_METHODS:
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope, receive)
+        origin = request.headers.get("origin", "")
+        referer = request.headers.get("referer", "")
+
+        allowed = (settings.web_app_url or "").rstrip("/")
+        if not allowed:
+            await self.app(scope, receive, send)
+            return
+
+        valid_origin = origin and (origin.rstrip("/") == allowed or origin.startswith(allowed + "/"))
+        valid_referer = referer and (referer.rstrip("/").startswith(allowed))
+
+        if not valid_origin and not valid_referer:
+            logger.warning(
+                "CSRF rejected: method=%s path=%s origin=%s referer=%s",
+                scope["method"], scope["path"], origin, referer,
+            )
+            response = JSONResponse(
+                status_code=403,
+                content={"message": "CSRF check failed"},
+            )
+            await response(scope, receive, send)
+            return
+
+        await self.app(scope, receive, send)
 
 
 class RequestLoggingMiddleware:
@@ -182,4 +225,5 @@ def register_middleware(app: FastAPI) -> None:
     
     app.add_middleware(RequestLoggingMiddleware)
     
-    logger.info("Middleware registered: error handlers + request logging")
+    app.add_middleware(CSRFProtectMiddleware)
+    logger.info("Middleware registered: error handlers + request logging + CSRF")

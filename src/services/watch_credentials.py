@@ -51,12 +51,12 @@ def upsert_watch_credential(
         cred = WatchCredential(
             user_id=user_id,
             brand=brand,
-            encrypted_user=email,
+            encrypted_user=encrypt(email),
         )
         db.add(cred)
         logger.info("WatchCredential created: user=%s brand=%s", user_id, brand)
     else:
-        cred.encrypted_user = email
+        cred.encrypted_user = encrypt(email)
 
     if password and password != '********':
         cred.encrypted_password = encrypt(password)

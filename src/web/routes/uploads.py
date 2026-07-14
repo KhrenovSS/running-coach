@@ -19,6 +19,7 @@ from src.api.deps import get_current_user
 from src.services.audit import AuditService
 from src.services.telegram_notify import telegram_notify
 from src.web.state import _pending, PENDING_DIR
+from src.utils.rate_limit import rate_limit
 
 logger = get_logger("app")
 router = APIRouter()
@@ -26,7 +27,8 @@ router = APIRouter()
 
 @router.post('/upload')
 async def upload_files(files: list[UploadFile] = File(...), db: Session = Depends(get_db),
-                       current_user: User = Depends(get_current_user)):
+                       current_user: User = Depends(get_current_user),
+                       _: None = Depends(rate_limit(max_requests=30, window_seconds=60))):
     settings = get_settings()
     saved = 0
     deleted_hit = None

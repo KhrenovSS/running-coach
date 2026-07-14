@@ -23,6 +23,7 @@ from src.services.auth import (
 from src.services.audit import AuditService
 from src.exceptions import ValidationError
 from src.utils.logger import get_logger
+from src.utils.rate_limit import rate_limit
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = get_logger("auth")
@@ -49,7 +50,8 @@ async def telegram_login(request: Request, token: str, db: Session = Depends(get
         )
         return RedirectResponse(url="/login?error=invalid_token", status_code=303)
     
-    # Сохраняем пользователя в сессии (Store user in session)
+    # Session fixation protection: очищаем сессию перед установкой (clear session before setting)
+    request.session.clear()
     request.session["user_id"] = user.id
     request.session["user_name"] = user.name or user.telegram_username or "Бегун"
     
@@ -74,6 +76,7 @@ async def password_login(
     email: str = Form(...),
     password: str = Form(...),
     db: Session = Depends(get_db),
+    _: None = Depends(rate_limit(max_requests=5, window_seconds=60)),
 ):
     """
     Вход по email и паролю (Login via email and password)
@@ -95,7 +98,8 @@ async def password_login(
         )
         return RedirectResponse(url="/login?error=invalid_credentials", status_code=303)
     
-    # Сохраняем пользователя в сессии (Store user in session)
+    # Session fixation protection
+    request.session.clear()
     request.session["user_id"] = user.id
     request.session["user_name"] = user.name or user.telegram_username or "Бегун"
     
@@ -168,7 +172,8 @@ async def register(
     user.password_hash = hash_password(password)
     db.commit()
     
-    # Сохраняем пользователя в сессии (Store user in session)
+    # Session fixation protection
+    request.session.clear()
     request.session["user_id"] = user.id
     request.session["user_name"] = user.name or user.telegram_username or "Бегун"
     
