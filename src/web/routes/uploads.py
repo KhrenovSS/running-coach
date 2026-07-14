@@ -52,16 +52,22 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(contents)
             tmp_path = tmp.name
-        if ext == ".fit":
-            data = parse_fit(tmp_path, max_hr=settings.max_hr,
-                             max_credible_pace=settings.max_credible_pace,
-                             max_gps_jump_m=settings.max_gps_jump_m,
-                             min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
-        else:
-            data = parse_tcx(tmp_path, max_hr=settings.max_hr,
-                             max_credible_pace=settings.max_credible_pace,
-                             max_gps_jump_m=settings.max_gps_jump_m,
-                             min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
+        try:
+            if ext == ".fit":
+                data = parse_fit(tmp_path, max_hr=settings.max_hr,
+                                 max_credible_pace=settings.max_credible_pace,
+                                 max_gps_jump_m=settings.max_gps_jump_m,
+                                 min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
+            else:
+                data = parse_tcx(tmp_path, max_hr=settings.max_hr,
+                                 max_credible_pace=settings.max_credible_pace,
+                                 max_gps_jump_m=settings.max_gps_jump_m,
+                                 min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
+        except Exception as e:
+            logger.warning("Upload: parse error for %s — %s", file.filename, e, exc_info=True)
+            parse_errors.append(file.filename or "unknown")
+            os.unlink(tmp_path)
+            continue
         if data is None:
             logger.warning("Загрузка: не удалось распарсить %s (Upload: parse failed)", file.filename)
             parse_errors.append(file.filename or "unknown")

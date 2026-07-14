@@ -618,6 +618,7 @@ pytest tests/ -v        # тесты проходят
 - [ ] **ARC-10**: `stats.py`: HTML (`render_zone_bars`, `render_type_row`, `build_nav_html`) из сервисного слоя в Jinja2 — MVC нарушен — `src/services/stats.py:66-133`
 - [ ] **ARC-11**: Dead code: `_get_progress_message`, `ValidationError` import, мёртвые константы settings — удалить
 - [ ] **ARC-12**: Опечатка `'Окторябрь'` → `'Октябрь'` — `src/services/stats.py:8`
+- [ ] **ARC-13**: CRC-ошибка parse_fit/parse_tcx в uploads.py → 500, а не информирование пользователя. Обернуть в try-except с логом и parse_errors. | — `src/web/routes/uploads.py:55-64`
 
 **Проверка:**
 ```bash
