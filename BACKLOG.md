@@ -246,8 +246,44 @@
 
 | # | Тег | Описание | Файл / Источник | Статус |
 |---|-----|----------|-----------------|--------|
-| 139 | [Memory] | **`_weather_cache` без LRU/TTL** — бесконтрольный рост словаря при длительном аптайме. При 1000+ уникальных (lat,lon,date) — утечка памяти. Нужен `functools.lru_cache` или `cachetools.TTLCache`. | `src/parsers/weather.py:7-46` | ⬜ Sprint 20b |
-| 140 | [Memory] | **`db.query(TrainingSession).all()` без LIMIT** — на главной странице все тренировки пользователя загружаются в память. При 1000+ сессий страница падает. Нужен `limit(100)`. | `src/web/routes/pages/index.py:36-38` | ⬜ Sprint 20b |
-| 141 | [Memory] | **N+1 в sync/activities.py: все begin_ts + DeletedTraining загружаются без фильтра** — при 5000+ тренировок каждый sync-цикл загружает всю историю. Нужен `filter(begin_ts >= cutoff_date)` или indexed lookup. | `src/services/sync/activities.py:85-86` | ⬜ Sprint 20b |
+| 139 | [Memory] | **`_weather_cache` без LRU/TTL** — бесконтрольный рост словаря при длительном аптайме. При 1000+ уникальных (lat,lon,date) — утечка памяти. Нужен `functools.lru_cache` или `cachetools.TTLCache`. | `src/parsers/weather.py:7-46` | ✅ Sprint 20b (DEBT-01) |
+| 140 | [Memory] | **`db.query(TrainingSession).all()` без LIMIT** — на главной странице все тренировки пользователя загружаются в память. При 1000+ сессий страница падает. Нужен `limit(100)`. | `src/web/routes/pages/index.py:36-38` | ✅ Sprint 20b (DEBT-02) |
+| 141 | [Memory] | **N+1 в sync/activities.py: все begin_ts + DeletedTraining загружаются без фильтра** — при 5000+ тренировок каждый sync-цикл загружает всю историю. Нужен `filter(begin_ts >= cutoff_date)` или indexed lookup. | `src/services/sync/activities.py:85-86` | ✅ Sprint 20b (DEBT-03) |
+
+---
+
+## 🔴 P0 — Подготовка к модулю аналитики (аудит 14.07.2026 — Sprint 20c)
+
+| # | Тег | Описание | Файл / Источник | Статус |
+|---|-----|----------|-----------------|--------|
+| 142 | [Bug] | **Telegram stats handler ссылается на несуществующие колонки** — `TrainingSession.distance_km`, `TrainingSession.duration_seconds`, `TrainingSession.sport` НЕ СУЩЕСТВУЮТ. Реальные колонки: `total_distance_km`, `duration_minutes`, `training_type`. Команда `/stats` падает с `AttributeError` при вызове `_overview()` (строки 44,47,64) или `_period_stats()` (строки 83-84,98). **Блокирует:** любой Telegram-пользователь, вызвавший `/stats`, получает crash. | `src/telegram/handlers/stats.py:44,47,64,83-84,98` | ⬜ Sprint 20c (PREP-01) |
+| 143 | [DB] | **Нет индексов для запросов по диапазонам времени** — `training_sessions` не имеет индекса на `begin_ts` и составного `(user_id, begin_ts)`. Модуль аналитики будет постоянно делать запросы «тренировки пользователя за N дней» — каждый раз full table scan. Аналогично: `training_feedback` нет `(user_id, created_at)`, `weight_measurements` нет `(user_id, measured_at)`. `daily_metrics` имеет `UniqueConstraint(user_id, date)` — это даёт составной индекс, но `training_sessions` — нет. **Блокирует:** все skills модуля аналитики (fatigue, load, progress, distribution) будут медленными. | `src/domain/models/training.py:13-14`, `health.py:15-16` | ⬜ Sprint 20c (PREP-02) |
+| 144 | [Arch] | **Нет слоя агрегационных запросов** — вся аналитика считается в Python после загрузки полных выборок. `calc_stats()` итерирует список объектов, `index.py` загружает до 200 сессий и фильтрует в Python. Нигде нет `func.sum()`, `func.avg()`, `group_by` на уровне БД. Модуль аналитики нуждается в `weekly_volume()`, `zone_distribution()`, `hrv_trend()` как SQL-запросах. **Блокирует:** skills (`fatigue.py`, `load.py`, `progress.py`) будут неэффективны и сложны в реализации. | `src/services/stats.py`, `src/web/routes/pages/index.py` | ⬜ Sprint 20c (PREP-03) |
+
+---
+
+## 🟠 P1 — Подготовка к модулю аналитики (аудит 14.07.2026 — Sprint 20c)
+
+| # | Тег | Описание | Файл / Источник | Статус |
+|---|-----|----------|-----------------|--------|
+| 145 | [Bug] | **Двойная сериализация `sleep_hrv_interval_list`** — `src/services/sync/health.py:47` делает `json.dumps(intervals)` перед записью в JSON-колонку. SQLAlchemy сериализует ещё раз. Потребители (`index.py:165`, `session.py:42`) вынуждены делать `json.loads()` для распаковки. Модуль `skills/fatigue.py` должен будет знать об этом quirke или получит строку вместо списка. **Усложняет:** реализацию HRV-аналитики. | `src/services/sync/health.py:47`, `src/web/routes/pages/index.py:165` | ⬜ Sprint 20c (PREP-04) |
+| 146 | [Arch] | **`get_settings()` хардкодит `User.id == 1`** — `src/models.py:17` всегда возвращает настройки первого пользователя. `index.py` использует `get_settings().max_hr` для расчёта зон — это некорректно для мультюзер-сценария. Модулю коуча нужен per-user доступ к настройкам (`user.max_hr`, `user.interval_pace_threshold` и т.д.). **Усложняет:** per-user аналитику и персонализацию. | `src/models.py:17`, `src/web/routes/pages/index.py:68` | ⬜ Sprint 20c (PREP-05) |
+| 147 | [Arch] | **`recovery_view.py` — только display, не аналитика** — функции `hrv_status()`, `tired_label()`, `readiness_label()`, `load_label()` возвращают строки с эмодзи для HTML. Структурированных числовых результатов нет. Модуль `skills/fatigue.py` должен будет переписывать логику с нуля, возвращая `SkillResult` (status + value + confidence + evidence). **Усложняет:** переиспользование существующей логики. | `src/services/recovery_view.py` | ⬜ Sprint 20c (PREP-06) |
+| 148 | [Arch] | **Нет функций трендов (slope, EWMA, moving average)** — ни одной функции для вычисления трендов VO2max, LTHR, stamina, HRV за 30/90 дней. `skills/progress.py` будет строиться полностью с нуля. Нужны helpers: `compute_slope(series, days)`, `compute_ewma(series, alpha)`, `compute_moving_average(series, window)`. **Усложняет:** реализацию progress-аналитики. | отсутствует в проекте | ⬜ Sprint 20c (PREP-07) |
+| 149 | [DB] | **Нет `avg_pace` на `TrainingSession`** — у `DeletedTraining` есть `avg_pace`, у `TrainingSession` — нет. Каждый раз нужно считать `duration_minutes / total_distance_km`. Для модуля аналитики, который сравнивает эффективность по темпу (pace-at-HR, running efficiency), это лишнее вычисление на каждый запрос. **Усложняет:** queries для efficiency-метрик. | `src/domain/models/training.py:9-38` | ⬜ Sprint 20c (PREP-08) |
+| 150 | [Test] | **Нет тестовых фабрик для DailyMetrics и TrainingSession** — `tests/helpers.py` содержит `build_trackpoints()` (dict-ы для анализа), но нет фабрик для ORM-объектов `DailyMetrics` (серии 30-90 дней), `TrainingSession` (с `segments_json`, `training_type`, `training_effect`), `TrainingFeedback`. Тестирование скиллов и калибровки без них невозможно. **Блокирует:** написание тестов для `src/coach/skills/`. | `tests/helpers.py` | ⬜ Sprint 20c (PREP-09) |
+
+---
+
+## 🟡 P2 — Подготовка к модулю аналитики (аудит 14.07.2026 — Sprint 20c)
+
+| # | Тег | Описание | Файл / Источник | Статус |
+|---|-----|----------|-----------------|--------|
+| 151 | [Config] | **Нет `src/coach/config.py`** — `settings.py` (9 полей) и `constants.py` (52 строки) не содержат параметров аналитики: веса readiness/fatigue score, пороги injury risk, EWMA-параметры калибровки, confidence thresholds, recovery hours by type. Предусмотрено дизайн-документом как часть Этапа 0. **Усложняет:** настройку модуля аналитики. | `src/config/settings.py`, `src/config/constants.py` | ⬜ Sprint 20c (PREP-10) |
+| 152 | [Cleanup] | **`src/models.py` — shim с бизнес-логикой** — содержит `get_settings()`, `get_user()`, `get_user_by_telegram()` — это сервисные функции, не реэкспорт моделей. Модулю коуча лучше импортировать из `src.domain.models` напрямую (по образцу `src/analysis/`, который вообще не импортирует `src.models`). **Усложняет:** чистоту импортов. | `src/models.py:13-64` | ⬜ Sprint 20c (PREP-11) |
+
+---
+
+*Обновлён: 14.07.2026 — Аудит перед Sprint 21: добавлены P0/P1/P2 находки (#142-#152), сформирован Sprint 20c (PREP-01..PREP-11)*
 
 ---

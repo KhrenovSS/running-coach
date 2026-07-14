@@ -680,6 +680,876 @@ pytest tests/ -v    # ≥ 30 тестов, все зелёные
 
 ---
 
+#### Sprint 20c — Analytics Preparation (P0/P1) — Аудит 14.07.2026
+
+**Зачем:** Аудит выявил критические проблемы, которые **объективно заблокируют** модуль аналитики (`src/coach/`): сломанный Telegram stats handler (runtime crash), отсутствие индексов для time-range queries (все skills будут медленными), отсутствие слоя агрегаций (skills придётся писать с нуля), двойная сериализация HRV-данных, отсутствие тестовых фабрик. Этот спринт закрывает P0/P1 находки, чтобы Sprint 21 (Этап 0 модуля аналитики) стартовал на стабильном фундаменте.
+
+**Docker:** `app` (миграция БД + новый модуль `src/services/repositories.py`)
+
+**Задачи (11 задач, ~2-3 дня работы):**
+
+##### PREP-01: Починить Telegram stats handler (P0, BACKLOG #142)
+**Файл:** `src/telegram/handlers/stats.py`
+**Проблема:** Строки 44, 47, 64, 83-84, 98 используют несуществующие колонки `TrainingSession.distance_km`, `TrainingSession.duration_seconds`, `TrainingSession.sport`. Команда `/stats` падает с `AttributeError`.
+**Решение:**
+1. Заменить `TrainingSession.distance_km` → `TrainingSession.total_distance_km` (строки 44, 64, 83, 98)
+2. Заменить `TrainingSession.duration_seconds` → `TrainingSession.duration_minutes` (строки 47, 84, 98)
+3. Заменить `TrainingSession.sport` → `TrainingSession.training_type` (строки 64, 98)
+4. Обновить `_format_duration()`: сейчас принимает секунды, нужно принимать минуты. Логика: `hours = minutes // 60`, `mins = minutes % 60`. Формат: `"2ч 30м"`.
+5. Обновить `_overview()` строка 47: `db.func.sum(TrainingSession.duration_minutes)` вместо `duration_seconds`.
+6. Обновить `_period_stats()` строка 84: `sum(s.duration_minutes or 0 for s in sessions)` вместо `duration_seconds`.
+
+**Проверка:**
+```bash
+python -c "from src.telegram.handlers.stats import StatsPages; print('import OK')"
+# Smoke-тест: бот стартует, /stats отвечает без crash
+```
+
+---
+
+##### PREP-02: Добавить индексы для time-range queries (P0, BACKLOG #143)
+**Файл:** `src/domain/models/training.py`, `src/domain/models/health.py`, Alembic миграция
+**Проблема:** Нет индексов на `begin_ts`, `(user_id, begin_ts)` для `training_sessions`. Модуль аналитики будет делать запросы «тренировки за N дней» — каждый раз full scan.
+**Решение:**
+1. **`src/domain/models/training.py`** — добавить в `TrainingSession`:
+   ```python
+   from sqlalchemy import Index
+   
+   class TrainingSession(Base):
+       __tablename__ = 'training_sessions'
+       # ... существующие колонки ...
+       __table_args__ = (
+           Index('ix_training_user_begin', 'user_id', 'begin_ts'),
+           Index('ix_training_begin', 'begin_ts'),
+       )
+   ```
+2. **`src/domain/models/health.py`** — `DailyMetrics` уже имеет `UniqueConstraint('user_id', 'date')`, что создаёт составной индекс. Добавить явный индекс на `date`:
+   ```python
+   class DailyMetrics(Base):
+       __table_args__ = (
+           UniqueConstraint('user_id', 'date', name='uq_user_date'),
+           Index('ix_daily_metrics_date', 'date'),
+       )
+   ```
+3. **`src/domain/models/training.py`** — добавить индекс на `TrainingFeedback`:
+   ```python
+   class TrainingFeedback(Base):
+       __table_args__ = (
+           Index('ix_feedback_user_created', 'user_id', 'created_at'),
+       )
+   ```
+4. **`src/domain/models/health.py`** — добавить индекс на `WeightMeasurement`:
+   ```python
+   class WeightMeasurement(Base):
+       __table_args__ = (
+           Index('ix_weight_user_measured', 'user_id', 'measured_at'),
+       )
+   ```
+5. **Alembic миграция** (новая, после `f7g8h9i0j1k2`):
+   ```python
+   def upgrade():
+       op.create_index('ix_training_user_begin', 'training_sessions', ['user_id', 'begin_ts'])
+       op.create_index('ix_training_begin', 'training_sessions', ['begin_ts'])
+       op.create_index('ix_daily_metrics_date', 'daily_metrics', ['date'])
+       op.create_index('ix_feedback_user_created', 'training_feedback', ['user_id', 'created_at'])
+       op.create_index('ix_weight_user_measured', 'weight_measurements', ['user_id', 'measured_at'])
+   
+   def downgrade():
+       op.drop_index('ix_weight_user_measured', 'weight_measurements')
+       op.drop_index('ix_feedback_user_created', 'training_feedback')
+       op.drop_index('ix_daily_metrics_date', 'daily_metrics')
+       op.drop_index('ix_training_begin', 'training_sessions')
+       op.drop_index('ix_training_user_begin', 'training_sessions')
+   ```
+
+**Проверка:**
+```bash
+alembic upgrade head    # миграция проходит
+alembic downgrade -1    # откат работает
+alembic upgrade head    # повторный накат идемпотентен
+pytest tests/ -v        # тесты проходят
+```
+
+---
+
+##### PREP-03: Создать слой агрегационных запросов (P0, BACKLOG #144)
+**Файл:** `src/services/repositories.py` (новый, ~150-200 строк)
+**Проблема:** Вся аналитика считается в Python после загрузки полных выборок. Нет `func.sum()`, `func.avg()`, `group_by` на уровне БД. Модуль аналитики нуждается в SQL-агрегациях.
+**Решение:** Создать `src/services/repositories.py` с классами-репозиториями:
+
+```python
+# src/services/repositories.py
+from datetime import datetime, timedelta
+from sqlalchemy import func
+from src.models import SessionLocal, TrainingSession, DailyMetrics, TrainingFeedback, WeightMeasurement
+
+class TrainingRepository:
+    """Агрегационные запросы для тренировок (Aggregation queries for training sessions)."""
+    
+    @staticmethod
+    def weekly_volume(user_id: int, weeks: int = 4) -> list[dict]:
+        """Объём тренировок по неделям (Weekly training volume).
+        Returns: [{"week_start": date, "total_km": float, "total_minutes": float, "session_count": int}, ...]
+        """
+        db = SessionLocal()
+        try:
+            since = datetime.utcnow() - timedelta(weeks=weeks)
+            results = db.query(
+                func.date_trunc('week', TrainingSession.begin_ts).label('week_start'),
+                func.sum(TrainingSession.total_distance_km).label('total_km'),
+                func.sum(TrainingSession.duration_minutes).label('total_minutes'),
+                func.count(TrainingSession.id).label('session_count'),
+            ).filter(
+                TrainingSession.user_id == user_id,
+                TrainingSession.begin_ts >= since,
+            ).group_by(
+                func.date_trunc('week', TrainingSession.begin_ts)
+            ).order_by('week_start').all()
+            
+            return [
+                {
+                    "week_start": r.week_start.date() if r.week_start else None,
+                    "total_km": float(r.total_km or 0),
+                    "total_minutes": float(r.total_minutes or 0),
+                    "session_count": r.session_count,
+                }
+                for r in results
+            ]
+        finally:
+            db.close()
+    
+    @staticmethod
+    def zone_distribution(user_id: int, days: int = 28) -> dict:
+        """Распределение времени по пульсовым зонам (Time distribution by HR zones).
+        Returns: {"z1": minutes, "z2": minutes, "z3": minutes, "z4": minutes, "z5": minutes}
+        Примечание: требует парсинга segments_json, поэтому загружает сессии и считает в Python.
+        """
+        db = SessionLocal()
+        try:
+            since = datetime.utcnow() - timedelta(days=days)
+            sessions = db.query(TrainingSession).filter(
+                TrainingSession.user_id == user_id,
+                TrainingSession.begin_ts >= since,
+            ).all()
+            
+            zone_minutes = {"z1": 0.0, "z2": 0.0, "z3": 0.0, "z4": 0.0, "z5": 0.0}
+            for session in sessions:
+                if not session.segments_json:
+                    continue
+                for segment in session.segments_json:
+                    # Каждый сегмент имеет avg_hr и duration
+                    # Зону определяем через hr_zones.get_zone(avg_hr, max_hr)
+                    # Но здесь упрощённо: считаем duration как вклад в зону
+                    # Полная реализация потребует max_hr из User
+                    duration = segment.get('duration', 0)
+                    zone_minutes["z2"] += duration  # placeholder: реальная логика в skills/distribution.py
+            
+            return zone_minutes
+        finally:
+            db.close()
+    
+    @staticmethod
+    def training_type_distribution(user_id: int, days: int = 28) -> dict:
+        """Распределение типов тренировок (Training type distribution).
+        Returns: {"interval": count, "tempo": count, "long": count, "recovery": count}
+        """
+        db = SessionLocal()
+        try:
+            since = datetime.utcnow() - timedelta(days=days)
+            results = db.query(
+                TrainingSession.training_type,
+                func.count(TrainingSession.id).label('count'),
+            ).filter(
+                TrainingSession.user_id == user_id,
+                TrainingSession.begin_ts >= since,
+            ).group_by(TrainingSession.training_type).all()
+            
+            return {r.training_type: r.count for r in results if r.training_type}
+        finally:
+            db.close()
+
+class HealthRepository:
+    """Агрегационные запросы для метрик здоровья (Aggregation queries for health metrics)."""
+    
+    @staticmethod
+    def hrv_trend(user_id: int, days: int = 30) -> list[dict]:
+        """Тренд HRV за период (HRV trend over period).
+        Returns: [{"date": date, "avg_sleep_hrv": float, "baseline": float}, ...]
+        """
+        db = SessionLocal()
+        try:
+            since = datetime.utcnow() - timedelta(days=days)
+            results = db.query(
+                DailyMetrics.date,
+                DailyMetrics.avg_sleep_hrv,
+                DailyMetrics.sleep_hrv_baseline,
+            ).filter(
+                DailyMetrics.user_id == user_id,
+                DailyMetrics.date >= since.date(),
+                DailyMetrics.avg_sleep_hrv.isnot(None),
+            ).order_by(DailyMetrics.date).all()
+            
+            return [
+                {
+                    "date": r.date,
+                    "avg_sleep_hrv": float(r.avg_sleep_hrv),
+                    "baseline": float(r.sleep_hrv_baseline) if r.sleep_hrv_baseline else None,
+                }
+                for r in results
+            ]
+        finally:
+            db.close()
+    
+    @staticmethod
+    def vo2max_trend(user_id: int, days: int = 90) -> list[dict]:
+        """Тренд VO2max за период (VO2max trend over period).
+        Returns: [{"date": date, "vo2max": float}, ...]
+        """
+        db = SessionLocal()
+        try:
+            since = datetime.utcnow() - timedelta(days=days)
+            results = db.query(
+                DailyMetrics.date,
+                DailyMetrics.vo2max,
+            ).filter(
+                DailyMetrics.user_id == user_id,
+                DailyMetrics.date >= since.date(),
+                DailyMetrics.vo2max.isnot(None),
+            ).order_by(DailyMetrics.date).all()
+            
+            return [{"date": r.date, "vo2max": float(r.vo2max)} for r in results]
+        finally:
+            db.close()
+    
+    @staticmethod
+    def load_ratio(user_id: int, days: int = 7) -> dict:
+        """Соотношение нагрузки (Acute:chronic load ratio).
+        Returns: {"acute_load": float, "chronic_load": float, "ratio": float}
+        """
+        db = SessionLocal()
+        try:
+            acute_since = datetime.utcnow() - timedelta(days=days)
+            chronic_since = datetime.utcnow() - timedelta(days=days * 4)
+            
+            acute = db.query(func.avg(DailyMetrics.training_load)).filter(
+                DailyMetrics.user_id == user_id,
+                DailyMetrics.date >= acute_since.date(),
+                DailyMetrics.training_load.isnot(None),
+            ).scalar() or 0.0
+            
+            chronic = db.query(func.avg(DailyMetrics.training_load)).filter(
+                DailyMetrics.user_id == user_id,
+                DailyMetrics.date >= chronic_since.date(),
+                DailyMetrics.training_load.isnot(None),
+            ).scalar() or 0.0
+            
+            ratio = float(acute) / float(chronic) if chronic > 0 else 0.0
+            return {"acute_load": float(acute), "chronic_load": float(chronic), "ratio": ratio}
+        finally:
+            db.close()
+```
+
+**Проверка:**
+```bash
+python -c "from src.services.repositories import TrainingRepository, HealthRepository; print('import OK')"
+pytest tests/ -v    # существующие тесты проходят
+```
+
+---
+
+##### PREP-04: Исправить двойную сериализацию `sleep_hrv_interval_list` (P1, BACKLOG #145)
+**Файл:** `src/services/sync/health.py`, `src/web/routes/pages/index.py`, `src/web/routes/pages/session.py`
+**Проблема:** `health.py:47` делает `json.dumps(intervals)` перед записью в JSON-колонку. SQLAlchemy сериализует ещё раз. Потребители вынуждены делать `json.loads()`.
+**Решение:**
+1. **`src/services/sync/health.py:47`** — убрать `json.dumps()`:
+   ```python
+   # БЫЛО:
+   dm.sleep_hrv_interval_list = json.dumps(intervals)
+   # СТАЛО:
+   dm.sleep_hrv_interval_list = intervals  # SQLAlchemy JSON сам сериализует
+   ```
+2. **`src/web/routes/pages/index.py:165`** — убрать `json.loads()`:
+   ```python
+   # БЫЛО:
+   intervals = json.loads(latest_rm.sleep_hrv_interval_list) if latest_rm.sleep_hrv_interval_list else []
+   # СТАЛО:
+   intervals = latest_rm.sleep_hrv_interval_list or []
+   ```
+3. **`src/web/routes/pages/session.py:42`** — аналогично убрать `json.loads()`.
+4. **Миграция данных** (опционально, если есть существующие записи): пройтись по всем `DailyMetrics` и десериализовать двойные JSON:
+   ```python
+   # В Alembic миграции (data migration):
+   def upgrade():
+       # ... индексы из PREP-02 ...
+       # Data migration: исправить двойную сериализацию
+       conn = op.get_bind()
+       results = conn.execute(text("SELECT id, sleep_hrv_interval_list FROM daily_metrics WHERE sleep_hrv_interval_list IS NOT NULL"))
+       for row in results:
+           if isinstance(row.sleep_hrv_interval_list, str):
+               # Двойная сериализация: строка внутри JSON
+               fixed = json.loads(row.sleep_hrv_interval_list)
+               conn.execute(
+                   text("UPDATE daily_metrics SET sleep_hrv_interval_list = :val WHERE id = :id"),
+                   {"val": json.dumps(fixed), "id": row.id}
+               )
+   ```
+
+**Проверка:**
+```bash
+pytest tests/ -v    # тесты проходят
+# Ручная проверка: загрузить новую метрику здоровья, проверить, что sleep_hrv_interval_list — list, не str
+```
+
+---
+
+##### PREP-05: Убрать хардкод `User.id == 1` из `get_settings()` (P1, BACKLOG #146)
+**Файл:** `src/models.py`, `src/web/routes/pages/index.py`
+**Проблема:** `get_settings()` всегда возвращает `User.id == 1`. `index.py` использует `get_settings().max_hr` для расчёта зон — некорректно для мультюзер.
+**Решение:**
+1. **`src/models.py`** — добавить параметр `user_id`:
+   ```python
+   def get_settings(user_id: int = 1):
+       """Получение настроек пользователя из User (Get user settings from User model).
+       По умолчанию user_id=1 для обратной совместимости.
+       """
+       from src.config import settings as app_settings
+       db = SessionLocal()
+       try:
+           user = db.query(User).filter(User.id == user_id).first()
+           if not user:
+               user = User(
+                   id=user_id, max_hr=app_settings.default_max_hr, weight_kg=85.0,
+                   max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130,
+               )
+               db.add(user)
+               db.commit()
+               db.refresh(user)
+           user.weight = user.weight_kg
+           return user
+       finally:
+           db.close()
+   ```
+2. **`src/web/routes/pages/index.py`** — передавать `user.id`:
+   ```python
+   # БЫЛО (строка ~68):
+   settings = get_settings()
+   # СТАЛО:
+   settings = get_settings(user.id)
+   ```
+3. **Другие вызовы `get_settings()`** — проверить, нужен ли per-user контекст. Если вызов из Telegram handler, где есть `user`, передавать `user.id`.
+
+**Проверка:**
+```bash
+grep -rn "get_settings()" src/ | grep -v "def get_settings"    # проверить все вызовы
+pytest tests/ -v
+```
+
+---
+
+##### PREP-06: Создать структурированные аналитические функции в `recovery_view.py` (P1, BACKLOG #147)
+**Файл:** `src/services/recovery_view.py`
+**Проблема:** Функции возвращают строки с эмодзи для HTML. Модуль `skills/fatigue.py` нуждается в структурированных результатах.
+**Решение:** Добавить новые функции, возвращающие `dict` с числовыми значениями:
+
+```python
+# src/services/recovery_view.py
+from typing import Optional
+
+def hrv_status_structured(avg_hrv: Optional[float], baseline: Optional[float], sd: Optional[float]) -> dict:
+    """Структурированный HRV-статус (Structured HRV status).
+    Returns: {"status": str, "value": float, "deviation_sd": float, "message": str}
+    """
+    if avg_hrv is None or baseline is None or sd is None or sd == 0:
+        return {"status": "unknown", "value": None, "deviation_sd": None, "message": "Недостаточно данных"}
+    
+    deviation = (avg_hrv - baseline) / sd
+    if deviation > 1.0:
+        status = "high"
+        message = "HRV повышена — отличное восстановление"
+    elif deviation > -1.0:
+        status = "normal"
+        message = "HRV в норме — готов к тренировкам"
+    elif deviation > -2.0:
+        status = "low"
+        message = "HRV понижена — рекомендуется лёгкая тренировка"
+    else:
+        status = "very_low"
+        message = "HRV очень низкая — рекомендуется отдых"
+    
+    return {"status": status, "value": avg_hrv, "deviation_sd": deviation, "message": message}
+
+def load_status_structured(training_load: Optional[float], load_ratio: Optional[float]) -> dict:
+    """Структурированный статус нагрузки (Structured load status).
+    Returns: {"status": str, "value": float, "ratio": float, "message": str}
+    """
+    if training_load is None or load_ratio is None:
+        return {"status": "unknown", "value": None, "ratio": None, "message": "Недостаточно данных"}
+    
+    if load_ratio < 0.8:
+        status = "low"
+        message = "Низкая нагрузка — можно увеличить интенсивность"
+    elif load_ratio < 1.2:
+        status = "optimal"
+        message = "Оптимальная нагрузка — продолжай в том же духе"
+    elif load_ratio < 1.5:
+        status = "high"
+        message = "Высокая нагрузка — следи за восстановлением"
+    else:
+        status = "very_high"
+        message = "Очень высокая нагрузка — риск перетренированности"
+    
+    return {"status": status, "value": training_load, "ratio": load_ratio, "message": message}
+```
+
+**Проверка:**
+```bash
+python -c "from src.services.recovery_view import hrv_status_structured; print(hrv_status_structured(50, 48, 9))"
+pytest tests/ -v
+```
+
+---
+
+##### PREP-07: Создать функции трендов (slope, EWMA, moving average) (P1, BACKLOG #148)
+**Файл:** `src/services/analytics_helpers.py` (новый, ~80-100 строк)
+**Проблема:** Нет функций для вычисления трендов. `skills/progress.py` будет строиться с нуля.
+**Решение:**
+
+```python
+# src/services/analytics_helpers.py
+"""Вспомогательные функции для аналитики (Helper functions for analytics)."""
+
+from typing import Optional
+
+def compute_slope(series: list[float]) -> Optional[float]:
+    """Вычислить наклон линейной регрессии (Compute linear regression slope).
+    Args: series — список числовых значений во времени.
+    Returns: наклон (единиц/шаг) или None, если данных недостаточно.
+    """
+    n = len(series)
+    if n < 2:
+        return None
+    
+    x_mean = (n - 1) / 2.0
+    y_mean = sum(series) / n
+    
+    numerator = sum((i - x_mean) * (y - y_mean) for i, y in enumerate(series))
+    denominator = sum((i - x_mean) ** 2 for i in range(n))
+    
+    if denominator == 0:
+        return None
+    
+    return numerator / denominator
+
+def compute_ewma(series: list[float], alpha: float = 0.3) -> Optional[float]:
+    """Вычислить экспоненциально взвешенное скользящее среднее (Compute EWMA).
+    Args: series — список числовых значений, alpha — коэффициент сглаживания (0 < alpha <= 1).
+    Returns: последнее значение EWMA или None, если серия пуста.
+    """
+    if not series:
+        return None
+    
+    ewma = series[0]
+    for value in series[1:]:
+        ewma = alpha * value + (1 - alpha) * ewma
+    
+    return ewma
+
+def compute_moving_average(series: list[float], window: int = 7) -> Optional[float]:
+    """Вычислить скользящее среднее (Compute moving average).
+    Args: series — список числовых значений, window — размер окна.
+    Returns: среднее последних `window` значений или None, если данных недостаточно.
+    """
+    if len(series) < window:
+        return None
+    
+    return sum(series[-window:]) / window
+
+def compute_trend_direction(series: list[float], threshold: float = 0.1) -> str:
+    """Определить направление тренда (Determine trend direction).
+    Args: series — список числовых значений, threshold — порог для "stable" (относительное изменение).
+    Returns: "improving", "declining", "stable".
+    """
+    slope = compute_slope(series)
+    if slope is None:
+        return "unknown"
+    
+    mean_val = sum(series) / len(series) if series else 0
+    if mean_val == 0:
+        return "stable"
+    
+    relative_change = slope / abs(mean_val)
+    
+    if relative_change > threshold:
+        return "improving"
+    elif relative_change < -threshold:
+        return "declining"
+    else:
+        return "stable"
+```
+
+**Проверка:**
+```bash
+python -c "from src.services.analytics_helpers import compute_slope, compute_ewma; print(compute_slope([1,2,3,4,5]))"
+# Ожидаемый вывод: 1.0 (наклон линейного ряда)
+pytest tests/ -v
+```
+
+---
+
+##### PREP-08: Добавить `avg_pace` на `TrainingSession` (P1, BACKLOG #149)
+**Файл:** `src/domain/models/training.py`, Alembic миграция, `src/analysis/__init__.py`
+**Проблема:** У `DeletedTraining` есть `avg_pace`, у `TrainingSession` — нет. Каждый раз нужно считать `duration_minutes / total_distance_km`.
+**Решение:**
+1. **`src/domain/models/training.py`** — добавить колонку:
+   ```python
+   class TrainingSession(Base):
+       # ... существующие колонки ...
+       avg_pace = Column(Float, nullable=True)  # Средний темп (мин/км) (Average pace, min/km)
+   ```
+2. **Alembic миграция** (добавить в ту же миграцию из PREP-02):
+   ```python
+   def upgrade():
+       # ... индексы ...
+       op.add_column('training_sessions', sa.Column('avg_pace', sa.Float(), nullable=True))
+       
+       # Data migration: вычислить avg_pace для существующих записей
+       conn = op.get_bind()
+       conn.execute(text("""
+           UPDATE training_sessions
+           SET avg_pace = CASE
+               WHEN total_distance_km > 0 THEN duration_minutes / total_distance_km
+               ELSE NULL
+           END
+       """))
+   
+   def downgrade():
+       op.drop_column('training_sessions', 'avg_pace')
+   ```
+3. **`src/analysis/__init__.py`** — вычислять `avg_pace` при создании сессии:
+   ```python
+   # В process_trackpoints() после вычисления duration и distance:
+   avg_pace = duration_minutes / total_distance_km if total_distance_km > 0 else None
+   result['avg_pace'] = avg_pace
+   ```
+4. **`src/web/routes/uploads.py`** — сохранять `avg_pace` при создании `TrainingSession`:
+   ```python
+   session = TrainingSession(
+       # ... существующие поля ...
+       avg_pace=analysis_result.get('avg_pace'),
+   )
+   ```
+
+**Проверка:**
+```bash
+alembic upgrade head
+pytest tests/ -v
+# Ручная проверка: загрузить TCX, проверить, что avg_pace сохранён
+```
+
+---
+
+##### PREP-09: Создать тестовые фабрики для DailyMetrics и TrainingSession (P1, BACKLOG #150)
+**Файл:** `tests/helpers.py`
+**Проблема:** Нет фабрик для ORM-объектов. Тестирование скиллов невозможно.
+**Решение:** Добавить builder-функции:
+
+```python
+# tests/helpers.py
+from datetime import date, datetime, timedelta
+from src.domain.models import DailyMetrics, TrainingSession, TrainingFeedback, User
+
+def build_daily_metrics(
+    user_id: int,
+    start_date: date,
+    days: int = 30,
+    hrv_base: float = 50.0,
+    hrv_trend: str = "stable",  # "stable", "declining", "improving"
+) -> list[DailyMetrics]:
+    """Создать серию DailyMetrics для тестов (Create DailyMetrics series for tests).
+    Args: user_id, start_date, days, hrv_base, hrv_trend.
+    Returns: список DailyMetrics объектов (не сохранённых в БД).
+    """
+    metrics = []
+    for i in range(days):
+        d = start_date + timedelta(days=i)
+        
+        # HRV с трендом
+        if hrv_trend == "declining":
+            hrv = hrv_base - (i * 0.5)
+        elif hrv_trend == "improving":
+            hrv = hrv_base + (i * 0.3)
+        else:
+            hrv = hrv_base + (i % 5 - 2)  # колебания ±2
+        
+        dm = DailyMetrics(
+            user_id=user_id,
+            date=d,
+            avg_sleep_hrv=hrv,
+            sleep_hrv_baseline=hrv_base,
+            sleep_hrv_sd=10.0,
+            rhr=55 + (i % 3),
+            tired_rate=(i % 5) - 2,  # -2..+2
+            training_load=50.0 + (i * 2),
+            training_load_ratio=1.0 + (i * 0.01),
+            performance=70 + (i % 10),
+            ati=2.5 + (i * 0.1),
+            cti=1.8 + (i * 0.05),
+            vo2max=45.0 + (i * 0.05),
+            lthr=165,
+            stamina_level=75.0 + (i * 0.2),
+            recovery_pct=80 - (i % 20),
+        )
+        metrics.append(dm)
+    
+    return metrics
+
+def build_training_session(
+    user_id: int,
+    begin_ts: datetime,
+    training_type: str = "tempo",
+    distance_km: float = 10.0,
+    duration_minutes: float = 60.0,
+    avg_hr: int = 150,
+    training_effect: float = 3.5,
+) -> TrainingSession:
+    """Создать TrainingSession для тестов (Create TrainingSession for tests).
+    Returns: TrainingSession объект (не сохранённый в БД).
+    """
+    avg_pace = duration_minutes / distance_km if distance_km > 0 else None
+    
+    return TrainingSession(
+        user_id=user_id,
+        begin_ts=begin_ts,
+        total_distance_km=distance_km,
+        duration_minutes=duration_minutes,
+        avg_heart_rate=avg_hr,
+        max_heart_rate=avg_hr + 20,
+        training_type=training_type,
+        training_effect=training_effect,
+        vo2max=45.0,
+        calories=int(duration_minutes * 10),
+        avg_pace=avg_pace,
+        segments_json=[
+            {"distance_km": distance_km, "pace_min_km": avg_pace, "avg_hr": avg_hr, "duration": duration_minutes}
+        ],
+    )
+
+def build_training_feedback(
+    user_id: int,
+    session_id: int,
+    rating: int = 5,
+    notes: str = "",
+) -> TrainingFeedback:
+    """Создать TrainingFeedback для тестов (Create TrainingFeedback for tests)."""
+    return TrainingFeedback(
+        user_id=user_id,
+        session_id=session_id,
+        rating=rating,
+        notes=notes,
+    )
+```
+
+**Проверка:**
+```bash
+python -c "from tests.helpers import build_daily_metrics, build_training_session; print(len(build_daily_metrics(1, date.today(), 30)))"
+# Ожидаемый вывод: 30
+pytest tests/ -v
+```
+
+---
+
+##### PREP-10: Создать `src/coach/config.py` (P2, BACKLOG #151)
+**Файл:** `src/coach/config.py` (новый, ~50-80 строк)
+**Проблема:** Нет параметров аналитики: веса readiness/fatigue score, пороги injury risk, EWMA-параметры.
+**Решение:**
+
+```python
+# src/coach/config.py
+"""Конфигурация модуля аналитики и коучинга (Coach module configuration)."""
+
+# Веса для readiness score (Weights for readiness score)
+READINESS_WEIGHTS = {
+    "hrv_status": 0.30,
+    "rhr_deviation": 0.20,
+    "tired_rate": 0.15,
+    "recovery_pct": 0.20,
+    "sleep_quality": 0.15,
+}
+
+# Веса для fatigue score (Weights for fatigue score)
+FATIGUE_WEIGHTS = {
+    "training_load_ratio": 0.35,
+    "hrv_deviation": 0.25,
+    "ati_cti_ratio": 0.20,
+    "consecutive_hard_days": 0.20,
+}
+
+# Пороги injury risk (Injury risk thresholds)
+INJURY_RISK_THRESHOLDS = {
+    "hrv_very_low_days": 3,  # 3+ дня очень низкой HRV → высокий риск
+    "load_ratio_high": 1.5,  # ACWR > 1.5 → высокий риск
+    "consecutive_hard_days": 4,  # 4+ тяжёлых дня подряд → высокий риск
+}
+
+# Параметры калибровки EWMA (EWMA calibration parameters)
+CALIBRATION_EWMA_ALPHA = 0.2  # Коэффициент сглаживания (smoothing factor)
+CALIBRATION_MIN_SAMPLES = 5  # Минимум данных для калибровки (minimum samples)
+CALIBRATION_MAX_CHANGE_PCT = 0.10  # Максимальное изменение за итерацию 10% (max change per iteration)
+
+# Пороги confidence (Confidence thresholds)
+CONFIDENCE_MIN_DAYS = 14  # Минимум 14 дней данных для высокого доверия
+CONFIDENCE_MIN_SESSIONS = 10  # Минимум 10 тренировок для высокого доверия
+CONFIDENCE_LOW_THRESHOLD = 0.5  # Ниже 0.5 → низкое доверие
+
+# Часы восстановления по типу тренировки (Recovery hours by training type)
+RECOVERY_HOURS_BY_TYPE = {
+    "interval": 48,
+    "tempo": 36,
+    "long": 30,
+    "recovery": 12,
+    "race": 72,
+}
+
+# Параметры 80/20 (80/20 rule parameters)
+DISTRIBUTION_80_20 = {
+    "easy_share_target": 0.80,  # 80% лёгкого бега
+    "hard_share_target": 0.20,  # 20% тяжёлого бега
+    "tolerance": 0.10,  # Допуск ±10%
+}
+
+# Цикл 3:1 (3:1 cycle parameters)
+CYCLE_3_1 = {
+    "build_weeks": 3,  # 3 недели нарастания
+    "deload_week": 1,  # 1 неделя разгрузки
+    "deload_volume_pct": 0.60,  # 60% объёма на неделе разгрузки
+}
+
+# Рост нагрузки (Load progression)
+LOAD_PROGRESSION = {
+    "max_weekly_increase_pct": 10,  # Максимум +10% в неделю
+    "max_monthly_increase_pct": 30,  # Максимум +30% в месяц
+}
+```
+
+**Проверка:**
+```bash
+mkdir -p src/coach
+touch src/coach/__init__.py
+python -c "from src.coach.config import READINESS_WEIGHTS; print(READINESS_WEIGHTS)"
+```
+
+---
+
+##### PREP-11: Разделить `src/models.py` на shim и сервисы (P2, BACKLOG #152)
+**Файл:** `src/models.py`, `src/services/user_service.py` (новый)
+**Проблема:** `models.py` содержит бизнес-логику (`get_settings`, `get_user`) — это не реэкспорт моделей.
+**Решение:**
+1. **`src/services/user_service.py`** (новый) — вынести сервисные функции:
+   ```python
+   # src/services/user_service.py
+   from src.domain.models import SessionLocal, User
+   from src.config import settings as app_settings
+   
+   def get_user_settings(user_id: int = 1) -> User:
+       """Получение настроек пользователя (Get user settings)."""
+       db = SessionLocal()
+       try:
+           user = db.query(User).filter(User.id == user_id).first()
+           if not user:
+               user = User(
+                   id=user_id, max_hr=app_settings.default_max_hr, weight_kg=85.0,
+                   max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130,
+               )
+               db.add(user)
+               db.commit()
+               db.refresh(user)
+           user.weight = user.weight_kg
+           return user
+       finally:
+           db.close()
+   
+   def get_user_by_telegram_id(chat_id: int) -> User:
+       """Получить пользователя по telegram chat_id (Get user by telegram chat ID)."""
+       db = SessionLocal()
+       try:
+           return db.query(User).filter(User.telegram_chat_id == chat_id).first()
+       finally:
+           db.close()
+   
+   def get_or_create_user_by_telegram(chat_id: int, username: str = None) -> User:
+       """Создать или получить пользователя по telegram (Get or create user by telegram)."""
+       db = SessionLocal()
+       try:
+           user = db.query(User).filter(User.telegram_chat_id == chat_id).first()
+           if not user:
+               user = User(telegram_chat_id=chat_id, telegram_username=username)
+               db.add(user)
+               db.commit()
+               db.refresh(user)
+           return user
+       finally:
+           db.close()
+   
+   def get_user_by_id(user_id: int) -> User:
+       """Получить пользователя по ID (Get user by ID)."""
+       db = SessionLocal()
+       try:
+           return db.query(User).filter(User.id == user_id).first()
+       finally:
+           db.close()
+   ```
+2. **`src/models.py`** — оставить shim с re-export + deprecated aliases:
+   ```python
+   # Shim для обратной совместимости (Backward compat shim)
+   from src.domain.models import *  # noqa: F401, F403
+   
+   # Deprecated: использовать src.services.user_service
+   from src.services.user_service import (
+       get_user_settings as get_settings,
+       get_user_by_telegram_id as get_user_by_telegram,
+       get_or_create_user_by_telegram,
+       get_user_by_id as get_user,
+   )
+   ```
+
+**Проверка:**
+```bash
+grep -rn "from src.models import get_settings\|from src.models import get_user" src/ | wc -l
+# Должно быть >0 (старые импорты работают через shim)
+python -c "from src.services.user_service import get_user_settings; print('OK')"
+pytest tests/ -v
+```
+
+---
+
+**Итоговая проверка спринта:**
+```bash
+# 1. Все импорты работают
+python -c "from src.telegram.handlers.stats import StatsPages; print('stats OK')"
+python -c "from src.services.repositories import TrainingRepository; print('repos OK')"
+python -c "from src.services.analytics_helpers import compute_slope; print('helpers OK')"
+python -c "from src.coach.config import READINESS_WEIGHTS; print('coach config OK')"
+
+# 2. Миграции проходят
+alembic upgrade head
+alembic downgrade -1
+alembic upgrade head
+
+# 3. Тесты проходят
+pytest tests/ -v    # 120+ тестов, все зелёные
+
+# 4. Нет сломанных колонок
+grep -rn "TrainingSession.distance_km\|TrainingSession.duration_seconds\|TrainingSession.sport" src/ | wc -l    # → 0
+
+# 5. Нет двойной сериализации
+grep -rn "json.dumps(intervals)" src/services/sync/health.py | wc -l    # → 0
+
+# 6. Индексы созданы
+alembic current    # показывает последнюю миграцию
+```
+
+---
+
 ### 🚀 Модуль аналитики (8 этапов из `decision_module_design.md`)
 
 Стартует после завершения Sprint 20. Все 8 этапов в том же порядке, что и в дизайн-документе.
@@ -722,17 +1592,27 @@ pytest tests/ -v    # ≥ 30 тестов, все зелёные
 Спринт 11 (P1)   — models.py + sync_service разбить         ✅
 Спринт 12 (P1)   — sync.py + pages.py чистка               ✅
 AUDIT-014        — Алгоритм сегментации                     ✅
-─── ПОДГОТОВКА К АНАЛИТИКЕ ────────────────────────────────
-Спринт 13 (P0)   — Security & Hardening                    🔴
-Спринт 14 (P0)   — Thread Safety                            🔴
-Спринт 15 (P0/P1)— Observability                            🟠
-Спринт 16 (P1)   — Config Consolidation                     🟠
+Спринт 13 (P0)   — Security & Hardening                     ✅
+Спринт 14 (P0)   — Thread Safety                            ✅
+Спринт 15 (P0/P1)— Observability                            ✅
+Спринт 16 (P1)   — Config Consolidation                     ✅
 Спринт 17 (P1)   — Data Integrity                           ✅
-Спринт 18 (P1)   — Architecture Cleanup (DRY, split)        🟠
-Спринт 19 (P2)   — Documentation & Types                    🟡
-Спринт 20 (P2)   — Tests                                    🟡
+Спринт 18 (P1)   — Architecture Cleanup (DRY, split)        ✅
+Спринт 19 (P2)   — Documentation & Types                    ✅
+Спринт 20 (P2)   — Tests                                    ✅
+Спринт 20b (P1)  — Tech Debt Fix                            ✅
+─── ПОДГОТОВКА К АНАЛИТИКЕ (ФИНАЛЬНАЯ) ────────────────────
+Спринт 20c (P0/P1)— Analytics Preparation (PREP-01..11)     🔴
+─── МОДУЛЬ АНАЛИТИКИ ──────────────────────────────────────
+Этап 0           — Каркас и данные (src/coach/)             ⏸️
+Этап 1           — Аналитика (Skills) + State Assessor      ⏸️
+Этап 2           — Движок + безопасность + Recovery         ⏸️
+Этап 3           — База знаний из литературы                ⏸️
+Этап 4           — Персонализация и обучение                ⏸️
+Этап 5           — LLM Coach                                ⏸️
+Этап 6           — Многонедельные планы                     ⏸️
+Этап 7           — Обратная связь и качество                ⏸️
 ─── ПОСЛЕ АНАЛИТИКИ ───────────────────────────────────────
-Модуль аналитики — 8 этапов                                 ⏸️
 Старый Sprint 13 — Фильтры + статистика                     ⏸️
 Старый Sprint 14 — Multi-brand onboarding                   ⏸️
 Старый Sprint 15 — Факторы самочувствия                     ⏸️
