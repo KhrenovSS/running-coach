@@ -1,7 +1,7 @@
 # PROJECT AUDIT — Running Coach
 
-**Дата:** 03.07.2026 (аудит v3 — 13.07.2026; Фаза B — 13.07.2026; Фаза C — 13.07.2026; Фаза D — 13.07.2026)  
-**Версия:** 3.2  
+**Дата:** 14.07.2026 (аудит v3 — 13.07.2026; реструктуризация спринтов под модуль аналитики — 14.07.2026)  
+**Версия:** 4.0  
 **Формат:** Architecture Refactoring Backlog + Tech Debt Registry
 
 ---
@@ -449,199 +449,292 @@ src/domain/models/
 
 ## 4. ПЛАН РАБОТ (СПРИНТЫ)
 
-### Спринт 8 — Чистка парсеров (1-2 дня) — P0 ✅
+### ✅ Выполнено (Sprints 1–12)
 
-**Задачи:**
-- [x] **AUDIT-001-1**: Создать `src/parsers/gps.py` — clean_trackpoints, haversine_m
-- [x] **AUDIT-001-2**: Создать `src/parsers/weather.py` — fetch_weather, weather_icon
-- [x] **AUDIT-001-3**: Создать `src/parsers/hr_zones.py` — get_zone, get_band, zone_ranges, calculate_hr_zones
-- [x] **AUDIT-001-4**: Создать `src/parsers/classification.py` — классификация тренировок
-- [x] **AUDIT-001-5**: Создать `src/parsers/segmentation.py` — сегментация трека
-- [x] **AUDIT-001-6**: Создать `src/parsers/utils.py` — format_pace, format_duration, calc_elevation, find_timezone
-- [x] **AUDIT-001-7**: `src/parsers/common.py` оставить только process_trackpoints (оркестратор)
-- [x] **AUDIT-001-8**: Обновить импорты в tcx_parser.py, fit_parser.py
-- [ ] **AUDIT-001-9**: `pytest` проходит, парсинг TCX/FIT работает (тесты пока отсутствуют)
-- [x] **AUDIT-010**: Убрать `src/logger.py` shim, обновить импорты
-- [x] **CHANGELOG.md** обновить
-
-**Docker:** пересобрать `app`
+| Спринт | Описание | Статус |
+|--------|----------|--------|
+| 1–7 | Инфраструктура, Docker, модели, интеграции | ✅ |
+| 8 | Разбивка `parsers/common.py` | ✅ |
+| 9 | Разбивка `telegram_bot.py` | ✅ |
+| 10 | Тесты (отложен) | ⏩ → Sprint 20 |
+| 11 | Разбивка `models.py` + `sync_service.py` | ✅ |
+| 12 | Чистка роутов (`sync.py`, `pages.py`) | ✅ |
 
 ---
 
-### Спринт 9 — Разделение telegram_bot.py (1-2 дня) — P0 ⚠️ reopen
+### 🔴 Этап подготовки к модулю аналитики (Sprints 13–20)
 
-**Задачи:**
-- [x] **AUDIT-002-1**: Создать `src/telegram/` пакет
-- [x] **AUDIT-002-2**: `src/telegram/handlers/start.py` — регистрация
-- [x] **AUDIT-002-3**: `src/telegram/handlers/sync.py` + `stats.py` + `trainings.py` + `weight.py` + `account.py`
-- [x] **AUDIT-002-4**: `src/telegram/handlers/feedback.py` — feedback_callback
-- [x] **AUDIT-002-5**: `src/telegram/jobs/weight.py` + `recovery.py`
-- [x] **AUDIT-002-6**: `src/telegram/utils.py` — get_user, _get_web_app_url
-- [x] **AUDIT-002-7**: `src/telegram/main.py` — run_bot, Application сборка
-- [x] **AUDIT-002-8**: `src/telegram/sync_runner.py` — sync в отдельном треде
-- [x] **AUDIT-002-9**: `src/telegram/state.py` — _awaiting_weight
-- [x] **AUDIT-007**: Заменить прямой импорт `CorosWatchClient` на `get_watch_client()`
-- [x] **AUDIT-011**: Удалить `COROS_SYNC_*` константы из audit.py — ✅ выполнено (Фаза A)
-- [x] `src/telegram_bot.py` удалён
-- [x] `run_telegram_bot.py` обновлён на `from src.telegram import run_bot`
-- [x] Все 12 файлов проходят py_compile — *py_compile недостаточен (см. AUDIT-015)*
-
-> ⚠️ **Reopen:** Спринт помечен `✅`, но пакет невозможно импортировать — сломанные импорты (AUDIT-015). `py_compile` проверяет только синтаксис, не разрешение импортов. Проверка спринта должна быть **поведенческой**: импорт запускается, бот отвечает на `/start`.
-
-**Docker:** пересобрать `bot`
+Цель: последовательно закрыть технические дыры, чтобы модуль аналитики стартовал на стабильном фундаменте.  
+Каждый спринт содержит **поведенческую проверку** (behavioral test, AGENTS.md п.4), **Docker rebuild** (AGENTS.md п.5) и **протокол конца сессии** (AGENTS.md п.6).
 
 ---
 
-### Спринт 10 — Тесты (2-3 дня) — P0
+#### Sprint 13 — Security & Hardening (P0)
 
-**Важно:** для тестов парсеров и классификации нужны **реальные данные тренировок**.
-Использовать:
-- TCX/FIT-файлы реальных тренировок от спортсменов (разные типы: интервальная, темповая, long run, recovery)
-- Типичный тренировочный план (например, из открытых источников: Jack Daniels' VDOT, Pfitzinger, FIRST)
-- Разные часы (Garmin, Coros, Polar) — чтобы проверить мульти-брендовость
-- Крайние случаи: GPS-скачки, обрыв трека, пульс 0, короткая тренировка (<1 км)
+**Зачем:** Закрыть критические дыры безопасности, делающие всю систему уязвимой.
 
-Файлы складываются в `tests/fixtures/` с README-описанием каждой тренировки:
-```
-tests/fixtures/
-  README.md            # описание: дата, тип, часы, дистанция, что проверяем
-  interval_coros.tcx   # интервальная с Coros Pace 4
-  tempo_garmin.tcx     # темповая с Garmin Forerunner 255
-  long_run_polar.tcx   # long run с Polar Vantage
-  recovery.tcx         # восстановительная, <5 км
-  gps_spikes.fit       # FIT с GPS-скачками для clean_trackpoints
-  short_walk.tcx       # короткая прогулка <1 км (проверка отбрасывания)
+**Docker:** `app` + `bot`
+
+**Задачи:**
+- [ ] **SEC-01**: Убрать дефолт `SECRET_KEY="dev-secret-key-change-in-production"` — `os.getenv("SECRET_KEY")` без fallback (нарушение AGENTS.md п.3) — `src/api/middleware.py:27`
+- [ ] **SEC-02**: `encrypted_user` — шифровать через Fernet или переименовать колонку в `email` (вводит в заблуждение) — `src/services/watch_credentials.py:54`, Alembic migration
+- [ ] **SEC-03**: `PENDING_DIR` из `/tmp` в `uploads/` (мирно-читаемая директория с GPS/HR) — `src/web/state.py:6`
+- [ ] **SEC-04**: Docker: `USER appuser`, убрать порт 5432 наружу, healthcheck для `app`+`bot` — `Dockerfile`, `docker-compose.yml`
+- [ ] **SEC-05**: Rate-limiting на `/auth/login`, `/upload`, `/settings` — `src/api/routes/auth.py`, `src/web/routes/uploads.py`, `src/web/routes/pages/settings.py`
+- [ ] **SEC-06**: Session fixation: `request.session.clear()` + `session.regenerate()` после логина — `src/api/routes/auth.py`
+- [ ] **SEC-07**: Нет CSRF защиты на POST endpoints — `src/api/routes/auth.py`, веб-роуты
+- [ ] **SEC-08**: `except Exception: pass` в `account.py:118-119,127-129` — заменить на конкретные типы (AGENTS.md п.2) — `src/telegram/handlers/account.py`
+- [ ] **SEC-09**: Remove `reload=True` from `main.py` dev block (dead code в Docker)
+
+**Проверка:**
+```bash
+grep -rn "dev-secret-key-change-in-production" src/ | wc -l       # → 0
+grep -rn "except: pass\|except Exception: pass" src/ | wc -l      # → 0
+grep -rn "PENDING_DIR.*/tmp" src/ | wc -l                         # → 0
 ```
 
-**Задачи:**
-- [ ] **AUDIT-003-0**: Собрать тестовые TCX/FIT-файлы (TODO — приложить реальные тренировки от спортсменов или взять типичный тренировочный план)
-- [ ] **AUDIT-003-1**: conftest.py — фикстуры (тестовая БД, user, session, sample data)
-- [ ] **AUDIT-003-2**: test_gps.py — clean_trackpoints (норма, скачок, нереальный темп)
-- [ ] **AUDIT-003-3**: test_classification.py — interval, tempo, long, recovery
-- [ ] **AUDIT-003-4**: test_segmentation.py — км-блоки, сплит интервальной
-- [ ] **AUDIT-003-5**: test_hr_zones.py — зоны, get_zone, get_band
-- [ ] **AUDIT-003-6**: test_stats.py — calc_stats, fmt_duration
-- [ ] **AUDIT-003-7**: test_health.py — GET /health/
-- [ ] **AUDIT-003-8**: tests/fixtures/README.md — описание тестовых файлов
-- [ ] **CHANGELOG.md** обновить
-
 ---
 
-### Спринт 11 — Разделение models.py + sync_service (1-2 дня) — P1 ✅
+#### Sprint 14 — Thread Safety (P0)
+
+**Зачем:** Устранить race conditions, которые делают поведение недетерминированным при конкуррентном доступе.
+
+**Docker:** `app` + `bot`
 
 **Задачи:**
-- [x] **AUDIT-005-1**: Создать `src/domain/` пакет
-- [x] **AUDIT-005-2**: `src/domain/models/base.py` — Base, utcnow, get_engine, SessionLocal, get_db, init_db
-- [x] **AUDIT-005-3**: `src/domain/models/user.py` — User
-- [x] **AUDIT-005-4**: `src/domain/models/training.py` — TrainingSession, TrainingFeedback, DeletedTraining
-- [x] **AUDIT-005-5**: `src/domain/models/watch.py` — WatchCredential
-- [x] **AUDIT-005-6**: `src/domain/models/health.py` — DailyMetrics, WeightMeasurement
-- [x] **AUDIT-005-7**: `src/domain/models/auth.py` — AuthToken
-- [x] **AUDIT-005-8**: `src/domain/models/audit.py` — AuditEvent
-- [x] **AUDIT-004-1**: Создать `src/services/sync/activities.py`
-- [x] **AUDIT-004-2**: Создать `src/services/sync/health.py`
-- [x] **AUDIT-004-3**: Создать `src/services/sync/utils.py`
-- [x] **AUDIT-004-4**: Создать `src/services/sync/orchestrator.py`
-- [x] **AUDIT-006**: Единый entry point `run_sync_for_user()` в sync_service.py (web; Telegram — TODO, обоснованно)
-- [x] Все импорты обновлены (4 файла: scheduler, sync routes, pages/index, telegram/sync_runner)
-- [x] Alembic миграции работают (shim сохраняет `from src.models import Base`)
-- [x] Docker пересобран
-- [x] **CHANGELOG.md** обновить
+- [ ] **TS-01**: `threading.Lock` на `_pending` — `src/web/state.py:9`
+- [ ] **TS-02**: `threading.Lock` на `_awaiting_weight` — `src/telegram/state.py:1`
+- [ ] **TS-03**: Lock на `_engine` / `_maker` (double-checked locking anti-pattern) — `src/domain/models/base.py:32-67`
+- [ ] **TS-04**: Lock на `_fernet_cache` — `src/crypto.py:34-36,50`
+- [ ] **TS-05**: Lock на logger cache (`_app_logger`, `_requests_logger`, `_audit_file_logger`) — `src/utils/logger.py:171-194`
+- [ ] **TS-06**: Cleanup `_pending` записей после confirm/timeout — `src/web/state.py`
+- [ ] **TS-07**: Cleanup `_awaiting_weight` при удалении пользователя — `src/telegram/state.py`
+- [ ] **TS-08**: scheduler TOCTOU: `threading.Event` вместо голого `if self._started` — `src/scheduler.py:23-25`
+- [ ] **TS-09**: Lock на доступ к `_auto_sync_status` в sync/utils.py и index.py (shallow copy недостаточен)
+
+**Проверка:**
+```bash
+python -c "from src.telegram.main import run_bot; print('import OK')"
+python -c "from src.startup import create_app; print('import OK')"
+```
 
 ---
 
-### Спринт 12 — Чистка роутов + web (1 день) — P1
+#### Sprint 15 — Observability (P0/P1)
+
+**Зачем:** Сделать ошибки видимыми. Без этого модуль аналитики будет работать «вслепую» — непонятно, почему рекомендации не приходят.
+
+**Docker:** `app`
 
 **Задачи:**
-- [x] **AUDIT-009**: sync.py (444 → 93 строк)
-- [x] **AUDIT-013**: pages.py (601 → пакет pages/, max 184 строк)
-- [ ] **AUDIT-008**: Threading review — хотя бы зафиксировать known issues
-- [ ] **CHANGELOG.md** обновить
+- [ ] **OBS-01**: `fix_logger_after_uvicorn()` — починить для ВСЕХ трёх логгеров (`app`, `requests`, `audit_file`), а не только `"app"` — `src/utils/logger.py:232`
+- [ ] **OBS-02**: Alembic failure из `logger.error` → `raise SystemExit(1)` (hard fail при битой БД) — `src/startup.py:24-25`
+- [ ] **OBS-03**: Silent parse failure → `logger.warning` + `exc_info=True` — `src/services/sync/activities.py:41-43`
+- [ ] **OBS-04**: `except Exception: pass` при `client.close()` → `logger.warning` — `src/services/sync/activities.py:232-233`
+- [ ] **OBS-05**: Analytics fetch failure → `exc_info=True` — `src/services/sync/health.py:106-107`
+- [ ] **OBS-06**: Dashboard save failure → `exc_info=True` — `src/services/sync/health.py:50-51`
+- [ ] **OBS-07**: Weather API errors — поднять с DEBUG на WARNING — `src/parsers/weather.py:48-49`
+- [ ] **OBS-08**: `api/deps.py` — `get_logger` вместо `logging.getLogger` — `src/api/deps.py:23`
+- [ ] **OBS-09**: Добавить лог успешного удаления temp file — `src/web/routes/uploads.py:130`
+- [ ] **OBS-10**: Weight state reset при ошибке: пользователь не должен застревать в режиме ввода — `src/telegram/handlers/weight.py:98-101`
+
+**Проверка:**
+```bash
+python -c "from src.utils.logger import get_logger; print('OK')"
+# Проверить, что при битой БД приложение падает, а не продолжает
+```
 
 ---
 
-### Спринт 13 — Фаза 3: Фильтры + статистика (1-2 дня) — Новая функциональность
+#### Sprint 16 — Config Consolidation (P1)
 
-> ⏸️ **Заморожено.** Детализировать перед стартом. Спринт-трекинг — в этом файле; README — product features.
+**Зачем:** Убрать «зоопарк» хардкоженных значений. Если аналитика будет добавлять свои константы в тот же хаос — получится не поддерживаемый код.
+
+**Docker:** `app`
 
 **Задачи:**
-- [ ] Фильтр по типу тренировки на главной (Все / Бег / Ходьба)
-- [ ] Общая дистанция и время за неделю/месяц
-- [ ] **CHANGELOG.md** обновить
+- [ ] **CFG-01**: Все хардкоды `max_hr=177` заменить на `settings.default_max_hr` / `constants.py` — `src/startup.py:35`, `src/services/reanalyze.py:56`, `src/models.py:20`, `src/domain/models/user.py:25`
+- [ ] **CFG-02**: `HEALTH_SYNC_DAYS=180` — использовать вместо `days=120` — `src/services/sync/health.py:77`
+- [ ] **CFG-03**: `settings.session_ttl_days` — использовать вместо `7*24*60*60` — `src/api/middleware.py:180`
+- [ ] **CFG-04**: `settings.http_timeout` — использовать вместо `timeout=15` — `src/services/sync/utils.py:57`
+- [ ] **CFG-05**: `Europe/Moscow` → `settings.timezone` с fallback `"UTC"` — `src/telegram/main.py:36,74`, `stats.py:27`, `sync.py:43`, `trainings.py:66` и др.
+- [ ] **CFG-06**: `COROS_BASE_URL`, `COROS_AUTH_ENDPOINT`, `COROS_LOGIN_ENDPOINT`, `COROS_TRAINING_LIST` — из `src/config/constants.py` в `src/watch/coros.py`
+- [ ] **CFG-07**: `password = '********'` sentinel → `None` (если у пользователя реально 8 звёздочек, он не может сменить пароль) — `src/services/watch_credentials.py:61`
+- [ ] **CFG-08**: Удалить мёртвые поля `settings.session_ttl_days`, `settings.default_max_hr`, `settings.log_file`, `settings.http_timeout`, или начать их использовать
+- [ ] **CFG-09**: `stats.py` — зоны пульса и пороги через `constants.py`, а не хардкод — `src/services/stats.py`
+
+**Проверка:**
+```bash
+grep -rn "=177\|= 177\|:177" src/ --include="*.py" | grep -v test | grep -v ".pyc" | wc -l  # → 0
+grep -rn "Europe/Moscow" src/ | wc -l                                                       # → 0
+```
 
 ---
 
-### Спринт 14 — Фаза 4: Multi-brand onboarding (1-2 дня) — Новая функциональность
+#### Sprint 17 — Data Integrity (P1)
 
-> ⏸️ **Заморожено.** Детализировать перед стартом.
+**Зачем:** Модуль аналитики будет опираться на данные тренировок, метрик и аудита. Если данные битые — рекомендации будут бессмысленными.
+
+**Docker:** `app`
 
 **Задачи:**
-- [ ] Telegram /start — выбор бренда часов
-- [ ] Coros — существующий флоу
-- [ ] Polar/Garmin/Suunto — заглушка
-- [ ] **CHANGELOG.md** обновить
+- [ ] **DI-01**: Alembic: nullable FK → `NOT NULL` + `ON DELETE CASCADE` для `user_id` во всех моделях — `src/domain/models/training.py`, `health.py`, `auth.py`, `audit.py`, `watch.py`
+- [ ] **DI-02**: Alembic: `Text` → `JSON` для `sleep_hrv_interval_list` — `src/domain/models/health.py:37`
+- [ ] **DI-03**: Alembic: `Text` → `JSON` для `audit.metadata_json` — `src/domain/models/audit.py:18`
+- [ ] **DI-04**: `fit_parser.py`: `check_crc=True` (сейчас False — повреждённые файлы парсятся молча) — `src/parsers/fit_parser.py:14`
+- [ ] **DI-05**: Cadence heuristic `cad < 100: cad * 2` → параметр бренда (Coros-specific в generic парсере) — `src/parsers/fit_parser.py:28-29`
+- [ ] **DI-06**: Auth token: удалять expired+неиспользованные (сейчас только used+>1day) — `src/services/auth.py:116-126`
+- [ ] **DI-07**: Input validation: file size (max 50MB), email regex, weight bounds (20–300 → 30–250) — `src/web/routes/uploads.py:28`, `src/telegram/handlers/start.py:41`, `src/telegram/handlers/weight.py:73`
+- [ ] **DI-08**: `gps.py`: `sqrt(max(0, min(a, 1)))` — защита от negative float — `src/parsers/gps.py:11`
+- [ ] **DI-09**: `hr_zones.py`: защита от `max_hr=0` (ZeroDivisionError) — `src/analysis/hr_zones.py:9`
+
+**Проверка:**
+```bash
+alembic upgrade head    # миграции проходят
+alembic downgrade -1    # откат работает
+alembic upgrade head    # повторный накат идемпотентен
+pytest tests/ -v        # тесты проходят
+```
 
 ---
 
-### Спринт 15 — Фаза 5: Факторы самочувствия (2-3 дня) — Новая функциональность
+#### Sprint 18 — Architecture Cleanup (P1)
 
-> ⏸️ **Заморожено.** Детализировать перед стартом.
+**Зачем:** Убрать дублирование кода, которое утроится при добавлении аналитики. Разбить файлы, превысившие лимит 400 строк (AGENTS.md п.1).
+
+**Docker:** `app` + `bot`
 
 **Задачи:**
-- [ ] Константы (BUILTIN_FACTORS, FACTOR_INACTIVITY_DAYS)
-- [ ] Модели (FeedbackFactor, UserActiveFactor)
-- [ ] Сервис (feedback_service.py)
-- [ ] Telegram — callback `factor:`
-- [ ] Web — чекбоксы факторов в форме оценки
-- [ ] Alembic миграция
-- [ ] **CHANGELOG.md** обновить
+- [ ] **ARC-01**: DRY: `auto_sync_health` + `auto_sync_activities` → одна параметризованная функция (~150 строк дубляжа) — `src/services/sync/orchestrator.py:83-238`
+- [ ] **ARC-02**: DRY: `upload_files` / `confirm_upload` / `confirm_deleted` → общий session builder (тройной дубль) — `src/web/routes/uploads.py:92-248`
+- [ ] **ARC-03**: DRY: rolling pace window (250м) в 3 местах → shared helper — `src/analysis/__init__.py:139-148,315-325`, `src/analysis/segment.py:103-104`
+- [ ] **ARC-04**: DRY: km-chunking в 2 местах → shared helper — `src/analysis/segment.py:209-259,404-436`
+- [ ] **ARC-05**: DRY: weather.py — `get_weather_code_at_time` + `get_temp_at_time` → один lookup — `src/parsers/weather.py:53-84`
+- [ ] **ARC-06**: `segment.py` превысил 400 строк (фактически 436) → разбить — AGENTS.md п.1
+- [ ] **ARC-07**: `analysis/__init__.py` (386, `process_trackpoints` ~200 строк) → разбить на pipeline
+- [ ] **ARC-08**: Graceful shutdown: `scheduler.Event` для daemon thread, трекинг in-flight sync — `src/scheduler.py`, `src/web/routes/sync.py:35-36`
+- [ ] **ARC-09**: `sys.path.insert` → `pip install -e .` — `run_telegram_bot.py:6`, `alembic/env.py:20`
+- [ ] **ARC-10**: `stats.py`: HTML (`render_zone_bars`, `render_type_row`, `build_nav_html`) из сервисного слоя в Jinja2 — MVC нарушен — `src/services/stats.py:66-133`
+- [ ] **ARC-11**: Dead code: `_get_progress_message`, `ValidationError` import, мёртвые константы settings — удалить
+- [ ] **ARC-12**: Опечатка `'Окторябрь'` → `'Октябрь'` — `src/services/stats.py:8`
+
+**Проверка:**
+```bash
+wc -l src/analysis/segment.py                                    # ≤ 400
+wc -l src/analysis/__init__.py                                   # ≤ 400
+grep -rn "Окторябрь" src/ | wc -l                                # → 0
+grep -rn "except: pass" src/ | wc -l                             # → 0
+```
 
 ---
 
-### Спринт 7 (отложенный) — Admin panel (2-3 дня)
+#### Sprint 19 — Documentation & Types (P2)
 
-> ⏸️ **Заморожено.** Детализировать перед стартом (появление >1 пользователя или запуск модуля аналитики).
+**Зачем:** Привести документацию в соответствие с реальным кодом. Сейчас `ARCHITECTURE.md`, `CODE_GUIDELINES.md` и `AGENTS.md` противоречат друг другу и коду.
 
-- [ ] **7.1** `src/models.py` — колонка `role` (String(20), default='user', значения: 'user', 'admin') в модель User + Alembic миграция. Установить `role='admin'` для user id=1.
-- [ ] **7.2** `src/api/deps.py` — зависимость `get_admin_user`: проверяет `role == 'admin'`, иначе 403. Параллельно с `get_current_user`.
-- [ ] **7.3** `src/api/routes/admin.py` — роутер с префиксом `/admin`, все эндпоинты под `Depends(get_admin_user)`.
-- [ ] **7.4** `/admin` — дашборд: количество пользователей, тренировок, синхронизаций за день (агрегатные запросы по audit_events и таблицам).
-- [ ] **7.5** `/admin/users` — список пользователей (id, email, telegram, дата регистрации, last_sync, is_active, role).
-- [ ] **7.6** `/admin/audit` — просмотр audit_events с фильтром по пользователю/типу/дате.
-- [ ] **7.7** `/admin/sync` — глобальный статус синхронизаций + принудительный sync для конкретного пользователя.
-- [ ] **7.8** `/admin/users/{id}` — управление пользователем: ban/unban (is_active toggle), сброс пароля, просмотр тренировок и метрик.
-- [ ] **7.9** Очистка старых данных: audit_events старше N дней, удалённые лог-файлы.
+**Docker:** нет
 
-**Что уже есть:** `AuditEvent` + `AuditService`, `is_active` на User, `get_current_user`, `/health/` endpoint, `/logs` endpoint, per-user data isolation, индексы на audit_events.
+**Задачи:**
+- [ ] **DOC-01**: `docs/ARCHITECTURE.md` — полное обновление: SQLite → PostgreSQL, новая структура файлов, `src/analysis/`, `src/domain/`, `src/watch/`, `src/services/sync/`, `src/telegram/`
+- [ ] **DOC-02**: `docs/CODE_GUIDELINES.md` — `CONFIG.*` → `settings.*` / `constants.*`; `src/models.py` → `src/domain/models/`; лимит 500 → 400 строк
+- [ ] **DOC-03**: `docs/CHECKLIST_FEATURE.md` — 500 → 400 строк; `CONFIG` → `settings` / `constants`
+- [ ] **DOC-04**: `src/parsers/__init__.py:1` — исправить комментарий (сейчас вводит в заблуждение)
+- [ ] **DOC-05**: TypedDict для trackpoints и результата `process_trackpoints` — `src/analysis/`
+- [ ] **DOC-06**: Type hints: `stats.py` (6 функций), `recovery_view.py` (4 функции), `deps.py` — добавить
+- [ ] **DOC-07**: Bilingual-комментарии: `src/domain/models/user.py` (id, email, password_hash), `src/domain/models/training.py` (id, user_id в DeletedTraining/TrainingFeedback)
+- [ ] **DOC-08**: `api/routes/health.py` — вынести импорты из тела функции на уровень модуля
 
-**Дизайн:** встроенная HTML-страница `/admin` (как `/settings`, `/logs`), не отдельный фронтенд. Доступ через `get_admin_user`. User id=1 получает `role='admin'` при миграции.
+**Проверка:**
+```bash
+grep -rn "CONFIG\.\|from src.config import CONFIG" docs/ | wc -l   # → 0
+grep -rn "500 строк" docs/ | wc -l                                   # → 0
+```
 
 ---
 
-### Модуль аналитики (8 этапов из decision_module_design.md)
+#### Sprint 20 — Tests (P2)
 
-> ⏸️ **Заморожено.** Детализировать перед стартом.
+**Зачем:** Последний спринт перед аналитикой. Фундамент стабилен, конфиги едины, данные целы — теперь можно писать осмысленные тесты.
+
+**Docker:** нет
+
+**Задачи:**
+- [ ] **TST-01**: `conftest.py` — переписать через `SessionLocal` из приложения (сейчас самодельный engine, не тестирующий реальную инфраструктуру) — `tests/conftest.py`
+- [ ] **TST-02**: Реальные TCX/FIT-фикстуры — `tests/fixtures/`
+- [ ] **TST-03**: `test_gps.py` — clean_trackpoints (норма, скачок, нереальный темп) — `tests/`
+- [ ] **TST-04**: `test_classification.py` — interval, tempo, long, recovery — `tests/`
+- [ ] **TST-05**: `test_segmentation.py` — км-блоки, сплит интервальной, short track — `tests/`
+- [ ] **TST-06**: `test_hr_zones.py` — зоны, max_hr=0, None — `tests/`
+- [ ] **TST-07**: `test_oscillation.py` — дописать edge cases (short phases, None HR) — `tests/`
+- [ ] **TST-08**: `test_stats.py` — calc_stats, fmt_duration — `tests/`
+- [ ] **TST-09**: `test_health.py` — GET /health/ — `tests/`
+- [ ] **TST-10**: `helpers.py` — 5 builder-функций → 1 параметризованная — `tests/helpers.py`
+- [ ] **TST-11**: `fixtures/README.md` — описание тестовых файлов — `tests/fixtures/`
+
+**Проверка:**
+```bash
+pytest tests/ -v    # ≥ 30 тестов, все зелёные
+```
+
+---
+
+### 🚀 Модуль аналитики (8 этапов из `decision_module_design.md`)
+
+Стартует после завершения Sprint 20. Все 8 этапов в том же порядке, что и в дизайн-документе.
+
+| Этап | Описание | Статус |
+|------|----------|--------|
+| 0 | Каркас и данные (`src/coach/`, таблицы) | ⏸️ |
+| 1 | Аналитика (Skills) + State Assessor | ⏸️ |
+| 2 | Движок + безопасность (P1) + Recovery Timing (P2) | ⏸️ |
+| 3 | База знаний из литературы (дистилляция) | ⏸️ |
+| 4 | Персонализация и обучение | ⏸️ |
+| 5 | LLM Coach | ⏸️ |
+| 6 | Многонедельные планы | ⏸️ |
+| 7 | Обратная связь и качество | ⏸️ |
+
+---
+
+### ❄️ Заморожено (фичи — после аналитики)
+
+| Старый спринт | Описание | Статус |
+|---------------|----------|--------|
+| Старый Sprint 13 | Фильтры + статистика | ⏸️ Заморожено |
+| Старый Sprint 14 | Multi-brand onboarding | ⏸️ Заморожено |
+| Старый Sprint 15 | Факторы самочувствия | ⏸️ Заморожено |
+| Sprint 7 | Admin panel | ⏸️ Заморожено |
 
 ---
 
 ## 5. ПРИОРИТЕТЫ
 
 ```
-Спринт 8  (P0) — parsers/common.py разбить + logger shim       ✅
-Спринт 9  (P0) — telegram_bot.py разбить                        ⚠️ reopen (AUDIT-015)
-AUDIT-014      — Алгоритм сегментации (change-point detection)  ✅
-Фаза A    (P0) — Починить Telegram-бот (сломанные импорты)      ✅
-Фаза B    (P1) — Тонкие роуты + мульти-бренд settings           ✅
-Фаза C    (P2) — Cleanup и унификация                            ✅
-Фаза D         — Документация (BACKLOG, чеклисты, AGENTS)        ✅
-Спринт 10 (P0) — тесты (минимум 20)                             🔴 2-3 дня
-Спринт 11 (P1) — models.py + sync_service разбить               ✅ 14.07.2026
-Спринт 12 (P1) — sync.py + pages.py чистка                      🟠 1 день
-Спринт 13      — Фаза 3: фильтры + статистика                   ⏸️ заморожено
-Спринт 14      — Фаза 4: multi-brand onboarding                  ⏸️ заморожено
-Спринт 15      — Фаза 5: факторы самочувствия                    ⏸️ заморожено
-Спринт 7       — Admin panel                                     ⏸️ заморожено
-Модуль аналитики — 8 этапов                                      ⏸️ заморожено
+─── ВЫПОЛНЕНО ─────────────────────────────────────────────
+Спринты 1-7      — Инфраструктура, Docker, модели, sync    ✅
+Спринт 8         — parsers/common.py разбить                ✅
+Спринт 9         — telegram_bot.py разбить                  ✅
+Фаза A (P0)      — Починить Telegram-бот (импорты)          ✅
+Фаза B (P1)      — Тонкие роуты + мульти-бренд settings    ✅
+Фаза C (P2)      — Cleanup (httpx, exceptions, async)       ✅
+Фаза D           — Документация (BACKLOG, чеклисты)         ✅
+Спринт 11 (P1)   — models.py + sync_service разбить         ✅
+Спринт 12 (P1)   — sync.py + pages.py чистка               ✅
+AUDIT-014        — Алгоритм сегментации                     ✅
+─── ПОДГОТОВКА К АНАЛИТИКЕ ────────────────────────────────
+Спринт 13 (P0)   — Security & Hardening                    🔴
+Спринт 14 (P0)   — Thread Safety                            🔴
+Спринт 15 (P0/P1)— Observability                            🟠
+Спринт 16 (P1)   — Config Consolidation                     🟠
+Спринт 17 (P1)   — Data Integrity                           🟠
+Спринт 18 (P1)   — Architecture Cleanup (DRY, split)        🟠
+Спринт 19 (P2)   — Documentation & Types                    🟡
+Спринт 20 (P2)   — Tests                                    🟡
+─── ПОСЛЕ АНАЛИТИКИ ───────────────────────────────────────
+Модуль аналитики — 8 этапов                                 ⏸️
+Старый Sprint 13 — Фильтры + статистика                     ⏸️
+Старый Sprint 14 — Multi-brand onboarding                   ⏸️
+Старый Sprint 15 — Факторы самочувствия                     ⏸️
+Sprint 7         — Admin panel                              ⏸️
 ```
 
 ---
@@ -681,9 +774,9 @@ src/
     state.py                      # глобальное состояние
     templates/                    # Jinja2
     routes/
-      pages.py                    # GET /, /login, /register, /session/{id}, /settings
+      pages/                      # Пакет: auth (48), index (184), session (177), settings (118)
       uploads.py                  # POST /upload, /upload/confirm
-      sync.py                     # POST /sync/{brand}/run, /sync/{brand}/health
+      sync.py                     # POST /sync/{brand}/run, /sync/{brand}/health (93 строки)
       logs.py                     # GET /logs
 
   services/                       # Business logic (старый слой, но разделённый)
@@ -771,8 +864,8 @@ tests/
 
 ---
 
-**Итого:** 15 спринтов (8 рефакторинг + 3 новые фичи + 1 админка + 3 модуль аналитики).  
-Критические (P0): Спринты 8-10 — примерно 4-7 дней.
+**Итого:** 20 спринтов (12 выполнено + 8 подготовка к аналитике → модуль аналитики).  
+Критические (P0): Спринты 13-14 — примерно 2-4 дня.
 
 ---
 
