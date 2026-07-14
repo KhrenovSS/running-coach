@@ -459,6 +459,7 @@ src/domain/models/
 | 10 | Тесты (отложен) | ⏩ → Sprint 20 |
 | 11 | Разбивка `models.py` + `sync_service.py` | ✅ |
 | 12 | Чистка роутов (`sync.py`, `pages.py`) | ✅ |
+| 17 | Data Integrity — NOT NULL FKs, cascade, JSON, валидация | ✅ |
 
 ---
 
@@ -725,7 +726,7 @@ AUDIT-014        — Алгоритм сегментации                    
 Спринт 14 (P0)   — Thread Safety                            🔴
 Спринт 15 (P0/P1)— Observability                            🟠
 Спринт 16 (P1)   — Config Consolidation                     🟠
-Спринт 17 (P1)   — Data Integrity                           🟠
+Спринт 17 (P1)   — Data Integrity                           ✅
 Спринт 18 (P1)   — Architecture Cleanup (DRY, split)        🟠
 Спринт 19 (P2)   — Documentation & Types                    🟡
 Спринт 20 (P2)   — Tests                                    🟡
