@@ -149,7 +149,7 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 ```
 Пароль/токен отдельно не спрашивать — брать из `.env`.
 
-## Текущее состояние (Session — 14.07.2026 — Sprint 15: Observability)
+## Текущее состояние (Session — 14.07.2026 — Sprint 16: Config Consolidation)
 
 **Фаза A ✅:** Починены сломанные импорты в `src/telegram/` (AUDIT-015), удалены `COROS_SYNC_*` константы (AUDIT-011).
 **Фаза B ✅:** Тонкие роуты (sync.py 444→93), мульти-бренд settings, единый `run_sync_for_user`, пакет `pages/`.
@@ -168,6 +168,8 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 **Sprint 14 ✅:** Thread Safety — `threading.Lock` на `_pending`, `_awaiting_weight`, `_engine`/`_maker`, `_fernet_cache`, logger cache; cleanup утечек `_pending`/`_awaiting_weight`; TOCTOU scheduler → `threading.Event`; deep copy `_auto_sync_status`.
 
 **Sprint 15 ✅:** Observability — `fix_logger_after_uvicorn` для всех 3 логгеров; Alembic hard fail (`raise SystemExit(1)`); silent failures → `exc_info=True` (activities, health); `except: pass` → `logger.warning`; weather ошибки → WARNING; `get_logger` в api/deps.py; лог удаления temp-файлов; сброс `_awaiting_weight` при ошибке.
+
+**Sprint 16 ✅:** Config Consolidation — `max_hr=177` → `settings.default_max_hr` (5 файлов); `days=120` → `HEALTH_SYNC_DAYS`; `7*24*60*60` → `settings.session_ttl_days`; `timeout=15` → `settings.http_timeout`; `Europe/Moscow` → `settings.timezone` (13 мест); удалены `COROS_*` из `constants.py`; удалён sentinel `'********'`; HR-зоны вынесены в `constants.py`; опечатка `Окторябрь` → `Октябрь`. 56 тестов зелёные.
 
 ### Что сделано в сессии (13.07.2026) — модуль анализа:
 1. `segment.py`: distance-based change points (`CHANGE_POINT_WINDOW_M=200` вместо 10 точек)
@@ -225,6 +227,18 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 9. **TS-09**: `get_auto_sync_status_snapshot()` с `copy.deepcopy` — `src/services/sync/utils.py`
 10. 56 тестов, все зелёные; Docker rebuild app + bot
 
+### Что сделано в сессии (14.07.2026) — Sprint 16 / Config Consolidation:
+1. **CFG-01**: `startup.py`, `reanalyze.py`, `models.py`, `tcx_parser.py`, `fit_parser.py` — `max_hr=177` → `settings.default_max_hr`
+2. **CFG-02**: `health.py` — `days=120` → `HEALTH_SYNC_DAYS=180`
+3. **CFG-03**: `middleware.py` — `7*24*60*60` → `settings.session_ttl_days * 24 * 60 * 60`
+4. **CFG-04**: `sync/utils.py` — `timeout=15` → `settings.http_timeout`
+5. **CFG-05**: 13 файлов — `Europe/Moscow` → `settings.timezone` (UTC по умолчанию)
+6. **CFG-06**: `constants.py` — удалены неиспользуемые `COROS_*` константы
+7. **CFG-07**: `watch_credentials.py` — удалён sentinel `'********'`
+8. **CFG-08**: Начато использование `default_max_hr`, `http_timeout`, `session_ttl_days`
+9. **CFG-09**: `constants.py` — добавлены `HR_ZONE_*_MAX_PCT`; `stats.py` + `hr_zones.py` — пороги через константы; опечатка `Окторябрь` → `Октябрь`
+10. Поведенческие проверки: импорты OK, `from src.database` → 0, `except:pass` → 0, `Europe/Moscow` → только комментарии, 56/56 тестов зелёные
+
 ### Коммиты:
 - `cda4a0a` Sprint 8+9: разбивка parsers/common.py и telegram_bot.py на пакеты
 - `3b4dd34` fix segmentation and tcx_parser import
@@ -233,7 +247,6 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 
 ### Следующие шаги (подготовка к модулю аналитики):
 Порядок выполнения — строго последовательный. Каждый спринт = behavioral test + CHANGELOG + commit.
-- **Sprint 16** (Config Consolidation): хардкоды → constants.py/settings, COROS_* в coros.py, Europe/Moscow в settings
 - **Sprint 17** (Data Integrity): nullable FK → NOT NULL, Text → JSON, FIT check_crc, input validation
 - **Sprint 18** (Architecture Cleanup): DRY (orchestrator, uploads, pace/weather helpers), split <400 files, graceful shutdown
 - **Sprint 19** (Documentation & Types): ARCHITECTURE.md, CODE_GUIDELINES.md, TypedDicts, type hints

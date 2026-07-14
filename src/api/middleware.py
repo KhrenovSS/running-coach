@@ -220,7 +220,7 @@ def register_middleware(app: FastAPI) -> None:
         SessionMiddleware,
         secret_key=SECRET_KEY,
         session_cookie="running_coach_session",
-        max_age=7 * 24 * 60 * 60,  # 7 дней (7 days)
+        max_age=settings.session_ttl_days * 24 * 60 * 60,  # N дней (N days)
     )
     
     app.add_middleware(RequestLoggingMiddleware)

@@ -6,6 +6,7 @@ from typing import Optional
 
 from src.utils.logger import get_logger
 from src.crypto import decrypt, safe_decrypt
+from src.config import settings
 from src.config.constants import (
     MIN_ACTIVITY_SYNC_INTERVAL_MIN,
     MIN_HEALTH_SYNC_INTERVAL_MIN,
@@ -62,7 +63,7 @@ async def _make_client(cred: WatchCredential) -> Optional[BaseWatchClient]:
     if not plain_password:
         return None
     email = safe_decrypt(cred.encrypted_user) or cred.encrypted_user or ''
-    client = get_watch_client(cred.brand, email=email, password=plain_password, timeout=15)
+    client = get_watch_client(cred.brand, email=email, password=plain_password, timeout=settings.http_timeout)
     if client is None:
         logger.warning("Unknown watch brand: %s", cred.brand)
         return None

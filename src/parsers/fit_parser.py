@@ -1,12 +1,15 @@
 import fitdecode
 from datetime import datetime
 from src.analysis import process_trackpoints
+from src.config import settings
 
 # Константа для конвертации полуокружностей в градусы (Semicircles to degrees)
 SEMICIRCLE_TO_DEG = 180.0 / 2**31
 
 # Парсинг FIT-файла (FIT file parsing)
-def parse_fit(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130):
+def parse_fit(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130):
+    if max_hr is None:
+        max_hr = settings.default_max_hr
     trackpoints = []
     start_time_utc = None
     calories = None

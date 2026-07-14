@@ -8,6 +8,7 @@ from telegram.ext import ContextTypes
 from src.telegram.utils import get_user
 from src.telegram.sync_runner import run_sync_in_thread
 from src.utils.logger import get_logger
+from src.config import settings
 
 logger = get_logger("telegram.handlers.sync")
 
@@ -40,7 +41,7 @@ async def cmd_sync(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db = SessionLocal()
             user_db = db.query(User).filter(User.telegram_chat_id == str(chat_id)).first()
             if user_db:
-                today_start = datetime.now(ZoneInfo("Europe/Moscow")).replace(hour=0, minute=0, second=0, microsecond=0)
+                today_start = datetime.now(ZoneInfo(settings.timezone)).replace(hour=0, minute=0, second=0, microsecond=0)
                 today_count = db.query(TrainingSession).filter(
                     TrainingSession.user_id == user_db.id,
                     TrainingSession.begin_ts >= today_start,

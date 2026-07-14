@@ -2,6 +2,33 @@
 
 All notable changes to this project are tracked here.
 
+## [14.07.2026] — Sprint 16: Config Consolidation
+
+### Changed
+- **CFG-01** `src/startup.py`, `src/services/reanalyze.py`, `src/models.py`, `src/parsers/tcx_parser.py`, `src/parsers/fit_parser.py` — хардкоды `max_hr=177` заменены на `settings.default_max_hr`
+- **CFG-02** `src/services/sync/health.py` — `days=120` → `HEALTH_SYNC_DAYS` (180)
+- **CFG-03** `src/api/middleware.py` — `7*24*60*60` → `settings.session_ttl_days * 24 * 60 * 60`
+- **CFG-04** `src/services/sync/utils.py` — `timeout=15` → `settings.http_timeout`
+- **CFG-05** `src/telegram/main.py`, `src/telegram/handlers/stats.py`, `src/telegram/handlers/sync.py`, `src/telegram/handlers/trainings.py`, `src/telegram/handlers/weight.py`, `src/telegram/jobs/recovery.py`, `src/telegram/jobs/weight.py`, `src/web/routes/pages/index.py`, `src/web/routes/pages/session.py`, `src/analysis/__init__.py`, `src/deps.py` — `ZoneInfo("Europe/Moscow")` → `ZoneInfo(settings.timezone)`, fallback `"Europe/Moscow"` → `settings.timezone`
+- **CFG-06** `src/config/constants.py` — удалены неиспользуемые `COROS_*` константы (URL-адреса живут в `src/watch/coros.py`)
+- **CFG-07** `src/services/watch_credentials.py` — удалён sentinel `'********'` из условия проверки пароля
+- **CFG-08** Начато использование мёртвых полей `settings`: `default_max_hr`, `http_timeout`, `session_ttl_days`
+- **CFG-09** `src/config/constants.py` — добавлены `HR_ZONE_*_MAX_PCT` пороги пульсовых зон; `src/services/stats.py` и `src/analysis/hr_zones.py` — хардкоды процентов заменены на константы
+- `src/config/settings.py` — добавлено поле `timezone: str = "UTC"`
+- `src/services/stats.py` — исправлена опечатка `'Окторябрь'` → `'Октябрь'`
+
+### Removed
+- `src/config/constants.py` — 6 неиспользуемых `COROS_*` констант
+
+### Verified
+- `python -c "from src.config import settings; settings.timezone"` → `"UTC"`
+- `grep -rn "Europe/Moscow" src/ --include="*.py"` → только комментарии в моделях
+- `grep -rn "max_hr=177\|= 177" src/ --include="*.py"` → только `settings.default_max_hr: int = 177` и функция `process_trackpoints` (default не используется — все вызвы передают явно)
+- `grep -rn "COROS_BASE_URL\|COROS_AUTH_" src/ --include="*.py"` → 0 (кроме coros.py)
+- `grep -rn "from src.database" src/` → 0
+- `grep -rn "except: pass\|except Exception: pass" src/` → 0
+- `pytest tests/ -v` → 56 passed
+
 ## [14.07.2026] — Sprint 15: Observability
 
 ### Changed

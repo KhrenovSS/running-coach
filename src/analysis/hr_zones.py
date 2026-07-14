@@ -1,5 +1,12 @@
 # Пульсовые зоны: расчёт зоны и полосы по пульсу (Heart rate zones: zone and band calculation)
 
+from src.config.constants import (
+    HR_ZONE_1_MAX_PCT,
+    HR_ZONE_2_MAX_PCT,
+    HR_ZONE_3_MAX_PCT,
+    HR_ZONE_4_MAX_PCT,
+)
+
 
 def get_zone(hr: int, max_hr: int) -> int:
     """
@@ -7,13 +14,13 @@ def get_zone(hr: int, max_hr: int) -> int:
     Determine HR zone (1-5) from heart rate and max HR
     """
     pct = hr / max_hr * 100
-    if pct <= 70:
+    if pct <= HR_ZONE_1_MAX_PCT * 100:
         return 1
-    elif pct <= 80:
+    elif pct <= HR_ZONE_2_MAX_PCT * 100:
         return 2
-    elif pct <= 87:
+    elif pct <= HR_ZONE_3_MAX_PCT * 100:
         return 3
-    elif pct <= 93:
+    elif pct <= HR_ZONE_4_MAX_PCT * 100:
         return 4
     else:
         return 5

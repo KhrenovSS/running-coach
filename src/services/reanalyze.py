@@ -3,6 +3,7 @@
 from sqlalchemy.orm import Session
 from src.models import TrainingSession, User, get_settings
 from src.analysis import process_trackpoints
+from src.config import settings as app_settings
 from src.utils.logger import get_logger
 
 logger = get_logger("analysis.reanalyze")
@@ -53,7 +54,7 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
     try:
         result = process_trackpoints(
             trackpoints, session.begin_ts,
-            max_hr=user.max_hr or 177,
+            max_hr=user.max_hr or app_settings.default_max_hr,
             max_credible_pace=user.max_credible_pace or 3.0,
             max_gps_jump_m=user.max_gps_jump_m or 100.0,
             min_hr_for_fast_pace=user.min_hr_for_fast_pace or 130,

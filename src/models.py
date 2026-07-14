@@ -11,13 +11,14 @@ from src.domain.models import (  # noqa: F401
 
 # Получение настроек пользователя из User (Get user settings from User model)
 def get_settings():
+    from src.config import settings as app_settings
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.id == 1).first()
         if not user:
             # Создаём пользователя со значениями по умолчанию (Create user with defaults)
             user = User(
-                id=1, max_hr=177, weight_kg=85.0,
+                id=1, max_hr=app_settings.default_max_hr, weight_kg=85.0,
                 max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130,
             )
             db.add(user)

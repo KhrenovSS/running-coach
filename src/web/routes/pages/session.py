@@ -13,6 +13,7 @@ from src.deps import templates
 from src.api.deps import get_current_user
 from src.parsers.weather import weather_icon
 from src.services.stats import fmt_duration
+from src.config import settings
 from src.services.recovery_view import hrv_status, tired_label, readiness_label, load_label
 from src.services.training_service import delete_training, upsert_feedback
 from src.services.reanalyze import reanalyze_training
@@ -32,7 +33,7 @@ async def session_detail(request: Request, session_id: int, db: Session = Depend
 
     recovery_info = None
     if s.begin_ts:
-        tz_name = current_user.timezone or s.timezone or "Europe/Moscow"
+        tz_name = current_user.timezone or s.timezone or settings.timezone
         local_begin = s.begin_ts.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(tz_name))
         training_date = local_begin.date()
         rm = db.query(DailyMetrics).filter(DailyMetrics.user_id == current_user.id, DailyMetrics.date == training_date).first()

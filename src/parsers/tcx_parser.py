@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 # Импорт общей логики обработки (Import shared processing logic)
 from src.analysis import process_trackpoints
 from .weather import weather_icon
+from src.config import settings
 
 # Пространство имён Garmin TCX (Garmin TCX XML namespace)
 NS = {
@@ -14,7 +15,9 @@ NS = {
 
 
 # Основная функция парсинга TCX-файла (Main TCX file parsing function)
-def parse_tcx(file_path, max_hr=177, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130):
+def parse_tcx(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130):
+    if max_hr is None:
+        max_hr = settings.default_max_hr
     # Парсинг XML и получение корневого элемента (Parse XML and get root element)
     tree = ET.parse(file_path)
     root = tree.getroot()

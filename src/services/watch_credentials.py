@@ -58,7 +58,7 @@ def upsert_watch_credential(
     else:
         cred.encrypted_user = encrypt(email)
 
-    if password and password != '********':
+    if password:
         cred.encrypted_password = encrypt(password)
 
     if activity_sync_interval is not None and activity_sync_interval > 0:

@@ -8,6 +8,7 @@ from src.models import User, WeightMeasurement
 from src.telegram.state import _awaiting_weight, _awaiting_weight_lock
 from src.services.audit import AuditService
 from src.utils.logger import get_logger
+from src.config import settings
 
 logger = get_logger("telegram.jobs.weight")
 
@@ -17,7 +18,7 @@ async def daily_weight_job(context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     audit = AuditService(db)
     try:
-        now = datetime.now(ZoneInfo("Europe/Moscow"))
+        now = datetime.now(ZoneInfo(settings.timezone))
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         hour = now.hour
 

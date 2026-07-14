@@ -13,6 +13,7 @@ from src.models import get_db, User, TrainingSession, DailyMetrics, WeightMeasur
 from src.deps import templates
 from src.api.deps import get_current_user
 from src.services.stats import fmt_duration, calc_stats, render_zone_bars, render_type_row, build_nav_html
+from src.config import settings
 from src.services.recovery_view import hrv_status, tired_label, readiness_label
 from src.services.sync import get_auto_sync_status_snapshot
 from src.web.state import TRAINING_TYPES_RU
@@ -68,7 +69,7 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
     rows = ""
     for s in filtered:
         if s.begin_ts:
-            tz_name = tz_str or s.timezone or "Europe/Moscow"
+            tz_name = tz_str or s.timezone or settings.timezone
             local_begin = s.begin_ts.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(tz_name))
             t = local_begin.strftime("%d.%m.%Y %H:%M")
         else:

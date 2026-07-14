@@ -7,6 +7,7 @@ from src.models import SessionLocal
 from src.models import User, DailyMetrics
 from src.services.audit import AuditService
 from src.utils.logger import get_logger
+from src.config import settings
 
 logger = get_logger("telegram.jobs.recovery")
 
@@ -16,7 +17,7 @@ async def daily_recovery_check_job(context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     audit = AuditService(db)
     try:
-        now = datetime.now(ZoneInfo("Europe/Moscow"))
+        now = datetime.now(ZoneInfo(settings.timezone))
         hour = now.hour
 
         if hour < 8 or hour >= 20:

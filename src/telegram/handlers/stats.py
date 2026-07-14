@@ -11,6 +11,7 @@ from src.models import User, TrainingSession, DailyMetrics, WeightMeasurement
 from src.telegram.utils import get_user
 from src.services.audit import AuditService
 from src.utils.logger import get_logger
+from src.config import settings
 
 logger = get_logger("telegram.handlers.stats")
 
@@ -24,7 +25,7 @@ class StatsPages:
     def get_page(self, period: str) -> str:
         db = SessionLocal()
         try:
-            now = datetime.now(ZoneInfo("Europe/Moscow"))
+            now = datetime.now(ZoneInfo(settings.timezone))
             if period == "all":
                 return self._overview(db, now)
             elif period == "week":

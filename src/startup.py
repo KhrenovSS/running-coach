@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from src.models import SessionLocal, User, get_settings, init_db, WeightMeasurement, utcnow
 from src.utils.logger import get_logger
 from src.api.middleware import register_middleware
+from src.config import settings
 from src.api.routes.health import router as health_router
 from src.api.routes.auth import router as auth_router
 from src.web.routes import web_router
@@ -34,7 +35,7 @@ def on_startup():
     try:
         admin_user = db.query(User).filter(User.id == 1).first()
         if not admin_user:
-            admin_user = User(id=1, is_active=True, max_hr=177)
+            admin_user = User(id=1, is_active=True, max_hr=settings.default_max_hr)
             db.add(admin_user)
             db.commit()
             db.refresh(admin_user)

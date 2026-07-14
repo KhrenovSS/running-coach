@@ -9,6 +9,7 @@ from src.telegram.utils import get_user
 from src.telegram.state import _awaiting_weight, _awaiting_weight_lock
 from src.services.audit import AuditService
 from src.utils.logger import get_logger
+from src.config import settings
 
 logger = get_logger("telegram.handlers.weight")
 
@@ -16,7 +17,7 @@ logger = get_logger("telegram.handlers.weight")
 def _get_weight_stats_text(user_id: int) -> str:
     db = SessionLocal()
     try:
-        now = datetime.now(ZoneInfo("Europe/Moscow"))
+        now = datetime.now(ZoneInfo(settings.timezone))
         month_ago = now - timedelta(days=30)
         measurements = db.query(WeightMeasurement).filter(
             WeightMeasurement.user_id == user_id,

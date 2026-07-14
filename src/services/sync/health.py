@@ -6,6 +6,7 @@ from datetime import timedelta, date, datetime, timezone
 from src.utils.logger import get_logger
 from src.models import SessionLocal, DailyMetrics
 from src.services.sync.utils import _make_client
+from src.config.constants import HEALTH_SYNC_DAYS
 from src.watch import BaseWatchClient
 
 logger = get_logger("app")
@@ -74,7 +75,7 @@ async def sync_health_for_user(cred, brand: str,
             progress['message'] = 'Получение дневных метрик...'
         existing_dates = {r[0] for r in db.query(DailyMetrics.date).filter(DailyMetrics.user_id == cred.user_id).all()}
         today = date.today()
-        start_day = (today - timedelta(days=120)).strftime("%Y%m%d")
+        start_day = (today - timedelta(days=HEALTH_SYNC_DAYS)).strftime("%Y%m%d")
         end_day = today.strftime("%Y%m%d")
 
         metrics_list = await client.get_daily_metrics(start_day, end_day)

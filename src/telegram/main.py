@@ -33,7 +33,7 @@ def run_bot():
         Application.builder()
         .token(token)
         .job_queue(JobQueue())
-        .defaults(Defaults(tzinfo=ZoneInfo("Europe/Moscow")))
+        .defaults(Defaults(tzinfo=ZoneInfo(settings.timezone)))
         .build()
     )
 
@@ -71,7 +71,7 @@ def run_bot():
         application.job_queue.run_daily(daily_weight_job, time=dt_time(hour=hour, minute=0))
     logger.info("Ежедневный опрос веса запланирован на 9:00, 12:00, 15:00, 18:00")
 
-    now = datetime.now(ZoneInfo("Europe/Moscow"))
+    now = datetime.now(ZoneInfo(settings.timezone))
     if now.hour >= 9 and not (now.hour == 9 and now.minute == 0 and now.second < 5):
         logger.info("Бот запущен после 9:00 MSK — запускаем напоминание веса через 30 секунд")
         application.job_queue.run_once(daily_weight_job, when=timedelta(seconds=30))

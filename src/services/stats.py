@@ -1,11 +1,18 @@
 # Вспомогательные функции для статистики и отображения (Statistics and display helpers)
 
+from src.config.constants import (
+    HR_ZONE_1_MAX_PCT,
+    HR_ZONE_2_MAX_PCT,
+    HR_ZONE_3_MAX_PCT,
+    HR_ZONE_4_MAX_PCT,
+)
+
 # Цвета для пульсовых зон (Heart rate zone colors)
 ZONE_COLORS = ['', '#e8f5e9', '#c8e6c9', '#fff3e0', '#ffccbc', '#ffcdd2']
 
 # Названия месяцев (Month names in Russian)
 MONTHS_RU = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
-             'Июль', 'Август', 'Сентябрь', 'Окторябрь', 'Ноябрь', 'Декабрь']
+             'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
 MONTHS_RU_SHORT = ['', 'Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн',
                    'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
 
@@ -50,11 +57,11 @@ def calc_stats(sessions):
 # Расчёт диапазонов пульсовых зон (Calculate heart rate zone ranges)
 def zone_ranges(max_hr):
     r = {}
-    r[1] = f"≤{round(0.70 * max_hr)}"
-    r[2] = f"{round(0.70 * max_hr) + 1}–{round(0.80 * max_hr)}"
-    r[3] = f"{round(0.80 * max_hr) + 1}–{round(0.87 * max_hr)}"
-    r[4] = f"{round(0.87 * max_hr) + 1}–{round(0.93 * max_hr)}"
-    r[5] = f"{round(0.93 * max_hr) + 1}–{max_hr}"
+    r[1] = f"≤{round(HR_ZONE_1_MAX_PCT * max_hr)}"
+    r[2] = f"{round(HR_ZONE_1_MAX_PCT * max_hr) + 1}–{round(HR_ZONE_2_MAX_PCT * max_hr)}"
+    r[3] = f"{round(HR_ZONE_2_MAX_PCT * max_hr) + 1}–{round(HR_ZONE_3_MAX_PCT * max_hr)}"
+    r[4] = f"{round(HR_ZONE_3_MAX_PCT * max_hr) + 1}–{round(HR_ZONE_4_MAX_PCT * max_hr)}"
+    r[5] = f"{round(HR_ZONE_4_MAX_PCT * max_hr) + 1}–{max_hr}"
     return r
 
 

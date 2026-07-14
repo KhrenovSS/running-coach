@@ -11,6 +11,7 @@ from src.analysis.segment import build_time_in_zones, segment_by_pace
 from src.analysis.classify import classify_training
 from src.analysis.oscillation import detect_pace_oscillations, compute_hr_lag_correlation
 from src.analysis.utils import format_duration, calc_elevation, find_timezone
+from src.config import settings
 
 logger = get_logger("analysis")
 
@@ -179,7 +180,7 @@ def process_trackpoints(trackpoints: list[dict], start_time_utc: datetime,
 
     positions = [(tp['lat'], tp['lon']) for tp in trackpoints if tp['lat'] is not None and tp['lon'] is not None]
     tz_name = find_timezone(positions)
-    local_tz = ZoneInfo(tz_name) if tz_name else ZoneInfo("Europe/Moscow")
+    local_tz = ZoneInfo(tz_name) if tz_name else ZoneInfo(settings.timezone)
     begin_ts = start_time_utc
 
     avg_temperature = None

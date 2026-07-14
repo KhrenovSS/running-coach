@@ -21,4 +21,7 @@ class Settings(BaseSettings):
     # Тайминги (Timing)
     http_timeout: int = 15
 
+    # Часовой пояс по умолчанию (Default timezone)
+    timezone: str = "UTC"
+
     model_config = {"env_prefix": ""}

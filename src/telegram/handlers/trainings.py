@@ -8,6 +8,7 @@ from src.models import SessionLocal
 from src.models import User, TrainingSession
 from src.telegram.utils import get_user
 from src.utils.logger import get_logger
+from src.config import settings
 
 logger = get_logger("telegram.handlers.trainings")
 
@@ -15,7 +16,7 @@ logger = get_logger("telegram.handlers.trainings")
 def trainings_keyboard(user_id: int) -> InlineKeyboardMarkup:
     db = SessionLocal()
     try:
-        now = datetime.now(ZoneInfo("Europe/Moscow"))
+        now = datetime.now(ZoneInfo(settings.timezone))
         days_options = [7, 14, 30]
         keyboard = []
         for days in days_options:
@@ -63,7 +64,7 @@ async def trainings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     db = SessionLocal()
     try:
-        since = datetime.now(ZoneInfo("Europe/Moscow")) - timedelta(days=days)
+        since = datetime.now(ZoneInfo(settings.timezone)) - timedelta(days=days)
         sessions = db.query(TrainingSession).filter(
             TrainingSession.user_id == user.id,
             TrainingSession.begin_ts >= since,

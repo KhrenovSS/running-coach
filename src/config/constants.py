@@ -13,14 +13,14 @@ BIN_SIZE_M: Final[int] = 200
 MAX_GPS_JUMP_M: Final[float] = 100.0
 MIN_DISTANCE_FOR_VALID_SEGMENT_M: Final[float] = 50.0
 
-# Настройки Coros API (Coros API settings)
-COROS_BASE_URL: Final[str] = "https://traininghub.coros.com"
-COROS_AUTH_ENDPOINT: Final[str] = "/account/v2/signin"
-COROS_ACTIVITIES_ENDPOINT: Final[str] = "/activities/v2/list"
-COROS_DASHBOARD_ENDPOINT: Final[str] = "/dashboard/query"
-COROS_DAILY_METRICS_ENDPOINT: Final[str] = "/analyse/dayDetail/query"
-COROS_ANALYSE_ENDPOINT: Final[str] = "/analyse/query"
+# Период синхронизации метрик здоровья (Health sync days)
 HEALTH_SYNC_DAYS: Final[int] = 180
+
+# Пороги пульсовых зон в процентах от max_hr (HR zone thresholds as % of max_hr)
+HR_ZONE_1_MAX_PCT: Final[float] = 0.70
+HR_ZONE_2_MAX_PCT: Final[float] = 0.80
+HR_ZONE_3_MAX_PCT: Final[float] = 0.87
+HR_ZONE_4_MAX_PCT: Final[float] = 0.93
 
 # Настройки погоды Open-Meteo (Open-Meteo weather settings)
 WEATHER_API_URL: Final[str] = "https://archive-api.open-meteo.com/v1/archive"
