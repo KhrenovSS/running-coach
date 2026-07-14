@@ -1,6 +1,7 @@
 # Инфраструктура БД: Base, engine, session, helpers (DB infrastructure: Base, engine, session, helpers)
 
 import os
+import threading
 from datetime import datetime, timezone
 
 from sqlalchemy import create_engine
@@ -30,29 +31,31 @@ if not DATABASE_URL:
 # Lazy engine creation — engine is built on first access, not at module import time.
 # This allows tests to override DATABASE_URL before any code calls get_db()/init_db().
 _engine = None
+_engine_lock = threading.Lock()
 
 
 def get_engine():
     global _engine
     if _engine is not None:
         return _engine
-    if DATABASE_URL.startswith("postgresql"):
-        _engine = create_engine(
-            DATABASE_URL,
-            pool_pre_ping=True,
-            pool_size=10,
-            max_overflow=20,
-        )
-    elif DATABASE_URL.startswith("sqlite"):
-        # test-only: SQLite engine для in-memory тестов (conftest.py устанавливает DATABASE_URL=sqlite:///:memory:)
-        # test-only: SQLite engine for in-memory tests (conftest.py sets DATABASE_URL=sqlite:///:memory:)
-        _engine = create_engine(
-            DATABASE_URL,
-            connect_args={"check_same_thread": False, "timeout": 30},
-            pool_pre_ping=True,
-        )
-    else:
-        raise ValueError(f"Unsupported DATABASE_URL scheme: {DATABASE_URL.split(':')[0]}")
+    with _engine_lock:
+        if _engine is not None:
+            return _engine
+        if DATABASE_URL.startswith("postgresql"):
+            _engine = create_engine(
+                DATABASE_URL,
+                pool_pre_ping=True,
+                pool_size=10,
+                max_overflow=20,
+            )
+        elif DATABASE_URL.startswith("sqlite"):
+            _engine = create_engine(
+                DATABASE_URL,
+                connect_args={"check_same_thread": False, "timeout": 30},
+                pool_pre_ping=True,
+            )
+        else:
+            raise ValueError(f"Unsupported DATABASE_URL scheme: {DATABASE_URL.split(':')[0]}")
     return _engine
 
 
@@ -60,20 +63,24 @@ def get_engine():
 class _SessionLocal:
     """Lazy sessionmaker: engine is resolved via get_engine() on first call, not at import time."""
     _maker = None
+    _maker_lock = threading.Lock()
 
     def __call__(self):
         if self._maker is None:
-            self._maker = sessionmaker(bind=get_engine())
+            with self._maker_lock:
+                if self._maker is None:
+                    self._maker = sessionmaker(bind=get_engine())
         return self._maker()
 
     def __init__(self):
         pass
 
     def configure(self, **kwargs):
-        if self._maker is None:
-            self._maker = sessionmaker(bind=get_engine(), **kwargs)
-        else:
-            self._maker.configure(**kwargs)
+        with self._maker_lock:
+            if self._maker is None:
+                self._maker = sessionmaker(bind=get_engine(), **kwargs)
+            else:
+                self._maker.configure(**kwargs)
 
 
 SessionLocal = _SessionLocal()

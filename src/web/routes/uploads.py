@@ -4,6 +4,7 @@ import os
 import json
 import shutil
 import tempfile
+import time
 import uuid
 import logging
 from pathlib import Path
@@ -18,7 +19,7 @@ from src.utils.logger import get_logger
 from src.api.deps import get_current_user
 from src.services.audit import AuditService
 from src.services.telegram_notify import telegram_notify
-from src.web.state import _pending, PENDING_DIR
+from src.web.state import _pending, _pending_lock, PENDING_DIR, _cleanup_stale_pending
 from src.utils.rate_limit import rate_limit
 
 logger = get_logger("app")
@@ -69,7 +70,9 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
                     break
         if deleted_match:
             tid = str(uuid.uuid4())
-            _pending[tid] = {'path': tmp_path, 'filename': file.filename, 'data': data}
+            with _pending_lock:
+                _pending[tid] = {'path': tmp_path, 'filename': file.filename, 'data': data, '_created': time.time()}
+                _cleanup_stale_pending()
             pace_str = format_pace(deleted_match.avg_pace) if deleted_match.avg_pace else '—'
             deleted_hit = {
                 'id': deleted_match.id,
@@ -151,7 +154,8 @@ async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(
     confirmed = 0
     audit = AuditService(db)
     for temp_id in temp_ids:
-        pending = _pending.pop(temp_id, None)
+        with _pending_lock:
+            pending = _pending.pop(temp_id, None)
         if not pending:
             continue
         data = pending['data']
@@ -210,7 +214,8 @@ async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(
 @router.post('/upload/confirm_deleted')
 async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db),
                            current_user: User = Depends(get_current_user)):
-    pending = _pending.pop(temp_id, None)
+    with _pending_lock:
+        pending = _pending.pop(temp_id, None)
     audit = AuditService(db)
     if not pending:
         audit.log_event(

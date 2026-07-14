@@ -11,6 +11,7 @@ from src.services.audit import AuditService
 from src.config import settings
 from src.telegram.config import NEW_PASSWORD
 from src.telegram.utils import get_user, _get_web_app_url
+from src.telegram.state import clear_awaiting_weight
 from src.utils.logger import get_logger
 
 logger = get_logger("telegram.handlers.account")
@@ -33,6 +34,7 @@ async def cmd_delete_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.query(WatchCredential).filter(WatchCredential.user_id == user.id).delete()
         user.telegram_chat_id = None
         db.commit()
+        clear_awaiting_weight(chat_id)
         audit.log_settings_changed(
             user_id=user.id,
             changes={"account": {"action": "delete_all_data"}},

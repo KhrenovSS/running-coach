@@ -165,6 +165,8 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 
 **Sprint 13 ✅:** Security & Hardening — SECRET_KEY без fallback, шифрование email (Fernet), PENDING_DIR → `uploads/pending`, Docker `USER appuser`, rate-limiting, CSRF (Origin/Referer), session fixation, `except:pass` устранены, `reload=True` убран.
 
+**Sprint 14 ✅:** Thread Safety — `threading.Lock` на `_pending`, `_awaiting_weight`, `_engine`/`_maker`, `_fernet_cache`, logger cache; cleanup утечек `_pending`/`_awaiting_weight`; TOCTOU scheduler → `threading.Event`; deep copy `_auto_sync_status`.
+
 ### Что сделано в сессии (13.07.2026) — модуль анализа:
 1. `segment.py`: distance-based change points (`CHANGE_POINT_WINDOW_M=200` вместо 10 точек)
 2. `segment.py`: адаптивный порог `_adaptive_min_diff(max(0.3, 0.25*range))`
@@ -196,6 +198,18 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 9. `main.py`: убран reload=True (SEC-09)
 10. `AGENTS.md` / `CHANGELOG.md` / `BACKLOG.md`: обновление по протоколу конца спринта
 
+### Что сделано в сессии (14.07.2026) — Sprint 14 / Thread Safety:
+1. **TS-01**: `threading.Lock` на `_pending` — `src/web/state.py`
+2. **TS-02**: `threading.Lock` на `_awaiting_weight` — `src/telegram/state.py`
+3. **TS-03**: Double-checked locking на `_engine`/`_maker` — `src/domain/models/base.py`
+4. **TS-04**: Double-checked locking на `_fernet_cache` — `src/crypto.py`
+5. **TS-05**: Double-checked locking на logger cache — `src/utils/logger.py`
+6. **TS-06**: Cleanup stale `_pending` записей (TTL 1ч) + `_created` timestamp
+7. **TS-07**: `clear_awaiting_weight()` при удалении пользователя — `src/telegram/handlers/account.py`
+8. **TS-08**: Scheduler TOCTOU — `threading.Event` + `_lock` guard — `src/scheduler.py`
+9. **TS-09**: `get_auto_sync_status_snapshot()` с `copy.deepcopy` — `src/services/sync/utils.py`
+10. 56 тестов, все зелёные; Docker rebuild app + bot
+
 ### Коммиты:
 - `cda4a0a` Sprint 8+9: разбивка parsers/common.py и telegram_bot.py на пакеты
 - `3b4dd34` fix segmentation and tcx_parser import
@@ -204,7 +218,6 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 
 ### Следующие шаги (подготовка к модулю аналитики):
 Порядок выполнения — строго последовательный. Каждый спринт = behavioral test + CHANGELOG + commit.
-- **Sprint 14** (Thread Safety): Locks на `_pending`, `_awaiting_weight`, `_engine`, `_fernet_cache`, logger cache; cleanup утечек
 - **Sprint 15** (Observability): fix_logger для всех 3 логгеров, silent failures → exc_info, Alembic hard fail, weather WARNING
 - **Sprint 16** (Config Consolidation): хардкоды → constants.py/settings, COROS_* в coros.py, Europe/Moscow в settings
 - **Sprint 17** (Data Integrity): nullable FK → NOT NULL, Text → JSON, FIT check_crc, input validation

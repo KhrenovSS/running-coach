@@ -2,6 +2,35 @@
 
 All notable changes to this project are tracked here.
 
+## [14.07.2026] — Sprint 14: Thread Safety
+
+### Added
+- **`src/telegram/state.py`** — `clear_awaiting_weight()` функция для безопасной очистки состояния
+- **`src/services/sync/utils.py`** — `get_auto_sync_status_snapshot()` thread-safe c `copy.deepcopy`
+- **`src/web/state.py`** — `_cleanup_stale_pending()` для удаления устаревших записей (TTL 1ч)
+
+### Changed
+- **TS-01** `src/web/state.py` — `threading.Lock` на `_pending` + `_created` timestamp
+- **TS-02** `src/telegram/state.py` — `threading.Lock` на `_awaiting_weight`
+- **TS-03** `src/domain/models/base.py` — double-checked locking на `_engine` и `_maker`
+- **TS-04** `src/crypto.py` — double-checked locking на `_fernet_cache`
+- **TS-05** `src/utils/logger.py` — `_logger_cache_lock` для `_app_logger`, `_requests_logger`, `_audit_file_logger`
+- **TS-06** `src/web/routes/uploads.py` — `_pending_lock` защита всех обращений к `_pending`
+- **TS-07** `src/telegram/handlers/account.py` — `clear_awaiting_weight()` при удалении пользователя
+- **TS-08** `src/scheduler.py` — `_started` → `threading.Event()` + `_lock` guard от TOCTOU
+- **TS-09** `src/web/routes/pages/index.py` — `get_auto_sync_status_snapshot()` вместо ручного lock+shallow copy
+
+### Fixed
+- Race condition при одновременной загрузке файлов (TS-01)
+- Race condition при вводе веса в Telegram (TS-02)
+- Race condition при первом подключении к БД (TS-03)
+- Race condition при первом шифровании/расшифровке (TS-04)
+- Race condition при инициализации логгеров (TS-05)
+- Утечка `_pending` записей при отмене подтверждения (TS-06)
+- Утечка `_awaiting_weight` при удалении пользователя (TS-07)
+- TOCTOU в планировщике авосинхронизации (TS-08)
+- Shallow copy `_auto_sync_status` → deep copy (TS-09)
+
 ## [14.07.2026] — Sprint 13: Security & Hardening
 
 ### Added

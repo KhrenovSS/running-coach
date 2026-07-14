@@ -2,6 +2,7 @@
 from src.services.sync.utils import (  # noqa: F401
     SYNC_TICK_INTERVAL, _auto_sync_status, _auto_sync_status_lock,
     get_activity_interval_seconds, get_health_interval_seconds, _is_sync_due,
+    get_auto_sync_status_snapshot,
 )
 from src.services.sync.health import sync_health_for_user  # noqa: F401
 from src.services.sync.activities import sync_activities_for_user  # noqa: F401

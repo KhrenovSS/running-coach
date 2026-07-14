@@ -10,7 +10,7 @@ logger = get_logger("app")
 class AutoSyncScheduler:
     _instance = None
     _lock = threading.Lock()
-    _started = False
+    _started = threading.Event()
 
     def __new__(cls):
         if cls._instance is None:
@@ -20,9 +20,10 @@ class AutoSyncScheduler:
         return cls._instance
 
     def start(self):
-        if self._started:
-            return
-        self._started = True
+        with self._lock:
+            if self._started.is_set():
+                return
+            self._started.set()
         thread = threading.Thread(target=self._loop, daemon=True, name="auto-sync-scheduler")
         thread.start()
         logger.info("Автосинхронизация: фоновый поток запущен (per-user intervals)")

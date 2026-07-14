@@ -7,7 +7,7 @@ from src.api.middleware import register_middleware
 from src.api.routes.health import router as health_router
 from src.api.routes.auth import router as auth_router
 from src.web.routes import web_router
-from src.web.state import _pending, PENDING_DIR
+from src.web.state import _pending, _pending_lock, PENDING_DIR
 from src.services.audit import AuditService
 
 logger = get_logger("app")
@@ -26,7 +26,8 @@ def on_startup():
 
     for f in PENDING_DIR.glob("*.tcx"):
         f.unlink(missing_ok=True)
-    _pending.clear()
+    with _pending_lock:
+        _pending.clear()
 
     db = SessionLocal()
     try:

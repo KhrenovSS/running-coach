@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import sys
+import threading
 from datetime import datetime, timezone
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
@@ -156,6 +157,7 @@ def _setup_logger(name: str, filename: str, level: str = LOG_LEVEL) -> logging.L
 _app_logger: logging.Logger | None = None
 _requests_logger: logging.Logger | None = None
 _audit_file_logger: logging.Logger | None = None
+_logger_cache_lock = threading.Lock()
 
 
 def get_logger(name: str = "app") -> logging.Logger:
@@ -174,7 +176,9 @@ def get_logger(name: str = "app") -> logging.Logger:
     
     logger = _setup_logger(name, "app.log")
     if name == "app":
-        _app_logger = logger
+        with _logger_cache_lock:
+            if _app_logger is None:
+                _app_logger = logger
     return logger
 
 
@@ -184,7 +188,9 @@ def get_requests_logger() -> logging.Logger:
     if _requests_logger is not None:
         return _requests_logger
     
-    _requests_logger = _setup_logger("requests", "requests.log")
+    with _logger_cache_lock:
+        if _requests_logger is None:
+            _requests_logger = _setup_logger("requests", "requests.log")
     return _requests_logger
 
 
@@ -194,7 +200,9 @@ def get_audit_file_logger() -> logging.Logger:
     if _audit_file_logger is not None:
         return _audit_file_logger
     
-    _audit_file_logger = _setup_logger("audit_file", "audit.log")
+    with _logger_cache_lock:
+        if _audit_file_logger is None:
+            _audit_file_logger = _setup_logger("audit_file", "audit.log")
     return _audit_file_logger
 
 

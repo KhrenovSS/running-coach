@@ -25,6 +25,13 @@ _auto_sync_status = {
 }
 _auto_sync_status_lock = threading.Lock()
 
+
+def get_auto_sync_status_snapshot() -> dict:
+    """Thread-safe deep-copied snapshot of auto-sync status."""
+    import copy
+    with _auto_sync_status_lock:
+        return copy.deepcopy(_auto_sync_status)
+
 # Базовый интервал тика планировщика (Scheduler tick interval — 5 минут)
 SYNC_TICK_INTERVAL: int = 300
 

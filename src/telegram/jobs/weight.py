@@ -5,7 +5,7 @@ from telegram.ext import ContextTypes
 
 from src.models import SessionLocal
 from src.models import User, WeightMeasurement
-from src.telegram.state import _awaiting_weight
+from src.telegram.state import _awaiting_weight, _awaiting_weight_lock
 from src.services.audit import AuditService
 from src.utils.logger import get_logger
 
@@ -44,7 +44,8 @@ async def daily_weight_job(context: ContextTypes.DEFAULT_TYPE):
                     text=text,
                     parse_mode="Markdown",
                 )
-                _awaiting_weight[user.telegram_chat_id] = True
+                with _awaiting_weight_lock:
+                    _awaiting_weight[user.telegram_chat_id] = True
                 audit.log_telegram_sent(
                     user_id=user.id,
                     chat_id=user.telegram_chat_id,
