@@ -30,6 +30,9 @@ Thumbs.db
 .env.local
 bin/
 
+# Egg info
+*.egg-info/
+
 # Logs
 logs/
 *.log
