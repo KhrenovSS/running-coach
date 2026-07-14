@@ -29,7 +29,7 @@
 
 ---
 
-*Обновлён: 14.07.2026 — массовое пополнение после аудита перед модулем аналитики*
+*Обновлён: 14.07.2026 — Sprint 15 (Observability): 10 пунктов закрыты*
 
 ---
 
@@ -63,12 +63,12 @@
 
 | # | Тег | Описание | Файл / Источник | Статус |
 |---|-----|----------|-----------------|--------|
-| 36 | [Silent] | **Alembic migration failure** → `logger.error` и continue. База может быть в неконсистентном состоянии, а приложение стартует. Нужен hard fail. | `src/startup.py:24-25` | ⬜ P0 |
-| 37 | [Silent] | **`except Exception: pass` при `client.close()`** — ошибки закрытия клиента съедаются без следа. | `src/services/sync/activities.py:232-233` | ⬜ P0 |
-| 38 | [Silent] | **Parse errors → return None** без traceback. Любая ошибка парсинга становится «не доступно». | `src/services/sync/activities.py:41-43` | ⬜ P0 |
-| 39 | [Silent] | **Weather API errors silenced на DEBUG уровне** — в production погода падает молча, без признаков в логе. | `src/parsers/weather.py:48-49` | ⬜ P0 |
-| 40 | [Silent] | **Analytics fetch failure** — `except Exception` → `logger.warning` без exc_info. | `src/services/sync/health.py:106-107` | ⬜ P0 |
-| 41 | [Silent] | **Dashboard save failure** — `except Exception` → `logger.warning` без exc_info. | `src/services/sync/health.py:50-51` | ⬜ P0 |
+| 36 | [Silent] | **Alembic migration failure** → `logger.error` и continue. База может быть в неконсистентном состоянии, а приложение стартует. Нужен hard fail. | `src/startup.py:24-25` | ✅ Sprint 15 |
+| 37 | [Silent] | **`except Exception: pass` при `client.close()`** — ошибки закрытия клиента съедаются без следа. | `src/services/sync/activities.py:232-233` | ✅ Sprint 15 |
+| 38 | [Silent] | **Parse errors → return None** без traceback. Любая ошибка парсинга становится «не доступно». | `src/services/sync/activities.py:41-43` | ✅ Sprint 15 |
+| 39 | [Silent] | **Weather API errors silenced на DEBUG уровне** — в production погода падает молча, без признаков в логе. | `src/parsers/weather.py:48-49` | ✅ Sprint 15 |
+| 40 | [Silent] | **Analytics fetch failure** — `except Exception` → `logger.warning` без exc_info. | `src/services/sync/health.py:106-107` | ✅ Sprint 15 |
+| 41 | [Silent] | **Dashboard save failure** — `except Exception` → `logger.warning` без exc_info. | `src/services/sync/health.py:50-51` | ✅ Sprint 15 |
 
 ### Dead / Broken Code
 
@@ -109,9 +109,9 @@
 
 | # | Тег | Описание | Файл / Источник | Статус |
 |---|-----|----------|-----------------|--------|
-| 58 | [Log] | **`fix_logger_after_uvicorn()` чинит только "app" логгер** — `requests_logger` и `audit_file_logger` остаются с мёртвыми хендлерами после uvicorn dictConfig. Логирование запросов и аудита молча перестаёт работать. | `src/utils/logger.py:232` | ⬜ P1 |
-| 59 | [Log] | **Нет логирования успешного удаления temp file** — на линии 130 в `uploads.py` нет лога в отличие от линии 58. | `src/web/routes/uploads.py:130` | ⬜ P1 |
-| 60 | [Log] | **`api/deps.py` использует `logging.getLogger` вместо `get_logger`** — сообщения не получают структурированного форматирования и ротации. | `src/api/deps.py:23` | ⬜ P1 |
+| 58 | [Log] | **`fix_logger_after_uvicorn()` чинит только "app" логгер** — `requests_logger` и `audit_file_logger` остаются с мёртвыми хендлерами после uvicorn dictConfig. Логирование запросов и аудита молча перестаёт работать. | `src/utils/logger.py:232` | ✅ Sprint 15 |
+| 59 | [Log] | **Нет логирования успешного удаления temp file** — на линии 130 в `uploads.py` нет лога в отличие от линии 58. | `src/web/routes/uploads.py:130` | ✅ Sprint 15 |
+| 60 | [Log] | **`api/deps.py` использует `logging.getLogger` вместо `get_logger`** — сообщения не получают структурированного форматирования и ротации. | `src/api/deps.py:23` | ✅ Sprint 15 |
 
 ### Data Integrity
 
@@ -208,7 +208,7 @@
 | 115 | [Bug] | **`cmd_delete_me` — немедленное удаление без подтверждения**. | `src/telegram/handlers/account.py:28-33` | ⬜ P2 |
 | 116 | [Bug] | **Пароль показывается в plaintext в Telegram** — self-deleting, но может засветиться в нотификациях. | `src/telegram/handlers/account.py:121-127` | ⬜ P2 |
 | 117 | [Bug] | **`handle_weight_message` — catch-all для всех не-командных сообщений** — любой текст в неудачный момент попытается стать weight. | `src/telegram/main.py:68` | ⬜ P2 |
-| 118 | [Bug] | **Weight state не сбрасывается при ошибке** — пользователь застревает в режиме ввода веса. | `src/telegram/handlers/weight.py:98-101` | ⬜ P2 |
+| 118 | [Bug] | **Weight state не сбрасывается при ошибке** — пользователь застревает в режиме ввода веса. | `src/telegram/handlers/weight.py:98-101` | ✅ Sprint 15 |
 | 119 | [Bug] | **`/logs` endpoint без аутентификации** + path traversal (хотя `os.path.join` немного защищает). | `src/web/routes/logs.py:10` | ⬜ P2 |
 | 120 | [Bug] | **`/logs` уровень детекции по подстроке** — слово `"WARNING"` в сообщении даёт неверный CSS. | `src/web/routes/logs.py:40-41` | ⬜ P2 |
 | 121 | [Bug] | **`/health` всегда 200, даже при `degraded`** — маскирует проблемы от load balancer. | `src/api/routes/health.py:92` | ⬜ P2 |

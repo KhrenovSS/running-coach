@@ -149,7 +149,7 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 ```
 Пароль/токен отдельно не спрашивать — брать из `.env`.
 
-## Текущее состояние (Session — 14.07.2026 — Sprint 13: Security & Hardening)
+## Текущее состояние (Session — 14.07.2026 — Sprint 15: Observability)
 
 **Фаза A ✅:** Починены сломанные импорты в `src/telegram/` (AUDIT-015), удалены `COROS_SYNC_*` константы (AUDIT-011).
 **Фаза B ✅:** Тонкие роуты (sync.py 444→93), мульти-бренд settings, единый `run_sync_for_user`, пакет `pages/`.
@@ -166,6 +166,8 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 **Sprint 13 ✅:** Security & Hardening — SECRET_KEY без fallback, шифрование email (Fernet), PENDING_DIR → `uploads/pending`, Docker `USER appuser`, rate-limiting, CSRF (Origin/Referer), session fixation, `except:pass` устранены, `reload=True` убран.
 
 **Sprint 14 ✅:** Thread Safety — `threading.Lock` на `_pending`, `_awaiting_weight`, `_engine`/`_maker`, `_fernet_cache`, logger cache; cleanup утечек `_pending`/`_awaiting_weight`; TOCTOU scheduler → `threading.Event`; deep copy `_auto_sync_status`.
+
+**Sprint 15 ✅:** Observability — `fix_logger_after_uvicorn` для всех 3 логгеров; Alembic hard fail (`raise SystemExit(1)`); silent failures → `exc_info=True` (activities, health); `except: pass` → `logger.warning`; weather ошибки → WARNING; `get_logger` в api/deps.py; лог удаления temp-файлов; сброс `_awaiting_weight` при ошибке.
 
 ### Что сделано в сессии (13.07.2026) — модуль анализа:
 1. `segment.py`: distance-based change points (`CHANGE_POINT_WINDOW_M=200` вместо 10 точек)
@@ -198,6 +200,19 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 9. `main.py`: убран reload=True (SEC-09)
 10. `AGENTS.md` / `CHANGELOG.md` / `BACKLOG.md`: обновление по протоколу конца спринта
 
+### Что сделано в сессии (14.07.2026) — Sprint 15 / Observability:
+1. **OBS-01**: `fix_logger_after_uvicorn()` — починена для всех 3 логгеров (app, requests, audit_file) через общий helper `_fix_single_logger()` — `src/utils/logger.py`
+2. **OBS-02**: Alembic failure — `logger.exception` + `raise SystemExit(1)` (hard stop) — `src/startup.py`
+3. **OBS-03**: Parse error в activities.py — `logger.warning` + `exc_info=True` — `src/services/sync/activities.py`
+4. **OBS-04**: `except: pass` при `client.close()` → `logger.warning` с exc_info — `src/services/sync/activities.py`
+5. **OBS-05**: Analytics fetch failure — `exc_info=True` — `src/services/sync/health.py`
+6. **OBS-06**: Dashboard save failure — `exc_info=True` — `src/services/sync/health.py`
+7. **OBS-07**: Weather API errors — подняты с DEBUG на WARNING — `src/parsers/weather.py`
+8. **OBS-08**: `api/deps.py` — `logging.getLogger` → `get_logger("api.deps")` из проекта
+9. **OBS-09**: Добавлен лог успешного удаления temp-файла — `src/web/routes/uploads.py`
+10. **OBS-10**: Сброс `_awaiting_weight` при ошибке сохранения веса — пользователь не застревает — `src/telegram/handlers/weight.py`
+11. Поведенческие проверки: импорты OK, `from src.database` → 0, `except:pass` → 0, 53/56 тестов зелёные
+
 ### Что сделано в сессии (14.07.2026) — Sprint 14 / Thread Safety:
 1. **TS-01**: `threading.Lock` на `_pending` — `src/web/state.py`
 2. **TS-02**: `threading.Lock` на `_awaiting_weight` — `src/telegram/state.py`
@@ -218,7 +233,6 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 
 ### Следующие шаги (подготовка к модулю аналитики):
 Порядок выполнения — строго последовательный. Каждый спринт = behavioral test + CHANGELOG + commit.
-- **Sprint 15** (Observability): fix_logger для всех 3 логгеров, silent failures → exc_info, Alembic hard fail, weather WARNING
 - **Sprint 16** (Config Consolidation): хардкоды → constants.py/settings, COROS_* в coros.py, Europe/Moscow в settings
 - **Sprint 17** (Data Integrity): nullable FK → NOT NULL, Text → JSON, FIT check_crc, input validation
 - **Sprint 18** (Architecture Cleanup): DRY (orchestrator, uploads, pace/weather helpers), split <400 files, graceful shutdown

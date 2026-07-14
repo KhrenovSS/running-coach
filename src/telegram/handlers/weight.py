@@ -100,6 +100,8 @@ async def handle_weight_message(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(f"✅ Вес {weight:.1f} кг сохранён! Спасибо! 🙌")
     except Exception as e:
         db.rollback()
+        with _awaiting_weight_lock:
+            _awaiting_weight[chat_id] = False
         logger.error("Weight save error for user=%s: %s", user.id, e, exc_info=True)
         await update.message.reply_text("😔 Ошибка при сохранении веса.")
     finally:

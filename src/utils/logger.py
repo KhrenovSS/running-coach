@@ -228,30 +228,35 @@ def log_with_context(
     log_func(message, extra=extra_dict)
 
 
+def _fix_single_logger(name: str, filename: str) -> None:
+    log = logging.getLogger(name)
+    log.disabled = False
+    log._cache.clear()
+    new_handlers = []
+    for h in log.handlers[:]:
+        stream = getattr(h, 'stream', None)
+        if stream is None and getattr(h, '_closed', False):
+            log.removeHandler(h)
+            if isinstance(h, TimedRotatingFileHandler):
+                new_handlers.append(_create_file_handler(filename))
+            elif isinstance(h, logging.StreamHandler):
+                new_handlers.append(_create_console_handler())
+    for h in new_handlers:
+        log.addHandler(h)
+
+
 def fix_logger_after_uvicorn() -> None:
     """
-    Восстановить логгер после uvicorn dictConfig (Python 3.13+).
+    Восстановить все логгеры после uvicorn dictConfig (Python 3.13+).
     uvicorn вызывает logging.config.dictConfig() при старте, что:
     1. Закрывает все существующие handlers (FileHandler.stream = None)
     2. Отключает существующие логгеры (logger.disabled = True)
     
     Эта функция должна вызываться из startup() приложения.
     """
-    app_log = logging.getLogger("app")
-    app_log.disabled = False
-    app_log._cache.clear()
-    
-    new_handlers = []
-    for h in app_log.handlers[:]:
-        stream = getattr(h, 'stream', None)
-        if stream is None and getattr(h, '_closed', False):
-            app_log.removeHandler(h)
-            if isinstance(h, TimedRotatingFileHandler):
-                new_handlers.append(_create_file_handler("app.log"))
-            elif isinstance(h, logging.StreamHandler):
-                new_handlers.append(_create_console_handler())
-    for h in new_handlers:
-        app_log.addHandler(h)
+    _fix_single_logger("app", "app.log")
+    _fix_single_logger("requests", "requests.log")
+    _fix_single_logger("audit_file", "audit.log")
 
 
 # Удобный доступ к app-логгеру (Convenient app logger access)

@@ -22,7 +22,8 @@ def on_startup():
         alembic_cfg = AlembicConfig("alembic.ini")
         command.upgrade(alembic_cfg, "head")
     except Exception as e:
-        logger.error("Ошибка Alembic миграции: %s", e)
+        logger.exception("Ошибка Alembic миграции —硬 остановка (hard stop)")
+        raise SystemExit(1)
 
     for f in PENDING_DIR.glob("*.tcx"):
         f.unlink(missing_ok=True)

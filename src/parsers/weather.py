@@ -46,7 +46,7 @@ def fetch_weather(lat, lon, date):
             _weather_cache[key] = result
             return result
     except (KeyError, httpx.HTTPError, ValueError) as e:
-        logger.debug("Weather fetch error: %s", e)
+        logger.warning("Weather fetch error: %s", e)
     return None
 
 

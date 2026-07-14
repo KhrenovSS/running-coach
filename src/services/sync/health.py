@@ -47,8 +47,8 @@ async def save_dashboard_data(client: BaseWatchClient, db, user_id: int, brand: 
         if not dm.source_brand:
             dm.source_brand = brand
         db.commit()
-    except Exception as e:
-        logger.warning("Dashboard save error: %s", e)
+    except Exception:
+        logger.warning("Dashboard save error", exc_info=True)
 
 
 # Синхронизация метрик здоровья для пользователя (Sync health metrics for a user)
@@ -103,8 +103,8 @@ async def sync_health_for_user(cred, brand: str,
                         analytics_by_date[d] = a
                     except (ValueError, TypeError):
                         pass
-        except Exception as e:
-            logger.warning("Analytics fetch error: %s", e)
+        except Exception:
+            logger.warning("Analytics fetch error", exc_info=True)
 
         synced = 0
         for i, entry in enumerate(metrics_list):
@@ -196,4 +196,4 @@ async def sync_health_for_user(cred, brand: str,
         try:
             await client.close()
         except Exception:
-            pass
+            logger.warning("Health sync: client.close() failed for brand=%s user=%s", brand, cred.user_id, exc_info=True)

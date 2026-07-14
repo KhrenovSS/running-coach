@@ -38,8 +38,8 @@ async def sync_activities_for_user(cred, brand: str,
                              max_credible_pace=us.max_credible_pace,
                              max_gps_jump_m=us.max_gps_jump_m,
                              min_hr_for_fast_pace=us.min_hr_for_fast_pace)
-        except Exception as e:
-            logger.warning("Parse error for %s: %s", act.get('name'), e)
+        except Exception:
+            logger.warning("Parse error for %s", act.get('name'), exc_info=True)
             return None
         finally:
             os.unlink(tmp_path)
@@ -230,4 +230,4 @@ async def sync_activities_for_user(cred, brand: str,
         try:
             await client.close()
         except Exception:
-            pass
+            logger.warning("Activity sync: client.close() failed for brand=%s user=%s", brand, cred.user_id, exc_info=True)

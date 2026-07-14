@@ -2,6 +2,37 @@
 
 All notable changes to this project are tracked here.
 
+## [14.07.2026] — Sprint 15: Observability
+
+### Changed
+- **OBS-01** `src/utils/logger.py` — `fix_logger_after_uvicorn()` теперь чинит все 3 логгера (app, requests, audit_file) через новый helper `_fix_single_logger(name, filename)`
+- **OBS-02** `src/startup.py` — Alembic failure: `logger.error` → `logger.exception` + `raise SystemExit(1)` (hard stop при битой БД)
+- **OBS-03** `src/services/sync/activities.py` — parse error: добавлен `exc_info=True` для полного traceback
+- **OBS-04** `src/services/sync/activities.py` — `except: pass` при `client.close()` → `logger.warning` с exc_info
+- **OBS-05** `src/services/sync/health.py` — analytics fetch failure: добавлен `exc_info=True`
+- **OBS-06** `src/services/sync/health.py` — dashboard save failure: добавлен `exc_info=True`
+- **OBS-07** `src/parsers/weather.py` — ошибки погоды подняты с DEBUG на WARNING (видны в production)
+- **OBS-08** `src/api/deps.py` — `logging.getLogger(__name__)` → `get_logger("api.deps")` из проекта
+- **OBS-09** `src/web/routes/uploads.py` — добавлен `logger.info` при успешном удалении temp-файла
+- **OBS-10** `src/telegram/handlers/weight.py` — сброс `_awaiting_weight` в except-блоке: пользователь не застревает в режиме ввода веса при ошибке
+
+### Fixed
+- Silent parse failures в синхронизации тренировок (OBS-03)
+- Silent client.close() ошибки в activities и health sync (OBS-04)
+- Логгеры requests и audit_file оставались с мёртвыми хендлерами после uvicorn (OBS-01)
+- Пользователь Telegram застревал в режиме ввода веса при ошибке БД (OBS-10)
+
+### Verified
+- `python -c "from src.telegram.main import run_bot"` — OK
+- `python -c "from src.utils.logger import fix_logger_after_uvicorn, get_logger"` — OK
+- `grep -rn "from src.database" src/` → 0
+- `grep -rn "except: pass\|except Exception: pass" src/` → 0
+- `pytest tests/ -v` → 53 passed, 3 pre-existing errors (SQLite params in PostgreSQL test)
+
+### Notes
+- **Docker**: пересобрать `app` (изменены logger.py, startup.py, activities.py, health.py, weather.py, deps.py, uploads.py)
+- **Docker**: пересобрать `bot` (изменён weight.py)
+
 ## [14.07.2026] — Sprint 14: Thread Safety
 
 ### Added

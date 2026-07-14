@@ -132,6 +132,7 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
                 distance_km=session.total_distance_km,
                 training_type=session.training_type,
             )
+        logger.info("Temp file удалён: %s", tmp_path)
         os.unlink(tmp_path)
 
     if parse_errors:

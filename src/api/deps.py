@@ -12,15 +12,15 @@ API зависимости FastAPI (FastAPI dependencies)
 """
 
 import time
-import logging
 from typing import Generator
 
 from fastapi import Depends, Request, HTTPException
 from sqlalchemy.orm import Session
 
 from src.models import SessionLocal, User
+from src.utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("api.deps")
 
 
 def get_db() -> Generator[Session, None, None]:
