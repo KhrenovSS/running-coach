@@ -579,15 +579,15 @@ grep -rn "Europe/Moscow" src/ | wc -l                                           
 **Docker:** `app`
 
 **Задачи:**
-- [ ] **DI-01**: Alembic: nullable FK → `NOT NULL` + `ON DELETE CASCADE` для `user_id` во всех моделях — `src/domain/models/training.py`, `health.py`, `auth.py`, `audit.py`, `watch.py`
-- [ ] **DI-02**: Alembic: `Text` → `JSON` для `sleep_hrv_interval_list` — `src/domain/models/health.py:37`
-- [ ] **DI-03**: Alembic: `Text` → `JSON` для `audit.metadata_json` — `src/domain/models/audit.py:18`
-- [ ] **DI-04**: `fit_parser.py`: `check_crc=True` (сейчас False — повреждённые файлы парсятся молча) — `src/parsers/fit_parser.py:14`
-- [ ] **DI-05**: Cadence heuristic `cad < 100: cad * 2` → параметр бренда (Coros-specific в generic парсере) — `src/parsers/fit_parser.py:28-29`
-- [ ] **DI-06**: Auth token: удалять expired+неиспользованные (сейчас только used+>1day) — `src/services/auth.py:116-126`
-- [ ] **DI-07**: Input validation: file size (max 50MB), email regex, weight bounds (20–300 → 30–250) — `src/web/routes/uploads.py:28`, `src/telegram/handlers/start.py:41`, `src/telegram/handlers/weight.py:73`
-- [ ] **DI-08**: `gps.py`: `sqrt(max(0, min(a, 1)))` — защита от negative float — `src/parsers/gps.py:11`
-- [ ] **DI-09**: `hr_zones.py`: защита от `max_hr=0` (ZeroDivisionError) — `src/analysis/hr_zones.py:9`
+- [x] **DI-01**: Alembic: nullable FK → `NOT NULL` + `ON DELETE CASCADE` для `user_id` во всех моделях — `src/domain/models/training.py`, `health.py`, `audit.py`, `watch.py`
+- [x] **DI-02**: Alembic: `Text` → `JSON` для `sleep_hrv_interval_list` — `src/domain/models/health.py:37`
+- [x] **DI-03**: Alembic: `Text` → `JSON` для `audit.metadata_json` — `src/domain/models/audit.py:18`
+- [x] **DI-04**: `fit_parser.py`: `check_crc=True` (сейчас False — повреждённые файлы парсятся молча) — `src/parsers/fit_parser.py:14`
+- [x] **DI-05**: Cadence heuristic `cad < 100: cad * 2` → параметр бренда (Coros-specific в generic парсере) — `src/parsers/fit_parser.py:28-29`
+- [x] **DI-06**: Auth token: удалять expired+неиспользованные (сейчас только used+>1day) — `src/services/auth.py:116-126`
+- [x] **DI-07**: Input validation: file size (max 50MB), email regex, weight bounds (20–300 → 30–250) — `src/web/routes/uploads.py:28`, `src/telegram/handlers/start.py:41`, `src/telegram/handlers/weight.py:73`
+- [x] **DI-08**: `gps.py`: `sqrt(max(0, min(a, 1)))` — защита от negative float — `src/parsers/gps.py:11`
+- [x] **DI-09**: `hr_zones.py`: защита от `max_hr=0` (ZeroDivisionError) — `src/analysis/hr_zones.py:9`
 
 **Проверка:**
 ```bash
@@ -618,7 +618,7 @@ pytest tests/ -v        # тесты проходят
 - [ ] **ARC-10**: `stats.py`: HTML (`render_zone_bars`, `render_type_row`, `build_nav_html`) из сервисного слоя в Jinja2 — MVC нарушен — `src/services/stats.py:66-133`
 - [ ] **ARC-11**: Dead code: `_get_progress_message`, `ValidationError` import, мёртвые константы settings — удалить
 - [ ] **ARC-12**: Опечатка `'Окторябрь'` → `'Октябрь'` — `src/services/stats.py:8`
-- [ ] **ARC-13**: CRC-ошибка parse_fit/parse_tcx в uploads.py → 500, а не информирование пользователя. Обернуть в try-except с логом и parse_errors. | — `src/web/routes/uploads.py:55-64`
+- [x] **ARC-13**: CRC-ошибка parse_fit/parse_tcx в uploads.py → 500, а не информирование пользователя. Обернуть в try-except с логом и parse_errors. | — `src/web/routes/uploads.py:55-64`
 
 **Проверка:**
 ```bash
