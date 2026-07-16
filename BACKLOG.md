@@ -213,7 +213,7 @@
 | 119 | [Bug] | **`/logs` endpoint без аутентификации** + path traversal (хотя `os.path.join` немного защищает). | `src/web/routes/logs.py:10` | ⬜ P2 |
 | 120 | [Bug] | **`/logs` уровень детекции по подстроке** — слово `"WARNING"` в сообщении даёт неверный CSS. | `src/web/routes/logs.py:40-41` | ⬜ P2 |
 | 121 | [Bug] | **`/health` всегда 200, даже при `degraded`** — маскирует проблемы от load balancer. | `src/api/routes/health.py:92` | ⬜ P2 |
-| 122 | [Bug] | **`psutil` в health — опциональный import, но не в зависимостях** — всегда падает в production. | `src/api/routes/health.py:69` | ⬜ P2 |
+| 122 | [Bug] | **`psutil` в health — опциональный import, но не в зависимостях** — всегда падает в production. | `src/api/routes/health.py:69` | ✅ Fixed: lazy import 16.07.2026 |
 | 123 | [Bug] | **`get_or_create_user_by_telegram` — если email уже занят другим, генерит рандомный пароль без уведомления юзера**. | `src/telegram/handlers/start.py:75-76` | ⬜ P2 |
 | 124 | [Bug] | **`today_start` в `sync.py:43` считает по Moscow TZ, хотя `begin_ts` в UTC** — смещение до 12ч. | `src/telegram/handlers/sync.py:43` | ⬜ P2 |
 | 125 | [Bug] | **Training list может превысить 4096 символов Telegram** — падение при 100+ сессиях. | `src/telegram/handlers/trainings.py:81` | ⬜ P2 |
@@ -252,6 +252,23 @@
 
 ---
 
+## 🆕 Новые находки (16.07.2026 — Диагностика сбоя уведомлений и регистрации)
+
+| # | Тег | Описание | Файл / Источник | Статус |
+|---|-----|----------|-----------------|--------|
+| 153 | [Bug] | **PK violation при регистрации нового пользователя через Telegram** — `startup.py` создаёт админа с явным `id=1`, но не синхронизирует PostgreSQL sequence `users_id_seq`. При `INSERT` без `id` (регистрация через `/start`) `nextval` возвращает `1` → конфликт с admin user. Проявилось после пересоздания таблиц (volume сброшен), sequence стартовал с 1. | `src/startup.py:38-40` | ⬜ |
+| 154 | [Bug] | **Type mismatch: `telegram_chat_id` (BigInteger) сохраняется и сравнивается как `str`** — `start.py` и `utils.py` используют `str(chat_id)` вместо `chat_id` (int) при записи и фильтрации `User.telegram_chat_id`. Работает за счёт неявного приведения PostgreSQL, но создаёт риск отказа при определённых версиях драйвера. | `src/telegram/handlers/start.py:63,76,90`, `src/telegram/utils.py:12` | ✅ Fixed: str→int 16.07.2026 |
+| 155 | [Bug] | **Missing `AuditService.log_user_registered`** — `start.py` вызывает `audit.log_user_registered()`, но такого метода нет в `AuditService`. При регистрации через Telegram падает с `AttributeError` и показывает пользователю «Ошибка при сохранении email». | `src/services/audit.py`, `src/telegram/handlers/start.py:80,97` | ✅ Fixed: метод добавлен 16.07.2026 |
+| 156 | [Bug] | **`/start` не проверяет `password_hash` — пользователь без пароля не может войти в веб** — если регистрация прервалась на шаге email (пользователь создан, `password_hash=NULL`), повторный `/start` показывает «С возвращением!» сразу, не предлагая ввести пароль. Войти в веб-панель невозможно. | `src/telegram/handlers/start.py:21-27` | ✅ Fixed: добавлена проверка password_hash 16.07.2026 |
+| 157 | [Bug] | **"Бегун" вместо имени в веб-интерфейсе** — при регистрации через Telegram не сохраняется `telegram_username` (`update.effective_user.username`), и нет поля `name` на странице `/settings`. Во всех 6 местах fallback `user.name or user.telegram_username or "Бегун"` показывает "Бегун". | `src/telegram/handlers/start.py:88,124`, `src/web/routes/pages/settings.py:51`, `src/web/templates/settings.html` | ✅ Fixed: telegram_username + поле name в /settings 16.07.2026 |
+| 158 | [Bug] | **Coros не синхронизируется после пересоздания БД** — таблица `watch_credentials` пуста, пользователю нужно заново ввести email/пароль от Coros Training Hub на странице `/settings`. | `src/web/templates/settings.html` (форма ввода credentials) | ⬜ |
+| 159 | [Fix] | **Пароль остаётся в Telegram после регистрации** — сообщение с паролем от веб-кабинета не удаляется после сохранения. Нужно удалять сообщение с паролем, а при неудаче писать WARNING в лог с user_id, chat_id и причиной. | `src/telegram/handlers/start.py:138-140` | ✅ Fixed: delete + logger.warning 16.07.2026 |
+| 160 | [Bug] | **Ошибка 422 при сохранении настроек — `weight` required** — GET /settings использует `get_settings()` (admin user), у которого `weight_kg = NULL`. Шаблон рендерит `value='None'`, браузер не отправляет битое число, FastAPI падает с `Field required`. POST handler требует `weight` и `max_hr` как обязательные. | `src/web/routes/pages/settings.py:27,70`, `src/web/templates/settings.html:22` | ✅ Fixed: current_user.* + опциональные поля + or '' 16.07.2026 |
+| 161 | [Bug] | **Неверная сегментация — проверяется общий разброс темпа, а не разница между соседними отрезками** — правило: по умолчанию 1км отрезки, отрезки другого размера только для интервалов, соседние отрезки должны отличаться > 1 мин/км. Исправлено: oscillation как основной детектор + _merge_similar_segments для слияния похожих отрезков. | `src/analysis/segment.py` | ✅ Fixed: oscillation + merge_similar + пересчёт 16.07.2026 |
+| 162 | [Bug] | **`classify_training` не учитывает финальные сегменты** — `oscillation_count` и `var_count` считаются из сырых трекпоинтов, но сегменты могут быть слиты `_merge_similar_segments` в 1. Классификация возвращает `interval` (oscillation_count ≥ 3), хотя реальных сегментов нет. | `src/analysis/classify.py:46-50`, `src/analysis/__init__.py:135-141` | ✅ Fixed: segments_len < 3 → не interval + пересчёт 16.07.2026 |
+| 163 | [Bug] | **Неинтервальные тренировки показывают 1 сегмент вместо км-блоков** — `segment_by_pace()` возвращает 1 сегмент после слияния, `is_km_segmentation()` не ловит единый 5.6км сегмент. Для tempo/long/recovery всегда должны быть км-блоки, oscillation-сегменты только для interval. | `src/analysis/__init__.py:104-142` | ✅ Fixed: km_fallback для не-interval + пересчёт 16.07.2026 |
+---
+
 ## 🔴 P0 — Подготовка к модулю аналитики (аудит 14.07.2026 — Sprint 20c)
 
 | # | Тег | Описание | Файл / Источник | Статус |
@@ -284,6 +301,6 @@
 
 ---
 
-*Обновлён: 14.07.2026 — Аудит перед Sprint 21: добавлены P0/P1/P2 находки (#142-#152), сформирован Sprint 20c (PREP-01..PREP-11)*
+*Обновлён: 16.07.2026 — #153-163, #154-157, #159-163 fixed*
 
 ---

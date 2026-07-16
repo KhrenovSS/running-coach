@@ -203,6 +203,16 @@ class AuditService:
             metadata={"preview": message_preview[:100], **extra},
         )
 
+    def log_user_registered(self, user_id: int, source: str = "web", **extra) -> None:
+        """Аудит: пользователь зарегистрирован (Audit: user registered)"""
+        self.log_event(
+            event_type="user.registered",
+            message=f"User registered via {source}",
+            severity="info",
+            user_id=user_id,
+            metadata={"source": source, **extra},
+        )
+
     def log_settings_changed(self, user_id: int, changes: dict[str, Any], **extra) -> None:
         """Аудит: настройки изменены (Audit: settings changed)"""
         self.log_event(

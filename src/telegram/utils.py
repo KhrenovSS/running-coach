@@ -9,7 +9,7 @@ from src.models import User
 def get_user(chat_id: int) -> User | None:
     next_db: Session = next(get_db())
     try:
-        return next_db.query(User).filter(User.telegram_chat_id == str(chat_id)).first()
+        return next_db.query(User).filter(User.telegram_chat_id == chat_id).first()
     finally:
         next_db.close()
 

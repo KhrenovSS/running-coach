@@ -16,22 +16,24 @@
     <h2>⚙️ Настройки</h2>
     <div class='card'>
         <form action='/settings' method='post'>
+            <label><b>Имя:</b></label>
+            <input type='text' name='name' value='{{ user_name or "" }}' style='width:250px;padding:6px;font-size:14px'>
             <label><b>Максимальный пульс (ЧССмакс):</b></label>
-            <input type='number' name='max_hr' value='{{ max_hr }}' min='100' max='250'>
+            <input type='number' name='max_hr' value='{{ max_hr or "" }}' min='100' max='250'>
             <label><b>Вес (кг):</b></label>
-            <input type='number' name='weight' value='{{ weight }}' min='30' max='250' step='0.1'>
+            <input type='number' name='weight' value='{{ weight or "" }}' min='30' max='250' step='0.1'>
             <hr>
             <h4>Детекция ошибочных тренировок (Bogus session detection)</h4>
             <label><b>Мин. темп (мин/км):</b> темп быстрее этого считается ошибкой</label>
-            <input type='number' name='max_credible_pace' value='{{ max_credible_pace }}' min='2.0' max='6.0' step='0.1'>
+            <input type='number' name='max_credible_pace' value='{{ max_credible_pace or "" }}' min='2.0' max='6.0' step='0.1'>
             <label><b>Макс. GPS-скачок (м):</b> прыжок координат больше этого — ошибка</label>
-            <input type='number' name='max_gps_jump_m' value='{{ max_gps_jump_m }}' min='10' max='500' step='10'>
+            <input type='number' name='max_gps_jump_m' value='{{ max_gps_jump_m or "" }}' min='10' max='500' step='10'>
             <label><b>Мин. пульс для быстрого темпа:</b> если пульс ниже, а темп быстрее — ошибка</label>
-            <input type='number' name='min_hr_for_fast_pace' value='{{ min_hr_for_fast_pace }}' min='90' max='180'>
+            <input type='number' name='min_hr_for_fast_pace' value='{{ min_hr_for_fast_pace or "" }}' min='90' max='180'>
             <hr>
             <h4>Настройки определения интервалов (Interval detection)</h4>
             <label><b>Порог ускорения (секунд на км):</b> разница с базовым темпом (средний темп пробежки). Участки быстрее этого порога = work-фаза.</label>
-            <input type='number' name='interval_pace_threshold' value='{{ interval_pace_threshold_sec }}' min='30' max='180' step='5'>
+            <input type='number' name='interval_pace_threshold' value='{{ interval_pace_threshold_sec or "" }}' min='30' max='180' step='5'>
             <div style='font-size:12px;color:#888;margin-top:4px'>Например: 60 = 1:00 мин/км, 90 = 1:30 мин/км, 120 = 2:00 мин/км</div>
             <label><b>Мин. длительность фазы (сек):</b> короче этого — шум, не фаза</label>
             <input type='number' name='interval_min_phase_duration' value='{{ interval_min_phase_duration }}' min='5' max='60'>

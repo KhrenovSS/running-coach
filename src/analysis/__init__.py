@@ -8,6 +8,7 @@ from src.parsers.gps import clean_trackpoints
 from src.parsers.weather import fetch_weather, get_weather_code_at_time, get_temp_at_time
 from src.analysis.hr_zones import get_zone
 from src.analysis.segment import build_time_in_zones, segment_by_pace
+from src.analysis.segment_km import km_segment_fallback
 from src.analysis.classify import classify_training
 from src.analysis.oscillation import detect_pace_oscillations, compute_hr_lag_correlation
 from src.analysis.utils import (
@@ -138,7 +139,18 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
         oscillation_count=oscillation_count,
         hr_correlated=hr_correlated,
         min_oscillations=interval_min_oscillations,
+        segments_len=len(segments),
     )
+
+    # Для не-интервалов — всегда км-блоки (по умолчанию),
+    # для интервалов — oscillation/change-point сегменты
+    # (For non-interval trainings — always km-blocks, for interval — oscillation segments)
+    if t_type != 'interval':
+        km_segments, km_var = km_segment_fallback(trackpoints, max_hr, total_dist_km)
+        if km_segments:
+            segments = km_segments
+            var_count = km_var
+            segments_count = len(km_segments)
 
     hr_pace_series = build_hr_pace_series(times, hrs, dists, var_count)
 

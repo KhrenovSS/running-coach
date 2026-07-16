@@ -1,6 +1,7 @@
 # Фабрика приложения и startup-событие (App factory and startup event)
 import os
 from fastapi import FastAPI
+from sqlalchemy import text
 from src.models import SessionLocal, User, get_settings, init_db, WeightMeasurement, utcnow
 from src.utils.logger import get_logger
 from src.api.middleware import register_middleware
@@ -38,6 +39,7 @@ def on_startup():
             admin_user = User(id=1, is_active=True, max_hr=settings.default_max_hr)
             db.add(admin_user)
             db.commit()
+            db.execute(text("SELECT setval('users_id_seq', (SELECT MAX(id) FROM users))"))
             db.refresh(admin_user)
 
         settings = get_settings()

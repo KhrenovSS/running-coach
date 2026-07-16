@@ -9,7 +9,6 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 
-import psutil
 from alembic.migration import MigrationContext
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -57,6 +56,7 @@ async def health_check(db: Session = Depends(get_db)):
     uptime_seconds = time.time() - _process_start_time
     memory_info = {}
     try:
+        import psutil
         process = psutil.Process(os.getpid())
         memory_mb = process.memory_info().rss / (1024 * 1024)
         memory_info = {

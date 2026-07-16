@@ -20,11 +20,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user = get_user(chat_id)
     if user:
+        if user.password_hash:
+            await update.message.reply_text(
+                f"👋 С возвращением! Твой email: {user.email}\n"
+                f"Используй /sync для синхронизации или /trainings для просмотра тренировок."
+            )
+            return ConversationHandler.END
+
         await update.message.reply_text(
-            f"👋 С возвращением! Твой email: {user.email}\n"
-            f"Используй /sync для синхронизации или /trainings для просмотра тренировок."
+            "🔑 Заверши регистрацию — введи пароль (минимум {} символов):".format(settings.password_min_length)
         )
-        return ConversationHandler.END
+        return PASSWORD
 
     await update.message.reply_text(
         "🏃 *Добро пожаловать в Running Coach!*\n\n"
@@ -48,7 +54,7 @@ async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
         existing = db.query(User).filter(
             User.email == email,
             User.telegram_chat_id.isnot(None),
-            User.telegram_chat_id != str(chat_id),
+            User.telegram_chat_id != chat_id,
         ).first()
         if existing:
             await update.message.reply_text(
@@ -60,7 +66,9 @@ async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = db.query(User).filter(User.email == email).first()
         if user:
             if user.password_hash:
-                user.telegram_chat_id = str(chat_id)
+                user.telegram_chat_id = chat_id
+                user.telegram_username = update.effective_user.username
+                user.name = update.effective_user.full_name
                 db.commit()
                 audit = AuditService(db)
                 audit.log_settings_changed(
@@ -73,7 +81,9 @@ async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return PASSWORD
             else:
-                user.telegram_chat_id = str(chat_id)
+                user.telegram_chat_id = chat_id
+                user.telegram_username = update.effective_user.username
+                user.name = update.effective_user.full_name
                 user.password_hash = hash_password(secrets.token_urlsafe(16))
                 db.commit()
                 audit = AuditService(db)
@@ -87,7 +97,9 @@ async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         new_user = User(
             email=email,
-            telegram_chat_id=str(chat_id),
+            telegram_chat_id=chat_id,
+            telegram_username=update.effective_user.username,
+            name=update.effective_user.full_name,
             is_active=True,
         )
         db.add(new_user)
@@ -121,15 +133,25 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db = SessionLocal()
     try:
-        user = db.query(User).filter(User.telegram_chat_id == str(chat_id)).first()
+        user = db.query(User).filter(User.telegram_chat_id == chat_id).first()
         if not user:
             await update.message.reply_text("❌ Ошибка: пользователь не найден.")
             return ConversationHandler.END
 
         user.password_hash = hash_password(password)
+        user.telegram_username = update.effective_user.username
+        user.name = update.effective_user.full_name
         db.commit()
         audit = AuditService(db)
         audit.log_user_registered(user_id=user.id, source="telegram_password_set")
+
+        try:
+            await update.message.delete()
+        except Exception as e:
+            logger.warning(
+                "Failed to delete password message for user %s (chat_id=%s): %s",
+                user.id, chat_id, e,
+            )
 
         web_app_url = _get_web_app_url()
         keyboard = [[

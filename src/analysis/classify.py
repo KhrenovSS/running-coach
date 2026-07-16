@@ -14,6 +14,7 @@ def classify_training(
     oscillation_count: int = 0,
     hr_correlated: bool = False,
     min_oscillations: int = 3,
+    segments_len: int = 0,
 ) -> tuple[str, int]:
     """
     Мульти-сигнальная классификация тренировки.
@@ -34,6 +35,7 @@ def classify_training(
         oscillation_count: число осцилляций темпа (НОВОЕ)
         hr_correlated: корреляция темп-пульс подтверждена (НОВОЕ)
         min_oscillations: мин. число осцилляций для interval (НОВОЕ, default=3)
+        segments_len: число финальных сегментов после слияния (для валидации)
 
     Returns:
         (training_type, segments_count) — тип тренировки и число сегментов
@@ -41,6 +43,12 @@ def classify_training(
     z2_pct = (time_in_zone[2] / total_duration_min * 100) if total_duration_min > 0 else 0
     hr_75 = 0.75 * max_hr
     long_z4 = [s for s in z4_plus_segments if s['duration'] > 5]
+
+    # Если после слияния осталось < 3 сегментов — реальных интервалов нет
+    # (If after merging fewer than 3 segments remain — not real intervals)
+    if 0 < segments_len < 3:
+        oscillation_count = 0
+        var_count = 0
 
     # Мульти-сигнальная детекция интервалов (Multi-signal interval detection)
     is_interval = (

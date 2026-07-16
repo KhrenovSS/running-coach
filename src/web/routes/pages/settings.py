@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from src.models import get_db, User, WeightMeasurement, WatchCredential, get_settings
+from src.models import get_db, User, WeightMeasurement, WatchCredential
 from src.deps import templates
 from src.api.deps import get_current_user
 from src.services.audit import AuditService
@@ -24,8 +24,8 @@ router = APIRouter()
 @router.get('/settings', response_class=HTMLResponse)
 async def settings_page(request: Request, current_user: User = Depends(get_current_user),
                         db: Session = Depends(get_db)):
-    settings = get_settings()
-    m = settings.max_hr
+    from src.config import settings as app_settings
+    m = current_user.max_hr or app_settings.default_max_hr
     z1 = f"{round(m * 0.5)}-{round(m * 0.6)}"
     z2 = f"{round(m * 0.6)}-{round(m * 0.7)}"
     z3 = f"{round(m * 0.7)}-{round(m * 0.8)}"
@@ -53,10 +53,11 @@ async def settings_page(request: Request, current_user: User = Depends(get_curre
     pace_threshold_min = current_user.interval_pace_threshold or DEFAULT_PACE_THRESHOLD
     return templates.TemplateResponse(request, "settings.html", {
         "user_header": user_header,
-        "max_hr": m, "weight": settings.weight, "z1": z1, "z2": z2, "z3": z3, "z4": z4, "z5": z5,
-        "max_credible_pace": settings.max_credible_pace,
-        "max_gps_jump_m": settings.max_gps_jump_m,
-        "min_hr_for_fast_pace": settings.min_hr_for_fast_pace,
+        "user_name": current_user.name or "",
+        "max_hr": m, "weight": current_user.weight_kg, "z1": z1, "z2": z2, "z3": z3, "z4": z4, "z5": z5,
+        "max_credible_pace": current_user.max_credible_pace,
+        "max_gps_jump_m": current_user.max_gps_jump_m,
+        "min_hr_for_fast_pace": current_user.min_hr_for_fast_pace,
         "watch_creds": watch_creds,
         "interval_pace_threshold_sec": round(pace_threshold_min * 60),
         "interval_min_phase_duration": current_user.interval_min_phase_duration or DEFAULT_MIN_PHASE_DURATION_SEC,
@@ -66,7 +67,7 @@ async def settings_page(request: Request, current_user: User = Depends(get_curre
 
 
 @router.post('/settings')
-async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
+async def settings_save(max_hr: int | None = Form(None), weight: float | None = Form(None),
                         max_credible_pace: float = Form(3.0),
                         max_gps_jump_m: float = Form(100.0),
                         min_hr_for_fast_pace: int = Form(130),
@@ -74,6 +75,7 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
                         interval_min_phase_duration: int = Form(DEFAULT_MIN_PHASE_DURATION_SEC),
                         interval_hr_lag_sec: int = Form(DEFAULT_HR_LAG_SEC),
                         interval_min_oscillations: int = Form(DEFAULT_MIN_OSCILLATIONS),
+                        name: str = Form(''),
                         watch_brand: str = Form(''),
                         watch_email: str = Form(''),
                         watch_password: str = Form(''),
@@ -89,6 +91,9 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
         db.add(user)
     old_weight = user.weight_kg
     old_max_hr = user.max_hr
+    old_name = user.name
+
+    user.name = name or None
 
     # Читаем старый email для audit-diff (Read old email for audit diff — brand-agnostic)
     old_watch_email = ''
@@ -99,8 +104,10 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
         ).first()
         old_watch_email = safe_decrypt(old_cred.encrypted_user) if old_cred else ''
 
-    user.max_hr = max_hr
-    user.weight_kg = weight
+    if max_hr is not None:
+        user.max_hr = max_hr
+    if weight is not None:
+        user.weight_kg = weight
     user.max_credible_pace = max_credible_pace
     user.max_gps_jump_m = max_gps_jump_m
     user.min_hr_for_fast_pace = min_hr_for_fast_pace
@@ -117,15 +124,15 @@ async def settings_save(max_hr: int = Form(...), weight: float = Form(...),
             activity_sync_interval=activity_sync_interval,
             health_sync_interval=health_sync_interval,
         )
-    if old_weight != weight:
+    if weight is not None and old_weight != weight:
         wm = WeightMeasurement(weight_kg=weight, measured_at=datetime.now(timezone.utc), user_id=current_user.id)
         db.add(wm)
     db.commit()
 
     changes = {}
-    if old_max_hr != max_hr:
+    if max_hr is not None and old_max_hr != max_hr:
         changes['max_hr'] = {'old': old_max_hr, 'new': max_hr}
-    if old_weight != weight:
+    if weight is not None and old_weight != weight:
         changes['weight_kg'] = {'old': old_weight, 'new': weight}
     if old_watch_email != (watch_email or None):
         changes['watch_email'] = {'old': old_watch_email, 'new': watch_email or None}

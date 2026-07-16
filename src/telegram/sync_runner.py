@@ -40,7 +40,7 @@ def run_sync_in_thread(chat_id: int) -> tuple[bool, str]:
     db = SessionLocal()
     audit = AuditService(db)
     try:
-        user = db.query(User).filter(User.telegram_chat_id == str(chat_id)).first()
+        user = db.query(User).filter(User.telegram_chat_id == chat_id).first()
         if not user:
             return False, "❌ Пользователь не найден."
 
