@@ -32,6 +32,8 @@
 
 ## Быстрые ссылки
 
+> ⚠️ Команды `uvicorn`, `alembic` и импорт `src.startup.create_app` требуют заполненного `.env` (`DATABASE_URL`, `SECRET_KEY`, `CRED_KEY`). Проверка импорта бота (`src.telegram.main`) работает без env.
+
 - Запуск сервера: `uvicorn main:app --host 0.0.0.0 --port 8000`
 - Тесты: `pytest tests/ -v`
 - Миграции: `alembic revision --autogenerate -m "..."`

@@ -18,12 +18,13 @@ _PENDING_TTL = timedelta(hours=1)
 
 def _cleanup_stale_pending():
     now = time.time()
-    stale = [tid for tid, entry in list(_pending.items())
-             if now - entry.get('_created', now) > _PENDING_TTL.total_seconds()]
-    for tid in stale:
-        entry = _pending.pop(tid, None)
-        if entry:
-            Path(entry['path']).unlink(missing_ok=True)
+    with _pending_lock:
+        stale = [tid for tid, entry in list(_pending.items())
+                 if now - entry.get('_created', now) > _PENDING_TTL.total_seconds()]
+        for tid in stale:
+            entry = _pending.pop(tid, None)
+            if entry:
+                Path(entry['path']).unlink(missing_ok=True)
 
 TRAINING_TYPES_RU = {
     'interval': 'Интервальная',

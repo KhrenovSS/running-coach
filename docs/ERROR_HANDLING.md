@@ -81,10 +81,10 @@ async def fetch_activities(access_token: str, api_base: str, endpoint: str):
             return response.json()
     except httpx.HTTPStatusError as e:
         logger.error(f"Watch API HTTP error: {url} → {e.response.status_code}")
-        raise WatchAPIError(str(e), brand="coros", status=e.response.status_code)
+        raise WatchAPIError(str(e), brand=brand, status=e.response.status_code)
     except httpx.RequestError as e:
         logger.error(f"Watch API network error: {url} → {e}")
-        raise WatchAPIError(str(e), brand="coros")
+        raise WatchAPIError(str(e), brand=brand)
 ```
 
 ### 3. Обработка файла
@@ -138,7 +138,7 @@ try:
     result = await fetch_data()
 except httpx.RequestError as e:
     logger.error(f"Network error: {e}")
-    raise WatchAPIError(str(e), brand="coros")
+    raise WatchAPIError(str(e), brand=brand)
 ```
 
 ### ❌ Голый `raise Exception`
@@ -189,4 +189,4 @@ except FileNotFoundError:
 
 ---
 
-**Последнее обновление:** 30.06.2026
+**Последнее обновление:** 16.07.2026

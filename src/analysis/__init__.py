@@ -23,7 +23,7 @@ logger = get_logger("analysis")
 
 
 def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datetime,
-                         max_hr: int = 177, max_credible_pace: float = 3.0,
+                          max_hr: int = settings.default_max_hr, max_credible_pace: float = 3.0,
                          max_gps_jump_m: float = 100.0, min_hr_for_fast_pace: int = 130,
                          pace_gap: float = 1.0,
                          interval_min_phase_duration: int = 15,

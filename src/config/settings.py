@@ -16,7 +16,6 @@ class Settings(BaseSettings):
 
     # Пути (Paths)
     log_file: str = "app.log"
-    upload_dir: str = "uploads"
 
     # Тайминги (Timing)
     http_timeout: int = 15

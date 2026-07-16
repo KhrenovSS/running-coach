@@ -5,7 +5,9 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func
 
-from src.models import SessionLocal, TrainingSession, DailyMetrics
+from src.analysis.hr_zones import get_zone
+from src.config import settings
+from src.models import SessionLocal, TrainingSession, DailyMetrics, User
 
 
 class TrainingRepository:
@@ -47,6 +49,8 @@ class TrainingRepository:
         db = SessionLocal()
         try:
             since = datetime.now(timezone.utc) - timedelta(days=days)
+            user = db.query(User).filter(User.id == user_id).first()
+            max_hr = user.max_hr if user else settings.default_max_hr
             sessions = db.query(TrainingSession).filter(
                 TrainingSession.user_id == user_id,
                 TrainingSession.begin_ts >= since,
@@ -57,8 +61,12 @@ class TrainingRepository:
                 if not session.segments_json:
                     continue
                 for segment in session.segments_json:
+                    avg_hr = segment.get('avg_hr') or 0
                     duration = segment.get('duration_min', 0) or 0
-                    zone_minutes["z2"] += duration
+                    zone = get_zone(avg_hr, max_hr)
+                    zone_key = f"z{zone}"
+                    if zone_key in zone_minutes:
+                        zone_minutes[zone_key] += duration
 
             return zone_minutes
         finally:

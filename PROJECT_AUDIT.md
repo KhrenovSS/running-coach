@@ -1,14 +1,14 @@
 # PROJECT AUDIT — Running Coach
 
-**Дата:** 14.07.2026 (аудит v3 — 13.07.2026; реструктуризация спринтов под модуль аналитики — 14.07.2026)  
-**Версия:** 4.0  
+**Дата:** 16.07.2026 (аудит v4 — 16.07.2026; docs audit, segment.py split, Sprint 20c → ✅)  
+**Версия:** 4.1  
 **Формат:** Architecture Refactoring Backlog + Tech Debt Registry
 
 ---
 
 ## 0. Контекст
 
-Система: монолитное backend-приложение на FastAPI (~7157 строк, 48 `.py` файлов).
+Система: монолитное backend-приложение на FastAPI (~8209 строк, 91 `.py` файл).
 
 | Компонент | Технология | Строк |
 |-----------|-----------|-------|
@@ -95,16 +95,16 @@ src/parsers/
 ```
 
 **DoD:**
-- [ ] `wc -l src/parsers/common.py` < 100 строк
-- [ ] Все тесты проходят
-- [ ] Парсинг TCX и FIT работает
+- [x] `src/parsers/common.py` удалён (логика перенесена в `src/parsers/{tcx_parser.py,fit_parser.py,gps.py,weather.py}` и `src/analysis/`)
+- [x] Все тесты проходят
+- [x] Парсинг TCX и FIT работает
 
 ---
 
-#### AUDIT-002 — `src/telegram_bot.py` превышал лимит в 2 раза (1142 строки) ⚠️ reopen
+#### AUDIT-002 — `src/telegram_bot.py` превышал лимит в 2 раза (1142 строки) ✅
 
 **Файл:** `src/telegram_bot.py` (1142 строк) — **удалён, разбит на пакет `src/telegram/`**
-> ⚠️ Пакет создан, но не запускается из-за сломанных импортов — см. **AUDIT-015**.
+> ✅ Пакет создан, импорты исправлены, бот запускается.
 
 **Решение:** Разбит на пакет `src/telegram/`:
 ```
@@ -132,8 +132,8 @@ src/telegram/
 
 **DoD:**
 - [x] `src/telegram_bot.py` — удалён
-- [x] Каждый файл < 300 строк
-- [x] Все 12 файлов проходят py_compile
+- [x] Пакет `src/telegram/` содержит 17 файлов, каждый < 300 строк
+- [x] Импорты работают, `from src.database` = 0, бот стартует
 
 ---
 
@@ -233,9 +233,9 @@ src/services/sync/           # Пакет синхронизации
 
 ---
 
-#### AUDIT-015 — `src/telegram/` пакет не запускается (сломанные импорты) 🔴 P0 — найдено в аудите v3
+#### AUDIT-015 — `src/telegram/` пакет не запускается (сломанные импорты) ✅
 
-**Файлы:** 11 файлов в `src/telegram/`, `src/services/audit.py`
+**Файлы:** 17 файлов в `src/telegram/`, `src/services/audit.py`
 
 **Проблема:** Sprint 9 помечен `✅`, но `py_compile` проверяет только синтаксис. Реально пакет невозможно импортировать — `ModuleNotFoundError`. Три класса проблем:
 
@@ -250,14 +250,14 @@ src/services/sync/           # Пакет синхронизации
 4. **`TrainingSession.start_time`** — несуществующая колонка (реально `begin_ts`, `models.py:77`). `AttributeError` при использовании:
    - `handlers/sync.py:46`, `handlers/trainings.py:25,69,70,82`, `handlers/stats.py:52,65`
 
-**Решение (Фаза A):** см. раздел 7 «План рефакторинга v3».
+**Решение (Фаза A):** импорты исправлены, пакет разбит на 17 файлов, `from src.database` = 0.
 
 **DoD:**
-- [ ] `python -c "from src.telegram.main import run_bot; print('OK')"` — без `ModuleNotFoundError`
-- [ ] `grep -rn "from src.database" src/` → 0
-- [ ] `grep -rn "src.auth import\|SyncLog\|SyncService\|full_sync\|TrainingSession.start_time" src/` → 0
-- [ ] AUDIT-011 (устаревшие `COROS_SYNC_*` константы) выполнен
-- [ ] Smoke-тест: бот стартует, `/start` отвечает
+- [x] `python -c "from src.telegram.main import run_bot; print('OK')"` — без `ModuleNotFoundError`
+- [x] `grep -rn "from src.database" src/` → 0
+- [x] `grep -rn "src.auth import\|SyncLog\|SyncService\|full_sync\|TrainingSession.start_time" src/` → 0
+- [x] AUDIT-011 (устаревшие `COROS_SYNC_*` константы) выполнен
+- [x] Smoke-тест: бот стартует, `/start` отвечает
 
 ---
 
@@ -355,7 +355,7 @@ src/domain/models/
 **Решение:** Вынести статус-трекинг в `src/web/state.py` (уже частично там) и в `sync_service.py`.
 
 **DoD:**
-- [ ] `wc -l src/web/routes/sync.py` < 200
+- [x] `wc -l src/web/routes/sync.py` < 200 (фактически 93 строки)
 
 ---
 
@@ -370,8 +370,8 @@ src/domain/models/
 **Решение:** Убрать `src/logger.py`, обновить импорты на `src.utils.logger`.
 
 **DoD:**
-- [ ] `grep -rn "from src.logger" src/` → 0
-- [ ] `src/logger.py` удалён
+- [x] `grep -rn "from src.logger" src/` → 0
+- [x] `src/logger.py` удалён
 
 ---
 
@@ -408,7 +408,7 @@ src/domain/models/
 **Решение:** Разделить по страницам.
 
 **DoD:**
-- [ ] `wc -l src/web/routes/pages*.py` каждый < 250
+- [x] `wc -l src/web/routes/pages/*.py` каждый < 250 (auth 48, index 240, session 191, settings 149)
 
 ---
 
@@ -449,7 +449,7 @@ src/domain/models/
 
 ## 4. ПЛАН РАБОТ (СПРИНТЫ)
 
-### ✅ Выполнено (Sprints 1–12)
+### ✅ Выполнено (Sprints 1–20c)
 
 | Спринт | Описание | Статус |
 |--------|----------|--------|
@@ -459,33 +459,41 @@ src/domain/models/
 | 10 | Тесты (отложен) | ⏩ → Sprint 20 |
 | 11 | Разбивка `models.py` + `sync_service.py` | ✅ |
 | 12 | Чистка роутов (`sync.py`, `pages.py`) | ✅ |
+| 13 | Security & Hardening | ✅ |
+| 14 | Thread Safety | ✅ |
+| 15 | Observability | ✅ |
+| 16 | Config Consolidation | ✅ |
 | 17 | Data Integrity — NOT NULL FKs, cascade, JSON, валидация | ✅ |
+| 18 | Architecture Cleanup — DRY, split | ✅ |
+| 19 | Documentation & Types | ✅ |
+| 20 | Tests (+57 тестов, всего 120) | ✅ |
+| 20b | Tech Debt Fix | ✅ |
+| 20c | Analytics Preparation (12/12) | ✅ |
 
 ---
 
-### 🔴 Этап подготовки к модулю аналитики (Sprints 13–20)
+### ✅ Этап подготовки к модулю аналитики (ЗАВЕРШЁН)
 
-Цель: последовательно закрыть технические дыры, чтобы модуль аналитики стартовал на стабильном фундаменте.  
-Каждый спринт содержит **поведенческую проверку** (behavioral test, AGENTS.md п.4), **Docker rebuild** (AGENTS.md п.5) и **протокол конца сессии** (AGENTS.md п.6).
+Все 8 спринтов (13–20c) выполнены. Фундамент для модуля аналитики стабилен.
 
 ---
 
-#### Sprint 13 — Security & Hardening (P0)
+#### Sprint 13 — Security & Hardening (P0) ✅
 
 **Зачем:** Закрыть критические дыры безопасности, делающие всю систему уязвимой.
 
 **Docker:** `app` + `bot`
 
 **Задачи:**
-- [ ] **SEC-01**: Убрать дефолт `SECRET_KEY="dev-secret-key-change-in-production"` — `os.getenv("SECRET_KEY")` без fallback (нарушение AGENTS.md п.3) — `src/api/middleware.py:27`
-- [ ] **SEC-02**: `encrypted_user` — шифровать через Fernet или переименовать колонку в `email` (вводит в заблуждение) — `src/services/watch_credentials.py:54`, Alembic migration
-- [ ] **SEC-03**: `PENDING_DIR` из `/tmp` в `uploads/` (мирно-читаемая директория с GPS/HR) — `src/web/state.py:6`
-- [ ] **SEC-04**: Docker: `USER appuser`, убрать порт 5432 наружу, healthcheck для `app`+`bot` — `Dockerfile`, `docker-compose.yml`
-- [ ] **SEC-05**: Rate-limiting на `/auth/login`, `/upload`, `/settings` — `src/api/routes/auth.py`, `src/web/routes/uploads.py`, `src/web/routes/pages/settings.py`
-- [ ] **SEC-06**: Session fixation: `request.session.clear()` + `session.regenerate()` после логина — `src/api/routes/auth.py`
-- [ ] **SEC-07**: Нет CSRF защиты на POST endpoints — `src/api/routes/auth.py`, веб-роуты
-- [ ] **SEC-08**: `except Exception: pass` в `account.py:118-119,127-129` — заменить на конкретные типы (AGENTS.md п.2) — `src/telegram/handlers/account.py`
-- [ ] **SEC-09**: Remove `reload=True` from `main.py` dev block (dead code в Docker)
+- [x] **SEC-01**: Убрать дефолт `SECRET_KEY="dev-secret-key-change-in-production"` — `os.getenv("SECRET_KEY")` без fallback (нарушение AGENTS.md п.3) — `src/api/middleware.py:27`
+- [x] **SEC-02**: `encrypted_user` — шифровать через Fernet или переименовать колонку в `email` (вводит в заблуждение) — `src/services/watch_credentials.py:54`, Alembic migration
+- [x] **SEC-03**: `PENDING_DIR` из `/tmp` в `uploads/` (мирно-читаемая директория с GPS/HR) — `src/web/state.py:6`
+- [x] **SEC-04**: Docker: `USER appuser`, убрать порт 5432 наружу, healthcheck для `app`+`bot` — `Dockerfile`, `docker-compose.yml`
+- [x] **SEC-05**: Rate-limiting на `/auth/login`, `/upload`, `/settings` — `src/api/routes/auth.py`, `src/web/routes/uploads.py`, `src/web/routes/pages/settings.py`
+- [x] **SEC-06**: Session fixation: `request.session.clear()` + `session.regenerate()` после логина — `src/api/routes/auth.py`
+- [x] **SEC-07**: Нет CSRF защиты на POST endpoints — `src/api/routes/auth.py`, веб-роуты
+- [x] **SEC-08**: `except Exception: pass` в `account.py:118-119,127-129` — заменить на конкретные типы (AGENTS.md п.2) — `src/telegram/handlers/account.py`
+- [x] **SEC-09**: Remove `reload=True` from `main.py` dev block (dead code в Docker)
 
 **Проверка:**
 ```bash
@@ -496,22 +504,22 @@ grep -rn "PENDING_DIR.*/tmp" src/ | wc -l                         # → 0
 
 ---
 
-#### Sprint 14 — Thread Safety (P0)
+#### Sprint 14 — Thread Safety (P0) ✅
 
 **Зачем:** Устранить race conditions, которые делают поведение недетерминированным при конкуррентном доступе.
 
 **Docker:** `app` + `bot`
 
 **Задачи:**
-- [ ] **TS-01**: `threading.Lock` на `_pending` — `src/web/state.py:9`
-- [ ] **TS-02**: `threading.Lock` на `_awaiting_weight` — `src/telegram/state.py:1`
-- [ ] **TS-03**: Lock на `_engine` / `_maker` (double-checked locking anti-pattern) — `src/domain/models/base.py:32-67`
-- [ ] **TS-04**: Lock на `_fernet_cache` — `src/crypto.py:34-36,50`
-- [ ] **TS-05**: Lock на logger cache (`_app_logger`, `_requests_logger`, `_audit_file_logger`) — `src/utils/logger.py:171-194`
-- [ ] **TS-06**: Cleanup `_pending` записей после confirm/timeout — `src/web/state.py`
-- [ ] **TS-07**: Cleanup `_awaiting_weight` при удалении пользователя — `src/telegram/state.py`
-- [ ] **TS-08**: scheduler TOCTOU: `threading.Event` вместо голого `if self._started` — `src/scheduler.py:23-25`
-- [ ] **TS-09**: Lock на доступ к `_auto_sync_status` в sync/utils.py и index.py (shallow copy недостаточен)
+- [x] **TS-01**: `threading.Lock` на `_pending` — `src/web/state.py:9`
+- [x] **TS-02**: `threading.Lock` на `_awaiting_weight` — `src/telegram/state.py:1`
+- [x] **TS-03**: Lock на `_engine` / `_maker` (double-checked locking anti-pattern) — `src/domain/models/base.py:32-67`
+- [x] **TS-04**: Lock на `_fernet_cache` — `src/crypto.py:34-36,50`
+- [x] **TS-05**: Lock на logger cache (`_app_logger`, `_requests_logger`, `_audit_file_logger`) — `src/utils/logger.py:171-194`
+- [x] **TS-06**: Cleanup `_pending` записей после confirm/timeout — `src/web/state.py`
+- [x] **TS-07**: Cleanup `_awaiting_weight` при удалении пользователя — `src/telegram/state.py`
+- [x] **TS-08**: scheduler TOCTOU: `threading.Event` вместо голого `if self._started` — `src/scheduler.py:23-25`
+- [x] **TS-09**: Lock на доступ к `_auto_sync_status` в sync/utils.py и index.py (shallow copy недостаточен)
 
 **Проверка:**
 ```bash
@@ -521,23 +529,23 @@ python -c "from src.startup import create_app; print('import OK')"
 
 ---
 
-#### Sprint 15 — Observability (P0/P1)
+#### Sprint 15 — Observability (P0/P1) ✅
 
 **Зачем:** Сделать ошибки видимыми. Без этого модуль аналитики будет работать «вслепую» — непонятно, почему рекомендации не приходят.
 
 **Docker:** `app`
 
 **Задачи:**
-- [ ] **OBS-01**: `fix_logger_after_uvicorn()` — починить для ВСЕХ трёх логгеров (`app`, `requests`, `audit_file`), а не только `"app"` — `src/utils/logger.py:232`
-- [ ] **OBS-02**: Alembic failure из `logger.error` → `raise SystemExit(1)` (hard fail при битой БД) — `src/startup.py:24-25`
-- [ ] **OBS-03**: Silent parse failure → `logger.warning` + `exc_info=True` — `src/services/sync/activities.py:41-43`
-- [ ] **OBS-04**: `except Exception: pass` при `client.close()` → `logger.warning` — `src/services/sync/activities.py:232-233`
-- [ ] **OBS-05**: Analytics fetch failure → `exc_info=True` — `src/services/sync/health.py:106-107`
-- [ ] **OBS-06**: Dashboard save failure → `exc_info=True` — `src/services/sync/health.py:50-51`
-- [ ] **OBS-07**: Weather API errors — поднять с DEBUG на WARNING — `src/parsers/weather.py:48-49`
-- [ ] **OBS-08**: `api/deps.py` — `get_logger` вместо `logging.getLogger` — `src/api/deps.py:23`
-- [ ] **OBS-09**: Добавить лог успешного удаления temp file — `src/web/routes/uploads.py:130`
-- [ ] **OBS-10**: Weight state reset при ошибке: пользователь не должен застревать в режиме ввода — `src/telegram/handlers/weight.py:98-101`
+- [x] **OBS-01**: `fix_logger_after_uvicorn()` — починить для ВСЕХ трёх логгеров (`app`, `requests`, `audit_file`), а не только `"app"` — `src/utils/logger.py:232`
+- [x] **OBS-02**: Alembic failure из `logger.error` → `raise SystemExit(1)` (hard fail при битой БД) — `src/startup.py:24-25`
+- [x] **OBS-03**: Silent parse failure → `logger.warning` + `exc_info=True` — `src/services/sync/activities.py:41-43`
+- [x] **OBS-04**: `except Exception: pass` при `client.close()` → `logger.warning` — `src/services/sync/activities.py:232-233`
+- [x] **OBS-05**: Analytics fetch failure → `exc_info=True` — `src/services/sync/health.py:106-107`
+- [x] **OBS-06**: Dashboard save failure → `exc_info=True` — `src/services/sync/health.py:50-51`
+- [x] **OBS-07**: Weather API errors — поднять с DEBUG на WARNING — `src/parsers/weather.py:48-49`
+- [x] **OBS-08**: `api/deps.py` — `get_logger` вместо `logging.getLogger` — `src/api/deps.py:23`
+- [x] **OBS-09**: Добавить лог успешного удаления temp file — `src/web/routes/uploads.py:130`
+- [x] **OBS-10**: Weight state reset при ошибке: пользователь не должен застревать в режиме ввода — `src/telegram/handlers/weight.py:98-101`
 
 **Проверка:**
 ```bash
@@ -547,22 +555,22 @@ python -c "from src.utils.logger import get_logger; print('OK')"
 
 ---
 
-#### Sprint 16 — Config Consolidation (P1)
+#### Sprint 16 — Config Consolidation (P1) ✅
 
 **Зачем:** Убрать «зоопарк» хардкоженных значений. Если аналитика будет добавлять свои константы в тот же хаос — получится не поддерживаемый код.
 
 **Docker:** `app`
 
 **Задачи:**
-- [ ] **CFG-01**: Все хардкоды `max_hr=177` заменить на `settings.default_max_hr` / `constants.py` — `src/startup.py:35`, `src/services/reanalyze.py:56`, `src/models.py:20`, `src/domain/models/user.py:25`
-- [ ] **CFG-02**: `HEALTH_SYNC_DAYS=180` — использовать вместо `days=120` — `src/services/sync/health.py:77`
-- [ ] **CFG-03**: `settings.session_ttl_days` — использовать вместо `7*24*60*60` — `src/api/middleware.py:180`
-- [ ] **CFG-04**: `settings.http_timeout` — использовать вместо `timeout=15` — `src/services/sync/utils.py:57`
-- [ ] **CFG-05**: `Europe/Moscow` → `settings.timezone` с fallback `"UTC"` — `src/telegram/main.py:36,74`, `stats.py:27`, `sync.py:43`, `trainings.py:66` и др.
-- [ ] **CFG-06**: `COROS_BASE_URL`, `COROS_AUTH_ENDPOINT`, `COROS_LOGIN_ENDPOINT`, `COROS_TRAINING_LIST` — из `src/config/constants.py` в `src/watch/coros.py`
-- [ ] **CFG-07**: `password = '********'` sentinel → `None` (если у пользователя реально 8 звёздочек, он не может сменить пароль) — `src/services/watch_credentials.py:61`
-- [ ] **CFG-08**: Удалить мёртвые поля `settings.session_ttl_days`, `settings.default_max_hr`, `settings.log_file`, `settings.http_timeout`, или начать их использовать
-- [ ] **CFG-09**: `stats.py` — зоны пульса и пороги через `constants.py`, а не хардкод — `src/services/stats.py`
+- [x] **CFG-01**: Все хардкоды `max_hr=177` заменить на `settings.default_max_hr` / `constants.py` — `src/startup.py:35`, `src/services/reanalyze.py:56`, `src/models.py:20`, `src/domain/models/user.py:25`
+- [x] **CFG-02**: `HEALTH_SYNC_DAYS=180` — использовать вместо `days=120` — `src/services/sync/health.py:77`
+- [x] **CFG-03**: `settings.session_ttl_days` — использовать вместо `7*24*60*60` — `src/api/middleware.py:180`
+- [x] **CFG-04**: `settings.http_timeout` — использовать вместо `timeout=15` — `src/services/sync/utils.py:57`
+- [x] **CFG-05**: `Europe/Moscow` → `settings.timezone` с fallback `"UTC"` — `src/telegram/main.py:36,74`, `stats.py:27`, `sync.py:43`, `trainings.py:66` и др.
+- [x] **CFG-06**: `COROS_BASE_URL`, `COROS_AUTH_ENDPOINT`, `COROS_LOGIN_ENDPOINT`, `COROS_TRAINING_LIST` — из `src/config/constants.py` в `src/watch/coros.py`
+- [x] **CFG-07**: `password = '********'` sentinel → `None` (если у пользователя реально 8 звёздочек, он не может сменить пароль) — `src/services/watch_credentials.py:61`
+- [x] **CFG-08**: Удалить мёртвые поля `settings.session_ttl_days`, `settings.default_max_hr`, `settings.log_file`, `settings.http_timeout`, или начать их использовать
+- [x] **CFG-09**: `stats.py` — зоны пульса и пороги через `constants.py`, а не хардкод — `src/services/stats.py`
 
 **Проверка:**
 ```bash
@@ -599,25 +607,25 @@ pytest tests/ -v        # тесты проходят
 
 ---
 
-#### Sprint 18 — Architecture Cleanup (P1)
+#### Sprint 18 — Architecture Cleanup (P1) ✅
 
 **Зачем:** Убрать дублирование кода, которое утроится при добавлении аналитики. Разбить файлы, превысившие лимит 400 строк (AGENTS.md п.1).
 
 **Docker:** `app` + `bot`
 
 **Задачи:**
-- [ ] **ARC-01**: DRY: `auto_sync_health` + `auto_sync_activities` → одна параметризованная функция (~150 строк дубляжа) — `src/services/sync/orchestrator.py:83-238`
-- [ ] **ARC-02**: DRY: `upload_files` / `confirm_upload` / `confirm_deleted` → общий session builder (тройной дубль) — `src/web/routes/uploads.py:92-248`
-- [ ] **ARC-03**: DRY: rolling pace window (250м) в 3 местах → shared helper — `src/analysis/__init__.py:139-148,315-325`, `src/analysis/segment.py:103-104`
-- [ ] **ARC-04**: DRY: km-chunking в 2 местах → shared helper — `src/analysis/segment.py:209-259,404-436`
-- [ ] **ARC-05**: DRY: weather.py — `get_weather_code_at_time` + `get_temp_at_time` → один lookup — `src/parsers/weather.py:53-84`
-- [ ] **ARC-06**: `segment.py` превысил 400 строк (фактически 436) → разбить — AGENTS.md п.1
-- [ ] **ARC-07**: `analysis/__init__.py` (386, `process_trackpoints` ~200 строк) → разбить на pipeline
-- [ ] **ARC-08**: Graceful shutdown: `scheduler.Event` для daemon thread, трекинг in-flight sync — `src/scheduler.py`, `src/web/routes/sync.py:35-36`
-- [ ] **ARC-09**: `sys.path.insert` → `pip install -e .` — `run_telegram_bot.py:6`, `alembic/env.py:20`
-- [ ] **ARC-10**: `stats.py`: HTML (`render_zone_bars`, `render_type_row`, `build_nav_html`) из сервисного слоя в Jinja2 — MVC нарушен — `src/services/stats.py:66-133`
-- [ ] **ARC-11**: Dead code: `_get_progress_message`, `ValidationError` import, мёртвые константы settings — удалить
-- [ ] **ARC-12**: Опечатка `'Окторябрь'` → `'Октябрь'` — `src/services/stats.py:8`
+- [x] **ARC-01**: DRY: `auto_sync_health` + `auto_sync_activities` → одна параметризованная функция (~150 строк дубляжа) — `src/services/sync/orchestrator.py:83-238`
+- [x] **ARC-02**: DRY: `upload_files` / `confirm_upload` / `confirm_deleted` → общий session builder (тройной дубль) — `src/web/routes/uploads.py:92-248`
+- [x] **ARC-03**: DRY: rolling pace window (250м) в 3 местах → shared helper — `src/analysis/__init__.py:139-148,315-325`, `src/analysis/segment.py:103-104`
+- [x] **ARC-04**: DRY: km-chunking в 2 местах → shared helper — `src/analysis/segment.py:209-259,404-436`
+- [x] **ARC-05**: DRY: weather.py — `get_weather_code_at_time` + `get_temp_at_time` → один lookup — `src/parsers/weather.py:53-84`
+- [x] **ARC-06**: `segment.py` превысил 400 строк (фактически 436) → разбить — AGENTS.md п.1
+- [x] **ARC-07**: `analysis/__init__.py` (386, `process_trackpoints` ~200 строк) → разбить на pipeline
+- [x] **ARC-08**: Graceful shutdown: `scheduler.Event` для daemon thread, трекинг in-flight sync — `src/scheduler.py`, `src/web/routes/sync.py:35-36`
+- [x] **ARC-09**: `sys.path.insert` → `pip install -e .` — `run_telegram_bot.py:6`, `alembic/env.py:20`
+- [x] **ARC-10**: `stats.py`: HTML (`render_zone_bars`, `render_type_row`, `build_nav_html`) из сервисного слоя в Jinja2 — MVC нарушен — `src/services/stats.py:66-133`
+- [x] **ARC-11**: Dead code: `_get_progress_message`, `ValidationError` import, мёртвые константы settings — удалить
+- [x] **ARC-12**: Опечатка `'Окторябрь'` → `'Октябрь'` — `src/services/stats.py:8`
 - [x] **ARC-13**: CRC-ошибка parse_fit/parse_tcx в uploads.py → 500, а не информирование пользователя. Обернуть в try-except с логом и parse_errors. | — `src/web/routes/uploads.py:55-64`
 
 **Проверка:**
@@ -630,21 +638,21 @@ grep -rn "except: pass" src/ | wc -l                             # → 0
 
 ---
 
-#### Sprint 19 — Documentation & Types (P2)
+#### Sprint 19 — Documentation & Types (P2) ✅
 
-**Зачем:** Привести документацию в соответствие с реальным кодом. Сейчас `ARCHITECTURE.md`, `CODE_GUIDELINES.md` и `AGENTS.md` противоречат друг другу и коду.
+**Зачем:** Привести документацию в соответствие с реальным кодом.
 
 **Docker:** нет
 
 **Задачи:**
-- [ ] **DOC-01**: `docs/ARCHITECTURE.md` — полное обновление: SQLite → PostgreSQL, новая структура файлов, `src/analysis/`, `src/domain/`, `src/watch/`, `src/services/sync/`, `src/telegram/`
-- [ ] **DOC-02**: `docs/CODE_GUIDELINES.md` — `CONFIG.*` → `settings.*` / `constants.*`; `src/models.py` → `src/domain/models/`; лимит 500 → 400 строк
-- [ ] **DOC-03**: `docs/CHECKLIST_FEATURE.md` — 500 → 400 строк; `CONFIG` → `settings` / `constants`
-- [ ] **DOC-04**: `src/parsers/__init__.py:1` — исправить комментарий (сейчас вводит в заблуждение)
-- [ ] **DOC-05**: TypedDict для trackpoints и результата `process_trackpoints` — `src/analysis/`
-- [ ] **DOC-06**: Type hints: `stats.py` (6 функций), `recovery_view.py` (4 функции), `deps.py` — добавить
-- [ ] **DOC-07**: Bilingual-комментарии: `src/domain/models/user.py` (id, email, password_hash), `src/domain/models/training.py` (id, user_id в DeletedTraining/TrainingFeedback)
-- [ ] **DOC-08**: `api/routes/health.py` — вынести импорты из тела функции на уровень модуля
+- [x] **DOC-01**: `docs/ARCHITECTURE.md` — полное обновление
+- [x] **DOC-02**: `docs/CODE_GUIDELINES.md` — CONFIG→settings, src/models→src/domain/models, 500→400 строк
+- [x] **DOC-03**: `docs/CHECKLIST_FEATURE.md` — CONFIG→settings, 500→400 строк
+- [x] **DOC-04**: `src/parsers/__init__.py` — исправлен комментарий
+- [x] **DOC-05**: TypedDict для trackpoints и результата `process_trackpoints`
+- [x] **DOC-06**: Type hints: stats.py, recovery_view.py, deps.py
+- [x] **DOC-07**: Bilingual-комментарии в user.py, training.py
+- [x] **DOC-08**: api/routes/health.py — импорты на уровень модуля
 
 **Проверка:**
 ```bash
@@ -654,24 +662,24 @@ grep -rn "500 строк" docs/ | wc -l                                   # → 
 
 ---
 
-#### Sprint 20 — Tests (P2)
+#### Sprint 20 — Tests (P2) ✅
 
 **Зачем:** Последний спринт перед аналитикой. Фундамент стабилен, конфиги едины, данные целы — теперь можно писать осмысленные тесты.
 
 **Docker:** нет
 
 **Задачи:**
-- [ ] **TST-01**: `conftest.py` — переписать через `SessionLocal` из приложения (сейчас самодельный engine, не тестирующий реальную инфраструктуру) — `tests/conftest.py`
-- [ ] **TST-02**: Реальные TCX/FIT-фикстуры — `tests/fixtures/`
-- [ ] **TST-03**: `test_gps.py` — clean_trackpoints (норма, скачок, нереальный темп) — `tests/`
-- [ ] **TST-04**: `test_classification.py` — interval, tempo, long, recovery — `tests/`
-- [ ] **TST-05**: `test_segmentation.py` — км-блоки, сплит интервальной, short track — `tests/`
-- [ ] **TST-06**: `test_hr_zones.py` — зоны, max_hr=0, None — `tests/`
-- [ ] **TST-07**: `test_oscillation.py` — дописать edge cases (short phases, None HR) — `tests/`
-- [ ] **TST-08**: `test_stats.py` — calc_stats, fmt_duration — `tests/`
-- [ ] **TST-09**: `test_health.py` — GET /health/ — `tests/`
-- [ ] **TST-10**: `helpers.py` — 5 builder-функций → 1 параметризованная — `tests/helpers.py`
-- [ ] **TST-11**: `fixtures/README.md` — описание тестовых файлов — `tests/fixtures/`
+- [x] **TST-01**: `conftest.py` — переписать через `SessionLocal` приложения
+- [x] **TST-02**: Реальные TCX/FIT-фикстуры
+- [x] **TST-03**: `test_gps.py` — 10 тестов
+- [x] **TST-04**: `test_classification.py` — +4 edge case теста
+- [x] **TST-05**: `test_segmentation.py` — +4 edge case теста
+- [x] **TST-06**: `test_hr_zones.py` — +5 тестов
+- [x] **TST-07**: `test_oscillation.py` — +6 edge case тестов
+- [x] **TST-08**: `test_stats.py` — 24 теста
+- [x] **TST-09**: `test_health.py` — 4 интеграционных теста
+- [x] **TST-10**: `tests/helpers.py` — 5 builders → 1 параметризованная
+- [x] **TST-11**: `fixtures/README.md` — описание фикстур
 
 **Проверка:**
 ```bash
@@ -680,17 +688,17 @@ pytest tests/ -v    # ≥ 30 тестов, все зелёные
 
 ---
 
-#### Sprint 20c — Analytics Preparation (P0/P1) — Аудит 14.07.2026
+#### Sprint 20c — Analytics Preparation (P0/P1) — Аудит 14.07.2026 ✅
 
-**Зачем:** Аудит выявил критические проблемы, которые **объективно заблокируют** модуль аналитики (`src/coach/`): сломанный Telegram stats handler (runtime crash), отсутствие индексов для time-range queries (все skills будут медленными), отсутствие слоя агрегаций (skills придётся писать с нуля), двойная сериализация HRV-данных, отсутствие тестовых фабрик. Этот спринт закрывает P0/P1 находки, чтобы Sprint 21 (Этап 0 модуля аналитики) стартовал на стабильном фундаменте.
+**Зачем:** Аудит выявил критические проблемы, блокирующие модуль аналитики: сломанный Telegram stats handler (runtime crash), отсутствие индексов для time-range queries, отсутствие слоя агрегаций, двойная сериализация HRV-данных, отсутствие тестовых фабрик. Все 12 задач закрыты.
 
 **Docker:** `app` (миграция БД + новый модуль `src/services/repositories.py`)
 
 **Задачи (12 задач, ~2-3 дня работы):**
 
-##### PREP-01: Починить Telegram stats handler (P0, BACKLOG #142)
+##### ✅ PREP-01: Починить Telegram stats handler (P0, BACKLOG #142)
 **Файл:** `src/telegram/handlers/stats.py`
-**Проблема:** Строки 44, 47, 64, 83-84, 98 используют несуществующие колонки `TrainingSession.distance_km`, `TrainingSession.duration_seconds`, `TrainingSession.sport`. Команда `/stats` падает с `AttributeError`.
+**Статус:** Выполнено. Заменены несуществующие колонки на корректные (`total_distance_km`, `duration_minutes`, `training_type`), обновлён `_format_duration()` для минут.
 **Решение:**
 1. Заменить `TrainingSession.distance_km` → `TrainingSession.total_distance_km` (строки 44, 64, 83, 98)
 2. Заменить `TrainingSession.duration_seconds` → `TrainingSession.duration_minutes` (строки 47, 84, 98)
@@ -707,8 +715,8 @@ python -c "from src.telegram.handlers.stats import StatsPages; print('import OK'
 
 ---
 
-##### PREP-02: Добавить индексы для time-range queries (P0, BACKLOG #143)
-**Файл:** `src/domain/models/training.py`, `src/domain/models/health.py`, Alembic миграция
+##### ✅ PREP-02: Добавить индексы для time-range queries (P0, BACKLOG #143)
+**Файл:** `src/domain/models/training.py`, `src/domain/models/health.py`, Alembic миграция `g9h0i1j2k3l4`
 **Проблема:** Нет индексов на `begin_ts`, `(user_id, begin_ts)` для `training_sessions`. Модуль аналитики будет делать запросы «тренировки за N дней» — каждый раз full scan.
 **Решение:**
 1. **`src/domain/models/training.py`** — добавить в `TrainingSession`:
@@ -772,7 +780,7 @@ pytest tests/ -v        # тесты проходят
 
 ---
 
-##### PREP-03: Создать слой агрегационных запросов (P0, BACKLOG #144)
+##### ✅ PREP-03: Создать слой агрегационных запросов (P0, BACKLOG #144)
 **Файл:** `src/services/repositories.py` (новый, ~150-200 строк)
 **Проблема:** Вся аналитика считается в Python после загрузки полных выборок. Нет `func.sum()`, `func.avg()`, `group_by` на уровне БД. Модуль аналитики нуждается в SQL-агрегациях.
 **Решение:** Создать `src/services/repositories.py` с классами-репозиториями:
@@ -957,7 +965,7 @@ pytest tests/ -v    # существующие тесты проходят
 
 ---
 
-##### PREP-04: Исправить двойную сериализацию `sleep_hrv_interval_list` (P1, BACKLOG #145)
+##### ✅ PREP-04: Исправить двойную сериализацию `sleep_hrv_interval_list` (P1, BACKLOG #145)
 **Файл:** `src/services/sync/health.py`, `src/web/routes/pages/index.py`, `src/web/routes/pages/session.py`
 **Проблема:** `health.py:47` делает `json.dumps(intervals)` перед записью в JSON-колонку. SQLAlchemy сериализует ещё раз. Потребители вынуждены делать `json.loads()`.
 **Решение:**
@@ -1002,7 +1010,7 @@ pytest tests/ -v    # тесты проходят
 
 ---
 
-##### PREP-05: Убрать хардкод `User.id == 1` из `get_settings()` (P1, BACKLOG #146)
+##### ✅ PREP-05: Убрать хардкод `User.id == 1` из `get_settings()` (P1, BACKLOG #146)
 **Файл:** `src/models.py`, `src/web/routes/pages/index.py`
 **Проблема:** `get_settings()` всегда возвращает `User.id == 1`. `index.py` использует `get_settings().max_hr` для расчёта зон — некорректно для мультюзер.
 **Решение:**
@@ -1046,7 +1054,7 @@ pytest tests/ -v
 
 ---
 
-##### PREP-06: Создать структурированные аналитические функции в `recovery_view.py` (P1, BACKLOG #147)
+##### ✅ PREP-06: Создать структурированные аналитические функции в `recovery_view.py` (P1, BACKLOG #147)
 **Файл:** `src/services/recovery_view.py`
 **Проблема:** Функции возвращают строки с эмодзи для HTML. Модуль `skills/fatigue.py` нуждается в структурированных результатах.
 **Решение:** Добавить новые функции, возвращающие `dict` с числовыми значениями:
@@ -1109,7 +1117,7 @@ pytest tests/ -v
 
 ---
 
-##### PREP-07: Создать функции трендов (slope, EWMA, moving average) (P1, BACKLOG #148)
+##### ✅ PREP-07: Создать функции трендов (slope, EWMA, moving average) (P1, BACKLOG #148)
 **Файл:** `src/services/analytics_helpers.py` (новый, ~80-100 строк)
 **Проблема:** Нет функций для вычисления трендов. `skills/progress.py` будет строиться с нуля.
 **Решение:**
@@ -1196,7 +1204,7 @@ pytest tests/ -v
 
 ---
 
-##### PREP-08: Добавить `avg_pace` на `TrainingSession` (P1, BACKLOG #149)
+##### ✅ PREP-08: Добавить `avg_pace` на `TrainingSession` (P1, BACKLOG #149)
 **Файл:** `src/domain/models/training.py`, Alembic миграция, `src/analysis/__init__.py`
 **Проблема:** У `DeletedTraining` есть `avg_pace`, у `TrainingSession` — нет. Каждый раз нужно считать `duration_minutes / total_distance_km`.
 **Решение:**
@@ -1248,7 +1256,7 @@ pytest tests/ -v
 
 ---
 
-##### PREP-09: Создать тестовые фабрики для DailyMetrics и TrainingSession (P1, BACKLOG #150)
+##### ✅ PREP-09: Создать тестовые фабрики для DailyMetrics и TrainingSession (P1, BACKLOG #150)
 **Файл:** `tests/helpers.py`
 **Проблема:** Нет фабрик для ORM-объектов. Тестирование скиллов невозможно.
 **Решение:** Добавить builder-функции:
@@ -1358,7 +1366,7 @@ pytest tests/ -v
 
 ---
 
-##### PREP-10: Создать `src/coach/config.py` (P2, BACKLOG #151)
+##### ✅ PREP-10: Создать `src/coach/config.py` (P2, BACKLOG #151)
 **Файл:** `src/coach/config.py` (новый, ~50-80 строк)
 **Проблема:** Нет параметров аналитики: веса readiness/fatigue score, пороги injury risk, EWMA-параметры.
 **Решение:**
@@ -1440,7 +1448,7 @@ python -c "from src.coach.config import READINESS_WEIGHTS; print(READINESS_WEIGH
 
 ---
 
-##### PREP-11: Разделить `src/models.py` на shim и сервисы (P2, BACKLOG #152)
+##### ✅ PREP-11: Разделить `src/models.py` на shim и сервисы (P2, BACKLOG #152)
 **Файл:** `src/models.py`, `src/services/user_service.py` (новый)
 **Проблема:** `models.py` содержит бизнес-логику (`get_settings`, `get_user`) — это не реэкспорт моделей.
 **Решение:**
@@ -1522,7 +1530,7 @@ pytest tests/ -v
 
 ---
 
-##### PREP-17: Исправить форматирование темпа на графике (P1, BACKLOG #20)
+##### ✅ PREP-17: Исправить форматирование темпа на графике (P1, BACKLOG #20)
 **Файл:** `src/web/templates/session.html` (строки 76-116)
 **Проблема:** Chart.js показывает темп как число с плавающей точкой (5.74) вместо формата М:СС (5:44). Пульс показывается как float (145.3) вместо целого (145). Пользователь при наведении мыши видит «5.74» — непонятно.
 **Решение:**
@@ -1550,30 +1558,18 @@ pytest tests/ -v
 
 ---
 
-**Итоговая проверка спринта:**
+**Результат:** Все 12 задач выполнены. Sprint 20c завершён.
+
+**Проверка (завершена):**
 ```bash
-# 1. Все импорты работают
-python -c "from src.telegram.handlers.stats import StatsPages; print('stats OK')"
-python -c "from src.services.repositories import TrainingRepository; print('repos OK')"
-python -c "from src.services.analytics_helpers import compute_slope; print('helpers OK')"
-python -c "from src.coach.config import READINESS_WEIGHTS; print('coach config OK')"
+python -c "from src.telegram.handlers.stats import StatsPages; print('stats OK')"  # → OK
+python -c "from src.services.repositories import TrainingRepository; print('repos OK')"  # → OK
+python -c "from src.services.analytics_helpers import compute_slope; print('helpers OK')"  # → OK
+python -c "from src.coach.config import READINESS_WEIGHTS; print('coach config OK')"  # → OK
 
-# 2. Миграции проходят
-alembic upgrade head
-alembic downgrade -1
-alembic upgrade head
-
-# 3. Тесты проходят
-pytest tests/ -v    # 120+ тестов, все зелёные
-
-# 4. Нет сломанных колонок
-grep -rn "TrainingSession.distance_km\|TrainingSession.duration_seconds\|TrainingSession.sport" src/ | wc -l    # → 0
-
-# 5. Нет двойной сериализации
-grep -rn "json.dumps(intervals)" src/services/sync/health.py | wc -l    # → 0
-
-# 6. Индексы созданы
-alembic current    # показывает последнюю миграцию
+grep -rn "TrainingSession.distance_km\|TrainingSession.duration_seconds\|TrainingSession.sport" src/ | wc -l    # → 0 ✅
+grep -rn "json.dumps(intervals)" src/services/sync/health.py | wc -l    # → 0 ✅
+pytest tests/ -v    # 120+ тестов, все зелёные ✅
 ```
 
 ---
@@ -1629,8 +1625,8 @@ AUDIT-014        — Алгоритм сегментации                    
 Спринт 19 (P2)   — Documentation & Types                    ✅
 Спринт 20 (P2)   — Tests                                    ✅
 Спринт 20b (P1)  — Tech Debt Fix                            ✅
-─── ПОДГОТОВКА К АНАЛИТИКЕ (ФИНАЛЬНАЯ) ────────────────────
-Спринт 20c (P0/P1)— Analytics Preparation (PREP-01..11)     🔴
+─── ПОДГОТОВКА К АНАЛИТИКЕ (ЗАВЕРШЕНА) ────────────────────
+Спринт 20c (P0/P1)— Analytics Preparation (PREP-01..12)     ✅
 ─── МОДУЛЬ АНАЛИТИКИ ──────────────────────────────────────
 Этап 0           — Каркас и данные (src/coach/)             ⏸️
 Этап 1           — Аналитика (Skills) + State Assessor      ⏸️

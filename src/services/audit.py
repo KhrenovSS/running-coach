@@ -17,16 +17,16 @@ Usage:
 """
 
 import json
-import logging
 from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from src.models import AuditEvent
-from src.utils.logger import get_audit_file_logger
+from src.utils.logger import get_audit_file_logger, get_logger
 
 audit_logger = get_audit_file_logger()
+app_logger = get_logger("app")
 
 
 class AuditService:
@@ -41,8 +41,6 @@ class AuditService:
     TELEGRAM_NOTIFICATION_SENT = "telegram.notification.sent"
     TELEGRAM_NOTIFICATION_FAILED = "telegram.notification.failed"
     SETTINGS_CHANGED = "settings.changed"
-    USER_LOGIN = "user.login"
-    USER_LOGOUT = "user.logout"
     ERROR = "app.error"
     
     VALID_SEVERITIES = {"info", "warning", "error", "critical"}
@@ -90,7 +88,7 @@ class AuditService:
         except Exception as e:
             # Не падаем если БД недоступна — лог-файл уже есть
             # Don't fail if DB is unavailable — log file already written
-            logging.getLogger("app").error(
+            app_logger.error(
                 f"Failed to write audit event to DB: {event_type}",
                 exc_info=e,
             )

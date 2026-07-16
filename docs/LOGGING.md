@@ -4,9 +4,9 @@
 
 Проект реализует **Level 2 Standard observability**:
 
-- Структурированные логи приложения (`logs/app_YYYY-MM-DD.log`)
-- Логи API-запросов (`logs/requests_YYYY-MM-DD.log`)
-- Аудит-события в БД (`audit_events`) и в файле (`logs/audit_YYYY-MM-DD.log`)
+- Структурированные логи приложения (`logs/app.log.YYYY-MM-DD`)
+- Логи API-запросов (`logs/requests.log.YYYY-MM-DD`)
+- Аудит-события в БД (`audit_events`) и в файле (`logs/audit.log.YYYY-MM-DD`)
 - Порог медленного запроса: **1000 мс**
 
 ## Переменные окружения (Environment variables)
@@ -26,9 +26,9 @@
 
 ```
 logs/
-├── app_YYYY-MM-DD.log          # Логи приложения
-├── requests_YYYY-MM-DD.log     # Логи HTTP-запросов
-└── audit_YYYY-MM-DD.log        # Аудит-события (дублирование БД)
+├── app.log.YYYY-MM-DD          # Логи приложения
+├── requests.log.YYYY-MM-DD     # Логи HTTP-запросов
+└── audit.log.YYYY-MM-DD        # Аудит-события (дублирование БД)
 ```
 
 ## Как получить логгер (How to get a logger)
@@ -51,6 +51,12 @@ logger.info("Sync completed", extra={"count": 5})
 | `app.startup` | Приложение запущено | `src/startup.py` |
 | `training.uploaded` | Тренировка загружена | `/upload`, `/upload/confirm`, `/upload/confirm_deleted`, Coros sync |
 | `training.deleted` | Тренировка удалена | `/session/{id}/delete` |
+| `training.delete_failed` | Ошибка удаления тренировки | `/session/{id}/delete` |
+| `training.upload_summary` | Сводка по загруженным тренировкам | `/upload` |
+| `training.confirm_upload` | Подтверждение загрузки (сommon) | `/upload/confirm` |
+| `training.confirm_deleted` | Подтверждение повторной загрузки удалённой тренировки | `/upload/confirm_deleted` |
+| `feedback.created` | Оценка тренировки создана | `/session/{id}/feedback`, Telegram feedback |
+| `feedback.updated` | Оценка тренировки обновлена | `/session/{id}/feedback`, Telegram feedback |
 | `settings.changed` | Изменены настройки пользователя | `/settings`, Telegram `/start`, Telegram `/delete_me` |
 | `sync.{brand}.started` | Начата синхронизация часов | Telegram `/sync`, `/sync/{brand}/run` |
 | `sync.{brand}.completed` | Синхронизация часов завершена | Telegram `/sync`, `/sync/{brand}/run` |

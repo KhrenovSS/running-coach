@@ -137,23 +137,48 @@ async def get_training(
 ```python
 # src/services/training_service.py
 from sqlalchemy.orm import Session
-from src.models import TrainingSession
+from src.models import TrainingSession, TrainingFeedback
 from src.exceptions import NotFoundError
 
-class TrainingService:
-    """Сервис тренировок (Training service)"""
-    
-    def __init__(self, db: Session):
-        self.db = db
-    
-    def get(self, training_id: int) -> TrainingSession:
-        """
-        Получить тренировку по ID (Get training by ID)
-        """
-        training = self.db.query(TrainingSession).get(training_id)
-        if not training:
-            raise NotFoundError("training", training_id)
-        return training
+
+def delete_training(db: Session, user_id: int, session_id: int) -> None:
+    """Удалить тренировку пользователя (Delete user's training session)."""
+    session = db.query(TrainingSession).filter(
+        TrainingSession.id == session_id,
+        TrainingSession.user_id == user_id,
+    ).first()
+    if not session:
+        raise NotFoundError("training", session_id)
+    db.delete(session)
+    db.commit()
+
+
+def upsert_feedback(
+    db: Session,
+    user_id: int,
+    session_id: int,
+    rating: int,
+    notes: str | None = None,
+) -> TrainingFeedback:
+    """Сохранить или обновить оценку тренировки (Upsert training feedback)."""
+    feedback = db.query(TrainingFeedback).filter(
+        TrainingFeedback.session_id == session_id,
+        TrainingFeedback.user_id == user_id,
+    ).first()
+    if feedback:
+        feedback.rating = rating
+        feedback.notes = notes
+    else:
+        feedback = TrainingFeedback(
+            session_id=session_id,
+            user_id=user_id,
+            rating=rating,
+            notes=notes,
+        )
+        db.add(feedback)
+    db.commit()
+    db.refresh(feedback)
+    return feedback
 ```
 
 ---
@@ -191,7 +216,7 @@ async def update(
     return {"status": "ok"}
 ```
 
-### Pydantic схема (внутри файла роута или в `src/models.py`)
+### Pydantic схема (внутри файла роута или в отдельном модуле `src/schemas/`)
 
 ```python
 from pydantic import BaseModel, Field

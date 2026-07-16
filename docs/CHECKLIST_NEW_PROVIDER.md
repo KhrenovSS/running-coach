@@ -126,8 +126,8 @@ python -c "from src.watch.factory import list_brands; print(list_brands())"
 
 ## 6. Интеграция
 
-- `sync_service.py` уже бренд-независим — вызывает `get_watch_client(brand, ...)`
-- Telegram-бот: `sync_runner.py` — TODO: миграция на `run_sync_for_user_all_brands()`
+- `src/services/sync/orchestrator.py` уже бренд-независим — вызывает `get_watch_client(brand, ...)`
+- Telegram-бот: `sync_runner.py` — вызывает `run_sync_for_user()` из orchestrator
 - Веб: `web/routes/sync.py` — передаёт `brand` из URL
 - Scheduler: `scheduler.py` — бренд-независим, перебирает `WatchCredential`
 

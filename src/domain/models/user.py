@@ -4,6 +4,7 @@ from sqlalchemy import Column, Integer, Float, String, BigInteger, Boolean, Date
 from sqlalchemy.orm import relationship
 
 from src.domain.models.base import Base, utcnow
+from src.config import settings
 
 
 class User(Base):
@@ -22,7 +23,7 @@ class User(Base):
     goal_type = Column(String(50), nullable=True)  # lose_weight / 10k / half_marathon / marathon / general
     goal_target = Column(String(255), nullable=True)  # e.g. "sub 60 min 10k"
     last_health_sync_at = Column(DateTime(timezone=True), nullable=True)
-    max_hr = Column(Integer, default=177)
+    max_hr = Column(Integer, default=settings.default_max_hr)
     max_credible_pace = Column(Float, default=3.0)
     max_gps_jump_m = Column(Float, default=100.0)
     min_hr_for_fast_pace = Column(Integer, default=130)

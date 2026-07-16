@@ -24,13 +24,13 @@
 | 17 | [Фикс] | Добавить `docs/ARCHITECTURE.md`: описание `src/analysis/` пакета (oscillation, classify, segment, hr_zones, utils) и пайплайна `process_trackpoints()`. | `docs/ARCHITECTURE.md` | ✅ Sprint 19 (DOC-01) |
 | 18 | [Фикс] | Добавить unit-тесты для `src/analysis/oscillation.py`: `detect_pace_oscillations` + `compute_hr_lag_correlation` на синтетических данных. | `tests/` | ✅ Sprint 20 (TST-07) |
 | 19 | [Фикс] | Обновить `docs/ARCHITECTURE.md`: описание нового алгоритма детекции интервалов (base_pace = средний темп, work-фаза = темп ≥ порог быстрее base_pace). | `docs/ARCHITECTURE.md` | ✅ Sprint 19 (DOC-01) |
-| 20 | [Фикс] | Chart.js: темп на графике показывать в формате М:СС (мин:сек) вместо десятичных минут. Например 5.71 → 5:43. Добавить tooltip/label callback + форматирование оси Y. Пульс округлить до целого. | `src/web/templates/session.html:96-115` | ⬜ Sprint 20c (PREP-17) |
+| 20 | [Фикс] | Chart.js: темп на графике показывать в формате М:СС (мин:сек) вместо десятичных минут. Например 5.71 → 5:43. Добавить tooltip/label callback + форматирование оси Y. Пульс округлить до целого. | `src/web/templates/session.html:96-115` | ✅ Sprint 20c (PREP-17) |
 | 21 | [Фикс] | Weight save через Telegram: "Ошибка при сохранении веса". Decimal→Float, tz-aware, отсутствие traceback, отсутствие метода `log_telegram_received()` в AuditService, `run_once` c `dt_time` вместо `timedelta`. | `src/telegram/handlers/weight.py:89-103`, `src/services/audit.py`, `src/telegram/main.py:77` | ✅ Выполнено |
 | 139 | [Фикс] | CRC-ошибка в uploads.py вызывает 500 вместо информирования пользователя + добавление в parse_errors. Нужен try-except вокруг parse_fit/parse_tcx. | `src/web/routes/uploads.py:55-64` | ✅ Выполнено |
 
 ---
 
-*Обновлён: 14.07.2026 — Sprint 17 (Data Integrity): DI-01..DI-09 + BACKLOG #139*
+*Обновлён: 16.07.2026 — Docs audit: README, AGENTS, PROJECT_AUDIT синхронизированы; segment.py split (417→367); Sprint 20c → ✅; #168-176*
 
 ---
 
@@ -213,7 +213,7 @@
 | 119 | [Bug] | **`/logs` endpoint без аутентификации** + path traversal (хотя `os.path.join` немного защищает). | `src/web/routes/logs.py:10` | ⬜ P2 |
 | 120 | [Bug] | **`/logs` уровень детекции по подстроке** — слово `"WARNING"` в сообщении даёт неверный CSS. | `src/web/routes/logs.py:40-41` | ⬜ P2 |
 | 121 | [Bug] | **`/health` всегда 200, даже при `degraded`** — маскирует проблемы от load balancer. | `src/api/routes/health.py:92` | ⬜ P2 |
-| 122 | [Bug] | **`psutil` в health — опциональный import, но не в зависимостях** — всегда падает в production. | `src/api/routes/health.py:69` | ✅ Fixed: lazy import 16.07.2026 |
+| 122 | [Bug] | **`psutil` не объявлен в `pyproject.toml`** — health-endpoint импортирует psutil, но пакет отсутствует в зависимостях. В production метрики памяти всегда возвращают "psutil not installed". | `pyproject.toml`, `src/api/routes/health.py:59-67` | ⬜ |
 | 123 | [Bug] | **`get_or_create_user_by_telegram` — если email уже занят другим, генерит рандомный пароль без уведомления юзера**. | `src/telegram/handlers/start.py:75-76` | ⬜ P2 |
 | 124 | [Bug] | **`today_start` в `sync.py:43` считает по Moscow TZ, хотя `begin_ts` в UTC** — смещение до 12ч. | `src/telegram/handlers/sync.py:43` | ⬜ P2 |
 | 125 | [Bug] | **Training list может превысить 4096 символов Telegram** — падение при 100+ сессиях. | `src/telegram/handlers/trainings.py:81` | ⬜ P2 |
@@ -267,7 +267,7 @@
 | 161 | [Bug] | **Неверная сегментация — проверяется общий разброс темпа, а не разница между соседними отрезками** — правило: по умолчанию 1км отрезки, отрезки другого размера только для интервалов, соседние отрезки должны отличаться > 1 мин/км. Исправлено: oscillation как основной детектор + _merge_similar_segments для слияния похожих отрезков. | `src/analysis/segment.py` | ✅ Fixed: oscillation + merge_similar + пересчёт 16.07.2026 |
 | 162 | [Bug] | **`classify_training` не учитывает финальные сегменты** — `oscillation_count` и `var_count` считаются из сырых трекпоинтов, но сегменты могут быть слиты `_merge_similar_segments` в 1. Классификация возвращает `interval` (oscillation_count ≥ 3), хотя реальных сегментов нет. | `src/analysis/classify.py:46-50`, `src/analysis/__init__.py:135-141` | ✅ Fixed: segments_len < 3 → не interval + пересчёт 16.07.2026 |
 | 163 | [Bug] | **Неинтервальные тренировки показывают 1 сегмент вместо км-блоков** — `segment_by_pace()` возвращает 1 сегмент после слияния, `is_km_segmentation()` не ловит единый 5.6км сегмент. Для tempo/long/recovery всегда должны быть км-блоки, oscillation-сегменты только для interval. | `src/analysis/__init__.py:104-142` | ✅ Fixed: km_fallback для не-interval + пересчёт 16.07.2026 |
-| 164 | [Docs] | **Документация не соответствовала проекту** — TESTING.md устарел (структура, импорты, conftest), API_ROUTES_GUIDE.md ссылался на несуществующие `src/schemas/`, ARCHITECTURE.md неправильно размещал main.py в дереве, AGENTS.md упоминал несуществующие файлы как существующие, CHECKLIST_API.md ссылался на старый CONFIG. | `docs/*`, `AGENTS.md` | ✅ Fixed: все docs приведены в соответствие 16.07.2026 |
+| 164 | [Docs] | **Документация не соответствовала проекту** — частично fixed (TESTING.md, API_ROUTES_GUIDE.md, ARCHITECTURE.md, AGENTS.md, CHECKLIST_API.md). Остались замечания #189–#197. | `docs/*`, `AGENTS.md`, `README.md` | ⬜ |
 | 165 | [Bug] | **`_merge_similar_segments` использует `<= threshold` вместо `< threshold`** — сегменты с разницей темпа ровно 1.0 мин/км (work=4.0, recovery=5.0) сливаются в один. Интервальная тренировка с `pace_gap=1.0` теряет все work/recovery фазы, остаётся 2-3 сегмента вместо 11+. `classify_training()` не видит интервалов и возвращает `tempo`. | `src/analysis/segment.py:252` | ✅ Fixed 16.07.2026 |
 ---
 
@@ -275,9 +275,9 @@
 
 | # | Тег | Описание | Файл / Источник | Статус |
 |---|-----|----------|-----------------|--------|
-| 142 | [Bug] | **Telegram stats handler ссылается на несуществующие колонки** — `TrainingSession.distance_km`, `TrainingSession.duration_seconds`, `TrainingSession.sport` НЕ СУЩЕСТВУЮТ. Реальные колонки: `total_distance_km`, `duration_minutes`, `training_type`. Команда `/stats` падает с `AttributeError` при вызове `_overview()` (строки 44,47,64) или `_period_stats()` (строки 83-84,98). **Блокирует:** любой Telegram-пользователь, вызвавший `/stats`, получает crash. | `src/telegram/handlers/stats.py:44,47,64,83-84,98` | ⬜ Sprint 20c (PREP-01) |
-| 143 | [DB] | **Нет индексов для запросов по диапазонам времени** — `training_sessions` не имеет индекса на `begin_ts` и составного `(user_id, begin_ts)`. Модуль аналитики будет постоянно делать запросы «тренировки пользователя за N дней» — каждый раз full table scan. Аналогично: `training_feedback` нет `(user_id, created_at)`, `weight_measurements` нет `(user_id, measured_at)`. `daily_metrics` имеет `UniqueConstraint(user_id, date)` — это даёт составной индекс, но `training_sessions` — нет. **Блокирует:** все skills модуля аналитики (fatigue, load, progress, distribution) будут медленными. | `src/domain/models/training.py:13-14`, `health.py:15-16` | ⬜ Sprint 20c (PREP-02) |
-| 144 | [Arch] | **Нет слоя агрегационных запросов** — вся аналитика считается в Python после загрузки полных выборок. `calc_stats()` итерирует список объектов, `index.py` загружает до 200 сессий и фильтрует в Python. Нигде нет `func.sum()`, `func.avg()`, `group_by` на уровне БД. Модуль аналитики нуждается в `weekly_volume()`, `zone_distribution()`, `hrv_trend()` как SQL-запросах. **Блокирует:** skills (`fatigue.py`, `load.py`, `progress.py`) будут неэффективны и сложны в реализации. | `src/services/stats.py`, `src/web/routes/pages/index.py` | ⬜ Sprint 20c (PREP-03) |
+| 142 | [Bug] | **Telegram stats handler ссылается на несуществующие колонки** — `TrainingSession.distance_km`, `TrainingSession.duration_seconds`, `TrainingSession.sport` НЕ СУЩЕСТВУЮТ. Реальные колонки: `total_distance_km`, `duration_minutes`, `training_type`. Команда `/stats` падает с `AttributeError` при вызове `_overview()` (строки 44,47,64) или `_period_stats()` (строки 83-84,98). **Блокирует:** любой Telegram-пользователь, вызвавший `/stats`, получает crash. | `src/telegram/handlers/stats.py:44,47,64,83-84,98` | ✅ Sprint 20c (PREP-01) |
+| 143 | [DB] | **Нет индексов для запросов по диапазонам времени** — `training_sessions` не имеет индекса на `begin_ts` и составного `(user_id, begin_ts)`. Модуль аналитики будет постоянно делать запросы «тренировки пользователя за N дней» — каждый раз full table scan. Аналогично: `training_feedback` нет `(user_id, created_at)`, `weight_measurements` нет `(user_id, measured_at)`. `daily_metrics` имеет `UniqueConstraint(user_id, date)` — это даёт составной индекс, но `training_sessions` — нет. **Блокирует:** все skills модуля аналитики (fatigue, load, progress, distribution) будут медленными. | `src/domain/models/training.py:13-14`, `health.py:15-16` | ✅ Sprint 20c (PREP-02) |
+| 144 | [Arch] | **Нет слоя агрегационных запросов** — создан `src/services/repositories.py` с `TrainingRepository` и `HealthRepository`, но `zone_distribution()` является заглушкой (всё падает в `z2`). Нужно реализовать реальное распределение по пульсовым зонам. | `src/services/repositories.py:45-62` | ⬜ Sprint 20c (PREP-03) |
 
 ---
 
@@ -285,12 +285,12 @@
 
 | # | Тег | Описание | Файл / Источник | Статус |
 |---|-----|----------|-----------------|--------|
-| 145 | [Bug] | **Двойная сериализация `sleep_hrv_interval_list`** — `src/services/sync/health.py:47` делает `json.dumps(intervals)` перед записью в JSON-колонку. SQLAlchemy сериализует ещё раз. Потребители (`index.py:165`, `session.py:42`) вынуждены делать `json.loads()` для распаковки. Модуль `skills/fatigue.py` должен будет знать об этом quirke или получит строку вместо списка. **Усложняет:** реализацию HRV-аналитики. | `src/services/sync/health.py:47`, `src/web/routes/pages/index.py:165` | ⬜ Sprint 20c (PREP-04) |
-| 146 | [Arch] | **`get_settings()` хардкодит `User.id == 1`** — `src/models.py:17` всегда возвращает настройки первого пользователя. `index.py` использует `get_settings().max_hr` для расчёта зон — это некорректно для мультюзер-сценария. Модулю коуча нужен per-user доступ к настройкам (`user.max_hr`, `user.interval_pace_threshold` и т.д.). **Усложняет:** per-user аналитику и персонализацию. | `src/models.py:17`, `src/web/routes/pages/index.py:68` | ⬜ Sprint 20c (PREP-05) |
-| 147 | [Arch] | **`recovery_view.py` — только display, не аналитика** — функции `hrv_status()`, `tired_label()`, `readiness_label()`, `load_label()` возвращают строки с эмодзи для HTML. Структурированных числовых результатов нет. Модуль `skills/fatigue.py` должен будет переписывать логику с нуля, возвращая `SkillResult` (status + value + confidence + evidence). **Усложняет:** переиспользование существующей логики. | `src/services/recovery_view.py` | ⬜ Sprint 20c (PREP-06) |
-| 148 | [Arch] | **Нет функций трендов (slope, EWMA, moving average)** — ни одной функции для вычисления трендов VO2max, LTHR, stamina, HRV за 30/90 дней. `skills/progress.py` будет строиться полностью с нуля. Нужны helpers: `compute_slope(series, days)`, `compute_ewma(series, alpha)`, `compute_moving_average(series, window)`. **Усложняет:** реализацию progress-аналитики. | отсутствует в проекте | ⬜ Sprint 20c (PREP-07) |
-| 149 | [DB] | **Нет `avg_pace` на `TrainingSession`** — у `DeletedTraining` есть `avg_pace`, у `TrainingSession` — нет. Каждый раз нужно считать `duration_minutes / total_distance_km`. Для модуля аналитики, который сравнивает эффективность по темпу (pace-at-HR, running efficiency), это лишнее вычисление на каждый запрос. **Усложняет:** queries для efficiency-метрик. | `src/domain/models/training.py:9-38` | ⬜ Sprint 20c (PREP-08) |
-| 150 | [Test] | **Нет тестовых фабрик для DailyMetrics и TrainingSession** — `tests/helpers.py` содержит `build_trackpoints()` (dict-ы для анализа), но нет фабрик для ORM-объектов `DailyMetrics` (серии 30-90 дней), `TrainingSession` (с `segments_json`, `training_type`, `training_effect`), `TrainingFeedback`. Тестирование скиллов и калибровки без них невозможно. **Блокирует:** написание тестов для `src/coach/skills/`. | `tests/helpers.py` | ⬜ Sprint 20c (PREP-09) |
+| 145 | [Bug] | **Двойная сериализация `sleep_hrv_interval_list`** — `src/services/sync/health.py:47` делает `json.dumps(intervals)` перед записью в JSON-колонку. SQLAlchemy сериализует ещё раз. Потребители (`index.py:165`, `session.py:42`) вынуждены делать `json.loads()` для распаковки. Модуль `skills/fatigue.py` должен будет знать об этом quirke или получит строку вместо списка. **Усложняет:** реализацию HRV-аналитики. | `src/services/sync/health.py:47`, `src/web/routes/pages/index.py:165` | ✅ Sprint 20c (PREP-04) |
+| 146 | [Arch] | **`get_settings()` хардкодит `User.id == 1`** — `src/models.py:17` всегда возвращает настройки первого пользователя. `index.py` использует `get_settings().max_hr` для расчёта зон — это некорректно для мультюзер-сценария. Модулю коуча нужен per-user доступ к настройкам (`user.max_hr`, `user.interval_pace_threshold` и т.д.). **Усложняет:** per-user аналитику и персонализацию. | `src/models.py:17`, `src/web/routes/pages/index.py:68` | ✅ Sprint 20c (PREP-05) |
+| 147 | [Arch] | **`recovery_view.py` — только display, не аналитика** — функции `hrv_status()`, `tired_label()`, `readiness_label()`, `load_label()` возвращают строки с эмодзи для HTML. Структурированных числовых результатов нет. Модуль `skills/fatigue.py` должен будет переписывать логику с нуля, возвращая `SkillResult` (status + value + confidence + evidence). **Усложняет:** переиспользование существующей логики. | `src/services/recovery_view.py` | ✅ Sprint 20c (PREP-06) |
+| 148 | [Arch] | **Нет функций трендов (slope, EWMA, moving average)** — ни одной функции для вычисления трендов VO2max, LTHR, stamina, HRV за 30/90 дней. `skills/progress.py` будет строиться полностью с нуля. Нужны helpers: `compute_slope(series, days)`, `compute_ewma(series, alpha)`, `compute_moving_average(series, window)`. **Усложняет:** реализацию progress-аналитики. | `src/services/analytics_helpers.py` | ✅ Sprint 20c (PREP-07) |
+| 149 | [DB] | **Нет `avg_pace` на `TrainingSession`** — у `DeletedTraining` есть `avg_pace`, у `TrainingSession` — нет. Каждый раз нужно считать `duration_minutes / total_distance_km`. Для модуля аналитики, который сравнивает эффективность по темпу (pace-at-HR, running efficiency), это лишнее вычисление на каждый запрос. **Усложняет:** queries для efficiency-метрик. | `src/domain/models/training.py:9-38` | ✅ Sprint 20c (PREP-08) |
+| 150 | [Test] | **Нет тестовых фабрик для DailyMetrics и TrainingSession** — `tests/helpers.py` содержит `build_trackpoints()` (dict-ы для анализа), но нет фабрик для ORM-объектов `DailyMetrics` (серии 30-90 дней), `TrainingSession` (с `segments_json`, `training_type`, `training_effect`), `TrainingFeedback`. Тестирование скиллов и калибровки без них невозможно. **Блокирует:** написание тестов для `src/coach/skills/`. | `tests/helpers.py` | ✅ Sprint 20c (PREP-09) |
 
 ---
 
@@ -298,14 +298,72 @@
 
 | # | Тег | Описание | Файл / Источник | Статус |
 |---|-----|----------|-----------------|--------|
-| 151 | [Config] | **Нет `src/coach/config.py`** — `settings.py` (9 полей) и `constants.py` (52 строки) не содержат параметров аналитики: веса readiness/fatigue score, пороги injury risk, EWMA-параметры калибровки, confidence thresholds, recovery hours by type. Предусмотрено дизайн-документом как часть Этапа 0. **Усложняет:** настройку модуля аналитики. | `src/config/settings.py`, `src/config/constants.py` | ⬜ Sprint 20c (PREP-10) |
-| 152 | [Cleanup] | **`src/models.py` — shim с бизнес-логикой** — содержит `get_settings()`, `get_user()`, `get_user_by_telegram()` — это сервисные функции, не реэкспорт моделей. Модулю коуча лучше импортировать из `src.domain.models` напрямую (по образцу `src/analysis/`, который вообще не импортирует `src.models`). **Усложняет:** чистоту импортов. | `src/models.py:13-64` | ⬜ Sprint 20c (PREP-11) |
+| 151 | [Config] | **Нет `src/coach/config.py`** — `settings.py` (9 полей) и `constants.py` (52 строки) не содержат параметров аналитики: веса readiness/fatigue score, пороги injury risk, EWMA-параметры калибровки, confidence thresholds, recovery hours by type. Предусмотрено дизайн-документом как часть Этапа 0. **Усложняет:** настройку модуля аналитики. | `src/config/settings.py`, `src/config/constants.py` | ✅ Sprint 20c (PREP-10) |
+| 152 | [Cleanup] | **`src/models.py` — shim с бизнес-логикой** — содержит `get_settings()`, `get_user()`, `get_user_by_telegram()` — это сервисные функции, не реэкспорт моделей. Модулю коуча лучше импортировать из `src.domain.models` напрямую (по образцу `src/analysis/`, который вообще не импортирует `src.models`). **Усложняет:** чистоту импортов. | `src/models.py:13-64` | ✅ Sprint 20c (PREP-11) |
 
 ---
 
 | 166 | [Fix] | **Jitter ±20% не реализован** — README декларирует jitter для авто-синка, константа `JITTER_FACTOR=0.2` определена, но не использовалась. Добавлена `with_jitter()`, применена к тику в `scheduler.py` и к `next_run` в `orchestrator.py`. | `src/config/constants.py`, `src/scheduler.py`, `src/services/sync/orchestrator.py` | ✅ Fixed 16.07.2026 |
-| 167 | [Cleanup] | **`src/analysis/segment.py` превышает 400 строк** (417 строк) — нарушение AGENTS.md п.1. После ARC-06 было 312 строк, с тех пор выросло. Нужно вынести part of `_merge_similar_segments` или `_adaptive_min_diff` в `segment_utils.py`. | `src/analysis/segment.py` | ⬜ |
+| 167 | [Cleanup] | **`src/analysis/segment.py` не превышает 400 строк** — фактически 367 строк. Закрыто после Sprint 18. | `src/analysis/segment.py` | ✅ Sprint 18 |
+
+| 168 | [Docs] | **README migration order неверен** — порядок миграций в README не соответствует цепочке `down_revision`. `3205fe660d47`/`4201426df9cc` указаны на позициях 8-9, а реально применяются 2-3 (сразу после baseline). Исправлено: переупорядочено по `down_revision`. | `README.md:212-222` | ✅ Fixed 16.07.2026 |
+| 169 | [Docs] | **README `users` — пропущена колонка `last_health_sync_at`** — реальная модель имеет колонку, но она не описана в README SQL-блоке. | `README.md:64-90`, `src/domain/models/user.py:24` | ✅ Fixed 16.07.2026 |
+| 170 | [Docs] | **README `auth_tokens` — неверный тип `token`** — README пишет «UUID», по факту `String(64)` (`secrets.token_urlsafe`). Исправлено. | `README.md:58`, `src/domain/models/auth.py` | ✅ Fixed 16.07.2026 |
+| 171 | [Docs] | **README weight poll — неверное расписание** — README писал «в 9:00», код запускает 4 раза: 9, 12, 15, 18 (скип если вес уже введён). Исправлено. | `README.md:422`, `src/telegram/main.py:70-71` | ✅ Fixed 16.07.2026 |
+| 172 | [Docs] | **README «Аналитика (12 недель)» — не реализовано** — раздел описывал VO₂max/LTHR/Stamina/Performance trend как готовые, но в коде только generic-хелперы. Sprint 21 ⬜. Исправлено: перенесено в планы с пометкой ⚠️. | `README.md:453-459`, `src/services/stats.py`, `analytics_helpers.py` | ✅ Fixed 16.07.2026 |
+| 173 | [Docs] | **README — недокументированные роуты** — отсутствуют в дереве: `/session/{id}/delete`, `/session/{id}/feedback`, `/sync/status/{task_id}`, legacy `/coros/*`. `/dashboard/query` описан как локальный endpoint, но это внешний Coros API URL. Добавлены. | `README.md:338-341`, `sync.py:55,80,86,92`, `session.py:166,173` | ✅ Fixed 16.07.2026 |
+| 174 | [Docs] | **README Telegram /cancel не указан** — `/cancel` зарегистрирован как ConversationHandler fallback, но не документирован. Добавлен. | `README.md:413`, `src/telegram/main.py:46,61` | ✅ Fixed 16.07.2026 |
+| 175 | [Cleanup] | **Undocumented root files** — `app.log`, `running_coach.db`, `test.db`, `test.db-journal` не отражены в README дереве и не в `.gitignore`. SQLite-файлы — артефакты прежних запусков, не используются (README декларирует PostgreSQL). Удалены SQLite-файлы; `app.log` — перенести/добавить в `logs/`. | корень проекта | ⬜ |
+| 176 | [Docs] | **Revision-ID `f7g8h9i0j1k2`/`g9h0i1j2k3l4` содержат не-hex символы** — буквы g-l не являются hex-цифрами. Рабочие как строки Alembic, но стилистически подозрительны (hand-faked). Рекомендуется переименовать в корректные hex-ID при следующем пересоздании миграций. | `alembic/versions/f7g8h9i0j1k2*.py`, `g9h0i1j2k3l4*.py` | ⬜ |
 
 ---
 
-*Обновлён: 16.07.2026 — #153-167*
+*Обновлён: 16.07.2026 — #153-176, docs audit*
+
+---
+
+## 🆕 Новые находки (аудит 16.07.2026 — полный docs/config/code audit)
+
+### 🔴 P0 — Критично
+
+| # | Тег | Описание | Файл / Источник | Статус |
+|---|-----|----------|-----------------|--------|
+| 177 | [Bug] | **`psutil` не объявлен в `pyproject.toml`** — health-endpoint импортирует psutil, но пакет отсутствует в зависимостях. В production метрики памяти всегда возвращают "psutil not installed". | `pyproject.toml`, `src/api/routes/health.py:59-67` | ⬜ |
+
+### 🟠 P1 — Важно
+
+| # | Тег | Описание | Файл / Источник | Статус |
+|---|-----|----------|-----------------|--------|
+| 178 | [Config] | **Healthcheck бота бесполезен** — `docker-compose.yml` использует `pg_isready` в образе `python:3.13-slim`, где его нет; `|| exit 0` делает проверку формально успешной. | `docker-compose.yml` | ⬜ |
+| 179 | [Docs/Git] | **`bin/docker.sh` отслеживается git, но `.gitignore` игнорирует `bin/`** — документация говорит "создать вручную, не отслеживается git". | `.gitignore:31`, `bin/docker.sh` | ✅ (файл не в индексе git, .gitignore работает) |
+| 180 | [Config] | **`SUDO_PASSWORD` не описан в `.env.example`** — `bin/docker.sh:8` читает переменную, но шаблон .env её не содержит. | `.env.example`, `bin/docker.sh:8` | ⬜ |
+| 181 | [Config] | **`max_hr=177` остаётся хардкодом** — `User.max_hr`, `process_trackpoints`, `_merge_similar_segments` используют `177` напрямую вместо `settings.default_max_hr`. Нужен единый источник правды. | `src/domain/models/user.py:25`, `src/analysis/__init__.py:26`, `src/analysis/segment.py:186` | ⬜ |
+| 182 | [Bug] | **`zone_distribution()` в `repositories.py` — заглушка** — всё время записывается в `z2`, реальное распределение по пульсовым зонам не считается. | `src/services/repositories.py:45-62` | ⬜ |
+| 183 | [Race] | **`_cleanup_stale_pending()` без `_pending_lock`** — функция модифицирует `_pending` без блокировки, риск race condition. | `src/web/state.py:19-26` | ⬜ |
+
+### 🟡 P2 — Желательно / документация
+
+| # | Тег | Описание | Файл / Источник | Статус |
+|---|-----|----------|-----------------|--------|
+| 184 | [Config] | **`.env.example` неполный** — отсутствуют переменные из `settings.py`: `PASSWORD_MIN_LENGTH`, `TOKEN_TTL_MINUTES`, `SESSION_TTL_DAYS`, `DEFAULT_MAX_HR`, `LOG_FILE`, `HTTP_TIMEOUT`, `TIMEZONE`. | `.env.example`, `src/config/settings.py` | ⬜ |
+| 185 | [Cleanup] | **Неиспользуемые зависимости** — `tzlocal` в основных; `pytest-asyncio`, `freezegun`, `factory-boy` в dev. | `pyproject.toml` | ⬜ |
+| 186 | [Cleanup] | **Мёртвые константы в `audit.py`** — `USER_LOGIN`, `USER_LOGOUT`, `ERROR` объявлены, но не используются. | `src/services/audit.py:14` | ⬜ |
+| 187 | [Log] | **`audit.py` использует `logging.getLogger("app")`** вместо `get_logger` из `src.utils.logger`. | `src/services/audit.py:93` | ⬜ |
+| 188 | [Cleanup] | **Мёртвые ссылки в docstring `sync_runner.py`** — упоминаются `SyncService`, `SyncLog`, `full_sync`. | `src/telegram/sync_runner.py:5-6` | ⬜ |
+| 189 | [Docs] | **`README.md`: устаревшие цифры** — "parsers разбиты на 9 модулей" (факт 5), "telegram разбит на 12 файлов" (факт 17); Roadmap не отмечает тесты как выполненные. | `README.md` | ⬜ |
+| 190 | [Docs] | **`README.md`: неверная команда для логов** — `logs/app_$(date +%F).log`, реальные файлы `logs/app.log.YYYY-MM-DD`. | `README.md:656-659` | ⬜ |
+| 191 | [Docs] | **`README.md`: дерево `pages/` неполное** — в структуре раскрыт только `session.py`, не хватает `auth.py`, `index.py`, `settings.py`. | `README.md:338-340` | ⬜ |
+| 192 | [Docs] | **`docs/LOGGING.md`: формат файлов и event types** — имена файлов не совпадают с `src/utils/logger.py`; не хватает событий `training.*`, `feedback.*`. | `docs/LOGGING.md` | ⬜ |
+| 193 | [Docs] | **`docs/TESTING.md`: SQLite vs PostgreSQL** — написано "реальный PostgreSQL", но `tests/conftest.py` использует `sqlite:///:memory:`. | `docs/TESTING.md:29` | ⬜ |
+| 194 | [Docs] | **`docs/TESTING.md`: пример `conftest.py` устарел** — `scope="session"` и `init_db`, реально `scope="function"` и `SessionLocal`. | `docs/TESTING.md:64-80` | ⬜ |
+| 195 | [Docs] | **`docs/API_ROUTES_GUIDE.md`: устаревшие примеры** — Pydantic-схемы в `src/models.py` (shim), пример `TrainingService.get`. | `docs/API_ROUTES_GUIDE.md:137-157, 194` | ⬜ |
+| 196 | [Docs] | **`docs/CODE_GUIDELINES.md`: устаревший пример `TrainingService.get`** | `docs/CODE_GUIDELINES.md:393-403` | ⬜ |
+| 197 | [Docs] | **`docs/DEVELOPMENT_GUIDELINES.md`: не упомянут env** — проверочные команды (`from src.startup import create_app`) требуют `DATABASE_URL`, `SECRET_KEY`, `CRED_KEY`. | `docs/DEVELOPMENT_GUIDELINES.md:35-38` | ⬜ |
+| 198 | [Docs] | **`PROJECT_AUDIT.md`: неотмеченные закрытые AUDIT-пункты** — AUDIT-001, AUDIT-002, AUDIT-009, AUDIT-010, AUDIT-013, AUDIT-015 в коде fixed, но DoD-чекбоксы пустые. | `PROJECT_AUDIT.md` | ⬜ |
+| 199 | [Docs] | **`AGENTS.md`: устаревший статус** — Sprint 21 помечен ⬜, но не начат; цифры `src/telegram/` и `src/parsers/` не совпадают с README. | `AGENTS.md` | ⬜ |
+| 200 | [Cleanup] | **Затенение импорта `settings`** — переменная `settings = get_settings(...)` затеняет `from src.config import settings` в `startup.py` и `index.py`. | `src/startup.py:45`, `src/web/routes/pages/index.py:68` | ⬜ |
+| 201 | [Cleanup] | **Magic numbers в фильтре графика** — `3.0 < pace_val < 10.0` в `analysis/utils.py`. | `src/analysis/utils.py:261` | ⬜ |
+
+---
+
+*Обновлён: 16.07.2026 — #177-201, full docs/config/code audit*

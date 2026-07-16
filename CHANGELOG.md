@@ -2,6 +2,42 @@
 
 All notable changes to this project are tracked here.
 
+## [16.07.2026] — Docs/config/code audit: discrepancies logged and fixed
+
+### Docs
+- **BACKLOG.md**: обновлены статусы #122, #142-#152, #167, #175; добавлены новые замечания #177-#201
+- **AGENTS.md**: добавлена строка о текущем docs/config/code audit, уточнён Sprint 16 (остатки `max_hr=177`), добавлен Pre-Sprint 21 cleanup
+- **PROJECT_AUDIT.md**: закрыты AUDIT-001, AUDIT-002, AUDIT-009, AUDIT-010, AUDIT-013, AUDIT-015
+- **README.md**: исправлены цифры (`parsers` 9→5, `telegram` 12→17), отмечены тесты, исправлена команда для логов, дополнено дерево `pages/`
+- **docs/LOGGING.md**: исправлен формат имён файлов, дополнена таблица audit event types (`training.*`, `feedback.*`)
+- **docs/TESTING.md**: уточнено SQLite in-memory по умолчанию, актуализирован пример `conftest.py`
+- **docs/API_ROUTES_GUIDE.md**: убран `src/models.py` как место для Pydantic-схем, заменён устаревший пример `TrainingService.get`
+- **docs/CODE_GUIDELINES.md**: заменён устаревший пример `TrainingService.get`
+- **docs/DEVELOPMENT_GUIDELINES.md**: добавлено примечание о необходимости `.env` для проверочных команд
+- **docs/ARCHITECTURE.md**: уточнён статус `bin/docker.sh` (создаётся локально, `.gitignore`)
+
+### Config / Dependencies
+- **pyproject.toml**: добавлен `psutil`, удалены неиспользуемые `tzlocal`, `pytest-asyncio`, `freezegun`, `factory-boy`
+- **docker-compose.yml**: исправлен healthcheck бота (`pg_isready` → проверка процесса)
+- **.env.example**: добавлен `SUDO_PASSWORD` и настройки из `settings.py`
+
+### Code
+- **src/domain/models/user.py**, **src/analysis/__init__.py**, **src/analysis/segment.py**: `max_hr=177` → `settings.default_max_hr`
+- **src/services/repositories.py**: `zone_distribution()` реализована — реальное распределение по пульсовым зонам
+- **src/web/state.py**: `_cleanup_stale_pending()` теперь под `_pending_lock`
+- **src/services/audit.py**: `logging.getLogger("app")` → `get_logger`, удалены мёртвые константы `USER_LOGIN`/`USER_LOGOUT`
+- **src/telegram/sync_runner.py**: убраны мёртвые ссылки из docstring
+
+### Cleanup
+- Удалены артефактные SQLite-файлы: `running_coach.db`, `test.db`, `test.db-journal`
+
+### Status
+- 120/120 tests passed
+- `from src.database` = 0, `except: pass` = 0, `except Exception: pass` = 0
+- `docker compose config` — OK
+
+---
+
 ## [16.07.2026] — Jitter ±20% for auto-sync
 
 ### Added

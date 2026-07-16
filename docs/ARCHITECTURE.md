@@ -22,7 +22,7 @@ running-coach/
 │   ├── versions/               # Файлы миграций
 │   └── env.py                  # Конфигурация Alembic
 ├── bin/
-│   └── docker.sh               # Защищённая обёртка docker compose (.gitignore)
+│   └── docker.sh               # Защищённая обёртка docker compose (создаётся локально, .gitignore)
 ├── docs/                       # Документация
 │   ├── ARCHITECTURE.md
 │   ├── CODE_GUIDELINES.md
@@ -92,8 +92,14 @@ running-coach/
 │   │   ├── reanalyze.py        # ReanalyzeService (пересчёт из trackpoints_json)
 │   │   ├── stats.py            # calc_stats, fmt_duration, zone_ranges, get_zone_bars_data
 │   │   ├── recovery_view.py    # hrv_status, tired_label, readiness_label, load_label
-│   │   └── telegram_notify.py  # Отправка уведомлений в Telegram
-│   ├── telegram/               # Пакет Telegram-бота (12 файлов)
+│   │   ├── telegram_notify.py  # Отправка уведомлений в Telegram
+│   │   ├── repositories.py     # TrainingRepository, HealthRepository (агрегационные запросы)
+│   │   ├── analytics_helpers.py# compute_slope, compute_ewma, compute_moving_average
+│   │   └── user_service.py     # get_user_settings, get_or_create_user_by_telegram
+│   ├── coach/                  # Модуль аналитики и коучинга
+│   │   ├── __init__.py
+│   │   └── config.py           # Веса readiness/fatigue, пороги, EWMA-параметры
+│   ├── telegram/               # Пакет Telegram-бота (17 файлов)
 │   │   ├── __init__.py         #   экспорт run_bot
 │   │   ├── main.py             #   run_bot, Application сборка
 │   │   ├── config.py           #   Константы состояний (EMAIL, PASSWORD, NEW_PASSWORD)
@@ -122,7 +128,8 @@ running-coach/
 │   │   ├── hr_zones.py         #   get_zone, get_band
 │   │   └── utils.py            #   format_pace, calc_elevation, find_timezone, rolling pace
 │   └── utils/
-│       └── logger.py           # Структурированное логирование с ротацией
+│       ├── logger.py           # Структурированное логирование с ротацией
+│       └── rate_limit.py       # In-memory rate limiter (Sprint 13)
 ├── tests/                      # Pytest-тесты
 │   └── ...
 ├── uploads/                    # Загруженные файлы (.tcx, .fit)

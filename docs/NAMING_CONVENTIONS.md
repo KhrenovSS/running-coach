@@ -7,7 +7,7 @@
 | Элемент | Стиль | Пример |
 |---------|-------|--------|
 | Файлы и модули | `snake_case` | `tcx_parser.py`, `training_service.py` |
-| Классы | `PascalCase` | `TrainingService`, `CorosClient` |
+| Классы | `PascalCase` | `TrainingService`, `CorosWatchClient` |
 | Функции и методы | `snake_case` | `classify_training()`, `process_upload()` |
 | Переменные | `snake_case` | `avg_heart_rate`, `total_distance_km` |
 | Константы | `UPPER_SNAKE_CASE` | `DEFAULT_MAX_HR`, `HTTP_TIMEOUT` |
@@ -36,7 +36,7 @@
 
 ```python
 # ✅
-class TrainingUploadService:
+class TrainingService:
     pass
 
 class WatchAPIError(Exception):
@@ -120,7 +120,7 @@ do_stuff()        # никогда так
 
 ```python
 # ✅
-TrainingUploadService
+TrainingService
 WatchClientFactory
 SettingsService
 
@@ -176,4 +176,4 @@ dur = 45
 
 ---
 
-**Последнее обновление:** 30.06.2026
+**Последнее обновление:** 16.07.2026

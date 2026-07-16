@@ -10,7 +10,7 @@ class WatchCredential(Base):
     __tablename__ = 'watch_credentials'
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
     brand = Column(String(50), nullable=False)  # e.g. 'coros', 'garmin', 'polar'
     encrypted_user = Column(String(255), nullable=True)   # encrypted email/username
     encrypted_password = Column(String(255), nullable=True)  # encrypted password

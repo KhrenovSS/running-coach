@@ -26,7 +26,7 @@ tests/
 |-----|----------|----|
 | Unit (анализ) | быстро (< 1 сек) | нет (чистые функции) |
 | Unit (парсеры) | быстро (< 1 сек) | нет |
-| Integration (health) | средне (5-30 сек) | реальный PostgreSQL (SessionLocal) |
+| Integration (health) | средне (5-30 сек) | SQLite in-memory по умолчанию; PostgreSQL при явном `DATABASE_URL` |
 
 ## Запуск тестов
 
@@ -57,21 +57,27 @@ python_files = test_*.py
 
 ```python
 # tests/conftest.py
+import os
+
+os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
+
 import pytest
-from src.domain.models.base import Base, SessionLocal, get_engine, init_db
+from src.domain.models.base import get_engine
+from src.models import Base, SessionLocal
 
 
-@pytest.fixture(scope="session", autouse=True)
-def setup_db():
-    """Создать таблицы один раз на сессию (Create tables once per session)"""
-    Base.metadata.create_all(bind=get_engine())
+@pytest.fixture(autouse=True)
+def setup_test_db():
+    """Авто-создание/удаление таблиц для каждого теста (Auto create/drop tables per test)"""
+    engine = get_engine()
+    Base.metadata.create_all(bind=engine)
     yield
-    Base.metadata.drop_all(bind=get_engine())
+    Base.metadata.drop_all(bind=engine)
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def db_session():
-    """Свежая сессия для каждого теста (Fresh session for each test)"""
+    """Сессия БД через SessionLocal приложения (DB session via app's SessionLocal)"""
     db = SessionLocal()
     try:
         yield db

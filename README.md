@@ -33,7 +33,7 @@
 ### Стек
 - **Backend**: Python + FastAPI + SQLAlchemy + PostgreSQL 16 (через Docker Compose)
 - **Frontend**: HTML/CSS/JS (Vanilla) + Chart.js
-- **Анализ**: `src/analysis/` — пакет анализа: `__init__.py` (оркестратор process_trackpoints), `oscillation.py` (детекция интервалов: base_pace + pace_gap + HR-lag), `classify.py` (interval/tempo/long/recovery), `segment.py` (change-point detection + осцилляции), `hr_zones.py` (пульсовые зоны Z1–Z5), `utils.py`
+- **Анализ**: `src/analysis/` — пакет анализа (7 файлов): `__init__.py` (оркестратор process_trackpoints), `oscillation.py` (детекция интервалов: base_pace + pace_gap + HR-lag), `classify.py` (interval/tempo/long/recovery), `segment.py` (change-point detection + осцилляции), `segment_km.py` (km-fallback, вариативность), `hr_zones.py` (пульсовые зоны Z1–Z5), `utils.py`
 - **Парсеры**: `src/parsers/` — `tcx_parser.py` (XML), `fit_parser.py` (бинарный), `gps.py` (очистка GPS), `weather.py` (Open-Meteo API, httpx)
 - **Интеграции**: Coros Training Hub (неофициальное API), Open‑Meteo (погода), Telegram Bot API. Мульти-бренд: `BaseWatchClient` ABC + `factory.py` реестр.
 - **Аутентификация**: email+пароль (bcrypt), одноразовые токены регистрации (`secrets`), session-cookie (`SessionMiddleware`)
@@ -55,8 +55,8 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 ### Таблицы и схемы (дополнительные)
 
 Помимо перечисленных ниже, в БД есть таблицы:
-- **`auth_tokens`** — одноразовые токены входа (Telegram → web). Поля: `id`, `user_id`, `token` (UUID), `expires_at`, `used` (boolean), `created_at`.
-- **`audit_events`** — события аудита. Поля: `id`, `user_id`, `event_type`, `details` (JSON), `ip_address`, `created_at`.
+- **`auth_tokens`** — одноразовые токены входа (Telegram → web). Поля: `id`, `user_id`, `token` (String(64), генерируется через `secrets.token_urlsafe`), `expires_at`, `used_at` (DateTime, nullable), `created_at`.
+- **`audit_events`** — события аудита. Поля: `id`, `user_id`, `event_type`, `metadata_json` (JSON), `severity` (String), `message` (Text), `ip_address`, `created_at`.
 - **`watch_credentials`** — учётные данные часов (мульти-бренд). Поля: `id`, `user_id`, `brand`, `encrypted_user`, `encrypted_password`, `access_token`, `token_expires_at`, `last_activity_sync_at`, `last_health_sync_at`, `activity_sync_interval`, `health_sync_interval`, `is_active`.
 
 Также в `daily_metrics` добавлена колонка `sleep_hrv_interval_list` (TEXT, JSON) — интервалы HRV из Coros (минимальное, низкое, норма start, норма end).
@@ -87,6 +87,7 @@ interval_min_oscillations INTEGER         -- Мин. число осцилляц
 is_active BOOLEAN DEFAULT TRUE          -- Активен ли пользователь
 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 registered_at DATETIME                  -- Дата регистрации
+last_health_sync_at DATETIME            -- Время последней синхронизации метрик здоровья
 ```
 
 #### **`training_sessions`** — тренировки
@@ -116,6 +117,7 @@ training_effect FLOAT                   -- Аэробный тренировоч
 anaerobic_training_effect FLOAT         -- Анаэробный тренировочный эффект (0‑10)
 vo2max FLOAT                           -- Макс. потребление кислорода
 calories INTEGER                        -- Потраченные калории
+avg_pace FLOAT                          -- Средний темп (мин/км)
 ```
 
 #### **`daily_metrics`** — ежедневные метрики здоровья (Coros)
@@ -138,6 +140,12 @@ lthr INTEGER                           -- Лактатный порог (ЧСС)
 stamina_level FLOAT                    -- Уровень выносливости (stamina)
 ltsp FLOAT                             -- Темп лактатного порога (LTSP, мин/км)
 stamina_level_7d FLOAT                 -- 7‑дневный тренд выносливости
+recovery_pct INTEGER                    -- Восстановление Coros (%)
+form_score FLOAT                        -- Базовая форма Coros
+load_impact FLOAT                       -- Влияние нагрузки Coros
+intensity_trend FLOAT                   -- Тренд интенсивности Coros
+sleep_hrv_interval_list JSON            -- Интервалы HRV из Coros (минимальное, низкое, норма start, норма end)
+source_brand VARCHAR(50)                -- Бренд-источник метрики (coros, polar, …)
 synced_at DATETIME DEFAULT CURRENT_TIMESTAMP -- Когда метрика синхронизирована
 UNIQUE(user_id, date)                  -- Уникальность по дате
 ```
@@ -175,9 +183,9 @@ measured_at DATETIME DEFAULT CURRENT_TIMESTAMP -- Дата/время замер
 id INTEGER PRIMARY KEY
 user_id INTEGER FOREIGN KEY(users.id)
 brand VARCHAR(50) NOT NULL               -- Бренд часов (coros, polar, garmin, suunto, …)
-encrypted_user TEXT                       -- Зашифрованный email/логин
-encrypted_password TEXT                   -- Зашифрованный пароль
-access_token TEXT                         -- Временный токен доступа (nullable)
+encrypted_user VARCHAR(255)               -- Зашифрованный email/логин
+encrypted_password VARCHAR(255)           -- Зашифрованный пароль
+access_token VARCHAR(512)                 -- Временный токен доступа (nullable)
 token_expires_at DATETIME                 -- Срок токена доступа (nullable)
 last_activity_sync_at DATETIME            -- Время последней синхронизации тренировок
 last_health_sync_at DATETIME              -- Время последней синхронизации метрик здоровья
@@ -203,16 +211,19 @@ created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 Управление схемой БД — через **Alembic**. При старте контейнера `app` выполняется `alembic upgrade head`:
 
 - `f75d2362cf9f` (fresh baseline) — единая database-agnostic миграция: все таблицы
+- `3205fe660d47` — add `timezone` column to `users`
+- `4201426df9cc` — add `timezone` column to `training_sessions`
 - `a1b2c3d4e5f6` — data migration: конвертация старых naive-local `begin_ts` → naive UTC
 - `5e287a9fc289` — convert all DateTime columns to `TIMESTAMP WITH TIME ZONE`
 - `b6c7d8e9f0a1` — add `watch_credentials` table, `source_brand` to `daily_metrics`
 - `c9d8e7f6a0b2` — remove `coros_email`, `coros_password`, `last_coros_sync` from `users`
 - `d1e2f3a4b5c6` — add `training_type_override`, `trackpoints_json` to `training_sessions`; add interval settings to `users`
 - `e5f6a7b8c9d0` — rename `interval_oscillation_amplitude` → `interval_pace_threshold`, update defaults
-- `3205fe660d47` — add `timezone` column to `users`
-- `4201426df9cc` — add `timezone` column to `training_sessions`
 - `f7g8h9i0j1k2` — data integrity: NOT NULL + CASCADE on FKs, Text→JSON for HRV and metadata
 - `g9h0i1j2k3l4` — analytics preparation: indexes, `avg_pace` on `training_sessions`, `performance` → `Integer`
+- `h1i2j3k4l5m6` — add `ON DELETE CASCADE` to `watch_credentials` and `auth_tokens` FKs
+
+> **Примечание:** порядок соответствует цепочке `down_revision` в файлах миграций, а не хронологии создания.
 
 Файлы миграций: `alembic/versions/`. Конфигурация: `alembic.ini`, `alembic/env.py` (`DATABASE_URL` из env).
 
@@ -291,6 +302,7 @@ running-coach/
 │   │   ├── oscillation.py           #   детекция интервалов: base_pace + pace_gap + HR-lag
 │   │   ├── classify.py              #   классификация (interval/tempo/long/recovery)
 │   │   ├── segment.py               #   сегментация: change-point detection + осцилляции
+│   │   ├── segment_km.py            #   km-fallback, вариативность
 │   │   ├── hr_zones.py              #   пульсовые зоны Z1–Z5
 │   │   └── utils.py                 #   format_pace, haversine_m, calc_elevation
 │   ├── parsers/
@@ -325,11 +337,16 @@ running-coach/
 │   │   └── routes/
 │   │       ├── __init__.py          # web_router = pages + uploads + sync + logs
 │   │       ├── pages/               # Пакет: auth (48), index (240), session (191), settings (149)
+│   │       │   ├── auth.py          #   GET /login, /register
+│   │       │   ├── index.py         #   GET / — главная страница
+│   │       │   ├── session.py       #   GET /session/{id}, POST /session/{id}/delete, /session/{id}/feedback, /session/{id}/reanalyze
+│   │       │   └── settings.py      #   GET /settings, POST /settings
 │   │       ├── uploads.py           # POST /upload, /upload/confirm, /upload/confirm_deleted
-│   │       ├── sync.py              # POST /sync/{brand}/run, /sync/{brand}/health
+│   │       ├── sync.py              # POST /sync/{brand}/run, /sync/{brand}/health, GET /sync/status/{task_id}; legacy /coros/sync*
 │   │       └── logs.py              # GET /logs
 │   └── utils/
-│       └── logger.py                # Структурированное логирование, ротация
+│       ├── logger.py                # Структурированное логирование, ротация
+│       └── rate_limit.py            # In-memory rate limiter (Sprint 13)
 ├── alembic/
 │   ├── env.py
 │   ├── script.py.mako
@@ -401,6 +418,7 @@ running-coach/
 - `/login_info` – показать email для входа в веб-интерфейс
 - `/reset_password` – сменить пароль (бот показывает 2 сек и удаляет)
 - `/delete_me` – удалить все данные пользователя (тренировки, метрики, настройки)
+- `/cancel` – отмена текущего диалога (ConversationHandler)
 
 ### Обратная связь по тренировкам
 - **Оценка 0–10** – пользователь оценивает каждую новую тренировку по шкале сложности
@@ -410,7 +428,7 @@ running-coach/
 - **Уведомления** – при автосинхронизации и ручном `/sync`
 
 ### Автоматические напоминания
-- **Ежедневный опрос веса** – в 9:00 (python-telegram-bot JobQueue)
+- **Ежедневный опрос веса** – в 9:00, 12:00, 15:00, 18:00 (python-telegram-bot JobQueue; если вес уже введён за сегодня — пропускается)
 - **Проверка данных о сне** – запускается в 10:00:
   - Если данные за последние 12 часов **есть** – следующая проверка в 18:00
   - Если данных **нет** – проверка каждые 2 часа (12:00, 14:00, 16:00, 18:00)
@@ -441,13 +459,11 @@ running-coach/
 - **LTHR** – порог лактата (ЧСС)
 - **Stamina** – уровень выносливости
 
-### Аналитика (12 недель)
-- **VO₂max trend** – тренд VO₂max
-- **LTHR trend** – тренд лактатного порога
-- **Stamina trend** – тренд выносливости
-- **Performance** – общая эффективность
+### Метрики здоровья — аналитические тренды (планируется, Sprint 21+)
 
-Данные загружаются через эндпоинты `/dashboard/query` и `/analyse/dayDetail/query` (за последние 180 дней, инкрементально).
+> ⚠️ **Не реализовано.** Generic-хелперы трендов (slope, EWMA, MA) есть в `analytics_helpers.py`, но конкретные расчёты VO₂max/LTHR/Stamina/Performance trend не реализованы. Запланированы в рамках модуля аналитики (`src/coach/`, Sprint 21+).
+
+Данные для расчётов загружаются через внешние эндпоинты Coros API `/dashboard/query` и `/analyse/dayDetail/query` (за последние 180 дней, инкрементально).
 
 ---
 
@@ -483,9 +499,20 @@ LOG_FORMAT=text                  # Формат: text или json
 LOGS_DIR=logs                    # Папка логов
 SLOW_REQUEST_MS=1000            # Порог медленного запроса для лога
 GITHUB_TOKEN=                    # Токен для пуша в GitHub
-COROS_HEALTH_SYNC_INTERVAL=360  # (Устарело — заменён per-user интервалами в WatchCredential, Sprint 6)
-COROS_ACTIVITY_SYNC_INTERVAL=60 # (Устарело — заменён per-user интервалами в WatchCredential, Sprint 6)
 ```
+
+### Настройки `settings.py` (pydantic-settings, читаются из env)
+
+| Настройка | По умолчанию | Описание |
+|-----------|-------------|----------|
+| `default_max_hr` | `177` | Максимальный пульс по умолчанию (уд/мин) |
+| `http_timeout` | `15` | Таймаут HTTP-запросов (сек) |
+| `timezone` | `UTC` | Часовой пояс по умолчанию |
+| `session_ttl_days` | `7` | Время жизни session-cookie (дни) |
+| `token_ttl_minutes` | `30` | Время жизни одноразового токена входа (мин) |
+| `password_min_length` | `6` | Минимальная длина пароля |
+| `slow_request_ms` | `1000` | Порог медленного запроса (мс) |
+| `web_app_url` | `""` | URL веб-приложения для CSRF и ссылок из бота |
 
 ### Запуск через Docker Compose (рекомендуется)
 
@@ -555,14 +582,14 @@ python run_telegram_bot.py
 - [x] Мульти-брендовая архитектура (`BaseWatchClient`, `WatchCredential`, `factory.py`)
 - [x] Оценка тренировок 0–10 (Telegram inline + веб-форма)
 - [x] Per-user интервалы синхронизации
-- [x] Рефакторинг: main.py 2776→7, parsers разбиты на 9 модулей, telegram разбит на 12 файлов, тонкие роуты
+- [x] Рефакторинг: main.py 2776→7, parsers разбиты на 5 файлов (tcx, fit, gps, weather + __init__), telegram разбит на 17 файлов, тонкие роуты
 - [x] Пакет `src/analysis/` — модуль анализа тренировок (классификация, сегментация, осцилляции, HR-зоны)
 - [x] Новый алгоритм детекции интервалов: base_pace + pace_gap + HR-lag корреляция
 - [x] Пересчёт тренировок (`POST /session/{id}/reanalyze`) с ручной сменой типа
 - [x] Хранение трекпоинтов (`trackpoints_json`) для повторного анализа
 
 ### ⬜ Запланировано
-- [ ] Тесты (минимум 20, реальные TCX/FIT-файлы)
+- [x] Тесты (120 тестов, реальные TCX/FIT-фикстуры)
 - [x] Разбивка models.py + sync_service.py на пакеты
 - [ ] Фильтр по типу тренировки, общая дистанция/время за неделю/месяц
 - [ ] Multi-brand onboarding (выбор бренда при регистрации)
@@ -632,7 +659,7 @@ python run_telegram_bot.py
 Структурированные логи с ежедневной ротацией (`logs/app_YYYY-MM-DD.log`, `logs/audit_YYYY-MM-DD.log`).
 Просмотр последних 100 строк:
 ```bash
-tail -n 100 logs/app_$(date +%F).log
+tail -n 100 logs/app.log.$(date +%F)
 ```
 
 Через веб‑интерфейс: `/logs?lines=100`
@@ -666,4 +693,4 @@ docker compose up -d
 
 ---
 
-*Последнее обновление: 14.07.2026 — Sprint 11-12: разбивка models.py/sync_service.py + чистка роутов*
+*Последнее обновление: 16.07.2026 — Docs audit: исправлены migration order, users schema, weight schedule, analytics section; добавлены /cancel, undocumented routes*

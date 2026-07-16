@@ -111,13 +111,19 @@ async def upload(file: UploadFile, db: Session = Depends(get_db)):
 ### ✅ После — разделение ответственности
 
 ```python
-# src/web/routes/uploads.py (тонкий роут — вызов сервиса)
-from src.services.analysis import process_and_save
+# src/web/routes/uploads.py (тонкий роут — вызов парсера и анализа)
+from src.analysis import process_trackpoints
+from src.parsers.tcx_parser import parse_tcx
+from src.parsers.fit_parser import parse_fit
 
 @router.post("/upload")
 async def upload(file: UploadFile, db: Session = Depends(get_db)):
     """Загрузить тренировку (Upload training)"""
-    training = process_and_save(db, file)
+    data = parse_tcx(file.file) if file.filename.endswith('.tcx') else parse_fit(file.file)
+    result = process_trackpoints(data, user_settings)
+    training = TrainingSession(**result)
+    db.add(training)
+    db.commit()
     return {"status": "ok", "training_id": training.id}
 
 # Логика в src/analysis/__init__.py :: process_trackpoints()
@@ -136,35 +142,28 @@ async def upload(file: UploadFile, db: Session = Depends(get_db)):
 ### Шаблон роута
 
 ```python
-# src/api/routes/training.py
-from fastapi import APIRouter, Depends, UploadFile, status
+# src/api/routes/auth.py
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from src.api.deps import get_db
-from src.schemas.training import TrainingUploadResponse
-from src.services.training.upload import TrainingUploadService
+from src.services.auth import AuthService
+from src.exceptions import AuthenticationError
 
-router = APIRouter(prefix="/training", tags=["training"])
+router = APIRouter(prefix="/auth", tags=["auth"])
 
-@router.post(
-    "/upload",
-    response_model=TrainingUploadResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def upload_training(
-    file: UploadFile,
+@router.post("/login", status_code=status.HTTP_200_OK)
+async def login(
+    data: LoginRequest,
     db: Session = Depends(get_db),
 ):
     """
-    Загрузить тренировку из TCX/FIT файла
-    Upload training from TCX/FIT file
+    Вход по email+паролю
+    Login with email+password
     """
-    service = TrainingUploadService(db)
-    training = await service.process(file)
-    return TrainingUploadResponse(
-        status="ok",
-        training_id=training.id,
-    )
+    service = AuthService(db)
+    token = service.login(data.email, data.password)
+    return {"status": "ok", "token": token}
 ```
 
 ### Что должен делать роут
@@ -393,14 +392,21 @@ raise WatchAPIError("Not authenticated", brand="coros")
 
 ```python
 # src/services/training_service.py
+from sqlalchemy.orm import Session
+from src.models import TrainingSession
 from src.exceptions import NotFoundError
 
-class TrainingService:
-    def get(self, training_id: int) -> TrainingSession:
-        training = self.db.query(TrainingSession).get(training_id)
-        if not training:
-            raise NotFoundError("training", training_id)
-        return training
+
+def delete_training(db: Session, user_id: int, session_id: int) -> None:
+    """Удалить тренировку пользователя (Delete user's training session)."""
+    session = db.query(TrainingSession).filter(
+        TrainingSession.id == session_id,
+        TrainingSession.user_id == user_id,
+    ).first()
+    if not session:
+        raise NotFoundError("training", session_id)
+    db.delete(session)
+    db.commit()
 ```
 
 ---

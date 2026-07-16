@@ -5,6 +5,58 @@ from src.analysis.hr_zones import get_zone, get_band
 from src.analysis.utils import format_duration, format_pace, calc_elevation
 
 
+def _compute_per_point_pace(trackpoints: list[dict], window_m: int = 50,
+                             max_credible_pace: float = 3.0) -> list[dict]:
+    """
+    Вычислить темп для каждой точки через скользящее окно.
+    Calculate per-point pace using a rolling window.
+    """
+    points = []
+    n = len(trackpoints)
+    raw_dd = [0.0]
+    raw_dt = [0.0]
+    for i in range(1, n):
+        dd = max(0, trackpoints[i]['dist'] - trackpoints[i-1]['dist']) if trackpoints[i]['dist'] is not None and trackpoints[i-1]['dist'] is not None else 0
+        dt = (trackpoints[i]['time'] - trackpoints[i-1]['time']).total_seconds() if trackpoints[i]['time'] and trackpoints[i-1]['time'] else 0
+        raw_dd.append(dd)
+        raw_dt.append(dt)
+
+    for i in range(n):
+        cur = trackpoints[i]
+        if cur['time'] is None or cur['dist'] is None:
+            continue
+        lo = i
+        while lo >= 0 and trackpoints[i]['dist'] - trackpoints[lo]['dist'] < window_m:
+            lo -= 1
+        lo = max(0, lo)
+        w_dist = max(0, trackpoints[i]['dist'] - trackpoints[lo]['dist'])
+        w_time = (trackpoints[i]['time'] - trackpoints[lo]['time']).total_seconds()
+        if w_dist < 10 or w_time < 2:
+            continue
+        pace = (w_time / 60) / (w_dist / 1000)
+        max_credible_upper = 15.0
+        if not (max_credible_pace < pace < max_credible_upper):
+            continue
+        points.append({
+            'dist': cur['dist'],
+            'dist_delta': raw_dd[i],
+            'time_delta_sec': raw_dt[i],
+            'hr': cur['hr'],
+            'cad': cur['cad'],
+            'alt': cur.get('alt'),
+            'pace': pace,
+            'time': cur['time'],
+        })
+    return points
+
+
+def _smooth(values: list[float], window: int) -> list[float]:
+    """Скользящее среднее (Moving average smoothing)"""
+    return [sum(values[max(0, i - window):min(len(values), i + window + 1)]) /
+            (min(len(values), i + window + 1) - max(0, i - window))
+            for i in range(len(values))]
+
+
 def _build_segment_stats(chunk_points: list[dict], max_hr: int) -> dict | None:
     """Собрать статистику сегмента из точек (Build segment stats from points)"""
     if len(chunk_points) < 2:
