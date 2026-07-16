@@ -18,8 +18,8 @@ tests/
 ├── test_segment.py          # segment_by_pace, km_segment_fallback
 ├── test_stats.py            # calc_stats, fmt_duration, zone_ranges
 ├── test_health.py           # /health/ endpoint
-├── test_tcx_parser.py       # парсинг TCX
-└── test_fit_parser.py       # парсинг FIT
+├── test_process_trackpoints.py  # process_trackpoints pipeline
+└── test_models.py           # SQLAlchemy model tests
 ```
 
 | Тип | Скорость | БД |
@@ -51,10 +51,6 @@ pytest tests/test_classify.py::test_interval_detection -v
 [pytest]
 testpaths = tests
 python_files = test_*.py
-python_classes = Test*
-python_functions = test_*
-addopts = -v --tb=short
-asyncio_mode = auto
 ```
 
 ## Фикстуры (conftest.py)
@@ -62,7 +58,7 @@ asyncio_mode = auto
 ```python
 # tests/conftest.py
 import pytest
-from src.models import Base, SessionLocal, get_engine
+from src.domain.models.base import Base, SessionLocal, get_engine, init_db
 
 
 @pytest.fixture(scope="session", autouse=True)

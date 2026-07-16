@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     # Тайминги (Timing)
     http_timeout: int = 15
+    slow_request_ms: int = 1000
 
     # Часовой пояс по умолчанию (Default timezone)
     timezone: str = "UTC"

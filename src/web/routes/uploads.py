@@ -76,7 +76,7 @@ def _notify_new_session(session: TrainingSession, current_user: User,
 async def upload_files(files: list[UploadFile] = File(...), db: Session = Depends(get_db),
                        current_user: User = Depends(get_current_user),
                        _: None = Depends(rate_limit(max_requests=30, window_seconds=60))):
-    settings = get_settings()
+    settings = get_settings(current_user.id)
     saved = 0
     deleted_hit = None
     temp_id = None

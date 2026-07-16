@@ -207,8 +207,12 @@ created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 - `5e287a9fc289` — convert all DateTime columns to `TIMESTAMP WITH TIME ZONE`
 - `b6c7d8e9f0a1` — add `watch_credentials` table, `source_brand` to `daily_metrics`
 - `c9d8e7f6a0b2` — remove `coros_email`, `coros_password`, `last_coros_sync` from `users`
-- `d1e2f3a4b5c6` — add `training_type_override`, `trackpoints_json` to `training_sessions`; add `interval_pace_threshold`, `interval_min_phase_duration`, `interval_hr_lag_sec`, `interval_min_oscillations` to `users`
+- `d1e2f3a4b5c6` — add `training_type_override`, `trackpoints_json` to `training_sessions`; add interval settings to `users`
 - `e5f6a7b8c9d0` — rename `interval_oscillation_amplitude` → `interval_pace_threshold`, update defaults
+- `3205fe660d47` — add `timezone` column to `users`
+- `4201426df9cc` — add `timezone` column to `training_sessions`
+- `f7g8h9i0j1k2` — data integrity: NOT NULL + CASCADE on FKs, Text→JSON for HRV and metadata
+- `g9h0i1j2k3l4` — analytics preparation: indexes, `avg_pace` on `training_sessions`, `performance` → `Integer`
 
 Файлы миграций: `alembic/versions/`. Конфигурация: `alembic.ini`, `alembic/env.py` (`DATABASE_URL` из env).
 
@@ -268,6 +272,9 @@ running-coach/
 │   │   └── factory.py               #   Реестр брендов (register / get_watch_client)
 │   ├── crypto.py                    # Шифрование паролей (Fernet, требует CRED_KEY)
 │   ├── exceptions.py                # WatchAPIError, WatchAuthError, NotFoundError, …
+│   ├── coach/                       # Пакет модуля аналитики и коучинга
+│   │   ├── __init__.py
+│   │   └── config.py                # Конфигурация аналитики (веса, пороги, EWMA-параметры)
 │   ├── api/
 │   │   ├── __init__.py              # re-export: register_middleware, get_db
 │   │   ├── deps.py                  # get_current_user dependency (session-cookie)
@@ -308,13 +315,16 @@ running-coach/
 │   │   ├── reanalyze.py             #   пересчёт тренировок из trackpoints_json
 │   │   ├── stats.py                 #   calc_stats, fmt_duration, zone_ranges
 │   │   ├── recovery_view.py         # hrv_status, tired_label, readiness_label
-│   │   └── telegram_notify.py       # Отправка уведомлений в Telegram
+│   │   ├── telegram_notify.py       # Отправка уведомлений в Telegram
+│   │   ├── user_service.py          # get_user_settings, get_or_create_user_by_telegram
+│   │   ├── analytics_helpers.py     # compute_slope, compute_ewma, moving average
+│   │   └── repositories.py          # TrainingRepository, HealthRepository (агрегационные запросы)
 │   ├── web/
 │   │   ├── state.py                 # Глобальное состояние (_pending, _sync_tasks)
 │   │   ├── templates/               # 6 Jinja2-шаблонов + __init__.py
 │   │   └── routes/
 │   │       ├── __init__.py          # web_router = pages + uploads + sync + logs
-│   │       ├── pages/               # Пакет: auth (48), index (184), session (177), settings (118)
+│   │       ├── pages/               # Пакет: auth (48), index (240), session (191), settings (149)
 │   │       ├── uploads.py           # POST /upload, /upload/confirm, /upload/confirm_deleted
 │   │       ├── sync.py              # POST /sync/{brand}/run, /sync/{brand}/health
 │   │       └── logs.py              # GET /logs

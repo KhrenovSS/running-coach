@@ -303,6 +303,9 @@
 
 ---
 
-*Обновлён: 16.07.2026 — #153-165*
+| 166 | [Fix] | **Jitter ±20% не реализован** — README декларирует jitter для авто-синка, константа `JITTER_FACTOR=0.2` определена, но не использовалась. Добавлена `with_jitter()`, применена к тику в `scheduler.py` и к `next_run` в `orchestrator.py`. | `src/config/constants.py`, `src/scheduler.py`, `src/services/sync/orchestrator.py` | ✅ Fixed 16.07.2026 |
+| 167 | [Cleanup] | **`src/analysis/segment.py` превышает 400 строк** (417 строк) — нарушение AGENTS.md п.1. После ARC-06 было 312 строк, с тех пор выросло. Нужно вынести part of `_merge_similar_segments` или `_adaptive_min_diff` в `segment_utils.py`. | `src/analysis/segment.py` | ⬜ |
 
 ---
+
+*Обновлён: 16.07.2026 — #153-167*

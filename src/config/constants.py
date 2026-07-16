@@ -1,4 +1,5 @@
 # Фиксированные константы проекта (Fixed project constants — not env-configurable)
+import random
 from typing import Final
 
 # Пороги темпа и сегментации (Pace and segmentation thresholds)
@@ -37,6 +38,14 @@ CACHE_TTL_SECONDS: Final[int] = 300
 SYNC_HEALTH_INTERVAL: Final[int] = 21600
 SYNC_ACTIVITY_INTERVAL: Final[int] = 3600
 JITTER_FACTOR: Final[float] = 0.2
+
+
+def with_jitter(interval_seconds: int, factor: float = JITTER_FACTOR) -> int:
+    """Применить jitter к интервалу: interval ± factor*interval.
+    Apply jitter to an interval: interval ± factor*interval.
+    """
+    return int(interval_seconds * random.uniform(1 - factor, 1 + factor))
+
 
 # Настройки детекции интервалов (Interval detection settings)
 DEFAULT_PACE_THRESHOLD: Final[float] = 1.0          # мин/км — разница между базовым темпом и work-фазой

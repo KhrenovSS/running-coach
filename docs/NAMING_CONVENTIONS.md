@@ -23,13 +23,13 @@
 ### Файлы
 
 ```
-✅ src/services/training/classification.py
-✅ src/api/routes/coros.py
-✅ tests/unit/test_zones.py
+✅ src/watch/coros.py
+✅ src/parsers/tcx_parser.py
+✅ tests/test_gps.py
 
-❌ src/services/training/Classification.py
-❌ src/api/routes/CorosRoutes.py
-❌ tests/unit/testClassification.py
+❌ src/watch/CorosClient.py
+❌ src/parsers/TCXParser.py
+❌ tests/testGPS.py
 ```
 
 ### Классы
@@ -39,14 +39,14 @@
 class TrainingUploadService:
     pass
 
-class CorosSyncError(Exception):
+class WatchAPIError(Exception):
     pass
 
 # ❌
 class trainingUploadService:
     pass
 
-class coros_sync_error(Exception):
+class watch_api_error(Exception):
     pass
 ```
 
@@ -121,12 +121,12 @@ do_stuff()        # никогда так
 ```python
 # ✅
 TrainingUploadService
-CorosSyncService
+WatchClientFactory
 SettingsService
 
 # ❌
 TrainingManager
-CorosHelper
+WatchHelper
 SettingsHandler
 ```
 

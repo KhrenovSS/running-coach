@@ -111,30 +111,17 @@ async def upload(file: UploadFile, db: Session = Depends(get_db)):
 ### ✅ После — разделение ответственности
 
 ```python
-# src/api/routes/training.py
-from src.services.training.upload import TrainingUploadService
+# src/web/routes/uploads.py (тонкий роут — вызов сервиса)
+from src.services.analysis import process_and_save
 
 @router.post("/upload")
 async def upload(file: UploadFile, db: Session = Depends(get_db)):
     """Загрузить тренировку (Upload training)"""
-    service = TrainingUploadService(db)
-    training = await service.process(file)
+    training = process_and_save(db, file)
     return {"status": "ok", "training_id": training.id}
 
-# src/services/training/upload.py
-class TrainingUploadService:
-    """Сервис загрузки тренировок (Training upload service)"""
-    
-    def __init__(self, db: Session):
-        self.db = db
-    
-    async def process(self, file: UploadFile) -> TrainingSession:
-        """Обработать загруженный файл (Process uploaded file)"""
-        parser = get_parser_for_file(file.filename)
-        trackpoints = parser.parse(file.file)
-        cleaned = clean_trackpoints(trackpoints)
-        segments = segment_training(cleaned)
-        return self.save(cleaned, segments)
+# Логика в src/analysis/__init__.py :: process_trackpoints()
+# и сервисах src/services/ (reanalyze, training_service)
 ```
 
 ### Размер файла
@@ -322,24 +309,22 @@ async def save_settings(request: Request, db: Session = Depends(get_db)):
 ### ✅ После
 
 ```python
-# src/schemas/settings.py
-from pydantic import BaseModel, Field, field_validator
+# src/web/routes/pages/settings.py (Pydantic внутри роута или отдельно)
+from pydantic import BaseModel, Field
 
 class SettingsUpdate(BaseModel):
     """Обновление настроек (Settings update)"""
     max_hr: int = Field(ge=100, le=220)
     weight_kg: float = Field(ge=30, le=300)
-    max_credible_pace: float = Field(ge=2.0, le=10.0)
 
-# src/api/routes/settings.py
 @router.post("/")
 async def save_settings(
-    settings: SettingsUpdate,
+    data: SettingsUpdate,
     db: Session = Depends(get_db),
 ):
     """Сохранить настройки (Save settings)"""
     service = SettingsService(db)
-    service.update(settings)
+    service.update(data)
     return {"status": "ok"}
 ```
 
@@ -379,10 +364,10 @@ try:
     result.raise_for_status()
 except httpx.HTTPStatusError as e:
     logger.error(f"Watch API error: {url} → {e.response.status_code}")
-    raise WatchAPIError(str(e), brand="coros", status=e.response.status_code)
+    raise WatchAPIError(str(e), brand=brand, status=e.response.status_code)
 except httpx.RequestError as e:
     logger.error(f"Watch API network error: {url} → {e}")
-    raise WatchAPIError(str(e), brand="coros")
+    raise WatchAPIError(str(e), brand=brand)
 ```
 
 ### Исключения проекта
@@ -407,10 +392,10 @@ raise WatchAPIError("Not authenticated", brand="coros")
 ### Обработка в сервисах
 
 ```python
-# src/services/training/detail.py
+# src/services/training_service.py
 from src.exceptions import NotFoundError
 
-class TrainingDetailService:
+class TrainingService:
     def get(self, training_id: int) -> TrainingSession:
         training = self.db.query(TrainingSession).get(training_id)
         if not training:

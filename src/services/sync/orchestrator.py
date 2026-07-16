@@ -3,6 +3,7 @@
 from datetime import timedelta, datetime, timezone
 
 from src.utils.logger import get_logger
+from src.config.constants import with_jitter
 from src.models import SessionLocal, WatchCredential
 from src.services.audit import AuditService
 from src.services.async_utils import run_async_in_thread
@@ -128,7 +129,7 @@ def _auto_sync(sync_type: str):
                 s['status'] = 'ok'
                 s['last_run'] = now
                 s['message'] = 'Нет учётных данных'
-                s['next_run'] = now + timedelta(seconds=SYNC_TICK_INTERVAL)
+                s['next_run'] = now + timedelta(seconds=with_jitter(SYNC_TICK_INTERVAL))
             return
 
         total_synced = 0
@@ -173,7 +174,7 @@ def _auto_sync(sync_type: str):
             else:
                 s['message'] = 'Нет учётных данных'
             next_seconds = min_next if min_next is not None else SYNC_TICK_INTERVAL
-            s['next_run'] = now + timedelta(seconds=int(next_seconds))
+            s['next_run'] = now + timedelta(seconds=with_jitter(int(next_seconds)))
         logger.info("%s sync: итого — synced=%d, empty=%d, failed=%d, next=%ds", label, total_synced, total_empty, total_failed, int(next_seconds))
     except Exception as e:
         logger.exception("%s sync: глобальная ошибка", label)
@@ -182,7 +183,7 @@ def _auto_sync(sync_type: str):
             s['status'] = 'error'
             s['last_run'] = now
             s['message'] = str(e)[:80]
-            s['next_run'] = now + timedelta(seconds=SYNC_TICK_INTERVAL)
+            s['next_run'] = now + timedelta(seconds=with_jitter(SYNC_TICK_INTERVAL))
 
 
 def auto_sync_health():

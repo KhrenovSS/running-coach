@@ -90,6 +90,7 @@ async def handle_weight_message(update: Update, context: ContextTypes.DEFAULT_TY
             measured_at=utcnow(),
         )
         db.add(measurement)
+        user.weight_kg = weight
         db.commit()
         with _awaiting_weight_lock:
             _awaiting_weight[chat_id] = False

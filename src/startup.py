@@ -42,7 +42,7 @@ def on_startup():
             db.execute(text("SELECT setval('users_id_seq', (SELECT MAX(id) FROM users))"))
             db.refresh(admin_user)
 
-        settings = get_settings()
+        settings = get_settings(admin_user.id)
         existing = db.query(WeightMeasurement).filter(WeightMeasurement.user_id == admin_user.id).first()
         if not existing and settings.weight:
             wm = WeightMeasurement(weight_kg=settings.weight, measured_at=utcnow(), user_id=admin_user.id)

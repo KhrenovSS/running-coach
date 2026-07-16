@@ -63,8 +63,8 @@
 # Тесты (Tests)
 pytest tests/ -v
 
-# Линтер (если настроен) (Linter if configured)
-python -m py_compile src/**/*.py
+# Проверка импортов (Import check)
+python -c "from src.startup import create_app; print('OK')"
 
 # Сервер стартует (Server starts)
 python -c "from main import app; print('OK')"

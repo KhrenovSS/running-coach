@@ -135,13 +135,13 @@ async def get_training(
 ### Сервис с обработкой 404
 
 ```python
-# src/services/training/detail.py
+# src/services/training_service.py
 from sqlalchemy.orm import Session
 from src.models import TrainingSession
 from src.exceptions import NotFoundError
 
-class TrainingDetailService:
-    """Сервис деталей тренировки (Training detail service)"""
+class TrainingService:
+    """Сервис тренировок (Training service)"""
     
     def __init__(self, db: Session):
         self.db = db
@@ -232,42 +232,23 @@ async def upload_training(
 ### Сервис upload
 
 ```python
-# src/services/training/upload.py
+# src/web/routes/uploads.py (логика в роуте + analysis/__init__.py)
 from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
 from src.models import TrainingSession
+from src.analysis import process_trackpoints
 from src.parsers.tcx_parser import TcxParser
 from src.parsers.fit_parser import FitParser
 from src.exceptions import FileProcessingError
 
-class TrainingUploadService:
-    """Сервис загрузки тренировок (Training upload service)"""
-    
-    def __init__(self, db: Session):
-        self.db = db
-    
-    async def process(self, file: UploadFile) -> TrainingSession:
-        """
-        Обработать загруженный файл (Process uploaded file)
-        """
-        parser = self._get_parser(file.filename)
-        try:
-            training = parser.parse(file.file)
-        except Exception as e:
-            raise FileProcessingError(file.filename, str(e))
-        
-        self.db.add(training)
-        self.db.commit()
-        return training
-    
-    def _get_parser(self, filename: str):
-        """Выбрать парсер по расширению (Select parser by extension)"""
-        if filename.endswith('.tcx'):
-            return TcxParser()
-        elif filename.endswith('.fit'):
-            return FitParser()
-        raise FileProcessingError(filename, "Unsupported file format")
+def _parse_file(file: UploadFile):
+    """Выбрать парсер по расширению (Select parser by extension)"""
+    if file.filename.endswith('.tcx'):
+        return TcxParser().parse(file.file)
+    elif file.filename.endswith('.fit'):
+        return FitParser().parse(file.file)
+    raise FileProcessingError(file.filename, "Unsupported file format")
 ```
 
 ---

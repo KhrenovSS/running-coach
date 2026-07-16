@@ -51,10 +51,16 @@ async def settings_page(request: Request, current_user: User = Depends(get_curre
     user_name = current_user.name or current_user.telegram_username or "Бегун"
     user_header = f"👤 {user_name} | <a href='/auth/logout'>Выйти</a>"
     pace_threshold_min = current_user.interval_pace_threshold or DEFAULT_PACE_THRESHOLD
+    weight_display = current_user.weight_kg
+    if weight_display is None:
+        last_wm = db.query(WeightMeasurement.weight_kg).filter(
+            WeightMeasurement.user_id == current_user.id
+        ).order_by(WeightMeasurement.measured_at.desc()).first()
+        weight_display = last_wm[0] if last_wm else None
     return templates.TemplateResponse(request, "settings.html", {
         "user_header": user_header,
         "user_name": current_user.name or "",
-        "max_hr": m, "weight": current_user.weight_kg, "z1": z1, "z2": z2, "z3": z3, "z4": z4, "z5": z5,
+        "max_hr": m, "weight": weight_display, "z1": z1, "z2": z2, "z3": z3, "z4": z4, "z5": z5,
         "max_credible_pace": current_user.max_credible_pace,
         "max_gps_jump_m": current_user.max_gps_jump_m,
         "min_hr_for_fast_pace": current_user.min_hr_for_fast_pace,

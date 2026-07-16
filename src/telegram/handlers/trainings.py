@@ -82,9 +82,9 @@ async def trainings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         for s in sessions:
             d = s.begin_ts
             date_str = d.strftime("%d.%m %H:%M") if d else "N/A"
-            dur_str = f"{s.duration_seconds // 60} мин" if s.duration_seconds else "N/A"
-            dist_str = f"{float(s.distance_km or 0):.1f} км"
-            text += f"• {date_str} {s.sport or 'N/A'}: {dist_str}, {dur_str}\n"
+            dur_str = f"{int(s.duration_minutes // 60)} мин" if s.duration_minutes else "N/A"
+            dist_str = f"{float(s.total_distance_km or 0):.1f} км"
+            text += f"• {date_str} {s.training_type or 'N/A'}: {dist_str}, {dur_str}\n"
 
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=trainings_keyboard(user.id))
     except Exception as e:

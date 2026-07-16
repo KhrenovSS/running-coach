@@ -2,6 +2,48 @@
 
 All notable changes to this project are tracked here.
 
+## [16.07.2026] — Jitter ±20% for auto-sync
+
+### Added
+- **`with_jitter(interval_seconds, factor=JITTER_FACTOR)`** в `src/config/constants.py` — функция, применяющая случайное отклонение ±20% к интервалу
+- **Jitter на тик планировщика** в `src/scheduler.py` — `self._stop.wait(with_jitter(SYNC_TICK_INTERVAL))`
+- **Jitter на `next_run`** в `src/services/sync/orchestrator.py` — применён при расчёте следующего запуска синка (ветки: нет credentials, per-credential, ошибка)
+
+### Status
+- Импорты: OK
+- `python -c "from src.config.constants import with_jitter"` — OK
+- BACKLOG.md: #166 ✅
+
+---
+
+## [16.07.2026] — Docs audit: 15 discrepancies fixed
+
+### Fixed
+- **`src/telegram/handlers/trainings.py`**: баг — `duration_seconds`/`distance_km`/`sport` → `duration_minutes`/`total_distance_km`/`training_type`
+- **`src/config/settings.py`**: добавлено `slow_request_ms: int = 1000` (читается из `SLOW_REQUEST_MS` env)
+- **`src/api/middleware.py`**: `SLOW_REQUEST_THRESHOLD_MS` теперь читается из `settings.slow_request_ms`, не хардкод
+
+### Docs fixed
+- **README.md**: миграции 7→11, файловое дерево (добавлены `analytics_helpers`, `repositories`, `user_service`, `src/coach/`), line counts pages/* обновлены
+- **TESTING.md**: удалены несуществующие `test_tcx_parser.py`/`test_fit_parser.py`, добавлены `test_process_trackpoints.py`/`test_models.py`, pytest.ini синхронизирован
+- **LOGGING.md**: event type names `coros.sync.*`→`sync.{brand}.*`, `telegram.sent/failed`→`telegram.notification.sent/failed`, добавлены пропущенные типы
+- **AGENTS.md**: ⬜→✅ для 4 существующих файлов, line counts pages/* обновлены, analysis (6→7 файлов)
+- **ARCHITECTURE.md**: line counts pages/* обновлены
+- **CODE_GUIDELINES.md**: удалены ссылки на несуществующие `src/schemas/`, `src/services/training/`
+- **API_ROUTES_GUIDE.md**: удалены ссылки на `src/services/training/upload.py`, `src/services/training/detail.py`
+- **NAMING_CONVENTIONS.md**: `coros.py`→`watch/coros.py`, `CorosSyncError`→`WatchAPIError`, `CorosSyncService`→`WatchClientFactory`
+- **DEVELOPMENT_GUIDELINES.md**: `py_compile`→behavioral import check
+- **CHECKLIST_FEATURE.md**: `py_compile`→behavioral import check
+
+### Added
+- **BACKLOG.md**: #167 (segment.py превышает 400 строк)
+
+### Status
+- Все поведенческие проверки пройдены
+- BACKLOG.md: #167 ⬜
+
+---
+
 ## [14.07.2026] — Sprint 20b: Tech Debt Fix (DEBT-01, DEBT-02, DEBT-03)
 
 ### Fixed

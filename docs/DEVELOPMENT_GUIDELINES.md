@@ -35,8 +35,8 @@
 - Запуск сервера: `uvicorn main:app --host 0.0.0.0 --port 8000`
 - Тесты: `pytest tests/ -v`
 - Миграции: `alembic revision --autogenerate -m "..."`
-- Проверка синтаксиса: `python -m py_compile main.py src/**/*.py`
+- Проверка импортов: `python -c "from src.telegram.main import run_bot; print('OK')"`
 
 ---
 
-**Последнее обновление:** 30.06.2026
+**Последнее обновление:** 16.07.2026

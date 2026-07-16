@@ -2,6 +2,7 @@
 import time
 import threading
 from src.utils.logger import get_logger
+from src.config.constants import with_jitter
 from src.services.sync import SYNC_TICK_INTERVAL, auto_sync_health, auto_sync_activities
 
 logger = get_logger("app")
@@ -47,5 +48,5 @@ class AutoSyncScheduler:
                 auto_sync_activities()
             except Exception:
                 logger.exception("Автосинхронизация: ошибка activity sync")
-            # Ожидание с проверкой stop-сигнала (Wait with stop signal check)
-            self._stop.wait(SYNC_TICK_INTERVAL)
+            # Ожидание с проверкой stop-сигнала + jitter (Wait with stop signal check + jitter)
+            self._stop.wait(with_jitter(SYNC_TICK_INTERVAL))

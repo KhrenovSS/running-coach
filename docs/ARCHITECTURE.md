@@ -72,7 +72,7 @@ running-coach/
 │   │   ├── templates/          # 6 Jinja2-шаблонов
 │   │   └── routes/
 │   │       ├── __init__.py     # web_router = pages + uploads + sync + logs
-│   │       ├── pages/          # Пакет: auth (48), index (184), session (177), settings (118)
+│   │       ├── pages/          # Пакет: auth (48), index (240), session (191), settings (149)
 │   │       ├── uploads.py      # POST /upload, /upload/confirm, /upload/confirm_deleted
 │   │       ├── sync.py         # POST /sync/{brand}/run, /sync/{brand}/health
 │   │       └── logs.py         # GET /logs

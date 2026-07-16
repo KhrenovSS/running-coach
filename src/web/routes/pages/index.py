@@ -65,7 +65,7 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
     recent_sessions = db.query(TrainingSession).filter(
         TrainingSession.user_id == user_id
     ).order_by(TrainingSession.begin_ts.desc()).limit(200).all()
-    settings = get_settings()
+    settings = get_settings(user_id)
     weight_measurements = db.query(WeightMeasurement).filter(
         WeightMeasurement.user_id == user_id
     ).order_by(WeightMeasurement.measured_at).limit(365).all()

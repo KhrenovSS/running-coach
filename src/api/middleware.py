@@ -21,8 +21,8 @@ from src.config import settings
 logger = get_logger("app")
 requests_logger = get_requests_logger()
 
-# Порог медленного запроса в мс (Slow request threshold in ms)
-SLOW_REQUEST_THRESHOLD_MS = 1000
+# Порог медленного запроса в мс (Slow request threshold in ms) — из settings / SLOW_REQUEST_MS env
+SLOW_REQUEST_THRESHOLD_MS = settings.slow_request_ms
 
 # Секретный ключ для session-cookie (Secret key for session cookies)
 SECRET_KEY = os.environ["SECRET_KEY"]

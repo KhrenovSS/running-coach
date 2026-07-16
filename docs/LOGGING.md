@@ -48,15 +48,19 @@ logger.info("Sync completed", extra={"count": 5})
 
 | Тип | Описание | Источники |
 |-----|----------|-----------|
-| `app.startup` | Приложение запущено | `main.py` |
+| `app.startup` | Приложение запущено | `src/startup.py` |
 | `training.uploaded` | Тренировка загружена | `/upload`, `/upload/confirm`, `/upload/confirm_deleted`, Coros sync |
 | `training.deleted` | Тренировка удалена | `/session/{id}/delete` |
 | `settings.changed` | Изменены настройки пользователя | `/settings`, Telegram `/start`, Telegram `/delete_me` |
-| `coros.sync.started` | Начата синхронизация Coros | Telegram `/sync`, `/coros/sync` |
-| `coros.sync.completed` | Синхронизация Coros завершена | Telegram `/sync`, `/coros/sync` |
-| `coros.sync.failed` | Ошибка синхронизации Coros | Telegram `/sync`, `/coros/sync` |
-| `telegram.sent` | Telegram-уведомление отправлено | Telegram bot |
-| `telegram.failed` | Ошибка отправки Telegram | Telegram bot |
+| `sync.{brand}.started` | Начата синхронизация часов | Telegram `/sync`, `/sync/{brand}/run` |
+| `sync.{brand}.completed` | Синхронизация часов завершена | Telegram `/sync`, `/sync/{brand}/run` |
+| `sync.{brand}.failed` | Ошибка синхронизации часов | Telegram `/sync`, `/sync/{brand}/run` |
+| `telegram.notification.sent` | Telegram-уведомление отправлено | Telegram bot |
+| `telegram.notification.failed` | Ошибка отправки Telegram | Telegram bot |
+| `telegram.received` | Команда получена от пользователя | Telegram bot |
+| `user.registered` | Пользователь зарегистрирован | Telegram `/start` |
+| `auth.register` | Регистрация через веб | `/auth/register` |
+| `auth.register_failed` | Ошибка регистрации | `/auth/register` |
 | `auth.login` | Пользователь вошёл через Telegram | `/auth/telegram` |
 | `auth.login_failed` | Неудачная попытка входа | `/auth/telegram` |
 | `auth.logout` | Пользователь вышел | `/auth/logout` |
