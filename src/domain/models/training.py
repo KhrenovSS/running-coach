@@ -1,6 +1,6 @@
 # Модель тренировочной сессии + обратная связь + удалённые (Training session, feedback, deleted)
 
-from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey, JSON, Index
 from sqlalchemy.orm import relationship
 
 from src.domain.models.base import Base, utcnow
@@ -8,6 +8,10 @@ from src.domain.models.base import Base, utcnow
 
 class TrainingSession(Base):
     __tablename__ = 'training_sessions'
+    __table_args__ = (
+        Index('ix_training_user_begin', 'user_id', 'begin_ts'),
+        Index('ix_training_begin', 'begin_ts'),
+    )
 
     id = Column(Integer, primary_key=True)                    # ID тренировки (training session ID)
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)  # ID владельца (owner ID)
@@ -34,6 +38,7 @@ class TrainingSession(Base):
     anaerobic_training_effect = Column(Float, nullable=True)
     vo2max = Column(Float, nullable=True)
     calories = Column(Integer, nullable=True)
+    avg_pace = Column(Float, nullable=True)  # Средний темп мин/км (avg pace min/km)
 
     user = relationship("User", back_populates="training_sessions")
 
@@ -62,6 +67,9 @@ class DeletedTraining(Base):
 
 class TrainingFeedback(Base):
     __tablename__ = 'training_feedback'
+    __table_args__ = (
+        Index('ix_feedback_user_created', 'user_id', 'created_at'),
+    )
     id = Column(Integer, primary_key=True)                    # ID оценки (feedback ID)
     session_id = Column(Integer, ForeignKey('training_sessions.id'), nullable=False, index=True)  # ID тренировки (session ID)
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)  # ID владельца (owner ID)

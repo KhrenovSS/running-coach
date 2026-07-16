@@ -686,7 +686,7 @@ pytest tests/ -v    # ≥ 30 тестов, все зелёные
 
 **Docker:** `app` (миграция БД + новый модуль `src/services/repositories.py`)
 
-**Задачи (11 задач, ~2-3 дня работы):**
+**Задачи (12 задач, ~2-3 дня работы):**
 
 ##### PREP-01: Починить Telegram stats handler (P0, BACKLOG #142)
 **Файл:** `src/telegram/handlers/stats.py`
@@ -1518,6 +1518,34 @@ grep -rn "from src.models import get_settings\|from src.models import get_user" 
 # Должно быть >0 (старые импорты работают через shim)
 python -c "from src.services.user_service import get_user_settings; print('OK')"
 pytest tests/ -v
+```
+
+---
+
+##### PREP-17: Исправить форматирование темпа на графике (P1, BACKLOG #20)
+**Файл:** `src/web/templates/session.html` (строки 76-116)
+**Проблема:** Chart.js показывает темп как число с плавающей точкой (5.74) вместо формата М:СС (5:44). Пульс показывается как float (145.3) вместо целого (145). Пользователь при наведении мыши видит «5.74» — непонятно.
+**Решение:**
+1. Добавить JS-функцию `formatPace(pace)` — конвертирует float (5.74) → строку "5:44":
+   ```javascript
+   function formatPace(pace) {
+       const m = Math.floor(pace);
+       const s = Math.round((pace - m) * 60);
+       return m + ':' + String(s).padStart(2, '0');
+   }
+   ```
+2. Добавить `plugins.tooltip.callbacks.label` — форматирование значений в tooltip:
+   - Темп: `formatPace(raw) + ' мин/км'`
+   - Пульс: `Math.round(raw) + ' уд/мин'`
+3. Добавить `scales.y1.ticks.callback` — форматирование оси Y темпа: `formatPace(value)`
+4. Добавить `scales.y.ticks.callback` — форматирование оси Y пульса: `Math.round(value)`
+
+**Проверка:**
+```bash
+# Визуальная: открыть страницу тренировки, навести мышь на график
+# Темп показывает "5:44" вместо "5.74"
+# Пульс показывает "145" вместо "145.3"
+# Оси Y показывают отформатированные значения
 ```
 
 ---

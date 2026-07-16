@@ -24,8 +24,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from src.api.deps import get_db
-from src.schemas.<domain> import <SomeSchema>
-from src.services.<domain>.<service> import <SomeService>
+from src.services.<service> import <SomeService>
 from src.exceptions import NotFoundError
 
 router = APIRouter(
@@ -59,60 +58,49 @@ async def list_items(
 ## 2. GET — список
 
 ```python
-# src/api/routes/training.py
+# src/api/routes/<domain>.py
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from typing import Annotated
 
 from src.api.deps import get_db
-from src.schemas.training import TrainingSummary
-from src.services.training.list import TrainingListService
+from src.services.<service> import <SomeService>
 
-router = APIRouter(prefix="/training", tags=["training"])
+router = APIRouter(prefix="/<domain>", tags=["<domain>"])
 
 
-@router.get("/", response_model=list[TrainingSummary])
-async def list_trainings(
+@router.get("/", response_model=list)
+async def list_items(
     year: Annotated[int | None, Query(ge=2000, le=2100)] = None,
     month: Annotated[int | None, Query(ge=1, le=12)] = None,
     db: Session = Depends(get_db),
 ):
     """
-    Список тренировок с фильтром по году/месяцу
-    List trainings filtered by year/month
+    Список ... с фильтром по году/месяцу
+    List ... filtered by year/month
     """
-    service = TrainingListService(db)
-    return service.list_trainings(year=year, month=month)
+    service = <SomeService>(db)
+    return service.list(year=year, month=month)
 ```
 
 ### Сервис
 
 ```python
-# src/services/training/list.py
+# src/services/<domain>.py
 from sqlalchemy.orm import Session
-from src.models import TrainingSession
+from src.models import SomeModel
 
-class TrainingListService:
-    """Сервис списка тренировок (Training list service)"""
+class SomeService:
+    """Сервис ... (Service description)"""
     
     def __init__(self, db: Session):
         self.db = db
     
-    def list_trainings(
-        self,
-        year: int | None = None,
-        month: int | None = None,
-    ) -> list[TrainingSession]:
+    def list(self, year: int | None = None, month: int | None = None) -> list:
         """
-        Получить список тренировок (Get trainings list)
+        Получить список ... (Get list)
         """
-        query = self.db.query(TrainingSession).order_by(TrainingSession.begin_ts.desc())
-        
-        if year is not None:
-            query = query.filter(self.db.extract('year', TrainingSession.begin_ts) == year)
-        if month is not None:
-            query = query.filter(self.db.extract('month', TrainingSession.begin_ts) == month)
-        
+        query = self.db.query(SomeModel).order_by(SomeModel.id.desc())
         return query.all()
 ```
 
@@ -121,13 +109,12 @@ class TrainingListService:
 ## 3. GET — детальная информация
 
 ```python
-# src/api/routes/training.py
+# src/api/routes/<domain>.py
 from fastapi import APIRouter, Depends, Path
 from sqlalchemy.orm import Session
 
 from src.api.deps import get_db
-from src.schemas.training import TrainingDetail
-from src.services.training.detail import TrainingDetailService
+from src.services.<service> import <SomeService>
 
 router = APIRouter(prefix="/training", tags=["training"])
 
@@ -174,42 +161,44 @@ class TrainingDetailService:
 ## 4. POST — создание
 
 ```python
-# src/api/routes/settings.py
+# src/api/routes/<domain>.py
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
 
 from src.api.deps import get_db
-from src.schemas.settings import SettingsUpdate
-from src.services.settings import SettingsService
+from src.services.<service> import <SomeService>
 
-router = APIRouter(prefix="/settings", tags=["settings"])
+
+class UpdateSchema(BaseModel):
+    """Схема обновления (Update schema)"""
+    value: int = Field(ge=0, le=100)
+
+
+router = APIRouter(prefix="/<domain>", tags=["<domain>"])
 
 
 @router.post("/", response_model=dict, status_code=status.HTTP_200_OK)
-async def save_settings(
-    settings: SettingsUpdate,
+async def update(
+    data: UpdateSchema,
     db: Session = Depends(get_db),
 ):
     """
-    Сохранить настройки пользователя
-    Save user settings
+    Обновить ... (Update ...)
     """
-    service = SettingsService(db)
-    service.update(settings)
+    service = <SomeService>(db)
+    service.update(data)
     return {"status": "ok"}
 ```
 
-### Pydantic схема
+### Pydantic схема (внутри файла роута или в `src/models.py`)
 
 ```python
-# src/schemas/settings.py
 from pydantic import BaseModel, Field
 
-class SettingsUpdate(BaseModel):
-    """Обновление настроек (Settings update)"""
-    max_hr: int = Field(ge=100, le=220)
-    weight_kg: float = Field(ge=30, le=300)
-    max_credible_pace: float = Field(ge=2.0, le=10.0)
+class UpdateSchema(BaseModel):
+    """Обновление ... (Update schema)"""
+    value: int = Field(ge=100, le=220)
 ```
 
 ---
@@ -217,22 +206,17 @@ class SettingsUpdate(BaseModel):
 ## 5. POST — upload файла
 
 ```python
-# src/api/routes/training.py
-from fastapi import APIRouter, Depends, UploadFile, File, status
+# src/api/routes/uploads.py
+from fastapi import APIRouter, Depends, UploadFile, File, status, Form
 from sqlalchemy.orm import Session
 
 from src.api.deps import get_db
-from src.schemas.training import TrainingUploadResponse
-from src.services.training.upload import TrainingUploadService
+from src.models import TrainingSession
 
-router = APIRouter(prefix="/training", tags=["training"])
+router = APIRouter(tags=["uploads"])
 
 
-@router.post(
-    "/upload",
-    response_model=TrainingUploadResponse,
-    status_code=status.HTTP_201_CREATED,
-)
+@router.post("/upload")
 async def upload_training(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -241,12 +225,8 @@ async def upload_training(
     Загрузить тренировку из TCX/FIT файла
     Upload training from TCX/FIT file
     """
-    service = TrainingUploadService(db)
-    training = await service.process(file)
-    return TrainingUploadResponse(
-        status="ok",
-        training_id=training.id,
-    )
+    # Логика загрузки (парсинг, анализ, сохранение)
+    return {"status": "ok", "training_id": training.id}
 ```
 
 ### Сервис upload
@@ -295,61 +275,55 @@ class TrainingUploadService:
 ## 6. DELETE — удаление
 
 ```python
-# src/api/routes/training.py
+# src/api/routes/<domain>.py
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from src.api.deps import get_db
-from src.services.training.delete import TrainingDeleteService
-
-router = APIRouter(prefix="/training", tags=["training"])
+from src.services.<service> import <SomeService>
 
 
-@router.delete("/{training_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_training(
-    training_id: int,
+@router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_item(
+    id: int,
     db: Session = Depends(get_db),
 ):
     """
-    Удалить тренировку
-    Delete training
+    Удалить ... (Delete ...)
     """
-    service = TrainingDeleteService(db)
-    service.delete(training_id)
+    service = <SomeService>(db)
+    service.delete(id)
     return None
 ```
 
 ---
 
-## 7. Подключение роутера к main.py
+## 7. Подключение роутера к приложению
 
 ```python
-# main.py
-from fastapi import FastAPI
-from src.api.middleware import register_middleware
-from src.api.routes import training, settings, coros, health
-
-app = FastAPI(title="AI Running Coach")
-
-# Middleware
-register_middleware(app)
-
-# Роуты
-app.include_router(training.router)
-app.include_router(settings.router)
-app.include_router(coros.router)
-app.include_router(health.router)
+# src/startup.py (внутри create_app())
+def create_app():
+    app = FastAPI(title="AI Running Coach")
+    register_middleware(app)
+    app.include_router(health_router)
+    app.include_router(auth_router)
+    app.include_router(web_router)
+    return app
 ```
 
-### Файл `src/api/routes/__init__.py`
-
+Роуты группируются в `src/web/routes/__init__.py`:
 ```python
-"""
-API routes package
-"""
-from src.api.routes import training, settings, coros, health
+# src/web/routes/__init__.py
+from src.web.routes.pages import router as pages_router
+from src.web.routes.uploads import router as uploads_router
+from src.web.routes.sync import router as sync_router
+from src.web.routes.logs import router as logs_router
 
-__all__ = ["training", "settings", "coros", "health"]
+web_router = APIRouter()
+web_router.include_router(pages_router)
+web_router.include_router(uploads_router)
+web_router.include_router(sync_router)
+web_router.include_router(logs_router)
 ```
 
 ---
@@ -367,4 +341,4 @@ __all__ = ["training", "settings", "coros", "health"]
 
 ---
 
-**Последнее обновление:** 30.06.2026
+**Последнее обновление:** 16.07.2026

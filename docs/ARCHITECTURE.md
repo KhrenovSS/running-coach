@@ -37,9 +37,9 @@ running-coach/
 │   ├── CHECKLIST_NEW_PROVIDER.md
 │   ├── DEVELOPMENT_GUIDELINES.md
 │   └── coros_health_metrics.md
+├── main.py                     # 7 строк: create_app() + uvicorn.run()
+├── run_telegram_bot.py         # Запуск Telegram-бота (pip install -e .)
 ├── src/                        # Исходный код
-│   ├── main.py                 # 7 строк: create_app() + uvicorn.run()
-│   ├── run_telegram_bot.py     # Запуск Telegram-бота (pip install -e .)
 │   ├── startup.py              # create_app() фабрика, startup-событие, роуты
 │   ├── scheduler.py            # AutoSyncScheduler (threading.Event)
 │   ├── models.py               # Shim: реэкспорт из src/domain/models/ + хелперы
@@ -259,4 +259,4 @@ src/telegram/main.py :: run_bot()
 
 ---
 
-**Последнее обновление:** 14.07.2026 (Sprint 19)
+**Последнее обновление:** 16.07.2026 (Sprint 19, docs audit)

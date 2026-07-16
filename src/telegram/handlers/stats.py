@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta
-from decimal import Decimal
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -41,10 +40,10 @@ class StatsPages:
     def _overview(self, db, now: datetime) -> str:
         user_id = self.user.id
         total_sessions = db.query(TrainingSession).filter(TrainingSession.user_id == user_id).count()
-        total_distance = db.query(db.func.sum(TrainingSession.distance_km)).filter(
+        total_distance = db.query(db.func.sum(TrainingSession.total_distance_km)).filter(
             TrainingSession.user_id == user_id,
-        ).scalar() or Decimal("0")
-        total_duration = db.query(db.func.sum(TrainingSession.duration_seconds)).filter(
+        ).scalar() or 0
+        total_duration = db.query(db.func.sum(TrainingSession.duration_minutes)).filter(
             TrainingSession.user_id == user_id,
         ).scalar() or 0
 
@@ -61,8 +60,8 @@ class StatsPages:
         if last_session:
             text += (
                 f"\n*Последняя тренировка:*\n"
-                f"  {last_session.sport or 'N/A'}: {float(last_session.distance_km or 0):.1f} км, "
-                f"{self._format_duration(last_session.duration_seconds or 0)}\n"
+                f"  {last_session.training_type or 'N/A'}: {float(last_session.total_distance_km or 0):.1f} км, "
+                f"{self._format_duration(last_session.duration_minutes or 0)}\n"
                 f"  📅 {last_session.begin_ts.strftime('%d.%m.%Y %H:%M') if last_session.begin_ts else 'N/A'}"
             )
         return text
@@ -80,8 +79,8 @@ class StatsPages:
         if not sessions:
             return f"📊 Нет тренировок за последний(юю) {label}."
 
-        total_distance = sum(float(s.distance_km or 0) for s in sessions)
-        total_duration = sum(s.duration_seconds or 0 for s in sessions)
+        total_distance = sum(float(s.total_distance_km or 0) for s in sessions)
+        total_duration = sum(s.duration_minutes or 0 for s in sessions)
         total_count = len(sessions)
 
         text = (
@@ -95,17 +94,17 @@ class StatsPages:
         for s in sessions[:5]:
             d = s.begin_ts
             date_str = d.strftime("%d.%m") if d else "N/A"
-            text += f"• {date_str} {s.sport or 'N/A'}: {float(s.distance_km or 0):.1f} км, {self._format_duration(s.duration_seconds or 0)}\n"
+            text += f"• {date_str} {s.training_type or 'N/A'}: {float(s.total_distance_km or 0):.1f} км, {self._format_duration(s.duration_minutes or 0)}\n"
 
         return text
 
     @staticmethod
-    def _format_duration(seconds: int) -> str:
-        h, remainder = divmod(seconds, 3600)
-        m, s = divmod(remainder, 60)
+    def _format_duration(minutes: float) -> str:
+        h = int(minutes // 60)
+        m = int(minutes % 60)
         if h > 0:
             return f"{h}ч {m}м"
-        return f"{m}м {s}с"
+        return f"{m}м"
 
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):

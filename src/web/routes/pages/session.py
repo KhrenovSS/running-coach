@@ -39,7 +39,7 @@ async def session_detail(request: Request, session_id: int, db: Session = Depend
         rm = db.query(DailyMetrics).filter(DailyMetrics.user_id == current_user.id, DailyMetrics.date == training_date).first()
         if rm:
             _, hrv_label = hrv_status(rm.avg_sleep_hrv, rm.sleep_hrv_baseline, rm.sleep_hrv_sd,
-                json.loads(rm.sleep_hrv_interval_list) if rm.sleep_hrv_interval_list else None)
+                rm.sleep_hrv_interval_list)
             rhr_str = f"{rm.rhr}" if rm.rhr is not None else "—"
             tired_str = tired_label(rm.tired_rate) or "—"
             perf_str = readiness_label(rm.performance, rm.recovery_pct, rm.training_load_ratio) or "—"

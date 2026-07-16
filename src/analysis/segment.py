@@ -249,7 +249,7 @@ def _merge_similar_segments(segments: list[dict], threshold: float = 1.0, max_hr
         for i in range(len(result) - 1):
             pi = result[i].get('pace_min_km')
             pj = result[i+1].get('pace_min_km')
-            if pi is not None and pj is not None and abs(pi - pj) <= threshold:
+            if pi is not None and pj is not None and abs(pi - pj) < threshold:
                 a = result[i]
                 b = result[i+1]
                 da = a.get('duration_min', 0) or 0
@@ -353,7 +353,7 @@ def segment_by_pace(trackpoints: list[dict], max_hr: int, total_dist_km: float,
                     return km_segment_fallback(trackpoints, max_hr, total_dist_km)
 
                 var_count = compute_km_variability(trackpoints, total_dist_km)
-                osc_segments = _merge_similar_segments(osc_segments, threshold=1.0, max_hr=max_hr)
+                osc_segments = _merge_similar_segments(osc_segments, threshold=pace_gap * 0.5, max_hr=max_hr)
                 return osc_segments, var_count
 
     # Если change-point сегментов > 2, но не все соседние отличаются > 1.0 мин/км —
@@ -378,7 +378,7 @@ def segment_by_pace(trackpoints: list[dict], max_hr: int, total_dist_km: float,
             osc_segments = _build_segments_from_boundaries(osc_boundaries, points, max_hr)
             if len(osc_segments) > 2:
                 var_count = compute_km_variability(trackpoints, total_dist_km)
-                osc_segments = _merge_similar_segments(osc_segments, threshold=1.0, max_hr=max_hr)
+                osc_segments = _merge_similar_segments(osc_segments, threshold=pace_gap * 0.5, max_hr=max_hr)
                 logger.info("Oscillation found %d cycles — interval structure, %d segments",
                             len(osc_phases), len(osc_segments))
                 return osc_segments, var_count

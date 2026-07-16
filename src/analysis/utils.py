@@ -38,6 +38,7 @@ class AnalysisResult(TypedDict, total=False):
     trackpoints_json: list[dict]
     cleaning_log: list[dict] | None
     suspect_flags: list[str] | None
+    avg_pace: float | None
 
 _tf = TimezoneFinder()
 

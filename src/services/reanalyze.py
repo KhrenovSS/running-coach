@@ -91,6 +91,7 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
     session.elevation_loss = result.get('elevation_loss')
     session.avg_temperature = result.get('avg_temperature')
     session.weather_code = result.get('weather_code')
+    session.avg_pace = result.get('avg_pace')
 
     db.commit()
     logger.info("Reanalyze: тренировка %d пересчитана → %s, %d сегментов (Training %d reanalyzed → %s, %d segments)",

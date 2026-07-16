@@ -204,6 +204,7 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
         'avg_cadence': avg_cadence,
         'timezone': tz_name,
         'trackpoints_json': serialize_trackpoints(trackpoints),
+        'avg_pace': round(total_duration_min / total_dist_km, 2) if total_dist_km > 0 else None,
     }
 
     if cleaning_log:
@@ -234,6 +235,7 @@ def _empty_result(start_time_utc: datetime, cleaning_log: list) -> AnalysisResul
         'avg_cadence': None,
         'timezone': None,
         'cleaning_log': cleaning_log,
+        'avg_pace': None,
     }
 
 

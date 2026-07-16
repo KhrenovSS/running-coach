@@ -1,7 +1,10 @@
-# Фабрики синтетических трекпоинтов для тестов
-# Synthetic trackpoint factories for analysis tests
+# Фабрики синтетических трекпоинтов и ORM-объектов для тестов
+# Synthetic trackpoint and ORM object factories for tests
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date as date_type
+
+from src.domain.models.base import utcnow
+from src.domain.models import User, DailyMetrics, TrainingSession, TrainingFeedback
 
 
 def _make_tp(time, dist, hr, alt=None, lat=55.75, lon=37.62, cad=None):
@@ -230,3 +233,90 @@ def build_recovery_trackpoints(**kwargs):
 
 def build_trackpoints_with_gps_errors(**kwargs):
     return build_trackpoints(training_type='gps_errors', **kwargs)
+
+
+# --- ORM фабрики для тестов модуля аналитики ---
+
+from datetime import date as date_type
+def make_user(db, chat_id: int = 12345, email: str = "test@example.com",
+              max_hr: int = 177, timezone: str = "Europe/Moscow") -> User:
+    """Создать тестового пользователя (Create test user)."""
+    user = User(telegram_chat_id=chat_id, email=email,
+                max_hr=max_hr, timezone=timezone, weight_kg=75.0)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def build_daily_metrics(db, user_id: int, metric_date: date_type | None = None,
+                         avg_sleep_hrv: float | None = 70.0,
+                         sleep_hrv_baseline: float | None = 65.0,
+                         sleep_hrv_sd: float | None = 10.0,
+                         rhr: int | None = 55,
+                         tired_rate: int | None = 0,
+                         training_load: float | None = 100.0,
+                         training_load_ratio: float | None = 1.0,
+                         performance: int | None = 0,
+                         recovery_pct: int | None = 50,
+                         ati: float | None = 100.0,
+                         cti: float | None = 80.0,
+                         vo2max: float | None = 50.0,
+                         lthr: int | None = 170,
+                         **kwargs) -> DailyMetrics:
+    """Создать тестовую запись DailyMetrics (Create test daily metrics)."""
+    if metric_date is None:
+        metric_date = date_type.today()
+    dm = DailyMetrics(
+        user_id=user_id, date=metric_date,
+        avg_sleep_hrv=avg_sleep_hrv, sleep_hrv_baseline=sleep_hrv_baseline,
+        sleep_hrv_sd=sleep_hrv_sd, rhr=rhr, tired_rate=tired_rate,
+        training_load=training_load, training_load_ratio=training_load_ratio,
+        performance=performance, recovery_pct=recovery_pct,
+        ati=ati, cti=cti, vo2max=vo2max, lthr=lthr,
+        **kwargs,
+    )
+    db.add(dm)
+    db.commit()
+    db.refresh(dm)
+    return dm
+
+
+def build_training_session(db, user_id: int,
+                            total_distance_km: float = 10.0,
+                            duration_minutes: float = 50.0,
+                            training_type: str = 'tempo',
+                            avg_heart_rate: int = 150,
+                            max_heart_rate: int = 175,
+                            training_effect: float | None = 3.0,
+                            segments_json: list | None = None,
+                            **kwargs) -> TrainingSession:
+    """Создать тестовую тренировку (Create test training session)."""
+    pace = round(duration_minutes / total_distance_km, 2) if total_distance_km > 0 else None
+    s = TrainingSession(
+        user_id=user_id,
+        begin_ts=utcnow(),
+        total_distance_km=total_distance_km,
+        duration_minutes=duration_minutes,
+        training_type=training_type,
+        avg_heart_rate=avg_heart_rate,
+        max_heart_rate=max_heart_rate,
+        training_effect=training_effect,
+        avg_pace=pace,
+        segments_json=segments_json or [],
+        **kwargs,
+    )
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    return s
+
+
+def build_training_feedback(db, session_id: int, user_id: int,
+                             rating: int = 5) -> TrainingFeedback:
+    """Создать тестовую оценку тренировки (Create test training feedback)."""
+    fb = TrainingFeedback(session_id=session_id, user_id=user_id, rating=rating)
+    db.add(fb)
+    db.commit()
+    db.refresh(fb)
+    return fb

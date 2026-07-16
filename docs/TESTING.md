@@ -2,29 +2,31 @@
 
 > Как писать и запускать тесты в running-coach.
 
-## Три уровня тестов
+## Структура тестов
 
 ```
 tests/
-├── conftest.py              # Фикстуры pytest
-├── unit/                    # Быстрые, с моками
-│   ├── test_parsers.py
-│   ├── test_classification.py
-│   ├── test_zones.py
-│   └── test_watch_client.py
-├── integration/             # С реальной БД
-│   ├── test_api_training.py
-│   ├── test_api_settings.py
-│   └── test_coros_sync.py
-└── e2e/                     # Полные сценарии (Playwright/Selenium)
-    └── test_upload_flow.py
+├── conftest.py              # Фикстуры pytest (SessionLocal, create/drop tables)
+├── helpers.py               # builder-функции (build_trackpoints)
+├── fixtures/                # TCX/FIT файлы для тестов
+│   ├── tempo_run.tcx
+│   └── short_walk.tcx
+├── test_gps.py              # clean_trackpoints, haversine_m
+├── test_classify.py         # classify_training
+├── test_hr_zones.py         # get_zone, get_band
+├── test_oscillation.py      # detect_pace_oscillations, compute_hr_lag_correlation
+├── test_segment.py          # segment_by_pace, km_segment_fallback
+├── test_stats.py            # calc_stats, fmt_duration, zone_ranges
+├── test_health.py           # /health/ endpoint
+├── test_tcx_parser.py       # парсинг TCX
+└── test_fit_parser.py       # парсинг FIT
 ```
 
-| Тип | Скорость | БД | HTTP | Браузер |
-|-----|----------|----|----|---------|
-| Unit | быстро (< 1 сек) | мок | мок | нет |
-| Integration | средне (5-30 сек) | in-memory SQLite | реальный FastAPI | нет |
-| E2E | медленно | SQLite | реальный | да |
+| Тип | Скорость | БД |
+|-----|----------|----|
+| Unit (анализ) | быстро (< 1 сек) | нет (чистые функции) |
+| Unit (парсеры) | быстро (< 1 сек) | нет |
+| Integration (health) | средне (5-30 сек) | реальный PostgreSQL (SessionLocal) |
 
 ## Запуск тестов
 
@@ -32,20 +34,14 @@ tests/
 # Все тесты
 pytest
 
-# Unit только
-pytest tests/unit/ -v
-
-# Integration только
-pytest tests/integration/ -v
+# С именем файла
+pytest tests/test_classify.py -v
 
 # С coverage
 pytest --cov=src --cov-report=html
 
-# Конкретный файл
-pytest tests/unit/test_classification.py -v
-
 # Конкретный тест
-pytest tests/unit/test_classification.py::TestTrainingClassification::test_interval_detection -v
+pytest tests/test_classify.py::test_interval_detection -v
 ```
 
 ## Конфигурация
@@ -61,173 +57,124 @@ addopts = -v --tb=short
 asyncio_mode = auto
 ```
 
-## Unit тесты
-
-### Пример: классификация тренировок
-
-```python
-# tests/unit/test_classification.py
-import pytest
-from src.services.training.classification import classify_training
-
-
-class TestTrainingClassification:
-    """Тесты классификации тренировок (Training classification tests)"""
-    
-    def test_interval_detection(self):
-        """3+ вариативных км → Интервальная"""
-        km_variability = [True, True, True, False]
-        result = classify_training(km_variability)
-        assert result == "interval"
-    
-    def test_tempo_detection(self):
-        """1-2 вариативных км → Темповая"""
-        km_variability = [True, False, False]
-        result = classify_training(km_variability)
-        assert result == "tempo"
-    
-    def test_long_recovery_detection(self):
-        """0 вариативных км → Long/Recovery"""
-        km_variability = [False, False, False]
-        result = classify_training(km_variability)
-        assert result in ("long", "recovery")
-    
-    def test_empty_input(self):
-        """Пустой список → Recovery"""
-        result = classify_training([])
-        assert result == "recovery"
-```
-
-### Пример: пульсовые зоны
-
-```python
-# tests/unit/test_zones.py
-import pytest
-from src.config import calculate_hr_zones, get_hr_zone
-
-
-class TestHRZones:
-    """Тесты пульсовых зон (Heart rate zones tests)"""
-    
-    def test_calculate_zones_for_max_hr_177(self):
-        """Расчёт зон для max_hr=177"""
-        zones = calculate_hr_zones(177)
-        assert zones["Z1"] == (106, 123)
-        assert zones["Z5"] == (164, 177)
-    
-    def test_get_hr_zone(self):
-        """Определение зоны по HR"""
-        assert get_hr_zone(150, 177) == "Z4"
-        assert get_hr_zone(130, 177) == "Z2"
-        assert get_hr_zone(90, 177) == "below"
-```
-
-## Integration тесты
-
-### Фикстуры
+## Фикстуры (conftest.py)
 
 ```python
 # tests/conftest.py
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-from main import app
-from src.models import Base, get_db
-
-# In-memory SQLite для тестов
-TEST_DATABASE_URL = "sqlite:///:memory:"
-engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+from src.models import Base, SessionLocal, get_engine
 
 
-def override_get_db():
-    """Подмена get_db для тестов (Override get_db for tests)"""
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+@pytest.fixture(scope="session", autouse=True)
+def setup_db():
+    """Создать таблицы один раз на сессию (Create tables once per session)"""
+    Base.metadata.create_all(bind=get_engine())
+    yield
+    Base.metadata.drop_all(bind=get_engine())
 
 
 @pytest.fixture(scope="function")
 def db_session():
-    """Свежая БД для каждого теста (Fresh DB for each test)"""
-    Base.metadata.create_all(bind=engine)
-    db = TestingSessionLocal()
-    yield db
-    db.close()
-    Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture(scope="function")
-def client(db_session):
-    """TestClient с тестовой БД (TestClient with test DB)"""
-    app.dependency_overrides[get_db] = override_get_db
-    with TestClient(app) as c:
-        yield c
-    app.dependency_overrides.clear()
+    """Свежая сессия для каждого теста (Fresh session for each test)"""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 ```
 
-### Пример integration теста
+## Примеры тестов
+
+### Классификация тренировок
 
 ```python
-# tests/integration/test_api_training.py
-import io
+# tests/test_classify.py
+from src.analysis.classify import classify_training
 
-class TestTrainingUpload:
-    """Integration tests for training upload"""
-    
-    def test_upload_valid_tcx(self, client):
-        """Загрузка валидного TCX"""
-        file = io.BytesIO(b'<TrainingCenterDatabase>...</TrainingCenterDatabase>')
-        file.name = "test.tcx"
-        
-        response = client.post(
-            "/training/upload",
-            files={"file": ("test.tcx", file, "application/tcx+xml")},
-        )
-        
-        assert response.status_code == 201
-        assert response.json()["status"] == "ok"
-    
-    def test_upload_invalid_format(self, client):
-        """Отклонение неподдерживаемого формата"""
-        file = io.BytesIO(b"not a training file")
-        file.name = "test.txt"
-        
-        response = client.post(
-            "/training/upload",
-            files={"file": ("test.txt", file, "text/plain")},
-        )
-        
-        assert response.status_code == 422
+
+def test_interval_oscillation_count():
+    """oscillation_count >= min_oscillations → interval"""
+    time_in_zone = {1: 0, 2: 10, 3: 10, 4: 5, 5: 0}
+    result, seg_count = classify_training(
+        var_count=0, time_in_zone=time_in_zone,
+        total_duration_min=25, max_hr=177,
+        z4_plus_segments=[], avg_hr=155,
+        oscillation_count=3, hr_correlated=True,
+        segments_len=5,
+    )
+    assert result == "interval"
+
+
+def test_tempo_no_oscillations():
+    """var_count >= 1, oscillation_count=0 → tempo"""
+    time_in_zone = {1: 0, 2: 20, 3: 5, 4: 0, 5: 0}
+    result, seg_count = classify_training(
+        var_count=1, time_in_zone=time_in_zone,
+        total_duration_min=25, max_hr=177,
+        z4_plus_segments=[], avg_hr=140,
+        oscillation_count=0, hr_correlated=False,
+        segments_len=5,
+    )
+    assert result == "tempo"
+```
+
+### Пульсовые зоны
+
+```python
+# tests/test_hr_zones.py
+from src.analysis.hr_zones import get_zone, get_band
+
+
+def test_get_zone_max_hr_177():
+    """Зоны для max_hr=177"""
+    assert get_zone(150, 177) == 4
+    assert get_zone(130, 177) == 2
+    assert get_zone(90, 177) == 1
+
+
+def test_get_zone_zero_max_hr():
+    """max_hr=0 не вызывает ZeroDivisionError"""
+    assert get_zone(100, 0) == 1
+```
+
+### Сегментация
+
+```python
+# tests/test_segment.py
+from src.analysis.segment_km import km_segment_fallback
+
+
+def test_km_fallback_short():
+    """Км-fallback для короткой тренировки"""
+    from tests.helpers import build_trackpoints
+    tps = build_trackpoints(distances=[500, 1000, 1500], times=[120, 240, 360])
+    segments, var_count = km_segment_fallback(tps, 177, 1.5)
+    assert len(segments) >= 1
+    assert var_count >= 0
 ```
 
 ## Что покрывать тестами
 
 ### Обязательно
 
-- Бизнес-логика (классификация, сегментация, зоны)
+- Бизнес-логика (классификация, сегментация, зоны, осцилляции)
 - Парсеры (TCX, FIT)
-- API endpoints (happy path + ошибки)
-- Работа с БД (CRUD)
+- GPS очистка (clean_trackpoints, haversine)
+- Edge cases (пустые данные, нули, None)
 
 ### Хорошая практика
 
-- Edge cases (пустые данные, нули, None)
-- Error paths (404, 400, 500)
-- Граничные значения (max_hr=100, max_hr=220)
+- Edge cases (max_hr=0, distance=0)
+- Error paths
+- Граничные значения
 
 ## Чеклист теста
 
 - [ ] Имя теста описывает поведение
 - [ ] Тест проверяет одну вещь
-- [ ] Дано/когда/тогда структура понятна
-- [ ] Нет зависимости от внешних сервисов в unit-тестах
-- [ ] Интеграционные тесты используют `TestClient` и in-memory БД
+- [ ] Нет зависимости от внешних сервисов
+- [ ] Интеграционные тесты используют `TestClient` и `SessionLocal`
 
 ---
 
-**Последнее обновление:** 30.06.2026
+**Последнее обновление:** 16.07.2026

@@ -44,7 +44,7 @@ async def save_dashboard_data(client: BaseWatchClient, db, user_id: int, brand: 
                 dm.sleep_hrv_sd = latest.get('sleepHrvSd')
         intervals = sleep_data.get('lastSleepHrvIntervalList')
         if intervals:
-            dm.sleep_hrv_interval_list = json.dumps(intervals)
+            dm.sleep_hrv_interval_list = intervals
         if not dm.source_brand:
             dm.source_brand = brand
         db.commit()

@@ -162,7 +162,7 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
     latest_rm = recovery_metrics[0] if recovery_metrics else None
     if latest_rm:
         _, latest_hrv = hrv_status(latest_rm.avg_sleep_hrv, latest_rm.sleep_hrv_baseline, latest_rm.sleep_hrv_sd,
-            json.loads(latest_rm.sleep_hrv_interval_list) if latest_rm.sleep_hrv_interval_list else None)
+            latest_rm.sleep_hrv_interval_list)
         latest_rhr = str(latest_rm.rhr) if latest_rm.rhr is not None else ''
         latest_tired = tired_label(latest_rm.tired_rate)
         latest_perf = readiness_label(latest_rm.performance, latest_rm.recovery_pct, latest_rm.training_load_ratio)

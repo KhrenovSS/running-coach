@@ -24,7 +24,7 @@
 | 17 | [Фикс] | Добавить `docs/ARCHITECTURE.md`: описание `src/analysis/` пакета (oscillation, classify, segment, hr_zones, utils) и пайплайна `process_trackpoints()`. | `docs/ARCHITECTURE.md` | ✅ Sprint 19 (DOC-01) |
 | 18 | [Фикс] | Добавить unit-тесты для `src/analysis/oscillation.py`: `detect_pace_oscillations` + `compute_hr_lag_correlation` на синтетических данных. | `tests/` | ✅ Sprint 20 (TST-07) |
 | 19 | [Фикс] | Обновить `docs/ARCHITECTURE.md`: описание нового алгоритма детекции интервалов (base_pace = средний темп, work-фаза = темп ≥ порог быстрее base_pace). | `docs/ARCHITECTURE.md` | ✅ Sprint 19 (DOC-01) |
-| 20 | [Фикс] | Chart.js: темп на графике показывать в формате М:СС (мин:сек) вместо десятичных минут. Например 5.71 → 5:43. Добавить tooltip/label callback + форматирование оси Y. Пульс округлить до целого. | `src/web/templates/session.html:96-115` | ⬜ Sprint 12b |
+| 20 | [Фикс] | Chart.js: темп на графике показывать в формате М:СС (мин:сек) вместо десятичных минут. Например 5.71 → 5:43. Добавить tooltip/label callback + форматирование оси Y. Пульс округлить до целого. | `src/web/templates/session.html:96-115` | ⬜ Sprint 20c (PREP-17) |
 | 21 | [Фикс] | Weight save через Telegram: "Ошибка при сохранении веса". Decimal→Float, tz-aware, отсутствие traceback, отсутствие метода `log_telegram_received()` в AuditService, `run_once` c `dt_time` вместо `timedelta`. | `src/telegram/handlers/weight.py:89-103`, `src/services/audit.py`, `src/telegram/main.py:77` | ✅ Выполнено |
 | 139 | [Фикс] | CRC-ошибка в uploads.py вызывает 500 вместо информирования пользователя + добавление в parse_errors. Нужен try-except вокруг parse_fit/parse_tcx. | `src/web/routes/uploads.py:55-64` | ✅ Выполнено |
 
@@ -267,6 +267,8 @@
 | 161 | [Bug] | **Неверная сегментация — проверяется общий разброс темпа, а не разница между соседними отрезками** — правило: по умолчанию 1км отрезки, отрезки другого размера только для интервалов, соседние отрезки должны отличаться > 1 мин/км. Исправлено: oscillation как основной детектор + _merge_similar_segments для слияния похожих отрезков. | `src/analysis/segment.py` | ✅ Fixed: oscillation + merge_similar + пересчёт 16.07.2026 |
 | 162 | [Bug] | **`classify_training` не учитывает финальные сегменты** — `oscillation_count` и `var_count` считаются из сырых трекпоинтов, но сегменты могут быть слиты `_merge_similar_segments` в 1. Классификация возвращает `interval` (oscillation_count ≥ 3), хотя реальных сегментов нет. | `src/analysis/classify.py:46-50`, `src/analysis/__init__.py:135-141` | ✅ Fixed: segments_len < 3 → не interval + пересчёт 16.07.2026 |
 | 163 | [Bug] | **Неинтервальные тренировки показывают 1 сегмент вместо км-блоков** — `segment_by_pace()` возвращает 1 сегмент после слияния, `is_km_segmentation()` не ловит единый 5.6км сегмент. Для tempo/long/recovery всегда должны быть км-блоки, oscillation-сегменты только для interval. | `src/analysis/__init__.py:104-142` | ✅ Fixed: km_fallback для не-interval + пересчёт 16.07.2026 |
+| 164 | [Docs] | **Документация не соответствовала проекту** — TESTING.md устарел (структура, импорты, conftest), API_ROUTES_GUIDE.md ссылался на несуществующие `src/schemas/`, ARCHITECTURE.md неправильно размещал main.py в дереве, AGENTS.md упоминал несуществующие файлы как существующие, CHECKLIST_API.md ссылался на старый CONFIG. | `docs/*`, `AGENTS.md` | ✅ Fixed: все docs приведены в соответствие 16.07.2026 |
+| 165 | [Bug] | **`_merge_similar_segments` использует `<= threshold` вместо `< threshold`** — сегменты с разницей темпа ровно 1.0 мин/км (work=4.0, recovery=5.0) сливаются в один. Интервальная тренировка с `pace_gap=1.0` теряет все work/recovery фазы, остаётся 2-3 сегмента вместо 11+. `classify_training()` не видит интервалов и возвращает `tempo`. | `src/analysis/segment.py:252` | ✅ Fixed 16.07.2026 |
 ---
 
 ## 🔴 P0 — Подготовка к модулю аналитики (аудит 14.07.2026 — Sprint 20c)
@@ -301,6 +303,6 @@
 
 ---
 
-*Обновлён: 16.07.2026 — #153-163, #154-157, #159-163 fixed*
+*Обновлён: 16.07.2026 — #153-165*
 
 ---

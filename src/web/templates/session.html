@@ -75,6 +75,11 @@
         <canvas id='hrPaceChart' height='100'></canvas>
         <script>
         const chartData = {{ chart_json|safe }};
+        function formatPace(pace) {
+            const m = Math.floor(pace);
+            const s = Math.round((pace - m) * 60);
+            return m + ':' + String(s).padStart(2, '0');
+        }
         if (chartData.length > 0) {
             const step = Math.max(1, Math.floor(chartData.length / 200));
             const data = chartData.filter((_, i) => i % step === 0);
@@ -105,10 +110,31 @@
                 options: {
                     responsive: true,
                     interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(ctx) {
+                                    if (ctx.datasetIndex === 1) {
+                                        return 'Темп: ' + formatPace(ctx.parsed.y) + ' мин/км';
+                                    }
+                                    return 'Пульс: ' + Math.round(ctx.parsed.y) + ' уд/мин';
+                                }
+                            }
+                        }
+                    },
                     scales: {
                         x: { type: 'linear', title: { display: true, text: 'Дистанция, км' }, ticks: { stepSize: 0.25, autoSkip: false } },
-                        y: { title: { display: true, text: 'Пульс, уд/мин' }, position: 'left' },
-                        y1: { title: { display: true, text: 'Темп, мин/км' }, position: 'right', reverse: true },
+                        y: {
+                            title: { display: true, text: 'Пульс, уд/мин' },
+                            position: 'left',
+                            ticks: { callback: function(value) { return Math.round(value); } }
+                        },
+                        y1: {
+                            title: { display: true, text: 'Темп, мин/км' },
+                            position: 'right',
+                            reverse: true,
+                            ticks: { callback: function(value) { return formatPace(value); } }
+                        },
                     }
                 }
             });

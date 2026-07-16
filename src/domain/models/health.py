@@ -1,6 +1,6 @@
 # Модели метрик здоровья и веса (Health metrics and weight models)
 
-from sqlalchemy import Column, Integer, Float, String, DateTime, Date, JSON, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, Float, String, DateTime, Date, JSON, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
 
 from src.domain.models.base import Base, utcnow
@@ -10,6 +10,7 @@ class DailyMetrics(Base):
     __tablename__ = 'daily_metrics'
     __table_args__ = (
         UniqueConstraint('user_id', 'date', name='uq_user_date'),
+        Index('ix_daily_metrics_date', 'date'),
     )
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
@@ -42,6 +43,9 @@ class DailyMetrics(Base):
 
 class WeightMeasurement(Base):
     __tablename__ = 'weight_measurements'
+    __table_args__ = (
+        Index('ix_weight_user_measured', 'user_id', 'measured_at'),
+    )
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
     weight_kg = Column(Float, nullable=False)

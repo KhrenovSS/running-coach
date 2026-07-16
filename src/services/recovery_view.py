@@ -73,3 +73,84 @@ def load_label(training_load: float | None) -> str:
         return 'Средняя'
     else:
         return 'Высокая'
+
+
+# --- Структурированные функции для модуля аналитики ---
+
+def hrv_status_structured(hrv: float | None, baseline: float | None, sd: float | None,
+                           intervals: list[float] | None = None) -> dict:
+    """Структурированный HRV-статус: status + value + confidence + evidence.
+    (Structured HRV status for analytics module.)
+    """
+    if hrv is None:
+        return {'status': 'unknown', 'value': None, 'confidence': 0.0, 'evidence': 'no HRV data'}
+    status, _ = hrv_status(hrv, baseline, sd, intervals)
+    confidence = 0.9 if intervals else (0.7 if baseline else 0.3)
+    return {
+        'status': status or 'unknown',
+        'value': round(hrv, 1),
+        'confidence': confidence,
+        'evidence': f'HRV={hrv}, baseline={baseline}, sd={sd}',
+    }
+
+
+def load_status_structured(training_load: float | None, cti: float | None = None,
+                            ati: float | None = None) -> dict:
+    """Структурированный статус нагрузки: status + value + confidence + evidence.
+    (Structured load status for analytics module.)
+    """
+    if training_load is None and cti is None:
+        return {'status': 'unknown', 'value': None, 'confidence': 0.0, 'evidence': 'no load data'}
+    if cti is not None and ati is not None:
+        ratio = ati / cti if cti > 0 else 0
+        if ratio > 1.5:
+            load_status = 'high_anaerobic'
+            confidence = 0.8
+        elif ratio > 1.0:
+            load_status = 'mixed'
+            confidence = 0.7
+        else:
+            load_status = 'aerobic'
+            confidence = 0.7
+        evidence = f'ATI={ati}, CTI={cti}, ratio={ratio:.2f}'
+        value = round(ratio, 2)
+    else:
+        value = training_load
+        load_status = 'unknown'
+        confidence = 0.3
+        evidence = f'training_load={training_load}'
+    return {
+        'status': load_status,
+        'value': value,
+        'confidence': confidence,
+        'evidence': evidence,
+    }
+
+
+def rhr_anomaly(rhr: int | None, baseline_rhr: int | None = None) -> dict:
+    """Детекция аномалии пульса покоя: +5 повышенный, +10 критический, -3 низкий.
+    (RHR anomaly detection based on coros_health_metrics.md §6.)
+    """
+    if rhr is None:
+        return {'status': 'unknown', 'value': None, 'confidence': 0.0, 'evidence': 'no RHR data'}
+    if baseline_rhr is None:
+        return {'status': 'normal', 'value': rhr, 'confidence': 0.3, 'evidence': 'no baseline'}
+    diff = rhr - baseline_rhr
+    if diff >= 10:
+        status = 'critical_elevated'
+        confidence = 0.9
+    elif diff >= 5:
+        status = 'elevated'
+        confidence = 0.8
+    elif diff <= -3:
+        status = 'low'
+        confidence = 0.7
+    else:
+        status = 'normal'
+        confidence = 0.8
+    return {
+        'status': status,
+        'value': rhr,
+        'confidence': confidence,
+        'evidence': f'RHR={rhr}, baseline={baseline_rhr}, diff={diff:+d}',
+    }
