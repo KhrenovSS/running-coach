@@ -2,6 +2,18 @@
 
 All notable changes to this project are tracked here.
 
+## [19.07.2026] — Sprint 23: DB Safety — tests never touch production data
+
+### Critical bug fix
+- **tests/conftest.py**: `os.environ.setdefault("DATABASE_URL", ...)` → `os.environ["DATABASE_URL"] = "sqlite:///:memory:"`. `setdefault` does NOT override already-set env vars — in Docker, `DATABASE_URL` was already set to PostgreSQL, so tests ran against production DB. Removed `drop_all` from autouse fixture (SQLite in-memory cleans up automatically).
+- **src/domain/models/base.py**: `DATABASE_URL = os.getenv(...)` module-level capture → `_get_database_url()` function that reads `os.environ` at call time. Engine is still cached but now always reads the correct env var. Removed dead `DATABASE_URL` module variable.
+- **tests/test_health.py**: removed redundant `os.environ.setdefault("DATABASE_URL")` — conftest.py handles it.
+
+### Safety documentation
+- **AGENTS.md**: added DB SAFETY rule (#8): permanent prohibition of `setdefault` for DATABASE_URL, `drop_all` in autouse fixtures, mandatory conftest override before src imports, pre-change checklist.
+- **src/startup.py**: added safety warning header — NEVER add drop_all/DELETE/TRUNCATE here.
+- **src/domain/models/base.py**: added safety comments about module-level URL capture risk.
+
 ## [19.07.2026] — Sprint 22: Fix classification — no more false intervals for monotonous runs
 
 ### Analysis — classification fix

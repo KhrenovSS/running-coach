@@ -1,4 +1,12 @@
 # Фабрика приложения и startup-событие (App factory and startup event)
+#
+# !! DB SAFETY !!
+# This file runs on EVERY app restart:
+# - init_db() creates tables (safe, additive only)
+# - Alembic upgrade head runs migrations (safe for upgrades)
+# - Creates admin user if missing (safe, additive only)
+# NEVER add drop_all, DELETE, or TRUNCATE here.
+# User data (trainings, credentials, settings) must survive restarts.
 import os
 from fastapi import FastAPI
 from sqlalchemy import text

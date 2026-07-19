@@ -1,7 +1,9 @@
 # Тесты health-check эндпоинта (Health check endpoint tests)
+#
+# DATABASE_URL is set by conftest.py BEFORE any src.* import.
+# Do NOT add os.environ.setdefault here — it won't override.
 
 import os
-os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest")
 
 from fastapi.testclient import TestClient

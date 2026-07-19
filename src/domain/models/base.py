@@ -18,20 +18,23 @@ def utcnow() -> datetime:
 Base = declarative_base()
 
 
-# Определение пути к БД и создание подключения (Database path and connection setup)
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise ValueError(
-        "DATABASE_URL environment variable is required. "
-        "Set it to a PostgreSQL connection string, e.g. "
-        "postgresql://running_coach:PASSWORD@localhost:5432/running_coach"
-    )
-
-
-# Lazy engine creation — engine is built on first access, not at module import time.
-# This allows tests to override DATABASE_URL before any code calls get_db()/init_db().
+# DB SAFETY: get_engine() reads DATABASE_URL from os.environ at call time,
+# NOT from a module-level variable. This ensures tests that override the env var
+# before any src.* import always get the correct engine.
 _engine = None
 _engine_lock = threading.Lock()
+
+
+def _get_database_url() -> str:
+    """Read DATABASE_URL from os.environ at call time (safe for test overrides)."""
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        raise ValueError(
+            "DATABASE_URL environment variable is required. "
+            "Set it to a PostgreSQL connection string, e.g. "
+            "postgresql://running_coach:PASSWORD@localhost:5432/running_coach"
+        )
+    return url
 
 
 def get_engine():
@@ -41,21 +44,22 @@ def get_engine():
     with _engine_lock:
         if _engine is not None:
             return _engine
-        if DATABASE_URL.startswith("postgresql"):
+        db_url = _get_database_url()
+        if db_url.startswith("postgresql"):
             _engine = create_engine(
-                DATABASE_URL,
+                db_url,
                 pool_pre_ping=True,
                 pool_size=10,
                 max_overflow=20,
             )
-        elif DATABASE_URL.startswith("sqlite"):
+        elif db_url.startswith("sqlite"):
             _engine = create_engine(
-                DATABASE_URL,
+                db_url,
                 connect_args={"check_same_thread": False, "timeout": 30},
                 pool_pre_ping=True,
             )
         else:
-            raise ValueError(f"Unsupported DATABASE_URL scheme: {DATABASE_URL.split(':')[0]}")
+            raise ValueError(f"Unsupported DATABASE_URL scheme: {db_url.split(':')[0]}")
     return _engine
 
 
