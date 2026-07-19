@@ -2,6 +2,28 @@
 
 All notable changes to this project are tracked here.
 
+## [19.07.2026] — Sprint 24: Data Protection — trainings survive every deploy
+
+### Backup & deploy safety
+- **bin/backup_db.sh** (new): `pg_dump` from db container into `backups/YYYY-MM-DD_HH-MMSS.sql.gz`, auto-rotation keeps last 7 backups. Run before every deploy.
+- **bin/docker.sh**: blocks `docker compose down -v` / `--volumes` unless user types `CONFIRM`.
+- **README.md**: removed dangerous "Очистка БД" section that contained `docker volume rm`. Replaced with safety warning.
+
+### Delete-me confirmation
+- **src/telegram/handlers/account.py**: `/delete_me` now shows warning + requires `/delete_me_confirm` within 5 minutes. No more instant data destruction.
+- **src/telegram/state.py**: added `_pending_deletion` dict with timeout tracking.
+- **src/telegram/main.py**: registered `/delete_me_confirm` handler.
+
+### FK safety
+- **src/domain/models/training.py**: `TrainingSession.user_id` FK changed from `ON DELETE CASCADE` to `ON DELETE RESTRICT`. Deleting a User no longer cascade-deletes training sessions.
+- **alembic/versions/i2j3k4l5m6n7**: migration to apply FK change.
+
+### Startup safety
+- **src/startup.py**: after `init_db()`, checks user count. If 0 → WARNING log "possible volume loss".
+
+### Documentation
+- **AGENTS.md**: rule #9 — BACKUP BEFORE DEPLOY.
+
 ## [19.07.2026] — Sprint 23: DB Safety — tests never touch production data
 
 ### Critical bug fix

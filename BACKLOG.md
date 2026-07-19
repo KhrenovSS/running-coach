@@ -374,16 +374,30 @@
 
 | # | Тег | Описание | Файл / Источник | Статус |
 |---|-----|----------|-----------------|--------|
-| 202 | [Bug] | **`_adaptive_pace_gap` схлопывается до 0.3** — для монотонных тренировок `data_gap < 0.5`, adaptive gap = 0.3 → гиперчувствительный детектор осцилляций. Исправление: `data_gap < MIN_EFFECTIVE_PACE_GAP` → вернуть `user_gap`. | `src/analysis/oscillation.py:37-49` | ⬜ Sprint 22 |
-| 203 | [Bug] | **`_calc_phase_distance` использует `end_idx-1` вместо `end_idx`** — exclusive boundary, неправильная дистанция фазы. 2 failing tests. | `src/analysis/oscillation.py:12-21` | ⬜ Sprint 22 |
-| 204 | [Bug] | **`classify.py`: нет типа `easy` (Легкая пробежка)** — монотонная Z2 тренировка на 6:00/км классифицируется как `tempo` (catch-all). Нужен отдельный тип для лёгких пробежек. | `src/analysis/classify.py` | ⬜ Sprint 22 |
-| 205 | [Bug] | **`classify.py`: `var_count >= 3 → interval`** — вторичный сигнал не должен один определять интервалы. Нужно требовать oscillation_count ≥ 2 + (hr_correlated OR avg_hr ≥ Z3). | `src/analysis/classify.py:54-58` | ⬜ Sprint 22 |
-| 206 | [Bug] | **`classify.py`: `long` требует ВСЕ Z4+ ≤5мин** — один короткий Z4+ участок на 2.5ч long run ломает классификацию. Исправление: z4_time_pct < 15%. | `src/analysis/classify.py:67-69` | ⬜ Sprint 22 |
-| 207 | [Bug] | **`classify.py`: `recovery` определяется ТОЛЬКО по avg_hr** — темповая Z3 без Z4+ тоже попадает в recovery. Исправление: + z4_time_pct < 5% + avg_pace > 6.0. | `src/analysis/classify.py:70-72` | ⬜ Sprint 22 |
-| 208 | [Arch] | **Magic numbers в classify.py** — пороги 0.75, 0.70, 60%, 15%, 5%, 3мин, 6.0 не в constants.py. Вынести все пороги классификации. | `src/analysis/classify.py`, `src/config/constants.py` | ⬜ Sprint 22 |
-| 209 | [Arch] | **Тип `easy` не добавлен в UI + reanalyze** — при добавлении типа нужно обновить TRAINING_TYPES_RU, session.html dropdown, index.py labels, uploads.py labels, reanalyze.py allowed types. | `src/web/state.py`, `src/web/templates/session.html`, `src/web/routes/pages/index.py`, `src/web/routes/uploads.py`, `src/services/reanalyze.py` | ⬜ Sprint 22 |
-| 210 | [Arch] | **`src/analysis/` отсутствует в Docker rebuild таблице** — AGENTS.md не содержит `src/analysis/` в таблице пересборки. Добавить: `src/analysis/` → `app`. | `AGENTS.md` | ⬜ Sprint 22 |
+| 202 | [Bug] | **`_adaptive_pace_gap` схлопывается до 0.3** — для монотонных тренировок `data_gap < 0.5`, adaptive gap = 0.3 → гиперчувствительный детектор осцилляций. Исправление: `data_gap < MIN_EFFECTIVE_PACE_GAP` → вернуть `user_gap`. | `src/analysis/oscillation.py:37-49` | ✅ Sprint 22 |
+| 203 | [Bug] | **`_calc_phase_distance` использует `end_idx-1` вместо `end_idx`** — exclusive boundary, неправильная дистанция фазы. 2 failing tests. | `src/analysis/oscillation.py:12-21` | ✅ Sprint 22 |
+| 204 | [Bug] | **`classify.py`: нет типа `easy` (Легкая пробежка)** — монотонная Z2 тренировка на 6:00/км классифицируется как `tempo` (catch-all). Нужен отдельный тип для лёгких пробежек. | `src/analysis/classify.py` | ✅ Sprint 22 |
+| 205 | [Bug] | **`classify.py`: `var_count >= 3 → interval`** — вторичный сигнал не должен один определять интервалы. Нужно требовать oscillation_count ≥ 2 + (hr_correlated OR avg_hr ≥ Z3). | `src/analysis/classify.py:54-58` | ✅ Sprint 22 |
+| 206 | [Bug] | **`classify.py`: `long` требует ВСЕ Z4+ ≤5мин** — один короткий Z4+ участок на 2.5ч long run ломает классификацию. Исправление: z4_time_pct < 15%. | `src/analysis/classify.py:67-69` | ✅ Sprint 22 |
+| 207 | [Bug] | **`classify.py`: `recovery` определяется ТОЛЬКО по avg_hr** — темповая Z3 без Z4+ тоже попадает в recovery. Исправление: + z4_time_pct < 5% + avg_pace > 6.0. | `src/analysis/classify.py:70-72` | ✅ Sprint 22 |
+| 208 | [Arch] | **Magic numbers в classify.py** — пороги 0.75, 0.70, 60%, 15%, 5%, 3мин, 6.0 не в constants.py. Вынести все пороги классификации. | `src/analysis/classify.py`, `src/config/constants.py` | ✅ Sprint 22 |
+| 209 | [Arch] | **Тип `easy` не добавлен в UI + reanalyze** — при добавлении типа нужно обновить TRAINING_TYPES_RU, session.html dropdown, index.py labels, uploads.py labels, reanalyze.py allowed types. | `src/web/state.py`, `src/web/templates/session.html`, `src/web/routes/pages/index.py`, `src/web/routes/uploads.py`, `src/services/reanalyze.py` | ✅ Sprint 22 |
+| 210 | [Arch] | **`src/analysis/` отсутствует в Docker rebuild таблице** — AGENTS.md не содержит `src/analysis/` в таблице пересборки. Добавить: `src/analysis/` → `app`. | `AGENTS.md` | ✅ Sprint 22 |
 
 ---
 
-*Обновлён: 19.07.2026 — #177-210, fix classification module (Sprint 22)*
+*Обновлён: 19.07.2026 — #202-210 ✅ Sprint 22; #211-217 Sprint 24 Data Protection*
+
+---
+
+## 🔴 P0 — Data Protection (Sprint 24)
+
+| # | Тег | Описание | Файл / Источник | Статус |
+|---|-----|----------|-----------------|--------|
+| 211 | [Data] | **README.md: секция «Очистка БД»** (стр.674-684) содержит `docker volume rm running-coach_pgdata` —诱导 к потере данных при следовании инструкции. Удалить секцию, заменить на предупреждение. | `README.md:674-684` | ⬜ Sprint 24 |
+| 212 | [Data] | **bin/docker.sh: защита от `-v`** — если передан флаг `-v`/`--volumes`, требовать ввод `CONFIRM` перед выполнением. Иначе — abort. | `bin/docker.sh` | ⬜ Sprint 24 |
+| 213 | [Data] | **bin/backup_db.sh (новый)** — pg_dump из контейнера db в `backups/YYYY-MM-DD_HH-MMSS.sql.gz`, автоматическая ротация (хранить последние 7 бэкапов). | `bin/backup_db.sh` | ⬜ Sprint 24 |
+| 214 | [Data] | **AGENTS.md правило #9: BACKUP BEFORE DEPLOY** — перед любым `docker compose build/up` → сначала `bin/backup_db.sh`. Никогда `down -v`, никогда `volume rm`. | `AGENTS.md` | ⬜ Sprint 24 |
+| 215 | [Data] | **`/delete_me` без подтверждения** — мгновенное удаление ВСЕХ данных. Два шага: `/delete_me` → предупреждение → `/delete_me_confirm`. Таймаут 5 мин. | `src/telegram/handlers/account.py` | ⬜ Sprint 24 |
+| 216 | [Data] | **ON DELETE CASCADE на TrainingSession** — если User удалён, каскадно удаляются ВСЕ тренировки. Заменить на RESTRICT. Миграция Alembic. | `src/domain/models/training.py:17` | ⬜ Sprint 24 |
+| 217 | [Data] | **startup.py: safety check** — после init_db() проверить user_count. Если 0 → WARNING в лог «Database has 0 users — possible volume loss». | `src/startup.py` | ⬜ Sprint 24 |

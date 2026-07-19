@@ -11,7 +11,7 @@ from src.services.audit import AuditService
 from src.config import settings
 from src.telegram.config import NEW_PASSWORD
 from src.telegram.utils import get_user, _get_web_app_url
-from src.telegram.state import clear_awaiting_weight
+from src.telegram.state import clear_awaiting_weight, set_pending_deletion, check_pending_deletion
 from src.utils.logger import get_logger
 
 logger = get_logger("telegram.handlers.account")
@@ -22,6 +22,31 @@ async def cmd_delete_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(chat_id)
     if not user:
         await update.message.reply_text("❌ Нет данных для удаления.")
+        return
+
+    set_pending_deletion(chat_id)
+    await update.message.reply_text(
+        "⚠️ Это удалит ВСЕ ваши данные:\n"
+        "• Тренировки и аналитику\n"
+        "• Привязку часов (Coros)\n"
+        "• Настройки и вес\n\n"
+        "Для подтверждения введите /delete_me_confirm\n"
+        "Отмена через 5 минут."
+    )
+
+
+async def cmd_delete_me_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user = get_user(chat_id)
+    if not user:
+        await update.message.reply_text("❌ Нет данных для удаления.")
+        return
+
+    if not check_pending_deletion(chat_id):
+        await update.message.reply_text(
+            "⏰ Время подтверждения истекло.\n"
+            "Начните заново через /delete_me"
+        )
         return
 
     db = SessionLocal()

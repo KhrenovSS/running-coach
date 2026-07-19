@@ -14,7 +14,7 @@ class TrainingSession(Base):
     )
 
     id = Column(Integer, primary_key=True)                    # ID тренировки (training session ID)
-    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)  # ID владельца (owner ID)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='RESTRICT'), nullable=False, index=True)  # ID владельца (owner ID)
     begin_ts = Column(DateTime(timezone=True), default=utcnow)
     total_distance_km = Column(Float)
     avg_heart_rate = Column(Integer)

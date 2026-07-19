@@ -671,17 +671,13 @@ LOG_FORMAT=text     # или json
 LOGS_DIR=logs
 ```
 
-### Очистка БД (PostgreSQL в Docker)
-```bash
-# Остановить контейнеры
-docker compose down
-
-# Удалить volume с данными PostgreSQL
-sudo docker volume rm running-coach_pgdata
-
-# Запустить заново (БД создастся с нуля)
-docker compose up -d
-```
+> ⚠️ **ВАЖНО: Не удаляйте volume с данными PostgreSQL!**
+> Команды `docker compose down -v` или `docker volume rm running-coach_pgdata` удалят **ВСЕ данные** (тренировки, пользователей, настройки).
+>
+> Безопасные команды:
+> - Перезапуск: `docker compose restart app`
+> - Пересборка: `docker compose build app && docker compose up -d app`
+> - Бэкап перед деплоем: `bin/backup_db.sh`
 
 ---
 

@@ -26,6 +26,20 @@ logger = get_logger("app")
 def on_startup():
     from datetime import datetime
     init_db()
+
+    # DB SAFETY: warn if database has 0 users — possible volume loss
+    try:
+        _db_check = SessionLocal()
+        _user_count = _db_check.execute(text("SELECT count(*) FROM users")).scalar()
+        if _user_count == 0:
+            logger.warning(
+                "⚠️ Database has 0 users — possible volume loss! "
+                "Check pgdata volume. Run bin/backup_db.sh before next deploy."
+            )
+        _db_check.close()
+    except Exception:
+        pass  # table may not exist yet (first boot)
+
     try:
         from alembic.config import Config as AlembicConfig
         from alembic import command
