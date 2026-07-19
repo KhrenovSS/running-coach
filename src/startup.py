@@ -56,12 +56,15 @@ def on_startup():
 
     db = SessionLocal()
     try:
+        # Unconditional sequence sync — protects against PK conflicts after volume loss
+        db.execute(text("SELECT setval('users_id_seq', COALESCE((SELECT MAX(id) FROM users), 0))"))
+        db.commit()
+
         admin_user = db.query(User).filter(User.id == 1).first()
         if not admin_user:
             admin_user = User(id=1, is_active=True, max_hr=settings.default_max_hr)
             db.add(admin_user)
             db.commit()
-            db.execute(text("SELECT setval('users_id_seq', (SELECT MAX(id) FROM users))"))
             db.refresh(admin_user)
 
         settings = get_settings(admin_user.id)

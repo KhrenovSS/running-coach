@@ -42,7 +42,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    email = update.message.text.strip()
+    email = update.message.text.strip().lower()
     chat_id = update.effective_chat.id
 
     if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
@@ -52,7 +52,7 @@ async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     try:
         existing = db.query(User).filter(
-            User.email == email,
+            User.email == email.lower().strip(),
             User.telegram_chat_id.isnot(None),
             User.telegram_chat_id != chat_id,
         ).first()
@@ -63,7 +63,7 @@ async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return ConversationHandler.END
 
-        user = db.query(User).filter(User.email == email).first()
+        user = db.query(User).filter(User.email == email.lower().strip()).first()
         if user:
             if user.password_hash:
                 user.telegram_chat_id = chat_id

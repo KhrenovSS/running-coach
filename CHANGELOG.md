@@ -4,6 +4,10 @@ All notable changes to this project are tracked here.
 
 ## [19.07.2026] — Sprint 24: Data Protection — trainings survive every deploy
 
+### Bugfix: PK sequence out of sync
+- **src/startup.py**: `setval('users_id_seq', ...)` moved **outside** `if not admin_user:` block — now runs unconditionally on every startup. Previously, if admin user already existed, the sequence was never synced → `UniqueViolation` on next registration.
+- **src/telegram/handlers/start.py**: email normalized with `.lower().strip()` to match web auth path (`auth.py:159`). Prevents case-sensitive lookup mismatches.
+
 ### Backup & deploy safety
 - **bin/backup_db.sh** (new): `pg_dump` from db container into `backups/YYYY-MM-DD_HH-MMSS.sql.gz`, auto-rotation keeps last 7 backups. Run before every deploy.
 - **bin/docker.sh**: blocks `docker compose down -v` / `--volumes` unless user types `CONFIRM`.
