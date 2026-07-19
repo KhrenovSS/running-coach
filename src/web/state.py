@@ -27,6 +27,7 @@ def _cleanup_stale_pending():
                 Path(entry['path']).unlink(missing_ok=True)
 
 TRAINING_TYPES_RU = {
+    'easy': 'Лёгкая пробежка',
     'interval': 'Интервальная',
     'long': 'Длинная',
     'recovery': 'Восстановительная',

@@ -366,4 +366,24 @@
 
 ---
 
-*Обновлён: 16.07.2026 — #177-201, full docs/config/code audit*
+## 🔴 P0 — Исправление модуля классификации тренировок (Sprint 22)
+
+### Корневая причина: `_adaptive_pace_gap` схлопывается до 0.3 для монотонных тренировок
+
+Тренировка #30 ("Москва Бег", 8.157 км) классифицирована как `interval` (11 осцилляций), хотя является монотонной. Причина: `data_gap` (p75-p25) ≈ 0.05 для монотонного бега → `effective_gap = max(0.3, min(1.0, 0.05)) = 0.3` → порог 7:12/км → GPS-шум = "work" фазы → 11 ложных осцилляций.
+
+| # | Тег | Описание | Файл / Источник | Статус |
+|---|-----|----------|-----------------|--------|
+| 202 | [Bug] | **`_adaptive_pace_gap` схлопывается до 0.3** — для монотонных тренировок `data_gap < 0.5`, adaptive gap = 0.3 → гиперчувствительный детектор осцилляций. Исправление: `data_gap < MIN_EFFECTIVE_PACE_GAP` → вернуть `user_gap`. | `src/analysis/oscillation.py:37-49` | ⬜ Sprint 22 |
+| 203 | [Bug] | **`_calc_phase_distance` использует `end_idx-1` вместо `end_idx`** — exclusive boundary, неправильная дистанция фазы. 2 failing tests. | `src/analysis/oscillation.py:12-21` | ⬜ Sprint 22 |
+| 204 | [Bug] | **`classify.py`: нет типа `easy` (Легкая пробежка)** — монотонная Z2 тренировка на 6:00/км классифицируется как `tempo` (catch-all). Нужен отдельный тип для лёгких пробежек. | `src/analysis/classify.py` | ⬜ Sprint 22 |
+| 205 | [Bug] | **`classify.py`: `var_count >= 3 → interval`** — вторичный сигнал не должен один определять интервалы. Нужно требовать oscillation_count ≥ 2 + (hr_correlated OR avg_hr ≥ Z3). | `src/analysis/classify.py:54-58` | ⬜ Sprint 22 |
+| 206 | [Bug] | **`classify.py`: `long` требует ВСЕ Z4+ ≤5мин** — один короткий Z4+ участок на 2.5ч long run ломает классификацию. Исправление: z4_time_pct < 15%. | `src/analysis/classify.py:67-69` | ⬜ Sprint 22 |
+| 207 | [Bug] | **`classify.py`: `recovery` определяется ТОЛЬКО по avg_hr** — темповая Z3 без Z4+ тоже попадает в recovery. Исправление: + z4_time_pct < 5% + avg_pace > 6.0. | `src/analysis/classify.py:70-72` | ⬜ Sprint 22 |
+| 208 | [Arch] | **Magic numbers в classify.py** — пороги 0.75, 0.70, 60%, 15%, 5%, 3мин, 6.0 не в constants.py. Вынести все пороги классификации. | `src/analysis/classify.py`, `src/config/constants.py` | ⬜ Sprint 22 |
+| 209 | [Arch] | **Тип `easy` не добавлен в UI + reanalyze** — при добавлении типа нужно обновить TRAINING_TYPES_RU, session.html dropdown, index.py labels, uploads.py labels, reanalyze.py allowed types. | `src/web/state.py`, `src/web/templates/session.html`, `src/web/routes/pages/index.py`, `src/web/routes/uploads.py`, `src/services/reanalyze.py` | ⬜ Sprint 22 |
+| 210 | [Arch] | **`src/analysis/` отсутствует в Docker rebuild таблице** — AGENTS.md не содержит `src/analysis/` в таблице пересборки. Добавить: `src/analysis/` → `app`. | `AGENTS.md` | ⬜ Sprint 22 |
+
+---
+
+*Обновлён: 19.07.2026 — #177-210, fix classification module (Sprint 22)*

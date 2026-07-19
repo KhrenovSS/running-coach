@@ -47,7 +47,8 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
 
     # Получить пороги из настроек пользователя (Get thresholds from user settings)
     pace_gap = user.interval_pace_threshold or 1.0
-    phase = user.interval_min_phase_duration or 15
+    phase = user.interval_min_phase_duration or 60
+    phase_dist_m = user.interval_min_phase_distance_m or 200
     lag = user.interval_hr_lag_sec or 5
     min_osc = user.interval_min_oscillations or 3
 
@@ -60,6 +61,7 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
             min_hr_for_fast_pace=user.min_hr_for_fast_pace or 130,
             pace_gap=pace_gap,
             interval_min_phase_duration=phase,
+            interval_min_phase_distance_m=phase_dist_m,
             interval_hr_lag_sec=lag,
             interval_min_oscillations=min_osc,
         )
@@ -71,7 +73,7 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
         return None
 
     # Применить override (Apply override)
-    if training_type_override and training_type_override in ('interval', 'tempo', 'long', 'recovery'):
+    if training_type_override and training_type_override in ('easy', 'interval', 'tempo', 'long', 'recovery'):
         result['training_type'] = training_type_override
         session.training_type_override = training_type_override
     elif training_type_override == '':

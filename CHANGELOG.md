@@ -2,6 +2,25 @@
 
 All notable changes to this project are tracked here.
 
+## [19.07.2026] — Sprint 22: Fix classification — no more false intervals for monotonous runs
+
+### Analysis — classification fix
+- **src/analysis/classify.py**: переписан с 4 типов на 5 (interval/tempo/long/recovery/easy). Приоритет: interval > long > recovery > easy > tempo. var_count один больше не триггерит interval — нужны oscillations + HR-подтверждение.
+- **src/analysis/oscillation.py**: `_adaptive_pace_gap()` — при data_gap < MIN_EFFECTIVE_PACE_GAP возвращает user_gap вместо схлопывания до 0.3 (фикс ложных осцилляций для монотонных забегов). `_calc_phase_distance()` — исправлена граница `[start:end]` → `[start:end]` (exclusive boundary).
+- **src/analysis/__init__.py**: передаёт `avg_pace` в `classify_training()` для классификации recovery/easy.
+
+### New type: easy (Лёгкая пробежка)
+- **src/config/constants.py**: 7 новых констант (MIN_EFFECTIVE_PACE_GAP=0.5, RECOVERY_MAX_HR_PCT=0.70, EASY_MAX_HR_PCT=0.75, EASY_MIN_Z2_PCT=60.0, RECOVERY_MAX_Z4_PCT=5.0, LONG_MAX_Z4_PCT=15.0, EASY_MAX_Z4_SEGMENT_MIN=3.0)
+- **src/web/state.py**, **src/web/templates/session.html**, **src/web/routes/pages/index.py**, **src/web/routes/uploads.py**, **src/services/reanalyze.py**: добавлен тип 'easy'/'Лёгкая пробежка' во все слои UI + backend
+
+### Tests
+- **tests/test_classify.py**: 18 тестов (было 13) — обновлены под новую 5-type иерархию, добавлены easy-тесты
+- **tests/test_oscillation.py**: обновлены AdaptivePaceGap тесты под новое поведение (MIN_EFFECTIVE_PACE_GAP=0.5)
+- **tests/test_process_trackpoints.py**: исправлены параметры HR (base_hr/work_hr → hr/max_hr), обновлены assertions
+- 135/135 тестов зелёные, Docker rebuild app
+
+---
+
 ## [16.07.2026] — Docs/config/code audit: discrepancies logged and fixed
 
 ### Docs

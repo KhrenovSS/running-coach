@@ -56,7 +56,7 @@ def _save_session_from_data(data: dict, db: Session, current_user: User,
 def _notify_new_session(session: TrainingSession, current_user: User,
                          source: str = "upload", filename: str = "unknown"):
     """Отправить уведомление о новой тренировке в Telegram (Notify Telegram about new training)"""
-    type_labels = {'interval': 'Интервальная', 'tempo': 'Темповая', 'long': 'Длинная', 'recovery': 'Восстановительная'}
+    type_labels = {'easy': 'Лёгкая пробежка', 'interval': 'Интервальная', 'tempo': 'Темповая', 'long': 'Длинная', 'recovery': 'Восстановительная'}
     t_type = type_labels.get(session.training_type, session.training_type or '—')
     telegram_notify(
         user_id=current_user.id,

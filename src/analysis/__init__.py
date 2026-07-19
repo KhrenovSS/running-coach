@@ -26,7 +26,8 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
                           max_hr: int = settings.default_max_hr, max_credible_pace: float = 3.0,
                          max_gps_jump_m: float = 100.0, min_hr_for_fast_pace: int = 130,
                          pace_gap: float = 1.0,
-                         interval_min_phase_duration: int = 15,
+                         interval_min_phase_duration: int = 60,
+                         interval_min_phase_distance_m: int = 200,
                          interval_hr_lag_sec: int = 5,
                          interval_min_oscillations: int = 3) -> AnalysisResult | None:
     """
@@ -119,8 +120,10 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
         if filled_paces:
             smoothed_osc = smooth_paces(filled_paces)
             oscillation_count, _ = detect_pace_oscillations(
-                smoothed_osc, times, pace_gap=pace_gap,
+                smoothed_osc, times, distances=dists,
+                pace_gap=pace_gap,
                 min_phase_duration_sec=interval_min_phase_duration,
+                min_phase_distance_m=interval_min_phase_distance_m,
             )
             _, hr_correlated = compute_hr_lag_correlation(
                 times, filled_paces, hrs, lag_sec=interval_hr_lag_sec,
@@ -140,6 +143,7 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
         hr_correlated=hr_correlated,
         min_oscillations=interval_min_oscillations,
         segments_len=len(segments),
+        avg_pace=round(total_duration_min / total_dist_km, 2) if total_dist_km > 0 else None,
     )
 
     # Для не-интервалов — всегда км-блоки (по умолчанию),

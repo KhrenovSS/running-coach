@@ -18,7 +18,7 @@ class TestProcessTrackpointsInterval:
             base_pace=5.0, work_pace=4.0,
             warmup_km=1.0, cooldown_km=1.0,
             intervals=5, work_dist_m=400, recovery_dist_m=400,
-            base_hr=130, work_hr=165, recovery_hr=140,
+            hr=155, max_hr=172,
         )
 
         result = process_trackpoints(
@@ -71,7 +71,7 @@ class TestProcessTrackpointsRecovery:
     def test_recovery_detected(self):
         """Recovery: короткая, лёгкая, низкий пульс → training_type == 'recovery'"""
         tps = build_recovery_trackpoints(
-            pace=6.5, duration_min=25.0, hr=110, max_hr=177,
+            base_pace=7.0, duration_min=25.0, hr=110, max_hr=177,
         )
 
         result = process_trackpoints(

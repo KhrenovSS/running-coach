@@ -6,8 +6,10 @@ from src.analysis.oscillation import (
     compute_hr_lag_correlation,
     _estimate_base_pace,
     _adaptive_pace_gap,
+    _calc_phase_distance,
     DEFAULT_PACE_THRESHOLD,
     DEFAULT_MIN_PHASE_DURATION_SEC,
+    DEFAULT_MIN_PHASE_DISTANCE_M,
     DEFAULT_HR_LAG_SEC,
 )
 
@@ -159,9 +161,9 @@ class TestEstimateBasePace:
 
 class TestAdaptivePaceGap:
     def test_steady_pace_small_gap(self):
-        """Стабильный темп → малый data_gap → minimal effective_gap"""
+        """Стабильный темп → малый data_gap → возвращаем user_gap (без схлопывания)"""
         gap = _adaptive_pace_gap([5.0] * 100, user_gap=1.0)
-        assert gap == 0.3  # max(0.3, min(1.0, 0.0))
+        assert gap == 1.0  # data_gap < MIN_EFFECTIVE_PACE_GAP → user_gap
 
     def test_wide_range_uses_user_gap(self):
         """Большой разброс → effective_gap = user_gap"""
@@ -176,11 +178,11 @@ class TestAdaptivePaceGap:
         assert gap == 0.5  # data_gap=0.5 < user_gap=1.0 → 0.5
 
     def test_fewer_than_10_points_returns_user_gap_minimum(self):
-        """< 10 точек → max(0.3, user_gap)"""
+        """< 10 точек → max(MIN_EFFECTIVE_PACE_GAP, user_gap)"""
         gap = _adaptive_pace_gap([5.0] * 5, user_gap=0.5)
         assert gap == 0.5
         gap = _adaptive_pace_gap([5.0] * 5, user_gap=0.2)
-        assert gap == 0.3
+        assert gap == 0.5  # max(MIN_EFFECTIVE_PACE_GAP=0.5, 0.2)
 
 
 class TestDetectPaceOscillationsEdgeCases:
@@ -251,3 +253,95 @@ class TestComputeHrLagCorrelationEdgeCases:
         coeff, is_corr = compute_hr_lag_correlation(times, paces, hrs, lag_sec=5)
         assert coeff == 0.0
         assert is_corr is False
+
+
+class TestCalcPhaseDistance:
+    def test_normal_distance(self):
+        """Обычная дистанция: разница между кумулятивными значениями"""
+        distances = [0.0, 100.0, 200.0, 300.0, 400.0]
+        result = _calc_phase_distance(distances, 1, 3)
+        assert result == 200.0
+
+    def test_none_distances(self):
+        """None в distances → 0.0"""
+        result = _calc_phase_distance(None, 0, 5)
+        assert result == 0.0
+
+    def test_out_of_bounds(self):
+        """Индекс за пределами → 0.0"""
+        distances = [0.0, 100.0, 200.0]
+        result = _calc_phase_distance(distances, 0, 10)
+        assert result == 0.0
+
+    def test_single_point(self):
+        """Одна точка → 0.0"""
+        distances = [0.0, 100.0, 200.0]
+        result = _calc_phase_distance(distances, 1, 2)
+        assert result == 100.0
+
+
+class TestDistanceFiltering:
+    def test_short_duration_long_distance_passes(self):
+        """Короткая длительность, но длинная дистанция → проходит фильтр (ИЛИ)"""
+        n = 100
+        times = _make_times(300, n)
+        distances = [i * 10.0 for i in range(n)]  # 10м на точку = 1000м всего
+        paces = [4.0] * 30 + [5.5] * 70  # work-фаза 30 точек = 90сек, 300м
+
+        count, phases = detect_pace_oscillations(
+            paces, times, distances=distances,
+            pace_gap=1.0, min_phase_duration_sec=120, min_phase_distance_m=200,
+        )
+        # work-фаза 90сек < 120сек, но 300м > 200м → проходит
+        assert len(phases) >= 1
+
+    def test_short_distance_long_duration_passes(self):
+        """Длинная длительность, но короткая дистанция → проходит фильтр (ИЛИ)"""
+        n = 100
+        times = _make_times(300, n)
+        distances = [i * 1.0 for i in range(n)]  # 1м на точку = 100м всего
+        paces = [4.0] * 50 + [5.5] * 50  # work-фаза 50 точек = 150сек
+
+        count, phases = detect_pace_oscillations(
+            paces, times, distances=distances,
+            pace_gap=1.0, min_phase_duration_sec=120, min_phase_distance_m=200,
+        )
+        # work-фаза 150сек > 120сек → проходит, хотя 50м < 200м
+        assert len(phases) >= 1
+
+    def test_short_both_filtered(self):
+        """Короткая длительность И короткая дистанция → отфильтрована"""
+        n = 100
+        times = _make_times(300, n)
+        distances = [i * 1.0 for i in range(n)]  # 1м на точку
+        paces = [4.0] * 10 + [5.5] * 90  # work-фаза 10 точек = 30сек, 10м
+
+        count, phases = detect_pace_oscillations(
+            paces, times, distances=distances,
+            pace_gap=1.0, min_phase_duration_sec=60, min_phase_distance_m=200,
+        )
+        # 30сек < 60сек И 10м < 200м → отфильтрована
+        assert count == 0
+
+    def test_no_distances_uses_duration_only(self):
+        """Без distances → фильтрация только по длительности"""
+        n = 100
+        times = _make_times(300, n)
+        paces = [4.0] * 30 + [5.5] * 70
+
+        count, phases = detect_pace_oscillations(
+            paces, times, distances=None,
+            pace_gap=1.0, min_phase_duration_sec=60, min_phase_distance_m=200,
+        )
+        # work-фаза 90сек > 60сек → проходит
+        assert len(phases) >= 1
+
+
+class TestNewDefaults:
+    def test_default_duration_is_60(self):
+        """Порог по умолчанию — 60 секунд"""
+        assert DEFAULT_MIN_PHASE_DURATION_SEC == 60
+
+    def test_default_distance_is_200(self):
+        """Порог дистанции по умолчанию — 200 метров"""
+        assert DEFAULT_MIN_PHASE_DISTANCE_M == 200

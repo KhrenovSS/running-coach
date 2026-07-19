@@ -49,9 +49,19 @@ def with_jitter(interval_seconds: int, factor: float = JITTER_FACTOR) -> int:
 
 # Настройки детекции интервалов (Interval detection settings)
 DEFAULT_PACE_THRESHOLD: Final[float] = 1.0          # мин/км — разница между базовым темпом и work-фазой
-DEFAULT_MIN_PHASE_DURATION_SEC: Final[int] = 15     # сек — мин. длительность фазы
+DEFAULT_MIN_PHASE_DURATION_SEC: Final[int] = 60     # сек — мин. длительность фазы
+DEFAULT_MIN_PHASE_DISTANCE_M: Final[int] = 200      # м — мин. дистанция фазы
 DEFAULT_HR_LAG_SEC: Final[int] = 5                  # сек — лаг пульса
 DEFAULT_MIN_OSCILLATIONS: Final[int] = 3            # мин. число осцилляций для interval
+
+# Пороги классификации тренировок (Training classification thresholds)
+MIN_EFFECTIVE_PACE_GAP: Final[float] = 0.5        # мин/км — мин. adaptive gap для детекции осцилляций
+RECOVERY_MAX_HR_PCT: Final[float] = 0.70          # max % от max_hr для recovery
+EASY_MAX_HR_PCT: Final[float] = 0.75              # max % от max_hr для easy
+EASY_MIN_Z2_PCT: Final[float] = 60.0              # мин. % времени в Z2 для easy
+RECOVERY_MAX_Z4_PCT: Final[float] = 5.0           # макс. % времени в Z4+ для recovery
+LONG_MAX_Z4_PCT: Final[float] = 15.0              # макс. % времени в Z4+ для long
+EASY_MAX_Z4_SEGMENT_MIN: Final[float] = 3.0       # макс. длительность Z4+ сегмента для easy (мин)
 
 # Интервалы синхронизации per-user (Per-user sync interval settings)
 MIN_ACTIVITY_SYNC_INTERVAL_MIN: Final[int] = 15

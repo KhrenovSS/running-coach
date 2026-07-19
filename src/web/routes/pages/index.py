@@ -23,7 +23,7 @@ router = APIRouter()
 
 def _format_type_row(type_count):
     """Форматировать строку с типами тренировок (Format training type row)"""
-    labels = {'interval': 'Интервальная', 'tempo': 'Темповая', 'long': 'Длинная', 'recovery': 'Восстановительная'}
+    labels = {'easy': 'Лёгкая пробежка', 'interval': 'Интервальная', 'tempo': 'Темповая', 'long': 'Длинная', 'recovery': 'Восстановительная'}
     parts = []
     for key, label in labels.items():
         c = type_count.get(key, 0)
