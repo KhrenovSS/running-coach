@@ -280,6 +280,52 @@ class TestCalcPhaseDistance:
         assert result == 100.0
 
 
+class TestEmptyPhaseAvgPace:
+    def test_zero_length_phase_uses_base_pace(self):
+        """Phase boundary where phase_start == i → avg_pace = base_pace, not 0.0"""
+        n = 200
+        times = _make_times(600, n)
+        threshold_pace = 5.0
+        paces = []
+        for i in range(n):
+            if i % 20 == 0:
+                paces.append(threshold_pace)
+            elif (i // 20) % 2 == 0:
+                paces.append(4.0)
+            else:
+                paces.append(5.5)
+
+        _, phases = detect_pace_oscillations(
+            paces, times, pace_gap=1.0, min_phase_duration_sec=10,
+        )
+        for p in phases:
+            assert p['avg_pace'] > 0.0, f"avg_pace={p['avg_pace']} for {p['type']} phase"
+
+    def test_all_values_equal_to_threshold(self):
+        """All values equal → threshold-based split can produce zero-length phases"""
+        n = 50
+        times = _make_times(250, n)
+        paces = [5.0] * n
+
+        _, phases = detect_pace_oscillations(
+            paces, times, pace_gap=1.0, min_phase_duration_sec=10,
+        )
+        for p in phases:
+            assert p['avg_pace'] > 0.0
+
+    def test_consecutive_boundary_values_no_zero_pace(self):
+        """Values oscillating exactly at threshold → no avg_pace == 0.0"""
+        n = 200
+        times = _make_times(600, n)
+        paces = [5.0 if i % 2 == 0 else 5.5 for i in range(n)]
+
+        _, phases = detect_pace_oscillations(
+            paces, times, pace_gap=1.0, min_phase_duration_sec=10,
+        )
+        for p in phases:
+            assert p['avg_pace'] > 0.0, f"avg_pace={p['avg_pace']} for {p['type']} phase"
+
+
 class TestDistanceFiltering:
     def test_short_duration_long_distance_passes(self):
         """Короткая длительность, но длинная дистанция → проходит фильтр (ИЛИ)"""

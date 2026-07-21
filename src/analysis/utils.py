@@ -51,7 +51,10 @@ def format_pace(min_per_km: float | None) -> str | None:
     if min_per_km is None or min_per_km <= 0:
         return None
     m = int(min_per_km)
-    s = int((min_per_km - m) * 60)
+    s = round((min_per_km - m) * 60)
+    if s >= 60:
+        m += 1
+        s = 0
     return f"{m}:{s:02d}"
 
 
@@ -63,7 +66,10 @@ def format_duration(duration_min: float | None) -> str | None:
     if duration_min is None or duration_min <= 0:
         return None
     m = int(duration_min)
-    s = int((duration_min - m) * 60)
+    s = round((duration_min - m) * 60)
+    if s >= 60:
+        m += 1
+        s = 0
     return f"{m}:{s:02d}"
 
 

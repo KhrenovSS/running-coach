@@ -213,9 +213,12 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
 
     if cleaning_log:
         result['cleaning_log'] = cleaning_log
-    else:
-        if result['duration_minutes'] < 2.0 and result['total_distance_km'] > 0.3:
-            result['suspect_flags'] = ['too_short']
+        result['suspect_flags'] = list(cleaning_log)
+
+    if result['duration_minutes'] < 2.0 and result['total_distance_km'] > 0.3:
+        if 'suspect_flags' not in result:
+            result['suspect_flags'] = []
+        result['suspect_flags'].append('too_short')
 
     return result
 

@@ -2,6 +2,28 @@
 
 All notable changes to this project are tracked here.
 
+## [21.07.2026] — CI + Bugfix Sprint: GitHub Actions CI + fix #100, #101, #108
+
+### Added
+- **`.github/workflows/ci.yml`** — GitHub Actions CI: Python 3.12, pytest, import checks, forbidden patterns (`from src.database`, `except: pass`). Triggers on push to `main`/`fix/*` and PRs to `main`. Uses SQLite in-memory (conftest.py override).
+
+### Fixed
+- **#101** `src/analysis/utils.py` — `format_pace` and `format_duration`: `int()` truncation → `round()` for seconds; added `s >= 60` overflow guard. pace `5.7166` now correctly returns `"5:43"` not `"5:42"`.
+- **#100** `src/analysis/__init__.py` — `suspect_flags` inverted logic: now populated from `cleaning_log` when GPS cleaning happened; `too_short` check moved outside if/else to apply unconditionally.
+- **#108** `src/analysis/oscillation.py` — `avg_pace` in phase calculation: division by zero guard when `phase_start == i`; falls back to `base_pace` instead of silent `0.0`.
+
+### Tests
+- **`tests/test_stats.py`** — +14 tests: `TestFormatPace` (8), `TestFormatDuration` (6)
+- **`tests/test_process_trackpoints.py`** — +3 tests: suspect_flags regression
+- **`tests/test_oscillation.py`** — +3 tests: empty phase avg_pace regression
+- Total: 155 tests, all green
+
+### Multi-agent workflow
+- First parallel bug-fix sprint: 3 agents (@architect × 3, @coder × 3, @tester × 3) ran concurrently
+- `fixes/100/`, `fixes/101/`, `fixes/108/` — approach.md for each
+
+---
+
 ## [19.07.2026] — Sprint 24: Data Protection — trainings survive every deploy
 
 ### Bugfix: PK sequence out of sync

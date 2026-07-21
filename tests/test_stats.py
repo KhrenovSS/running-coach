@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from src.services.stats import fmt_duration, calc_stats, zone_ranges, get_zone_bars_data, get_nav_data
+from src.analysis.utils import format_pace, format_duration
 
 
 class TestFmtDuration:
@@ -162,3 +163,49 @@ class TestGetNavData:
         s.begin_ts = None
         data, year, month, title = get_nav_data([s], None, None)
         assert data == {}
+
+
+class TestFormatPace:
+    def test_rounds_to_nearest_second(self):
+        assert format_pace(5.7166) == "5:43"
+
+    def test_exact_integer(self):
+        assert format_pace(6.0) == "6:00"
+
+    def test_none_returns_none(self):
+        assert format_pace(None) is None
+
+    def test_zero_returns_none(self):
+        assert format_pace(0) is None
+
+    def test_negative_returns_none(self):
+        assert format_pace(-1.5) is None
+
+    def test_no_roundup_to_next_minute(self):
+        assert format_pace(5.9833) == "5:59"
+
+    def test_seconds_round_to_60(self):
+        assert format_pace(1.9917) == "2:00"
+
+    def test_small_pace(self):
+        assert format_pace(3.5) == "3:30"
+
+
+class TestFormatDuration:
+    def test_rounds_to_nearest_second(self):
+        assert format_duration(5.7166) == "5:43"
+
+    def test_exact_integer(self):
+        assert format_duration(6.0) == "6:00"
+
+    def test_none_returns_none(self):
+        assert format_duration(None) is None
+
+    def test_zero_returns_none(self):
+        assert format_duration(0) is None
+
+    def test_no_roundup_to_next_minute(self):
+        assert format_duration(5.9833) == "5:59"
+
+    def test_seconds_round_to_60(self):
+        assert format_duration(1.9917) == "2:00"

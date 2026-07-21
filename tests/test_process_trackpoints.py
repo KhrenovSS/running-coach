@@ -3,6 +3,7 @@
 
 from datetime import datetime, timezone
 from src.analysis import process_trackpoints
+from src.parsers.gps import clean_trackpoints
 from tests.helpers import (
     build_interval_trackpoints,
     build_tempo_trackpoints,
@@ -99,3 +100,36 @@ class TestProcessTrackpointsLong:
         assert result is not None
         assert result['training_type'] == 'long'
         assert result['duration_minutes'] >= 90
+
+
+class TestSuspectFlags:
+    def test_suspect_flags_set_when_cleaning_log_has_entries(self):
+        """Когда GPS-очистка нашла аномалии, suspect_flags должны содержать их"""
+        tps = build_tempo_trackpoints(pace=5.0, distance_km=5.0, hr=140)
+        _, cleaning_log = clean_trackpoints(tps, 3.0, 100.0, 130)
+        if not cleaning_log:
+            for i in range(0, len(tps), 3):
+                tps[i]['lat'] += 0.05
+                tps[i]['lon'] += 0.05
+            _, cleaning_log = clean_trackpoints(tps, 3.0, 100.0, 130)
+        if cleaning_log:
+            result = process_trackpoints(tps, tps[0]['time'], max_hr=177, pace_gap=1.0)
+            assert result is not None
+            assert 'suspect_flags' in result
+            assert len(result['suspect_flags']) == len(cleaning_log)
+
+    def test_too_short_flag_applied_regardless_of_cleaning_log(self):
+        """too_short устанавливается независимо от cleaning_log"""
+        tps = build_tempo_trackpoints(pace=5.0, distance_km=0.35, hr=140)
+        result = process_trackpoints(tps, tps[0]['time'], max_hr=177, pace_gap=1.0)
+        assert result is not None
+        assert result['duration_minutes'] < 2.0
+        assert result['total_distance_km'] > 0.3
+        assert 'too_short' in result.get('suspect_flags', [])
+
+    def test_no_suspect_flags_when_clean_and_normal_length(self):
+        """Чистый трек нормальной длины → нет suspect_flags"""
+        tps = build_tempo_trackpoints(pace=5.0, distance_km=10.0, hr=140)
+        result = process_trackpoints(tps, tps[0]['time'], max_hr=177, pace_gap=1.0)
+        assert result is not None
+        assert 'suspect_flags' not in result

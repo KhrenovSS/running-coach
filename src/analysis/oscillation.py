@@ -110,7 +110,10 @@ def detect_pace_oscillations(
         point_type = 'work' if smoothed_paces[i] <= threshold else 'recovery'
         if point_type != current_type:
             duration_sec = times[i] - times[phase_start]
-            avg_pace = sum(smoothed_paces[phase_start:i]) / max(1, i - phase_start)
+            if i > phase_start:
+                avg_pace = sum(smoothed_paces[phase_start:i]) / (i - phase_start)
+            else:
+                avg_pace = base_pace
             phase_dist_m = _calc_phase_distance(distances, phase_start, i)
             raw_phases.append({
                 'type': current_type,
