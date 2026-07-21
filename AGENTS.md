@@ -414,57 +414,73 @@ python3 -m alembic upgrade head  # миграции
 ### Архитектура
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                      BUG FIX SPRINT                             │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │ @architect    │  │ @coder       │  │ @tester      │          │
-│  │ DeepSeek V4   │  │ DeepSeek V4  │  │ Big Pickle   │          │
-│  │ анализ бага   │  │ фикс кода    │  │ тесты        │          │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘          │
-│         │                 │                 │                   │
-│         └─────────────────┼─────────────────┘                   │
-│                           ▼                                     │
-│                     ┌──────────────┐                            │
-│                     │ @reviewer    │                            │
-│                     │ DeepSeek V4  │                            │
-│                     │ ревью кода   │                            │
-│                     └──────┬───────┘                            │
-│                            ▼                                    │
-│                     ┌──────────────┐                            │
-│                     │ @devops      │                            │
-│                     │ DeepSeek V4  │                            │
-│                     │ CI + Docker  │                            │
-│                     └──────┬───────┘                            │
-│                            ▼                                    │
-│                     Commit + Push                               │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│  PRIMARY AGENTS (Tab)                                               │
+│  ┌─────────┐  ┌─────────┐  ┌───────────────┐                       │
+│  │  Build   │  │  Plan   │  │ Orchestrator  │                       │
+│  │ пишет   │  │ анализ  │  │ координирует  │                       │
+│  │ код     │  │         │  │ цикл          │                       │
+│  └─────────┘  └─────────┘  └───────┬───────┘                       │
+│                                    │                               │
+│              BUG FIX SPRINT        │                               │
+├────────────────────────────────────┼───────────────────────────────┤
+│                                    ▼                               │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │
+│  │ @architect    │  │ @coder       │  │ @tester      │             │
+│  │ DeepSeek V4   │  │ DeepSeek V4  │  │ Big Pickle   │             │
+│  │ анализ бага   │  │ фикс кода    │  │ тесты        │             │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘             │
+│         │                 │                 │                      │
+│         └─────────────────┼─────────────────┘                      │
+│                           ▼                                        │
+│                     ┌──────────────┐                               │
+│                     │ @reviewer    │                               │
+│                     │ DeepSeek V4  │                               │
+│                     │ ревью кода   │                               │
+│                     └──────┬───────┘                               │
+│                            ▼                                       │
+│                     ┌──────────────┐                               │
+│                     │ @devops      │                               │
+│                     │ DeepSeek V4  │                               │
+│                     │ CI + Docker  │                               │
+│                     └──────┬───────┘                               │
+│                            ▼                                       │
+│                     Orchestrator: git commit + push                │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Агенты
 
-| Агент | Модель | Права | Роль | Бюджет |
-|-------|--------|-------|------|--------|
-| `@architect` | `opencode/deepseek-v4-pro` | read, grep, glob | Анализ бага, approach.md | ~$0.20 |
-| `@coder` | `opencode/deepseek-v4-pro` | read, edit, bash, grep, glob | Исправление кода | ~$1.00 |
-| `@tester` | `opencode/big-pickle` | read, edit, bash, grep, glob | Регрессионные тесты | ~$0.30 |
-| `@reviewer` | `opencode/deepseek-v4-pro` | read, grep, glob | Ревью изменений | ~$0.40 |
-| `@devops` | `opencode/deepseek-v4-pro` | read, edit, bash, grep, glob | CI + Docker | ~$0.60 |
+| Агент | Модель | Тип | Права | Роль | Бюджет |
+|-------|--------|-----|-------|------|--------|
+| **Build** | `opencode/big-pickle` | primary | все | Разработка (по умолчанию) | Free |
+| **Plan** | `opencode/big-pickle` | primary | read, grep, glob | Анализ без изменений | Free |
+| **Orchestrator** | `opencode/deepseek-v4-pro` | primary | read, grep, glob, task, git bash | Координация цикла | ~$0.50 |
+| `@architect` | `opencode/deepseek-v4-pro` | subagent | read, grep, glob | Анализ бага, approach.md | ~$0.20 |
+| `@coder` | `opencode/deepseek-v4-pro` | subagent | read, edit, bash, grep, glob | Исправление кода | ~$1.00 |
+| `@tester` | `opencode/big-pickle` | subagent | read, edit, bash, grep, glob | Регрессионные тесты | ~$0.30 |
+| `@reviewer` | `opencode/deepseek-v4-pro` | subagent | read, grep, glob | Ревью изменений | ~$0.40 |
+| `@devops` | `opencode/deepseek-v4-pro` | subagent | read, edit, bash, grep, glob | CI + Docker | ~$0.60 |
 
-**Итого: ~$2.50/спринт**
+**Итого: ~$3.00/спринт** (Orchestrator ~$0.50 за координацию)
 
 ### Workflow
 
-1. **Баг идентифицирован** → добавлен в `BACKLOG.md`
-2. **Планирование спринта** → выбор багов для исправления
-3. **@architect** анализирует каждый баг (параллельно) → `fixes/{bug-id}/approach.md`
-4. **@coder** исправляет баги (параллельно, ветка `fix/{bug-id}`)
-5. **@tester** пишет регрессионные тесты (параллельно)
-6. **@reviewer** проверяет все изменения → `fixes/{bug-id}/review.md`
-7. **@devops** обеспечивает прохождение CI
-8. **Commit + Push**
-9. **Обновление CHANGELOG.md**
+**Автоматический (через Orchestrator):**
+1. Пользователь: "Исправь баг #101"
+2. **Orchestrator** запускает pipeline:
+   - @architect → approach.md
+   - @coder → исправление
+   - @tester → регрессионные тесты
+   - @reviewer → review.md
+   - @devops → CI проверка
+   - Orchestrator → git commit + push
+3. Orchestrator докладывает результат
+
+**Ручной (через Build/Tab):**
+1. Баг идентифицирован → добавлен в `BACKLOG.md`
+2. Пользователь вызывает агентов через @architect, @coder и т.д.
+3. Commit + Push вручную
 
 ### Качественные ворота
 
@@ -479,6 +495,7 @@ python3 -m alembic upgrade head  # миграции
 running-coach/
 ├── .opencode/
 │   └── agents/
+│       ├── orchestrator.md  (primary — координация цикла)
 │       ├── architect.md
 │       ├── coder.md
 │       ├── tester.md
@@ -503,7 +520,11 @@ running-coach/
 # Из директории проекта
 cd /home/nimda/projects/running-coach
 
-# Запуск конкретного агента
+# Автоматический цикл (через Orchestrator)
+# Переключись на Orchestrator через Tab, затем напиши:
+# "Исправь баг #101"
+
+# Ручной запуск (через Build)
 opencode -m opencode/deepseek-v4-pro "Прочитай AGENTS.md и опиши структуру проекта"
 
 # Запуск через task (в основном агенте build)

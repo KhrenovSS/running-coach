@@ -2,6 +2,17 @@
 
 All notable changes to this project are tracked here.
 
+## [21.07.2026] — Orchestrator Agent: автоматический цикл исправления багов
+
+### Added
+- **`.opencode/agents/orchestrator.md`** — primary agent (mode: primary), model: deepseek-v4-pro. Координирует полный цикл исправления багов: @architect → @coder → @tester → @reviewer → @devops → git commit/push. Права: read/grep/glob/task/git-bash, edit/deny (строго делегирует).
+
+### Changed
+- **`AGENTS.md`** — обновлена диаграмма workflow (Orchestrator как primary), таблица агентов (+Orchestrator, +primary/subagent тип), описание автоматического и ручного workflow, структура файлов, секция запуска.
+- **`AGENTS.md`** — итого бюджета: $2.50 → $3.00/спринт (+$0.50 за оркестратора).
+
+---
+
 ## [21.07.2026] — CI + Bugfix Sprint: GitHub Actions CI + fix #100, #101, #108
 
 ### Added
