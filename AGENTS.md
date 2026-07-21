@@ -408,3 +408,125 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 ./bin/docker.sh build bot     # пересборка bot
 python3 -m alembic upgrade head  # миграции
 ```
+
+## Многоагентный workflow (Parallel Sprints)
+
+### Архитектура
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      BUG FIX SPRINT                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
+│  │ @architect    │  │ @coder       │  │ @tester      │          │
+│  │ DeepSeek V4   │  │ DeepSeek V4  │  │ Big Pickle   │          │
+│  │ анализ бага   │  │ фикс кода    │  │ тесты        │          │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘          │
+│         │                 │                 │                   │
+│         └─────────────────┼─────────────────┘                   │
+│                           ▼                                     │
+│                     ┌──────────────┐                            │
+│                     │ @reviewer    │                            │
+│                     │ DeepSeek V4  │                            │
+│                     │ ревью кода   │                            │
+│                     └──────┬───────┘                            │
+│                            ▼                                    │
+│                     ┌──────────────┐                            │
+│                     │ @devops      │                            │
+│                     │ DeepSeek V4  │                            │
+│                     │ CI + Docker  │                            │
+│                     └──────┬───────┘                            │
+│                            ▼                                    │
+│                     Commit + Push                               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Агенты
+
+| Агент | Модель | Права | Роль | Бюджет |
+|-------|--------|-------|------|--------|
+| `@architect` | `opencode/deepseek-v4-pro` | read, grep, glob | Анализ бага, approach.md | ~$0.20 |
+| `@coder` | `opencode/deepseek-v4-pro` | read, edit, bash, grep, glob | Исправление кода | ~$1.00 |
+| `@tester` | `opencode/big-pickle` | read, edit, bash, grep, glob | Регрессионные тесты | ~$0.30 |
+| `@reviewer` | `opencode/deepseek-v4-pro` | read, grep, glob | Ревью изменений | ~$0.40 |
+| `@devops` | `opencode/deepseek-v4-pro` | read, edit, bash, grep, glob | CI + Docker | ~$0.60 |
+
+**Итого: ~$2.50/спринт**
+
+### Workflow
+
+1. **Баг идентифицирован** → добавлен в `BACKLOG.md`
+2. **Планирование спринта** → выбор багов для исправления
+3. **@architect** анализирует каждый баг (параллельно) → `fixes/{bug-id}/approach.md`
+4. **@coder** исправляет баги (параллельно, ветка `fix/{bug-id}`)
+5. **@tester** пишет регрессионные тесты (параллельно)
+6. **@reviewer** проверяет все изменения → `fixes/{bug-id}/review.md`
+7. **@devops** обеспечивает прохождение CI
+8. **Commit + Push**
+9. **Обновление CHANGELOG.md**
+
+### Качественные ворота
+
+1. **Перед @coder:** approach.md существует
+2. **Перед @reviewer:** тесты проходят локально
+3. **Перед коммитом:** CI проходит (GitHub Actions)
+4. **Перед пушем:** Docker собирается успешно
+
+### Структура файлов
+
+```
+running-coach/
+├── .opencode/
+│   └── agents/
+│       ├── architect.md
+│       ├── coder.md
+│       ├── tester.md
+│       ├── reviewer.md
+│       └── devops.md
+├── .github/
+│   └── workflows/
+│       └── ci.yml
+├── fixes/
+│   ├── template/
+│   │   ├── approach.md
+│   │   └── review.md
+│   └── {bug-id}/
+│       ├── approach.md    (от @architect)
+│       └── review.md      (от @reviewer)
+└── ...
+```
+
+### Запуск агентов
+
+```bash
+# Из директории проекта
+cd /home/nimda/projects/running-coach
+
+# Запуск конкретного агента
+opencode -m opencode/deepseek-v4-pro "Прочитай AGENTS.md и опиши структуру проекта"
+
+# Запуск через task (в основном агенте build)
+task(subagent_type="architect", prompt="Проанализируй баг #123 из BACKLOG.md")
+task(subagent_type="coder", prompt="Исправь баг на основе fixes/123/approach.md")
+task(subagent_type="tester", prompt="Напиши тесты для исправления бага #123")
+task(subagent_type="reviewer", prompt="Проверь изменения в ветке fix/123")
+task(subagent_type="devops", prompt="Проверь прохождение CI для ветки fix/123")
+```
+
+### Смена модели
+
+Для смены модели агента отредактируйте файл `.opencode/agents/{agent}.md`:
+
+```yaml
+---
+name: agent_name
+model: opencode/deepseek-v4-pro  # измените на нужную модель
+---
+```
+
+Доступные модели:
+- `opencode/deepseek-v4-pro` — анализ, ревью, DevOps
+- `opencode/deepseek-v4-flash` — простые фиксы
+- `opencode/big-pickle` — тесты, рутина
+- `opencode/deepseek-v4-flash-free` — экстренный вариант
