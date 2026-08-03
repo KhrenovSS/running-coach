@@ -98,6 +98,7 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
   - `models/health.py` — DailyMetrics, WeightMeasurement
   - `models/auth.py` — AuthToken
   - `models/audit.py` — AuditEvent
+  - `models/coach.py` — Recommendation, PredictionLog, UserModel, Lesson (модуль аналитики, Этап 0)
 - `src/config/settings.py` — `Settings(BaseSettings)` из pydantic-settings
 - `src/config/constants.py` — плоские module-level константы
 - `src/exceptions.py` — типизированные исключения приложения (`WatchAPIError`, `WatchAuthError`, `NotFoundError`, etc.)
@@ -121,10 +122,13 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 - `src/services/repositories.py` — ✅ Sprint 20c: слой агрегационных запросов (TrainingRepository, HealthRepository) для модуля аналитики
 - `src/services/analytics_helpers.py` — ✅ Sprint 20c: функции трендов (compute_slope, compute_ewma, compute_moving_average, compute_trend_direction)
 - `src/services/user_service.py` — ✅ Sprint 20c: сервисные функции для User (get_user_settings, get_user_by_telegram_id, get_or_create_user_by_telegram, get_user_by_id)
-- `src/coach/` — ✅ Sprint 21+: пакет модуля аналитики и коучинга (config.py — конфигурация аналитики):
-  - `__init__.py`
-  - `config.py` — веса readiness/fatigue, пороги injury risk, EWMA-параметры, recovery hours
-  - (остальные файлы будут добавлены в Sprint 21+)
+- `src/coach/` — пакет модуля аналитики и коучинга (Этап 0 — каркас):
+  - `config.py` — веса readiness/fatigue, пороги injury risk, EWMA, `recovery_hours_for()`
+  - `contracts.py` — дата-классы движка: `SkillResult`, `AthleteState`, `Prescription`, `ReasoningStep`
+  - `state.py` / `engine.py` / `prescriber.py` / `orchestrator.py` — верхний уровень (заглушки Этапа 0)
+  - `skills/` (fatigue/load/distribution/progress/recovery/workout + base) — заглушки
+  - `rules/` (p1_safety…p5_personal + base), `personalization/`, `knowledge/` (+guides/), `llm/` — заглушки
+  - Источник порогов для skills/rules — `docs/coros_health_metrics.md`
 - `src/telegram/` — пакет Telegram-бота (17 файлов, разделён):
   - `main.py` — `run_bot`, Application сборка
   - `config.py` — константы состояний

@@ -2,6 +2,31 @@
 
 All notable changes to this project are tracked here.
 
+## [03.08.2026] — R1 (fresh-DB crash-loop) + Трек 4: каркас Этапа 0 модуля аналитики
+
+### Fixed (CRITICAL)
+- **R1 — `src/startup.py`**: свежая БД не поднималась. `init_db()`/`create_all()` выполнялся ДО
+  `alembic upgrade head`, из-за чего baseline-миграция `create_table('users')` падала на уже
+  созданной таблице → `SystemExit` → crash-loop на ЛЮБОЙ пустой БД (свежий деплой, dev/staging,
+  восстановление после потери тома, чистое окружение агента; ломало и CI docker-джобу). Порядок
+  инвертирован: **Alembic владеет схемой (upgrade head) → затем `init_db()` как additive safety net**.
+  Проверено на throwaway-Postgres: fresh boot ✅, restart идемпотентен ✅ (13 миграций от baseline).
+
+### Added — Этап 0 модуля коуча (по decision_module_design.md §3/§4/§8/§11)
+- **4 таблицы** `src/domain/models/coach.py`: `Recommendation`, `PredictionLog` (uq по `session_id` —
+  идемпотентность), `UserModel` (uq по `user_id`), `Lesson`; все per-user (FK CASCADE). Реэкспорт
+  через `src/domain/models/__init__.py` и shim `src/models.py`. Миграция
+  `alembic/versions/j3k4l5m6n7o8_coach_module_tables.py` (down_revision i2j3k4l5m6n7).
+- **Скелет пакета** `src/coach/{skills,rules,personalization,knowledge,llm}` + контракты
+  `src/coach/contracts.py` (`SkillResult`, `AthleteState`, `Prescription`, `ReasoningStep`) +
+  верхнеуровневые `state.py`/`engine.py`/`prescriber.py`/`orchestrator.py` (сигнатуры + docstring +
+  `NotImplementedError`). Skills/rules-заглушки ссылаются на `docs/coros_health_metrics.md` как источник порогов.
+- **`tests/skills/`**: gate Этапа 0 (+5) — 4 таблицы создаются под SQLite, контракты
+  инстанцируются/персистятся, стабы бросают `NotImplementedError`; фикстура `athlete_with_history`
+  (14 дней метрик + 5 сессий).
+
+Верификация: pytest 187 passed; fresh-Postgres boot + migration проверены на изолированном контейнере.
+
 ## [03.08.2026] — Трек 3: надёжность классификации + агрегация feedback
 
 ### Added

@@ -25,6 +25,24 @@ logger = get_logger("app")
 
 def on_startup():
     from datetime import datetime
+
+    # 1. Alembic владеет схемой (Alembic owns the schema). Запускать ДО create_all!
+    #    На пустой БД alembic создаёт все таблицы из миграций и штампует version.
+    #    На существующей — накатывает недостающие миграции.
+    #    Если сначала выполнить init_db()/create_all, baseline-миграция `create_table('users')`
+    #    падает на уже созданной таблице → SystemExit → crash-loop на ЛЮБОЙ свежей БД
+    #    (свежий деплой, dev/staging, восстановление после потери тома, чистое окружение).
+    try:
+        from alembic.config import Config as AlembicConfig
+        from alembic import command
+        alembic_cfg = AlembicConfig("alembic.ini")
+        command.upgrade(alembic_cfg, "head")
+    except Exception as e:
+        logger.exception("Ошибка Alembic миграции — hard stop")
+        raise SystemExit(1)
+
+    # 2. Safety net: создать таблицы моделей, отсутствующие в миграциях (additive).
+    #    create_all пропускает уже существующие таблицы → конфликта с миграциями нет.
     init_db()
 
     # DB SAFETY: warn if database has 0 users — possible volume loss
@@ -39,15 +57,6 @@ def on_startup():
         _db_check.close()
     except Exception:
         pass  # table may not exist yet (first boot)
-
-    try:
-        from alembic.config import Config as AlembicConfig
-        from alembic import command
-        alembic_cfg = AlembicConfig("alembic.ini")
-        command.upgrade(alembic_cfg, "head")
-    except Exception as e:
-        logger.exception("Ошибка Alembic миграции —硬 остановка (hard stop)")
-        raise SystemExit(1)
 
     for f in PENDING_DIR.glob("*.tcx"):
         f.unlink(missing_ok=True)
