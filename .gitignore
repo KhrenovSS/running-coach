@@ -39,3 +39,6 @@ logs/
 
 # Discussion files
 обсуждение
+
+# DB backup dumps (bin/backup_db.sh) — не версионируем
+backups/

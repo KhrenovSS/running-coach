@@ -1,5 +1,9 @@
 # Контекст проекта Running Coach
 
+> **Основные инструкции для разработки — в [`CLAUDE.md`](CLAUDE.md).** Этот файл хранит расширенный
+> контекст: карту `src/`, историю спринтов и справочные заметки. Прежний ролевой multi-agent workflow
+> (opencode: architect/coder/tester/reviewer/orchestrator) ретирован — разработку ведёт Claude-агент.
+
 ## Суть
 Персональный AI-тренер для бега. Парсит TCX-файлы (любые часы: Garmin, Coros, Polar, Suunto), анализирует тренировки, определяет тип (интервальная/темповая/long/recovery), разбивает на сегменты, считает пульсовые зоны, очищает GPS-ошибки.
 
@@ -9,8 +13,6 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 Локальная разработка: `docker compose up db -d && DATABASE_URL=postgresql://running_coach:<PASSWORD>@localhost:5432/running_coach uvicorn main:app --host 0.0.0.0 --port 8000`.
 
 ## Дисциплина работы ИИ-агента (AI Agent Discipline)
-
-0. **Автономность спринта.** По завершении всех задач спринта и поведенческих проверок — выполнить протокол конца спринта (п.6) **автоматически**, без ожидания команды пользователя. Это overriding-правило для `NEVER commit unless asked` — для данного проекта протокол завершения спринта всегда включает коммит.
 
 1. **Потолок ~400 строк/файл.** Модель склонна дописывать в существующий файл; потолок этому противодействит. Если файл приближается к 400 строкам — выноси логику в новый модуль.
 
@@ -35,29 +37,20 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
    | `pyproject.toml`, `Dockerfile` | `app` + `bot` |
    | `alembic/` | `app` (миграции при старте) |
 
-6. **Протокол завершения спринта.** После выполнения всех задач спринта и поведенческих проверок — автоматически выполнить без дополнительного запроса:
-   - Отметить спринт как ✅ в `AGENTS.md` (секция «Текущее состояние»)
-   - **Удалить выполненные пункты из «Следующие шаги»**
-   - Обновить `CHANGELOG.md` (дата, список изменений)
-   - `git add` + `git commit` с сообщением вида `Sprint N: <описание>`
-   - `git push`
-   - Сообщить пользователю: «Спринт N завершён, данные в AGENTS/CHANGELOG, коммит сделан, сессию можно закрывать»
-   - Начать следующий спринт (если указан в «Следующие шаги»)
-
-7. **Безопасность данных.** Любое изменение, которое может привести к потере данных (удаление колонок, переименование таблиц, смена сигнатур сервисных функций, починка `startup.py`) — **остановись и предупреди пользователя** перед реализацией. Опиши:
+6. **Безопасность данных.** Любое изменение, которое может привести к потере данных (удаление колонок, переименование таблиц, смена сигнатур сервисных функций, починка `startup.py`) — **остановись и предупреди пользователя** перед реализацией. Опиши:
    - Какие данные могут быть затронуты
    - Есть ли fallback / миграция
    - Можно ли откатить изменения
    Без явного подтверждения — не применяй. Пример: рефакторинг `get_settings()` в PREP-11 сломал `startup.py`, из-за чего на следующем рестарте контейнера не создался пользователь и данные тренировок оказались недоступны.
 
-8. **DB SAFETY — ТЕСТЫ НИКОГДА НЕ ТРОГАЮТ PRODUCTION.** Главное правило: алгоритмы меняются, данные пользователей остаются. Конкретные запреты:
+7. **DB SAFETY — ТЕСТЫ НИКОГДА НЕ ТРОГАЮТ PRODUCTION.** Главное правило: алгоритмы меняются, данные пользователей остаются. Конкретные запреты:
    - **НИКОГДА** не используй `os.environ.setdefault("DATABASE_URL", ...)` — это не переопределяет уже заданную переменную. В контейнере `DATABASE_URL` уже задан → setdefault = no-op → тесты пишут в production DB.
    - **НИКОГДА** не делай `drop_all` в autouse fixtures — если `DATABASE_URL` указывает на production, `drop_all` удалит ВСЕ таблицы и данные ВСЕХ пользователей.
    - **conftest.py** ДОЛЖЕН强制设置 `os.environ["DATABASE_URL"] = "sqlite:///:memory:"` ДО любых import из `src.*`.
    - **Перед изменением любых файлов** в `tests/`, `src/startup.py`, `src/domain/models/base.py`, `alembic/` — проверь: не повлияет ли это на production DB?
    - **Проверка после изменений:** `docker compose exec app python -c "from sqlalchemy import text; from src.domain.models.base import SessionLocal; db=SessionLocal(); print(db.execute(text('SELECT count(*) FROM users')).scalar()); db.close()"` — должен вернуть >= 1 (наличие пользователя).
 
-9. **BACKUP BEFORE DEPLOY.** Перед любым `docker compose build` или `docker compose up`:
+8. **BACKUP BEFORE DEPLOY.** Перед любым `docker compose build` или `docker compose up`:
    - Выполнить `bin/backup_db.sh`
    - НИКОГДА не `docker compose down -v` (это удаляет volume со всей БД)
    - НИКОГДА не `docker volume rm running-coach_pgdata`
@@ -165,17 +158,9 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 См. `docs/ARCHITECTURE.md` и `src/analysis/`.
 
 ## GitHub
-Репозиторий: https://github.com/KhrenovSS/running-coach
-Ветка: `main`
-Правила работы: коммитить каждую логически законченную задачу. В конце сессии — commit + push.
-
-### Push (токен из .env)
-GITHUB_TOKEN лежит в `.env` в корне проекта. Для push:
-```bash
-source .env && git remote set-url origin https://${GITHUB_TOKEN}@github.com/KhrenovSS/running-coach.git && git push
-git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # восстановить
-```
-Пароль/токен отдельно не спрашивать — брать из `.env`.
+Репозиторий: https://github.com/KhrenovSS/running-coach · ветка: `main`.
+**Коммит/пуш — только по запросу пользователя** (не автоматически), в рабочую ветку, не в `main` напрямую.
+`GITHUB_TOKEN` для push лежит в `.env` (отдельно не спрашивать). См. также `CLAUDE.md` → «Git / коммиты».
 
 ## Текущее состояние (Session — 21.07.2026 — Docs audit #2 + Orchestrator)
 
@@ -410,163 +395,3 @@ git remote set-url origin https://github.com/KhrenovSS/running-coach.git  # во
 python3 -m alembic upgrade head  # миграции
 ```
 
-## Многоагентный workflow
-
-### Архитектура
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  PRIMARY AGENT: Orchestrator                                            │
-│  ┌───────────────────────────────────────────────────────────────┐       │
-│  │  Orchestrator (deepseek-v4-pro)                               │       │
-│  │  Классифицирует задачу → выбирает pipeline → вызывает task()  │       │
-│  └───────────────────────────┬───────────────────────────────────┘       │
-│                              │                                          │
-│  ┌──────────────┬────────────┼────────────┬──────────────┐              │
-│  ▼              ▼            ▼            ▼              ▼              │
-│  bug           feature     refactor     migration      devops/docs      │
-│  │              │            │            │              │              │
-│  │              │            │            │              │              │
-│  └──────┬───────┘            │            │              │              │
-│         ▼                    ▼            ▼              ▼              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────┐  ┌──────────┐       │
-│  │ @architect   │  │ @architect   │  │@architect│  │ @devops  │       │
-│  │ approach.md  │  │ approach.md  │  │approach  │  │ CI/Docker│       │
-│  └──────┬───────┘  └──────┬───────┘  └────┬─────┘  └────┬─────┘       │
-│         ▼                 ▼               ▼              │              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────┐       │              │
-│  │ @coder       │  │ @coder       │  │ @coder   │       │              │
-│  │ исправление  │  │ реализация   │  │ миграция │       │              │
-│  └──────┬───────┘  └──────┬───────┘  └────┬─────┘       │              │
-│         ▼                 ▼               ▼              │              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────┐       │              │
-│  │ @tester      │  │ @tester      │  │ @tester  │       │              │
-│  │ регрессия    │  │ тесты фичи  │  │ тесты    │       │              │
-│  └──────┬───────┘  └──────┬───────┘  └────┬─────┘       │              │
-│         ▼                 ▼               ▼              │              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────┐       │              │
-│  │ @reviewer    │  │ @reviewer    │  │@reviewer │       │              │
-│  │ review.md    │  │ review.md    │  │ review   │       │              │
-│  └──────┬───────┘  └──────┬───────┘  └────┬─────┘       │              │
-│         ▼                 ▼               ▼              │              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────┐       │              │
-│  │ @devops      │  │ @devops      │  │ @devops  │       │              │
-│  │ CI + Docker  │  │ CI + Docker  │  │ backup   │       │              │
-│  └──────┬───────┘  └──────┬───────┘  └────┬─────┘       │              │
-│         └─────────────────┼────────────────┘              │              │
-│                           ▼                               │              │
-│                  Orchestrator: commit + push              │              │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### Агенты
-
-| Агент | Модель | Тип | Права | Роль |
-|-------|--------|-----|-------|------|
-| **Orchestrator** | `deepseek-v4-pro` | primary | read, grep, glob, task, bash | Классификация задач, вызов агентов, спринт-протокол |
-| **Build** | `big-pickle` | primary | все | Ручная разработка (альтернатива оркестратору) |
-| **Plan** | `big-pickle` | primary | read, grep, glob | Анализ без изменений |
-| `@architect` | `deepseek-v4-pro` | subagent | read, grep, glob | Анализ задач, approach.md |
-| `@coder` | `deepseek-v4-pro` | subagent | read, edit, bash, grep, glob | Реализация (фикс, фича, рефакторинг) |
-| `@tester` | `big-pickle` | subagent | read, edit, bash, grep, glob | Тесты (регрессия, фичи, edge cases) |
-| `@reviewer` | `deepseek-v4-pro` | subagent | read, grep, glob | Review любых изменений |
-| `@devops` | `deepseek-v4-pro` | subagent | read, edit, bash, grep, glob | CI, Docker, deploy |
-
-### Pipeline'ы по типу задачи
-
-| Тип | Pipeline |
-|-----|----------|
-| **Bug** | @architect → @coder → @tester → @reviewer → @devops → commit |
-| **Feature** | @architect → @coder → @tester → @reviewer → @devops → commit |
-| **Refactor** | @architect → @coder → @tester → @reviewer → commit |
-| **Sprint** | Разбивка на задачи → loop по типу → commit |
-| **Migration** | @architect → @coder → @tester → @devops → commit |
-| **DevOps** | @devops напрямую → commit |
-| **Docs** | @coder → @reviewer → commit |
-| **Test** | @tester → commit |
-
-### Workflow
-
-**Автоматический (через Orchestrator):**
-1. Пользователь: "Добавь фичу X" / "Исправь баг #101" / "Рефакторинг модуля Y"
-2. **Orchestrator** классифицирует задачу и запускает pipeline:
-   - @architect → approach.md ( universal template: bug/feature/refactor/migration секции)
-   - @coder → реализация по approach.md
-   - @tester → тесты (регрессия / фичи / edge cases)
-   - @reviewer → review.md
-   - @devops → CI + Docker проверка (если нужно)
-   - Orchestrator → git commit + push
-3. Orchestrator докладывает результат
-
-**Ручной (через Build/Tab):**
-1. Задача идентифицирована → добавлена в `BACKLOG.md`
-2. Пользователь вызывает агентов вручную
-3. Commit + Push вручную
-
-### Качественные ворота
-
-1. **Перед @coder:** approach.md существует
-2. **Перед @reviewer:** тесты проходят локально
-3. **Перед коммитом:** behavioral tests проходят
-4. **Перед пушем:** Docker собирается успешно (если менялась инфраструктура)
-
-### Структура файлов
-
-```
-running-coach/
-├── .opencode/
-│   └── agents/
-│       ├── orchestrator.md  (primary — координация всех задач)
-│       ├── architect.md     (анализ: баги, фичи, рефакторинг, миграции)
-│       ├── coder.md         (реализация: фикс, фича, рефакторинг)
-│       ├── tester.md        (тесты: регрессия, фичи, edge cases)
-│       ├── reviewer.md      (review любых изменений)
-│       └── devops.md        (CI, Docker, deploy)
-├── .github/
-│   └── workflows/
-│       └── ci.yml
-├── fixes/
-│   ├── template/
-│   │   ├── approach.md      (universal: bug/feature/refactor/migration)
-│   │   └── review.md
-│   └── {task-id}/
-│       ├── approach.md      (от @architect)
-│       └── review.md        (от @reviewer)
-└── ...
-```
-
-### Запуск агентов
-
-```bash
-# Из директории проекта
-cd /home/nimda/projects/running-coach
-
-# Автоматический цикл (через Orchestrator)
-# Переключись на Orchestrator через Tab, затем напиши:
-# "Исправь баг #101"
-# "Добавь фичу: WebSocket уведомления"
-# "Рефакторинг src/services/sync/"
-# "Спринт 21: каркас аналитики"
-
-# Ручной запуск (через Build)
-task(subagent_type="architect", prompt="Проанализируй задачу из BACKLOG.md")
-task(subagent_type="coder", prompt="Реализуй по fixes/{id}/approach.md")
-task(subagent_type="tester", prompt="Напиши тесты для fixes/{id}")
-task(subagent_type="reviewer", prompt="Проверь fixes/{id}")
-task(subagent_type="devops", prompt="Проверь CI и Docker")
-```
-
-### Смена модели
-
-```yaml
----
-name: agent_name
-model: opencode/deepseek-v4-pro  # измените на нужную модель
----
-```
-
-Доступные модели:
-- `opencode/deepseek-v4-pro` — анализ, ревью, DevOps
-- `opencode/deepseek-v4-flash` — простые фиксы
-- `opencode/big-pickle` — тесты, рутина
-- `opencode/deepseek-v4-flash-free` — экстренный вариант

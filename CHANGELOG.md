@@ -2,6 +2,25 @@
 
 All notable changes to this project are tracked here.
 
+## [03.08.2026] — Dev-процесс: ретирование opencode, переход на Claude-агента
+
+### Removed
+- **`.opencode/`** (6 ролевых агентов architect/coder/tester/reviewer/devops/orchestrator + node_modules),
+  **`opencode.json`**, **`TAB_ORCHESTRATOR_CHANGELOG.md`**, **`fixes/`** (README/template/100/101/108) —
+  ролевой multi-agent workflow больше не используется; разработку ведёт Claude-агент.
+
+### Added
+- **`CLAUDE.md`** — канонический файл инструкций для Claude-агента: стек/запуск, дисциплина
+  (400 строк/файл, backlog «не чини заодно», секреты, поведенческая проверка, data-safety,
+  DB-safety, backup перед деплоем), golden rules, Docker rebuild, git-дисциплина (коммит только
+  по запросу), заметки по модулю аналитики, таблица docs.
+
+### Changed
+- **`AGENTS.md`** — убраны секция «Многоагентный workflow», Правило 0 (автономность спринта) и
+  Правило 6 (авто commit/push), token-push блок; добавлен указатель на `CLAUDE.md`; правила
+  дисциплины перенумерованы 1–8. Сохранены карта `src/`, история спринтов, golden rules, docs-таблица.
+- **`.gitignore`** — добавлен `backups/` (рантайм-дампы БД не версионируются).
+
 ## [03.08.2026] — Tech-Debt Sprint: сверка BACKLOG + quick wins
 
 ### Changed
