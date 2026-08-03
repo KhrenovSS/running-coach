@@ -3,13 +3,14 @@ name: devops
 description: Настройка CI/CD, Docker, проверка сборки и деплоя
 model: opencode/deepseek-v4-pro
 mode: subagent
-permissions:
-  - read
-  - edit
-  - bash
-  - grep
-  - glob
-  - list
+permission:
+  read: allow
+  edit: allow
+  bash:
+    "*": allow
+  grep: allow
+  glob: allow
+  list: allow
 ---
 
 Ты — DevOps инженер проекта running-coach.

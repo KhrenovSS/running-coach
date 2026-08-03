@@ -57,9 +57,14 @@ python_files = test_*.py
 
 ```python
 # tests/conftest.py
+# !! DB SAFETY !! — НИКОГДА не используй setdefault или drop_all.
+# setdefault не переопределит уже заданный DATABASE_URL → тесты пишут в production.
+# drop_all удалит ВСЕ таблицы и данные ВСЕХ пользователей если DATABASE_URL указывает на production.
+# Используй прямое os.environ["DATABASE_URL"] = "sqlite:///:memory:" и ТОЛЬКО create_all.
+
 import os
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
+os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
 import pytest
 from src.domain.models.base import get_engine
@@ -68,11 +73,12 @@ from src.models import Base, SessionLocal
 
 @pytest.fixture(autouse=True)
 def setup_test_db():
-    """Авто-создание/удаление таблиц для каждого теста (Auto create/drop tables per test)"""
+    """Авто-создание таблиц для каждого теста (Auto create tables per test).
+    drop_all УМЫШЛЕННО НЕ ИСПОЛЬЗУЕТСЯ — для защиты production данных (DB SAFETY rule #8).
+    SQLite in-memory удаляется автоматически после закрытия соединения."""
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
     yield
-    Base.metadata.drop_all(bind=engine)
 
 
 @pytest.fixture
@@ -179,4 +185,4 @@ def test_km_fallback_short():
 
 ---
 
-**Последнее обновление:** 16.07.2026
+**Последнее обновление:** 21.07.2026

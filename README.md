@@ -8,7 +8,7 @@
 
 - **📤 Поддержка форматов** – TCX (XML) и FIT (бинарный) от любых часов/приложений
 - **🧠 Автоклассификация** – автоматически определяет тип тренировки (интервальная, темповая, long, recovery) по вариативности темпа и осцилляциям
-- **🔄 Пересчёт тренировок** – ручная смена типа (interval/tempo/long/recovery) + автоматический пересчёт анализа из сохранённых трекпоинтов
+- **🔄 Пересчёт тренировок** – ручная смена типа (interval/tempo/long/recovery/easy) + автоматический пересчёт анализа из сохранённых трекпоинтов
 - **📊 Сегментация** – каждый километр как отдельный отрезок; для интервальных тренировок – сплит на быстрые/медленные фазы
 - **🫀 Пульсовые зоны** – время в зонах Z1–Z5 (на основе max_hr)
 - **🗺️ Чистка GPS‑данных** – удаляет скачки и нереальные темпы, пересчитывает дистанцию
@@ -33,7 +33,7 @@
 ### Стек
 - **Backend**: Python + FastAPI + SQLAlchemy + PostgreSQL 16 (через Docker Compose)
 - **Frontend**: HTML/CSS/JS (Vanilla) + Chart.js
-- **Анализ**: `src/analysis/` — пакет анализа (7 файлов): `__init__.py` (оркестратор process_trackpoints), `oscillation.py` (детекция интервалов: base_pace + pace_gap + HR-lag), `classify.py` (interval/tempo/long/recovery), `segment.py` (change-point detection + осцилляции), `segment_km.py` (km-fallback, вариативность), `hr_zones.py` (пульсовые зоны Z1–Z5), `utils.py`
+- **Анализ**: `src/analysis/` — пакет анализа (7 файлов): `__init__.py` (оркестратор process_trackpoints), `oscillation.py` (детекция интервалов: base_pace + pace_gap + HR-lag), `classify.py` (interval/tempo/long/recovery/easy), `segment.py` (change-point detection + осцилляции), `segment_km.py` (km-fallback, вариативность), `hr_zones.py` (пульсовые зоны Z1–Z5), `utils.py`
 - **Парсеры**: `src/parsers/` — `tcx_parser.py` (XML), `fit_parser.py` (бинарный), `gps.py` (очистка GPS), `weather.py` (Open-Meteo API, httpx)
 - **Интеграции**: Coros Training Hub (неофициальное API), Open‑Meteo (погода), Telegram Bot API. Мульти-бренд: `BaseWatchClient` ABC + `factory.py` реестр.
 - **Аутентификация**: email+пароль (bcrypt), одноразовые токены регистрации (`secrets`), session-cookie (`SessionMiddleware`)
@@ -98,7 +98,7 @@ begin_ts DATETIME DEFAULT CURRENT_TIMESTAMP -- Дата и время начал
 total_distance_km FLOAT                  -- Общая дистанция (км)
 avg_heart_rate INTEGER                  -- Средний пульс (уд/мин)
 max_heart_rate INTEGER                  -- Максимальный пульс (уд/мин)
-training_type VARCHAR(50)               -- Тип: interval/tempo/long/recovery
+training_type VARCHAR(50)               -- Тип: interval/tempo/long/recovery/easy
 training_type_override VARCHAR(50)      -- Ручная установка типа (NULL = автоопределение)
 trackpoints_json JSON                   -- Сырые трекпоинты для пересчёта (reanalyze)
 segments_count INTEGER DEFAULT 1        -- Количество сегментов
@@ -222,6 +222,7 @@ created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 - `f7g8h9i0j1k2` — data integrity: NOT NULL + CASCADE on FKs, Text→JSON for HRV and metadata
 - `g9h0i1j2k3l4` — analytics preparation: indexes, `avg_pace` on `training_sessions`, `performance` → `Integer`
 - `h1i2j3k4l5m6` — add `ON DELETE CASCADE` to `watch_credentials` and `auth_tokens` FKs
+- `i2j3k4l5m6n7` — add `ON DELETE RESTRICT` to `training_sessions` FK
 
 > **Примечание:** порядок соответствует цепочке `down_revision` в файлах миграций, а не хронологии создания.
 
@@ -300,7 +301,7 @@ running-coach/
 │   ├── analysis/                    # Пакет анализа тренировок
 │   │   ├── __init__.py              #   оркестратор process_trackpoints()
 │   │   ├── oscillation.py           #   детекция интервалов: base_pace + pace_gap + HR-lag
-│   │   ├── classify.py              #   классификация (interval/tempo/long/recovery)
+│   │   ├── classify.py              #   классификация (interval/tempo/long/recovery/easy)
 │   │   ├── segment.py               #   сегментация: change-point detection + осцилляции
 │   │   ├── segment_km.py            #   km-fallback, вариативность
 │   │   ├── hr_zones.py              #   пульсовые зоны Z1–Z5

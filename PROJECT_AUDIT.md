@@ -72,7 +72,7 @@
 - Timezone (timezonefinder)
 - Weather (Open-Meteo)
 - HR zones
-- Classification (interval/tempo/long/recovery)
+- Classification (interval/tempo/long/recovery/easy)
 - Segmentation
 - HTML-рендеринг (format_pace, format_duration)
 

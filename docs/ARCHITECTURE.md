@@ -122,7 +122,7 @@ running-coach/
 │   ├── analysis/               # Пакет анализа тренировок
 │   │   ├── __init__.py         #   process_trackpoints() — оркестратор
 │   │   ├── oscillation.py      #   detect_pace_oscillations, compute_hr_lag_correlation
-│   │   ├── classify.py         #   classify_training (interval/tempo/long/recovery)
+│   │   ├── classify.py         #   classify_training (interval/tempo/long/recovery/easy)
 │   │   ├── segment.py          #   segment_by_pace, build_time_in_zones
 │   │   ├── segment_km.py       #   km_segment_fallback, compute_km_variability
 │   │   ├── hr_zones.py         #   get_zone, get_band
@@ -218,7 +218,7 @@ src/analysis/__init__.py :: process_trackpoints()
   ├── gps.py: clean_trackpoints (очистка GPS-скачков)
   ├── segment.py: build_time_in_zones + segment_by_pace
   ├── oscillation.py: detect_pace_oscillations + HR-lag
-  ├── classify.py: classify_training (interval/tempo/long/recovery)
+  ├── classify.py: classify_training (interval/tempo/long/recovery/easy)
   ├── segment_km.py: km_segment_fallback, compute_km_variability
   └── weather.py: fetch_weather, get_temp_at_time
   ↓

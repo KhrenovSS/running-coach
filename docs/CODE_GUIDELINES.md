@@ -393,7 +393,7 @@ raise WatchAPIError("Not authenticated", brand="coros")
 ```python
 # src/services/training_service.py
 from sqlalchemy.orm import Session
-from src.models import TrainingSession
+from src.domain.models.training import TrainingSession
 from src.exceptions import NotFoundError
 
 

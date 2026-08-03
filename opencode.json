@@ -1,24 +1,53 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "agent": {
+    "build": {
+      "description": "Разработка: чтение, запись, bash, тесты — все инструменты",
+      "mode": "primary",
+      "model": "opencode/big-pickle",
+      "permission": {
+        "read": "allow",
+        "edit": "allow",
+        "bash": {
+          "*": "allow"
+        },
+        "grep": "allow",
+        "glob": "allow",
+        "list": "allow",
+        "task": {
+          "*": "allow"
+        }
+      }
+    },
+    "plan": {
+      "description": "Анализ и планирование: только чтение, без изменений",
+      "mode": "primary",
+      "model": "opencode/big-pickle",
+      "permission": {
+        "read": "allow",
+        "edit": "deny",
+        "bash": "deny",
+        "grep": "allow",
+        "glob": "allow",
+        "list": "allow"
+      }
+    },
     "orchestrator": {
+      "description": "Координатор полного цикла исправления багов через субагентов",
       "mode": "primary",
       "model": "opencode/deepseek-v4-pro",
-      "description": "Оркестратор — координирует полный цикл исправления багов через субагентов",
-      "prompt": "{file:.opencode/agents/orchestrator.md}",
       "permission": {
         "read": "allow",
         "grep": "allow",
         "glob": "allow",
         "list": "allow",
-        "task": {"*": "allow"},
+        "task": {
+          "*": "allow"
+        },
         "bash": {
           "git *": "allow",
           "*": "deny"
-        },
-        "edit": "deny",
-        "webfetch": "allow",
-        "websearch": "allow"
+        }
       }
     }
   }
