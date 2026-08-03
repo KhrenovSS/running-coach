@@ -2,6 +2,16 @@
 
 All notable changes to this project are tracked here.
 
+## [03.08.2026] — Ролевые субагенты Claude Code (лин-набор)
+
+### Added
+- **`.claude/agents/db-safety-reviewer.md`** — read-only ревьюер (без Write/Edit): проверяет правки
+  `startup.py`/`domain/models`/`alembic`/`conftest`/sync против DB-safety правил и истории инцидентов.
+- **`.claude/agents/test-writer.md`** — пишет поведенческие pytest-тесты на фабриках `tests/helpers.py`
+  + SQLite-харнесс + DI.
+- **`CLAUDE.md`** — раздел «Субагенты (роли)»: on-demand делегирование, не обязательный конвейер
+  (в отличие от ретированного opencode). Агенты активируются в новой сессии Claude Code.
+
 ## [03.08.2026] — R1 (fresh-DB crash-loop) + Трек 4: каркас Этапа 0 модуля аналитики
 
 ### Fixed (CRITICAL)

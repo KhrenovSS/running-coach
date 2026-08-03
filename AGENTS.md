@@ -166,7 +166,23 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 **Коммит/пуш — только по запросу пользователя** (не автоматически), в рабочую ветку, не в `main` напрямую.
 `GITHUB_TOKEN` для push лежит в `.env` (отдельно не спрашивать). См. также `CLAUDE.md` → «Git / коммиты».
 
-## Текущее состояние (Session — 21.07.2026 — Docs audit #2 + Orchestrator)
+## Текущее состояние
+
+**Session 03.08.2026 — Pre-analytics prep + переход на Claude ✅** (ветка `feature/pre-analytics-prep`):
+- Dev-процесс: ретирован opencode (роли/`.opencode`/`opencode.json`/`fixes`), создан `CLAUDE.md`
+  (канонические инструкции), заведены 2 субагента `.claude/agents/` (db-safety-reviewer, test-writer).
+- Критические фиксы: **R1** порядок старта (alembic → потом `init_db`) — свежая БД больше не в crash-loop;
+  **R2** `_auto_sync` коммитит `last_*_sync_at` — нет шторма ресинков.
+- Фундамент аналитики: config-таксономия (`recovery_hours_for`), DI-репозитории (+`FeedbackRepository`,
+  убран Postgres-only `date_trunc`), `compute_ewma` skip-None, structured-выводы, +32 теста (187 всего).
+- **Модуль коуча Этап 0 построен:** 4 таблицы (`src/domain/models/coach.py`) + миграция `j3k4l5m6n7o8`,
+  скелет `src/coach/{skills,rules,personalization,knowledge,llm}` + `contracts.py`, `tests/skills/`.
+- Следующий шаг — Этап 1 (Skills). Открытые хвосты: ветка не запушена; прогнать `bin/backfill_avg_pace.py`
+  против прод-БД. Полные детали — `CHANGELOG.md` (03.08.2026); отложенные находки — `BACKLOG.md` #219–224.
+
+---
+
+### Session 21.07.2026 — Docs audit #2 + Orchestrator (историческое)
 
 **Фаза A ✅:** Починены сломанные импорты в `src/telegram/` (AUDIT-015), удалены `COROS_SYNC_*` константы (AUDIT-011).
 **Фаза B ✅:** Тонкие роуты (sync.py 444→93), мульти-бренд settings, единый `run_sync_for_user`, пакет `pages/`.
@@ -213,7 +229,8 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 
 **Pre-Sprint 21 cleanup ✅:** Закрыты замечания аудита #177-#183: `psutil` в dependencies, healthcheck бота исправлен (`ps aux`), `bin/docker.sh` в .gitignore, `max_hr` через `settings.default_max_hr`, `zone_distribution()` реализована, `_cleanup_stale_pending()` с lock.
 
-**Sprint 21 🚀:** модуль аналитики, Этап 0: каркас и данные (`src/coach/`, таблицы Recommendation, PredictionLog, UserModel, Lesson), config.py (уже создан в Sprint 20c), фикстуры для тестов.
+**Этап 0 модуля аналитики ✅ (03.08.2026):** каркас и данные — 4 таблицы (`src/domain/models/coach.py`),
+миграция `j3k4l5m6n7o8`, скелет `src/coach/` + `contracts.py`, `tests/skills/`. Следующий — Этап 1 (Skills).
 
 ### Что сделано в сессии (14.07.2026) — Sprint 20 / Tests:
 
@@ -386,7 +403,14 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 ✅ **Sprint 23** — DB Safety: conftest.py forced override, base.py dynamic URL read, DB SAFETY rule in AGENTS.md. Tests isolated from production DB.
 ✅ **Sprint 24** — Data Protection: backup script, docker.sh -v guard, /delete_me confirmation, FK CASCADE→RESTRICT, startup 0-users warning.
 
-🚀 **Sprint 21** — модуль аналитики, Этап 0: каркас и данные (`src/coach/`, таблицы Recommendation, PredictionLog, UserModel, Lesson), config.py, фикстуры для тестов.
+✅ **Pre-analytics prep (03.08.2026)** — dev-процесс переведён на Claude (ретирован opencode, создан
+`CLAUDE.md`); критические фиксы R1 (fresh-DB crash-loop: alembic→create_all) и R2 (авто-синк коммитит
+`last_*_sync_at`); укреплён фундамент аналитики (config-таксономия, DI-репозитории, EWMA, structured);
+классификация зафиксирована тестами; **Этап 0 модуля коуча построен** (4 таблицы + миграция + скелет
+`src/coach/` + `tests/skills/`). Детали — `CHANGELOG.md` (03.08.2026), новые находки — `BACKLOG.md` #219–224.
+
+🚀 **Следующий шаг — Этап 1 (Skills):** реализовать `src/coach/skills/*` (пороги из
+`docs/coros_health_metrics.md` → `SkillResult`), собрать `AthleteState` в `src/coach/state.py`, тесты в `tests/skills/`.
 
 ❄️ Заморожено (после аналитики): фильтры, multi-brand onboarding, факторы самочувствия, admin panel.
 

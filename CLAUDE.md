@@ -81,8 +81,15 @@
   skills/rules — `docs/coros_health_metrics.md`**; `skills/` и `rules/p1_safety.py` не должны расходиться.
 - Принципы: rules-first (детерминированный движок решает числа), LLM — только интерфейс/объяснение,
   никогда не меняет числа; каждое решение несёт `rationale`; обучение ограничено (min/max + EWMA).
-- Уже готово (Sprint 20c): `src/coach/config.py`, `src/services/repositories.py`,
-  `analytics_helpers.py`, частичные structured-выводы `recovery_view.py`, модель данных, тест-фабрики.
+- **Готово к Этапу 1.** Этап 0 (каркас) завершён 03.08.2026: 4 таблицы `src/domain/models/coach.py`
+  (Recommendation/PredictionLog/UserModel/Lesson) + миграция; скелет `src/coach/{skills,rules,
+  personalization,knowledge,llm}` + контракты `src/coach/contracts.py` (SkillResult/AthleteState/
+  Prescription); `tests/skills/` + фикстура `athlete_with_history`. Фундамент (Sprint 20c):
+  `config.py` (+`recovery_hours_for`), `repositories.py` (+`FeedbackRepository`, DI), `analytics_helpers.py`,
+  structured-выводы `recovery_view.py`.
+- **Следующий шаг — Этап 1 (Skills):** превратить пороги из `docs/coros_health_metrics.md` в чистые
+  функции `src/coach/skills/*` (сейчас заглушки с `NotImplementedError`), возвращающие `SkillResult`;
+  собрать `AthleteState` в `src/coach/state.py`; тесты в `tests/skills/`.
 
 ## Документация
 | Тема | Файл |
