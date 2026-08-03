@@ -6,8 +6,10 @@
 from datetime import timedelta
 
 from src.domain.models.base import utcnow
-from src.services.repositories import TrainingRepository, HealthRepository
-from tests.helpers import make_user, build_training_session, build_daily_metrics
+from src.services.repositories import TrainingRepository, HealthRepository, FeedbackRepository
+from tests.helpers import (
+    make_user, build_training_session, build_daily_metrics, build_training_feedback,
+)
 
 
 _uid = [1000]
@@ -79,3 +81,25 @@ def test_load_ratio(db_session):
     res = HealthRepository.load_ratio(user.id, days=7, db=db_session)
     assert res["acute_load"] > 0 and res["chronic_load"] > 0
     assert res["ratio"] > 1.0
+
+
+def test_feedback_repository(db_session):
+    user = _new_user(db_session)
+    s1 = build_training_session(db_session, user.id, training_type="interval")
+    s2 = build_training_session(db_session, user.id, training_type="easy")
+    build_training_feedback(db_session, s1.id, user.id, rating=8)
+    build_training_feedback(db_session, s2.id, user.id, rating=3)
+
+    assert FeedbackRepository.avg_rating(user.id, days=28, db=db_session) == 5.5
+    assert FeedbackRepository.rating_for_session(s1.id, db=db_session) == 8
+    assert FeedbackRepository.rating_for_session(999999, db=db_session) is None
+
+    paired = FeedbackRepository.ratings_with_sessions(user.id, days=28, db=db_session)
+    assert len(paired) == 2
+    by_type = {p["training_type"]: p["rating"] for p in paired}
+    assert by_type == {"interval": 8, "easy": 3}
+
+
+def test_feedback_avg_empty(db_session):
+    user = _new_user(db_session)
+    assert FeedbackRepository.avg_rating(user.id, db=db_session) is None

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from src.analysis.hr_zones import get_zone
 from src.config import settings
-from src.models import SessionLocal, TrainingSession, DailyMetrics, User
+from src.models import SessionLocal, TrainingSession, DailyMetrics, User, TrainingFeedback
 
 
 class TrainingRepository:
@@ -194,6 +194,81 @@ class HealthRepository:
 
             ratio = float(acute) / float(chronic) if chronic > 0 else 0.0
             return {"acute_load": float(acute), "chronic_load": float(chronic), "ratio": ratio}
+        finally:
+            if own:
+                db.close()
+
+
+class FeedbackRepository:
+    """Агрегация субъективных оценок (RPE 0–10) для аналитики (Training feedback / RPE aggregation)."""
+
+    @staticmethod
+    def avg_rating(user_id: int, days: int = 28, db: Session | None = None) -> float | None:
+        """Средняя субъективная тяжесть за период (Average perceived effort over period)."""
+        own = db is None
+        db = db or SessionLocal()
+        try:
+            since = datetime.now(timezone.utc) - timedelta(days=days)
+            val = db.query(func.avg(TrainingFeedback.rating)).filter(
+                TrainingFeedback.user_id == user_id,
+                TrainingFeedback.created_at >= since,
+            ).scalar()
+            return float(val) if val is not None else None
+        finally:
+            if own:
+                db.close()
+
+    @staticmethod
+    def rating_for_session(session_id: int, db: Session | None = None) -> int | None:
+        """Оценка конкретной тренировки (Rating for a specific session)."""
+        own = db is None
+        db = db or SessionLocal()
+        try:
+            fb = db.query(TrainingFeedback).filter(
+                TrainingFeedback.session_id == session_id,
+            ).first()
+            return fb.rating if fb else None
+        finally:
+            if own:
+                db.close()
+
+    @staticmethod
+    def ratings_with_sessions(user_id: int, days: int = 28, db: Session | None = None) -> list[dict]:
+        """RPE в связке с параметрами сессии — для будущего skills/workout.py.
+
+        (RPE paired with session params — for the future workout skill: predicted-vs-actual effort.)
+        """
+        own = db is None
+        db = db or SessionLocal()
+        try:
+            since = datetime.now(timezone.utc) - timedelta(days=days)
+            rows = db.query(
+                TrainingFeedback.session_id,
+                TrainingFeedback.rating,
+                TrainingFeedback.created_at,
+                TrainingSession.training_type,
+                TrainingSession.avg_pace,
+                TrainingSession.avg_heart_rate,
+                TrainingSession.total_distance_km,
+            ).join(
+                TrainingSession, TrainingFeedback.session_id == TrainingSession.id
+            ).filter(
+                TrainingFeedback.user_id == user_id,
+                TrainingFeedback.created_at >= since,
+            ).order_by(TrainingFeedback.created_at).all()
+
+            return [
+                {
+                    "session_id": r.session_id,
+                    "rating": r.rating,
+                    "created_at": r.created_at,
+                    "training_type": r.training_type,
+                    "avg_pace": r.avg_pace,
+                    "avg_heart_rate": r.avg_heart_rate,
+                    "total_distance_km": r.total_distance_km,
+                }
+                for r in rows
+            ]
         finally:
             if own:
                 db.close()

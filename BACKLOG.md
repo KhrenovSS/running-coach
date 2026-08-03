@@ -416,3 +416,18 @@
 | 215 | [Data] | **`/delete_me` без подтверждения** — мгновенное удаление ВСЕХ данных. Два шага: `/delete_me` → предупреждение → `/delete_me_confirm`. Таймаут 5 мин. | `src/telegram/handlers/account.py` | ✅ Sprint 24 |
 | 216 | [Data] | **ON DELETE CASCADE на TrainingSession** — если User удалён, каскадно удаляются ВСЕ тренировки. Заменить на RESTRICT. Миграция Alembic. | `src/domain/models/training.py:17` | ✅ Sprint 24 |
 | 217 | [Data] | **startup.py: safety check** — после init_db() проверить user_count. Если 0 → WARNING в лог «Database has 0 users — possible volume loss». | `src/startup.py` | ✅ Sprint 24 |
+
+---
+
+## 🟠 Отложенные находки ревью (03.08.2026 — подготовка к аналитике)
+
+MAJOR/тюнинг — «тихо-неверно», но не блокеры; править точечно при работе над нужным skill/этапом (не «заодно»).
+
+| # | Тег | Описание | Файл / Источник | Статус |
+|---|-----|----------|-----------------|--------|
+| 219 | [Analytics] | `load_ratio` исключает дни отдыха (`training_load IS NOT NULL`) → ACWR смещён; `ratio=0.0` неотличим от «нет хронических данных». Рефактор при реализации `skills/load.py`. | `src/services/repositories.py` (load_ratio) | ⬜ |
+| 220 | [Analytics] | `weekly_volume` бакетит недели по UTC, игнорируя `TrainingSession.timezone` — off-by-one для не-UTC. | `src/services/repositories.py` (weekly_volume) | ⬜ |
+| 221 | [Analytics] | `compute_slope` индекс-based (0,1,2…), игнорирует календарные разрывы → величина наклона неверна (знак корректен). Взвесить по датам при количественном использовании. | `src/services/analytics_helpers.py` | ⬜ |
+| 222 | [Classification] | Тюнинг порогов `classify.py` (tempo — catch-all) требует размеченной выборки тренировок; без неё менять пороги рискованно. Собрать labeled data → пересмотреть. | `src/analysis/classify.py` | ⬜ |
+| 223 | [Arch] | Планировщик стартует per-worker; синглтон только в пределах процесса → дубли синков при `--workers>1`. Advisory-lock / leader election перед масштабированием. | `src/scheduler.py`, `src/startup.py` | ⬜ |
+| 224 | [Arch] | Нет watchdog у потока планировщика: неперехваченное исключение вне внутренних try/except убивает `_loop` навсегда до рестарта. | `src/scheduler.py` | ⬜ |

@@ -2,6 +2,22 @@
 
 All notable changes to this project are tracked here.
 
+## [03.08.2026] — Трек 3: надёжность классификации + агрегация feedback
+
+### Added
+- **`src/services/repositories.py`** — `FeedbackRepository` (RPE-аналитика): `avg_rating`,
+  `rating_for_session`, `ratings_with_sessions` (RPE в связке с параметрами сессии — для будущего
+  `skills/workout.py`). Также с DI (`db=...`).
+- **Тесты** (+8): `tests/test_classify_boundaries.py` — фиксация 5-путевого поведения классификатора
+  (interval/long/recovery/easy/tempo-catch-all + guard <3 сегментов); тесты `FeedbackRepository`.
+
+### Notes
+- Классификатор (`classify.py`) НЕ менялся: пороги настроены в Sprint 22 на реальных данных, тюнинг без
+  размеченной выборки рискован → внесено в BACKLOG (#222). Ручной `training_type_override` уже пишется
+  в `training_type` (reanalyze), поэтому агрегаты (`training_type_distribution`) его учитывают.
+- В `BACKLOG.md` внесены отложенные MAJOR-находки ревью (#219–224): load_ratio ACWR, weekly_volume tz,
+  compute_slope календарные разрывы, тюнинг классификации, scheduler per-worker / watchdog.
+
 ## [03.08.2026] — Трек 2: укрепление фундамента аналитики
 
 ### Fixed (critical для будущего «коуча» — тихая некорректность)
