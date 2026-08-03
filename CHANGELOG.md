@@ -2,6 +2,14 @@
 
 All notable changes to this project are tracked here.
 
+## [03.08.2026] — Процесс: переход на trunk-based (всё в main)
+
+### Changed
+- Разработка ведётся **напрямую в `main`**, без рабочих веток («не плодить сущности»). Ветка
+  `feature/pre-analytics-prep` влита fast-forward и удалена (локально + remote). Обновлены
+  `CLAUDE.md` и `AGENTS.md` (раздел Git): убрано «рабочая ветка / не в `main` напрямую».
+  Коммит/пуш — по-прежнему только по запросу пользователя.
+
 ## [03.08.2026] — Деплой ветки в прод + проверка backfill-модуля
 
 ### Deployed

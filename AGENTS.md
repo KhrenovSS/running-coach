@@ -169,17 +169,22 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 
 ## Текущее состояние
 
-**Session 03.08.2026 — Pre-analytics prep + переход на Claude ✅** (ветка `feature/pre-analytics-prep`):
+**Session 03.08.2026 — Pre-analytics prep + переход на Claude ✅** (всё в `main`, trunk-based):
 - Dev-процесс: ретирован opencode (роли/`.opencode`/`opencode.json`/`fixes`), создан `CLAUDE.md`
   (канонические инструкции), заведены 2 субагента `.claude/agents/` (db-safety-reviewer, test-writer).
 - Критические фиксы: **R1** порядок старта (alembic → потом `init_db`) — свежая БД больше не в crash-loop;
   **R2** `_auto_sync` коммитит `last_*_sync_at` — нет шторма ресинков.
 - Фундамент аналитики: config-таксономия (`recovery_hours_for`), DI-репозитории (+`FeedbackRepository`,
-  убран Postgres-only `date_trunc`), `compute_ewma` skip-None, structured-выводы, +32 теста (187 всего).
+  убран Postgres-only `date_trunc`), `compute_ewma` skip-None, structured-выводы.
 - **Модуль коуча Этап 0 построен:** 4 таблицы (`src/domain/models/coach.py`) + миграция `j3k4l5m6n7o8`,
   скелет `src/coach/{skills,rules,personalization,knowledge,llm}` + `contracts.py`, `tests/skills/`.
-- Следующий шаг — Этап 1 (Skills). Открытые хвосты: ветка не запушена; прогнать `bin/backfill_avg_pace.py`
-  против прод-БД. Полные детали — `CHANGELOG.md` (03.08.2026); отложенные находки — `BACKLOG.md` #219–224.
+- **Прод развёрнут и проверен:** миграция применена без crash-loop (R1 в бою), данные целы
+  (2 users / 30 sessions), db+app+bot `healthy`; `backfill_avg_pace` в проде = 0 строк (данные здоровы);
+  попутно починены баг импорта backfill-скрипта и ложный healthcheck бота (`ps` нет в python-slim →
+  `grep /proc/1/cmdline`). Итого **190 тестов** зелёные.
+- Процесс: перешли на **trunk-based** — всё ведём в `main`, лишние ветки удалены.
+- **Следующий шаг — Этап 1 (Skills).** Полные детали — `CHANGELOG.md` (03.08.2026);
+  отложенные находки — `BACKLOG.md` #219–225.
 
 ---
 
