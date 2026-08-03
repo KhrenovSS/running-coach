@@ -3,6 +3,13 @@
 Парковка идей, фиксов и вопросов.  
 **Правило:** заметил мелочь → строка сюда, обратно к задаче. Не чини «заодно».
 
+> **Сверка 03.08.2026 (tech-debt спринт):** статусы синхронизированы с кодом. Закрыты как
+> уже-сделанные (были ⬜, по факту исправлены): #93, #100, #101, #108, #115, #122, #129, #144,
+> #153, #180, #184, #185, #186, #187, #188, #218 (P0), #76. Исправлены в этом спринте:
+> #56, #137, #200, #201. Остаются открытыми (вне скоупа): безопасность #78/#116/#119/#123,
+> архитектура #1/#16/#84/#85/#87/#89/#90/#133, анализ #103/#104/#106/#109/#111/#112/#113/#114,
+> и отложенные фичи #5/#6/#8–#13/#15. См. также `PROJECT_AUDIT.md`.
+
 | # | Тег | Описание | Файл / Источник | Статус |
 |---|-----|----------|-----------------|--------|
 | 1 | [Фикс] | AUDIT-006 Telegram TODO: `sync_runner.py` вызывает `sync_activities_for_user`/`sync_health_for_user` напрямую вместо `run_sync_for_user`. Миграция на `run_sync_for_user_all_brands(chat_id)`. | `src/telegram/sync_runner.py:8-12` | ⬜ Sprint 12b |
@@ -30,7 +37,7 @@
 
 ---
 
-*Обновлён: 16.07.2026 — Docs audit: README, AGENTS, PROJECT_AUDIT синхронизированы; segment.py split (417→367); Sprint 20c → ✅; #168-176*
+*Обновлён: 21.07.2026 — Docs audit #2: BACKLOG синхронизирован со Sprint 20b/21/24/Docs audit; #45,48,49,177-183,189-199,211-217 отмечены ✅*
 
 ---
 
@@ -83,11 +90,11 @@
 
 | # | Тег | Описание | Файл / Источник | Статус |
 |---|-----|----------|-----------------|--------|
-| 45 | [Memory] | **`_weather_cache` без TTL / лимита** — каждая уникальная (lat,lon,date) остаётся в памяти навсегда. | `src/parsers/weather.py:7` | ⬜ Sprint 20b |
+| 45 | [Memory] | **`_weather_cache` без TTL / лимита** — каждая уникальная (lat,lon,date) остаётся в памяти навсегда. | `src/parsers/weather.py:7` | ✅ Sprint 20b |
 | 46 | [Memory] | **`_pending` / `_sync_tasks` без cleanup** — записи копятся вечно после завершения задач. | `src/web/state.py:9-10` | ✅ Sprint 14 (TS-06: cleanup TTL 1ч) |
 | 47 | [Memory] | **`_awaiting_weight` без cleanup** — при удалении пользователя запись остаётся. | `src/telegram/state.py:1` | ✅ Sprint 14 (TS-07: clear_awaiting_weight) |
-| 48 | [Memory] | **`all_sessions = db.query(...).all()` без пагинации** — все сессии пользователя в память. | `src/web/routes/pages/index.py:36` | ⬜ Sprint 20b |
-| 49 | [Memory] | **N+1: загружаются ВСЕ `begin_ts` и `DeletedTraining`** — OOM при тысячах тренировок. | `src/services/sync/activities.py:85-86` | ⬜ Sprint 20b |
+| 48 | [Memory] | **`all_sessions = db.query(...).all()` без пагинации** — все сессии пользователя в память. | `src/web/routes/pages/index.py:36` | ✅ Sprint 20b |
+| 49 | [Memory] | **N+1: загружаются ВСЕ `begin_ts` и `DeletedTraining`** — OOM при тысячах тренировок. | `src/services/sync/activities.py:85-86` | ✅ Sprint 20b |
 
 ---
 
@@ -103,7 +110,7 @@
 | 53 | [DRY] | **Km-chunking logic в `_compute_km_variability` и `_km_segment_fallback`** — идентичные циклы разбора трека на км-блоки. | `src/analysis/segment.py:209-259,404-436` | ✅ Sprint 18 (ARC-04: _chunk_by_km) |
 | 54 | [DRY] | **Nearest-time lookup в weather.py** — `get_weather_code_at_time` и `get_temp_at_time` почти идентичны. | `src/parsers/weather.py:53-84` | ✅ Sprint 18 (ARC-05: _get_nearest) |
 | 55 | [DRY] | **Inline keyboard в uploads.py** — одинаковая клавиатура строится 3 раза. | `src/web/routes/uploads.py:109-122,176-188,249-262` | ✅ Sprint 18 (ARC-02: _build_rating_keyboard) |
-| 56 | [DRY] | **`user.name or user.telegram_username or "Бегун"`** повторяется в api/routes/auth.py как минимум 3 раза. | `src/api/routes/auth.py:54,100,173` | ⬜ P2 |
+| 56 | [DRY] | **`user.name or user.telegram_username or "Бегун"`** повторяется в api/routes/auth.py как минимум 3 раза. | `src/api/routes/auth.py:54,100,173` | ✅ Fixed 03.08.2026 (_display_name helper) |
 | 57 | [DRY] | **HTML в сервисном слое** — `render_zone_bars`, `render_type_row`, `build_nav_html` генерируют строки HTML в stats.py. Аналитика повторит этот паттерн. | `src/services/stats.py:66-133` | ✅ Sprint 18 (ARC-10: Jinja2) |
 
 ### Logging / Observability
@@ -138,7 +145,7 @@
 | 73 | [Config] | **Поле `password` со значением `'********'` как sentinel** — если у пользователя реально пароль `********`, он никогда не сможет обновить креды. | `src/services/watch_credentials.py:61` | ✅ Sprint 16 (CFG-07: sentinel удалён) |
 | 74 | [Config] | **`Europe/Moscow` хардкодом** в 6+ файлах telegram/ — для мульти-таймзоны нужно из settings. | `src/telegram/main.py:36,74`, `stats.py:27`, `sync.py:43`, `trainings.py:66` и др. | ✅ Sprint 16 (CFG-05: settings.timezone) |
 | 75 | [Config] | **`COROS_BASE_URL` и `COROS_*` константы** в глобальном `constants.py` — должны быть в `watch/coros.py`, а не в глобальном config. | `src/config/constants.py:17-22` | ✅ Sprint 16 (CFG-06: удалены) |
-| 76 | [Config] | **Поле `upload_dir` в settings не используется** — `startup.py` хардкодит `"uploads"`. | `src/startup.py:72` | ⬜ P2 |
+| 76 | [Config] | **Поле `upload_dir` в settings не используется** — `startup.py` хардкодит `"uploads"`. | `src/startup.py:72` | ✅ Сверка 03.08.2026 (нет поля upload_dir; хардкод норма) |
 
 ### Input Validation
 
@@ -174,8 +181,8 @@
 |---|-----|----------|-----------------|--------|
 | 91 | [Docs] | **`docs/ARCHITECTURE.md` полностью устарел** — SQLite, старые пути, нет `src/analysis/`, `src/domain/`, `src/watch/`. | `docs/ARCHITECTURE.md` | ✅ Sprint 19 (DOC-01) |
 | 92 | [Docs] | **`docs/CODE_GUIDELINES.md` ссылается на `CONFIG` (которого нет)** и старые пути. | `docs/CODE_GUIDELINES.md` | ✅ Sprint 19 (DOC-02) |
-| 93 | [Docs] | **`src/parsers/__init__.py:1` вводит в заблуждение** — пишет «модули вынесены в src/analysis/», хотя парсеры всё ещё в parsers/. | `src/parsers/__init__.py` | ⬜ P2 |
-| 94 | [Docs] | **`CHANGELOG.md` — 1161 строк без оглавления**, нет стандартного формата дат, дублирующиеся записи. | `CHANGELOG.md` | ⬜ P2 |
+| 93 | [Docs] | **`src/parsers/__init__.py:1` вводит в заблуждение** — пишет «модули вынесены в src/analysis/», хотя парсеры всё ещё в parsers/. | `src/parsers/__init__.py` | ✅ Сверка 03.08.2026 (docstring актуален) |
+| 94 | [Docs] | **`CHANGELOG.md` — 1613 строк без оглавления**, нет стандартного формата дат, дублирующиеся записи. | `CHANGELOG.md` | ⬜ P2 |
 
 ### Type Hints
 
@@ -191,36 +198,36 @@
 
 | # | Тег | Описание | Файл / Источник | Статус |
 |---|-----|----------|-----------------|--------|
-| 100 | [Bug] | **`suspect_flags` ставится ТОЛЬКО когда `cleaning_log` пуст** — инвертированная логика. | `src/analysis/__init__.py:235-236` | ⬜ P2 |
-| 101 | [Bug] | **`format_pace` может выдать `6:60`** — `int()` truncation вместо `round()`. | `src/analysis/utils.py:19` | ⬜ P2 |
+| 100 | [Bug] | **`suspect_flags` ставится ТОЛЬКО когда `cleaning_log` пуст** — инвертированная логика. | `src/analysis/__init__.py:235-236` | ✅ Сверка 03.08.2026 (`__init__.py:216-221`) |
+| 101 | [Bug] | **`format_pace` может выдать `6:60`** — `int()` truncation вместо `round()`. | `src/analysis/utils.py:19` | ✅ Сверка 03.08.2026 (`utils.py:46-58` round+guard) |
 | 102 | [Bug] | **`sqrt(min(a, 1))` — если `a < 0` (floating point), падение**. | `src/parsers/gps.py:11` | ✅ Sprint 17 (DI-09: sqrt(max(0,...))) |
 | 103 | [Bug] | **`save_dashboard_data` вызывается дважды** при пустом `metrics_list` — или баг, или лишний вызов. | `src/services/sync/health.py:81-83,181` | ⬜ P2 |
 | 104 | [Bug] | **Start_time в TCX: `'' or None` → `AttributeError`** при replace, если оба отсутствуют. | `src/parsers/tcx_parser.py:23-24` | ⬜ P2 |
 | 105 | [Bug] | **FIT: `cad < 100: cad * 2` — legitimate 80 spm (walking) → 160**. | `src/parsers/fit_parser.py:28-29` | ✅ Sprint 17 (DI-05: coros_cadence_workaround) |
 | 106 | [Bug] | **FIT: `enhanced_altitude=0 or data.get('altitude')` — 0 (valid) трактуется как falsy**. | `src/parsers/fit_parser.py:26` | ⬜ P2 |
 | 107 | [Bug] | **Haversine: `sqrt(min(a, 1))` — если `a < 0` (float error), падение**. | `src/parsers/gps.py:11` | ✅ Sprint 17 (DI-09: = #102) |
-| 108 | [Bug] | **Oscillation: `avg_pace = 0/1 = 0.0` при пустом slice** — silent data corruption. | `src/analysis/oscillation.py:89` | ⬜ P2 |
+| 108 | [Bug] | **Oscillation: `avg_pace = 0/1 = 0.0` при пустом slice** — silent data corruption. | `src/analysis/oscillation.py:89` | ✅ Сверка 03.08.2026 (`oscillation.py:114-132` fallback) |
 | 109 | [Bug] | **Oscillation HR-lag: mismatch time scales** — `pace_change` за 1 шаг, `hr_change` за `lag_sec`. | `src/analysis/oscillation.py:182-190` | ⬜ P2 |
 | 110 | [Bug] | **`hr_zones.get_zone()`: `ZeroDivisionError` при `max_hr=0`** — нет валидации. | `src/analysis/hr_zones.py:9` | ✅ Sprint 17 (DI-08: защита max_hr=0) |
 | 111 | [Bug] | **Сегментация O(n^2)** — while loop по trackpoints для rolling window при равных dist. | `src/analysis/segment.py:103-104` | ⬜ P2 |
 | 112 | [Bug] | **Сегментация: `max_credible_upper=15.0` хардкодом** — не из конфига. | `src/analysis/segment.py:111` | ⬜ P2 |
 | 113 | [Bug] | **Сегментация: `count_off_osc = len(osc) < num_kms * 0.5` — предел 50-150% слишком широк**. | `src/analysis/segment.py:370-371` | ⬜ P2 |
 | 114 | [Bug] | **Sync audit: `log_sync_completed` вызывается внутри per-cred цикла, передаёт cumulative totals** — искажение per-brand статистики. | `src/telegram/sync_runner.py:84-90` | ⬜ P2 |
-| 115 | [Bug] | **`cmd_delete_me` — немедленное удаление без подтверждения**. | `src/telegram/handlers/account.py:28-33` | ⬜ P2 |
+| 115 | [Bug] | **`cmd_delete_me` — немедленное удаление без подтверждения**. | `src/telegram/handlers/account.py:28-33` | ✅ Сверка 03.08.2026 (=#215, два шага) |
 | 116 | [Bug] | **Пароль показывается в plaintext в Telegram** — self-deleting, но может засветиться в нотификациях. | `src/telegram/handlers/account.py:121-127` | ⬜ P2 |
 | 117 | [Bug] | **`handle_weight_message` — catch-all для всех не-командных сообщений** — любой текст в неудачный момент попытается стать weight. | `src/telegram/main.py:68` | ⬜ P2 |
 | 118 | [Bug] | **Weight state не сбрасывается при ошибке** — пользователь застревает в режиме ввода веса. | `src/telegram/handlers/weight.py:98-101` | ✅ Sprint 15 |
 | 119 | [Bug] | **`/logs` endpoint без аутентификации** + path traversal (хотя `os.path.join` немного защищает). | `src/web/routes/logs.py:10` | ⬜ P2 |
 | 120 | [Bug] | **`/logs` уровень детекции по подстроке** — слово `"WARNING"` в сообщении даёт неверный CSS. | `src/web/routes/logs.py:40-41` | ⬜ P2 |
 | 121 | [Bug] | **`/health` всегда 200, даже при `degraded`** — маскирует проблемы от load balancer. | `src/api/routes/health.py:92` | ⬜ P2 |
-| 122 | [Bug] | **`psutil` не объявлен в `pyproject.toml`** — health-endpoint импортирует psutil, но пакет отсутствует в зависимостях. В production метрики памяти всегда возвращают "psutil not installed". | `pyproject.toml`, `src/api/routes/health.py:59-67` | ⬜ |
+| 122 | [Bug] | **`psutil` не объявлен в `pyproject.toml`** — health-endpoint импортирует psutil, но пакет отсутствует в зависимостях. В production метрики памяти всегда возвращают "psutil not installed". | `pyproject.toml`, `src/api/routes/health.py:59-67` | ✅ Сверка 03.08.2026 (=#177, psutil в pyproject) |
 | 123 | [Bug] | **`get_or_create_user_by_telegram` — если email уже занят другим, генерит рандомный пароль без уведомления юзера**. | `src/telegram/handlers/start.py:75-76` | ⬜ P2 |
 | 124 | [Bug] | **`today_start` в `sync.py:43` считает по Moscow TZ, хотя `begin_ts` в UTC** — смещение до 12ч. | `src/telegram/handlers/sync.py:43` | ⬜ P2 |
 | 125 | [Bug] | **Training list может превысить 4096 символов Telegram** — падение при 100+ сессиях. | `src/telegram/handlers/trainings.py:81` | ⬜ P2 |
 | 126 | [Bug] | **Feedback TOCTOU race** — check-then-insert без атомарности, возможны дубли. | `src/telegram/handlers/feedback.py:41-56` | ⬜ P2 |
 | 127 | [Bug] | **`settings.py: `old_watch_email` сравнение — ложное срабатывание при пустом `watch_brand`**. | `src/web/routes/pages/settings.py:127` | ⬜ P2 |
 | 128 | [Bug] | **`token_ttl_minutes` вычисляется при import time** — stale при hot-reload. | `src/services/auth.py:24` | ⬜ P2 |
-| 129 | [Bug] | **`models.py: `weight` как transient proxy** — теряется после закрытия сессии. | `src/models.py:27` | ⬜ P2 |
+| 129 | [Bug] | **`models.py: `weight` как transient proxy** — теряется после закрытия сессии. | `src/models.py:27` | ✅ Сверка 03.08.2026 (models.py — чистый shim) |
 | 130 | [Bug] | **Опечатка в `stats.py:8` — `'Окторябрь'` вместо `'Октябрь'`**. | `src/services/stats.py:8` | ✅ Sprint 16 (CFG-09) |
 
 ### Cleanup
@@ -233,12 +240,12 @@
 | 134 | [Cleanup] | **`get_db()` в Telegram через `next(get_db())`** — если `get_db` рефакторят, сломается бот. | `src/telegram/utils.py:10` | ⬜ P2 |
 | 135 | [Cleanup] | **`_get_web_app_url` с `_` (private), но импортируется снаружи** — или public, или не импортировать. | `src/telegram/utils.py:17` | ⬜ P2 |
 | 136 | [Cleanup] | **`_AUTO_SYNC_LOCK` (UPPER_CASE) vs `_sync_tasks_lock` (snake_case)** — непоследовательный нейминг. | `src/web/state.py:11-12` | ⬜ P2 |
-| 137 | [Cleanup] | **`telegram_notify.py: httpx.Client()` на каждый вызов** — должен быть shared client. | `src/services/telegram_notify.py:27` | ⬜ P2 |
+| 137 | [Cleanup] | **`telegram_notify.py: httpx.Client()` на каждый вызов** — должен быть shared client. | `src/services/telegram_notify.py:27` | ✅ Fixed 03.08.2026 (shared httpx client) |
 | 138 | [Cleanup] | **Мёртвые константы в `settings.py`** — `session_ttl_days`, `default_max_hr`, `log_file`, `http_timeout` никем не используются. | `src/config/settings.py:9-19` | ✅ Sprint 16 (CFG-01/03/04: используются) |
 
 ---
 
-*Обновлён: 14.07.2026 — Sprint 13-20 синхронизация (76+ пунктов отмечены ✅), добавлены новые P0-находки (#139-#141)*
+*Обновлён: 21.07.2026 — Sprint 13-20 синхронизация завершена; #45,48,49 ← Sprint 20b ✅; #177-183 ← Pre-Sprint 21 ✅; #189-199 ← Docs audit ✅; #211-217 ← Sprint 24 ✅*
 
 ---
 
@@ -256,7 +263,7 @@
 
 | # | Тег | Описание | Файл / Источник | Статус |
 |---|-----|----------|-----------------|--------|
-| 153 | [Bug] | **PK violation при регистрации нового пользователя через Telegram** — `startup.py` создаёт админа с явным `id=1`, но не синхронизирует PostgreSQL sequence `users_id_seq`. При `INSERT` без `id` (регистрация через `/start`) `nextval` возвращает `1` → конфликт с admin user. Проявилось после пересоздания таблиц (volume сброшен), sequence стартовал с 1. | `src/startup.py:38-40` | ⬜ |
+| 153 | [Bug] | **PK violation при регистрации нового пользователя через Telegram** — `startup.py` создаёт админа с явным `id=1`, но не синхронизирует PostgreSQL sequence `users_id_seq`. При `INSERT` без `id` (регистрация через `/start`) `nextval` возвращает `1` → конфликт с admin user. Проявилось после пересоздания таблиц (volume сброшен), sequence стартовал с 1. | `src/startup.py:38-40` | ✅ Сверка 03.08.2026 (=#218, `startup.py:60`) |
 | 154 | [Bug] | **Type mismatch: `telegram_chat_id` (BigInteger) сохраняется и сравнивается как `str`** — `start.py` и `utils.py` используют `str(chat_id)` вместо `chat_id` (int) при записи и фильтрации `User.telegram_chat_id`. Работает за счёт неявного приведения PostgreSQL, но создаёт риск отказа при определённых версиях драйвера. | `src/telegram/handlers/start.py:63,76,90`, `src/telegram/utils.py:12` | ✅ Fixed: str→int 16.07.2026 |
 | 155 | [Bug] | **Missing `AuditService.log_user_registered`** — `start.py` вызывает `audit.log_user_registered()`, но такого метода нет в `AuditService`. При регистрации через Telegram падает с `AttributeError` и показывает пользователю «Ошибка при сохранении email». | `src/services/audit.py`, `src/telegram/handlers/start.py:80,97` | ✅ Fixed: метод добавлен 16.07.2026 |
 | 156 | [Bug] | **`/start` не проверяет `password_hash` — пользователь без пароля не может войти в веб** — если регистрация прервалась на шаге email (пользователь создан, `password_hash=NULL`), повторный `/start` показывает «С возвращением!» сразу, не предлагая ввести пароль. Войти в веб-панель невозможно. | `src/telegram/handlers/start.py:21-27` | ✅ Fixed: добавлена проверка password_hash 16.07.2026 |
@@ -277,7 +284,7 @@
 |---|-----|----------|-----------------|--------|
 | 142 | [Bug] | **Telegram stats handler ссылается на несуществующие колонки** — `TrainingSession.distance_km`, `TrainingSession.duration_seconds`, `TrainingSession.sport` НЕ СУЩЕСТВУЮТ. Реальные колонки: `total_distance_km`, `duration_minutes`, `training_type`. Команда `/stats` падает с `AttributeError` при вызове `_overview()` (строки 44,47,64) или `_period_stats()` (строки 83-84,98). **Блокирует:** любой Telegram-пользователь, вызвавший `/stats`, получает crash. | `src/telegram/handlers/stats.py:44,47,64,83-84,98` | ✅ Sprint 20c (PREP-01) |
 | 143 | [DB] | **Нет индексов для запросов по диапазонам времени** — `training_sessions` не имеет индекса на `begin_ts` и составного `(user_id, begin_ts)`. Модуль аналитики будет постоянно делать запросы «тренировки пользователя за N дней» — каждый раз full table scan. Аналогично: `training_feedback` нет `(user_id, created_at)`, `weight_measurements` нет `(user_id, measured_at)`. `daily_metrics` имеет `UniqueConstraint(user_id, date)` — это даёт составной индекс, но `training_sessions` — нет. **Блокирует:** все skills модуля аналитики (fatigue, load, progress, distribution) будут медленными. | `src/domain/models/training.py:13-14`, `health.py:15-16` | ✅ Sprint 20c (PREP-02) |
-| 144 | [Arch] | **Нет слоя агрегационных запросов** — создан `src/services/repositories.py` с `TrainingRepository` и `HealthRepository`, но `zone_distribution()` является заглушкой (всё падает в `z2`). Нужно реализовать реальное распределение по пульсовым зонам. | `src/services/repositories.py:45-62` | ⬜ Sprint 20c (PREP-03) |
+| 144 | [Arch] | **Нет слоя агрегационных запросов** — создан `src/services/repositories.py` с `TrainingRepository` и `HealthRepository`, но `zone_distribution()` является заглушкой (всё падает в `z2`). Нужно реализовать реальное распределение по пульсовым зонам. | `src/services/repositories.py:45-62` | ✅ Сверка 03.08.2026 (=#182, реализовано) |
 
 ---
 
@@ -328,41 +335,41 @@
 
 | # | Тег | Описание | Файл / Источник | Статус |
 |---|-----|----------|-----------------|--------|
-| 177 | [Bug] | **`psutil` не объявлен в `pyproject.toml`** — health-endpoint импортирует psutil, но пакет отсутствует в зависимостях. В production метрики памяти всегда возвращают "psutil not installed". | `pyproject.toml`, `src/api/routes/health.py:59-67` | ⬜ |
+| 177 | [Bug] | **`psutil` не объявлен в `pyproject.toml`** — health-endpoint импортирует psutil, но пакет отсутствует в зависимостях. В production метрики памяти всегда возвращают "psutil not installed". | `pyproject.toml`, `src/api/routes/health.py:59-67` | ✅ Pre-Sprint 21 |
 
 ### 🟠 P1 — Важно
 
 | # | Тег | Описание | Файл / Источник | Статус |
 |---|-----|----------|-----------------|--------|
-| 178 | [Config] | **Healthcheck бота бесполезен** — `docker-compose.yml` использует `pg_isready` в образе `python:3.13-slim`, где его нет; `|| exit 0` делает проверку формально успешной. | `docker-compose.yml` | ⬜ |
+| 178 | [Config] | **Healthcheck бота бесполезен** — `docker-compose.yml` использует `pg_isready` в образе `python:3.13-slim`, где его нет; `|| exit 0` делает проверку формально успешной. | `docker-compose.yml` | ✅ Pre-Sprint 21 |
 | 179 | [Docs/Git] | **`bin/docker.sh` отслеживается git, но `.gitignore` игнорирует `bin/`** — документация говорит "создать вручную, не отслеживается git". | `.gitignore:31`, `bin/docker.sh` | ✅ (файл не в индексе git, .gitignore работает) |
-| 180 | [Config] | **`SUDO_PASSWORD` не описан в `.env.example`** — `bin/docker.sh:8` читает переменную, но шаблон .env её не содержит. | `.env.example`, `bin/docker.sh:8` | ⬜ |
-| 181 | [Config] | **`max_hr=177` остаётся хардкодом** — `User.max_hr`, `process_trackpoints`, `_merge_similar_segments` используют `177` напрямую вместо `settings.default_max_hr`. Нужен единый источник правды. | `src/domain/models/user.py:25`, `src/analysis/__init__.py:26`, `src/analysis/segment.py:186` | ⬜ |
-| 182 | [Bug] | **`zone_distribution()` в `repositories.py` — заглушка** — всё время записывается в `z2`, реальное распределение по пульсовым зонам не считается. | `src/services/repositories.py:45-62` | ⬜ |
-| 183 | [Race] | **`_cleanup_stale_pending()` без `_pending_lock`** — функция модифицирует `_pending` без блокировки, риск race condition. | `src/web/state.py:19-26` | ⬜ |
+| 180 | [Config] | **`SUDO_PASSWORD` не описан в `.env.example`** — `bin/docker.sh:8` читает переменную, но шаблон .env её не содержит. | `.env.example`, `bin/docker.sh:8` | ✅ Сверка 03.08.2026 (.env.example содержит) |
+| 181 | [Config] | **`max_hr=177` остаётся хардкодом** — `User.max_hr`, `process_trackpoints`, `_merge_similar_segments` используют `177` напрямую вместо `settings.default_max_hr`. Нужен единый источник правды. | `src/domain/models/user.py:25`, `src/analysis/__init__.py:26`, `src/analysis/segment.py:186` | ✅ Pre-Sprint 21 |
+| 182 | [Bug] | **`zone_distribution()` в `repositories.py` — заглушка** — всё время записывается в `z2`, реальное распределение по пульсовым зонам не считается. | `src/services/repositories.py:45-62` | ✅ Pre-Sprint 21 |
+| 183 | [Race] | **`_cleanup_stale_pending()` без `_pending_lock`** — функция модифицирует `_pending` без блокировки, риск race condition. | `src/web/state.py:19-26` | ✅ Pre-Sprint 21 |
 
 ### 🟡 P2 — Желательно / документация
 
 | # | Тег | Описание | Файл / Источник | Статус |
 |---|-----|----------|-----------------|--------|
-| 184 | [Config] | **`.env.example` неполный** — отсутствуют переменные из `settings.py`: `PASSWORD_MIN_LENGTH`, `TOKEN_TTL_MINUTES`, `SESSION_TTL_DAYS`, `DEFAULT_MAX_HR`, `LOG_FILE`, `HTTP_TIMEOUT`, `TIMEZONE`. | `.env.example`, `src/config/settings.py` | ⬜ |
-| 185 | [Cleanup] | **Неиспользуемые зависимости** — `tzlocal` в основных; `pytest-asyncio`, `freezegun`, `factory-boy` в dev. | `pyproject.toml` | ⬜ |
-| 186 | [Cleanup] | **Мёртвые константы в `audit.py`** — `USER_LOGIN`, `USER_LOGOUT`, `ERROR` объявлены, но не используются. | `src/services/audit.py:14` | ⬜ |
-| 187 | [Log] | **`audit.py` использует `logging.getLogger("app")`** вместо `get_logger` из `src.utils.logger`. | `src/services/audit.py:93` | ⬜ |
-| 188 | [Cleanup] | **Мёртвые ссылки в docstring `sync_runner.py`** — упоминаются `SyncService`, `SyncLog`, `full_sync`. | `src/telegram/sync_runner.py:5-6` | ⬜ |
-| 189 | [Docs] | **`README.md`: устаревшие цифры** — "parsers разбиты на 9 модулей" (факт 5), "telegram разбит на 12 файлов" (факт 17); Roadmap не отмечает тесты как выполненные. | `README.md` | ⬜ |
-| 190 | [Docs] | **`README.md`: неверная команда для логов** — `logs/app_$(date +%F).log`, реальные файлы `logs/app.log.YYYY-MM-DD`. | `README.md:656-659` | ⬜ |
-| 191 | [Docs] | **`README.md`: дерево `pages/` неполное** — в структуре раскрыт только `session.py`, не хватает `auth.py`, `index.py`, `settings.py`. | `README.md:338-340` | ⬜ |
-| 192 | [Docs] | **`docs/LOGGING.md`: формат файлов и event types** — имена файлов не совпадают с `src/utils/logger.py`; не хватает событий `training.*`, `feedback.*`. | `docs/LOGGING.md` | ⬜ |
-| 193 | [Docs] | **`docs/TESTING.md`: SQLite vs PostgreSQL** — написано "реальный PostgreSQL", но `tests/conftest.py` использует `sqlite:///:memory:`. | `docs/TESTING.md:29` | ⬜ |
-| 194 | [Docs] | **`docs/TESTING.md`: пример `conftest.py` устарел** — `scope="session"` и `init_db`, реально `scope="function"` и `SessionLocal`. | `docs/TESTING.md:64-80` | ⬜ |
-| 195 | [Docs] | **`docs/API_ROUTES_GUIDE.md`: устаревшие примеры** — Pydantic-схемы в `src/models.py` (shim), пример `TrainingService.get`. | `docs/API_ROUTES_GUIDE.md:137-157, 194` | ⬜ |
-| 196 | [Docs] | **`docs/CODE_GUIDELINES.md`: устаревший пример `TrainingService.get`** | `docs/CODE_GUIDELINES.md:393-403` | ⬜ |
-| 197 | [Docs] | **`docs/DEVELOPMENT_GUIDELINES.md`: не упомянут env** — проверочные команды (`from src.startup import create_app`) требуют `DATABASE_URL`, `SECRET_KEY`, `CRED_KEY`. | `docs/DEVELOPMENT_GUIDELINES.md:35-38` | ⬜ |
-| 198 | [Docs] | **`PROJECT_AUDIT.md`: неотмеченные закрытые AUDIT-пункты** — AUDIT-001, AUDIT-002, AUDIT-009, AUDIT-010, AUDIT-013, AUDIT-015 в коде fixed, но DoD-чекбоксы пустые. | `PROJECT_AUDIT.md` | ⬜ |
-| 199 | [Docs] | **`AGENTS.md`: устаревший статус** — Sprint 21 помечен ⬜, но не начат; цифры `src/telegram/` и `src/parsers/` не совпадают с README. | `AGENTS.md` | ⬜ |
-| 200 | [Cleanup] | **Затенение импорта `settings`** — переменная `settings = get_settings(...)` затеняет `from src.config import settings` в `startup.py` и `index.py`. | `src/startup.py:45`, `src/web/routes/pages/index.py:68` | ⬜ |
-| 201 | [Cleanup] | **Magic numbers в фильтре графика** — `3.0 < pace_val < 10.0` в `analysis/utils.py`. | `src/analysis/utils.py:261` | ⬜ |
+| 184 | [Config] | **`.env.example` неполный** — отсутствуют переменные из `settings.py`: `PASSWORD_MIN_LENGTH`, `TOKEN_TTL_MINUTES`, `SESSION_TTL_DAYS`, `DEFAULT_MAX_HR`, `LOG_FILE`, `HTTP_TIMEOUT`, `TIMEZONE`. | `.env.example`, `src/config/settings.py` | ✅ Сверка 03.08.2026 (.env.example содержит) |
+| 185 | [Cleanup] | **Неиспользуемые зависимости** — `tzlocal` в основных; `pytest-asyncio`, `freezegun`, `factory-boy` в dev. | `pyproject.toml` | ✅ Сверка 03.08.2026 (deps вычищены) |
+| 186 | [Cleanup] | **Мёртвые константы в `audit.py`** — `USER_LOGIN`, `USER_LOGOUT`, `ERROR` объявлены, но не используются. | `src/services/audit.py:14` | ✅ Сверка 03.08.2026 (удалены/ERROR используется) |
+| 187 | [Log] | **`audit.py` использует `logging.getLogger("app")`** вместо `get_logger` из `src.utils.logger`. | `src/services/audit.py:93` | ✅ Сверка 03.08.2026 (get_logger, `audit.py:26`) |
+| 188 | [Cleanup] | **Мёртвые ссылки в docstring `sync_runner.py`** — упоминаются `SyncService`, `SyncLog`, `full_sync`. | `src/telegram/sync_runner.py:5-6` | ✅ Сверка 03.08.2026 (docstring чист) |
+| 189 | [Docs] | **`README.md`: устаревшие цифры** — "parsers разбиты на 9 модулей" (факт 5), "telegram разбит на 12 файлов" (факт 17); Roadmap не отмечает тесты как выполненные. | `README.md` | ✅ Docs audit |
+| 190 | [Docs] | **`README.md`: неверная команда для логов** — `logs/app_$(date +%F).log`, реальные файлы `logs/app.log.YYYY-MM-DD`. | `README.md:656-659` | ✅ Docs audit |
+| 191 | [Docs] | **`README.md`: дерево `pages/` неполное** — в структуре раскрыт только `session.py`, не хватает `auth.py`, `index.py`, `settings.py`. | `README.md:338-340` | ✅ Docs audit |
+| 192 | [Docs] | **`docs/LOGGING.md`: формат файлов и event types** — имена файлов не совпадают с `src/utils/logger.py`; не хватает событий `training.*`, `feedback.*`. | `docs/LOGGING.md` | ✅ Docs audit |
+| 193 | [Docs] | **`docs/TESTING.md`: SQLite vs PostgreSQL** — написано "реальный PostgreSQL", но `tests/conftest.py` использует `sqlite:///:memory:`. | `docs/TESTING.md:29` | ✅ Docs audit |
+| 194 | [Docs] | **`docs/TESTING.md`: пример `conftest.py` устарел** — `scope="session"` и `init_db`, реально `scope="function"` и `SessionLocal`. | `docs/TESTING.md:64-80` | ✅ Docs audit |
+| 195 | [Docs] | **`docs/API_ROUTES_GUIDE.md`: устаревшие примеры** — Pydantic-схемы в `src/models.py` (shim), пример `TrainingService.get`. | `docs/API_ROUTES_GUIDE.md:137-157, 194` | ✅ Docs audit |
+| 196 | [Docs] | **`docs/CODE_GUIDELINES.md`: устаревший пример `TrainingService.get`** | `docs/CODE_GUIDELINES.md:393-403` | ✅ Docs audit |
+| 197 | [Docs] | **`docs/DEVELOPMENT_GUIDELINES.md`: не упомянут env** — проверочные команды (`from src.startup import create_app`) требуют `DATABASE_URL`, `SECRET_KEY`, `CRED_KEY`. | `docs/DEVELOPMENT_GUIDELINES.md:35-38` | ✅ Docs audit |
+| 198 | [Docs] | **`PROJECT_AUDIT.md`: неотмеченные закрытые AUDIT-пункты** — AUDIT-001, AUDIT-002, AUDIT-009, AUDIT-010, AUDIT-013, AUDIT-015 в коде fixed, но DoD-чекбоксы пустые. | `PROJECT_AUDIT.md` | ✅ Docs audit |
+| 199 | [Docs] | **`AGENTS.md`: устаревший статус** — Sprint 21 помечен ⬜, но не начат; цифры `src/telegram/` и `src/parsers/` не совпадают с README. | `AGENTS.md` | ✅ Docs audit |
+| 200 | [Cleanup] | **Затенение импорта `settings`** — переменная `settings = get_settings(...)` затеняет `from src.config import settings` в `startup.py` и `index.py`. | `src/startup.py:45`, `src/web/routes/pages/index.py:68` | ✅ Fixed 03.08.2026 (user_settings rename) |
+| 201 | [Cleanup] | **Magic numbers в фильтре графика** — `3.0 < pace_val < 10.0` в `analysis/utils.py`. | `src/analysis/utils.py:261` | ✅ Fixed 03.08.2026 (CHART_*_PACE константы) |
 
 ---
 
@@ -394,7 +401,7 @@
 
 | # | Тег | Описание | Файл / Источник | Статус |
 |---|-----|----------|-----------------|--------|
-| 218 | [Bug] | **`users_id_seq` не синхронизирован** — `setval` вызывается только при создании admin (внутри `if not admin_user`). Если admin уже существует, sequence остаётся на 1 → `UniqueViolation` при регистрации нового пользователя. Вынести `setval` за блок `if not admin_user`. | `src/startup.py:64` | ⬜ |
+| 218 | [Bug] | **`users_id_seq` не синхронизирован** — `setval` вызывается только при создании admin (внутри `if not admin_user`). Если admin уже существует, sequence остаётся на 1 → `UniqueViolation` при регистрации нового пользователя. Вынести `setval` за блок `if not admin_user`. | `src/startup.py:64` | ✅ Сверка 03.08.2026 (`startup.py:60` безусловный setval) |
 
 ---
 
@@ -402,10 +409,10 @@
 
 | # | Тег | Описание | Файл / Источник | Статус |
 |---|-----|----------|-----------------|--------|
-| 211 | [Data] | **README.md: секция «Очистка БД»** (стр.674-684) содержит `docker volume rm running-coach_pgdata` —诱导 к потере данных при следовании инструкции. Удалить секцию, заменить на предупреждение. | `README.md:674-684` | ⬜ Sprint 24 |
-| 212 | [Data] | **bin/docker.sh: защита от `-v`** — если передан флаг `-v`/`--volumes`, требовать ввод `CONFIRM` перед выполнением. Иначе — abort. | `bin/docker.sh` | ⬜ Sprint 24 |
-| 213 | [Data] | **bin/backup_db.sh (новый)** — pg_dump из контейнера db в `backups/YYYY-MM-DD_HH-MMSS.sql.gz`, автоматическая ротация (хранить последние 7 бэкапов). | `bin/backup_db.sh` | ⬜ Sprint 24 |
-| 214 | [Data] | **AGENTS.md правило #9: BACKUP BEFORE DEPLOY** — перед любым `docker compose build/up` → сначала `bin/backup_db.sh`. Никогда `down -v`, никогда `volume rm`. | `AGENTS.md` | ⬜ Sprint 24 |
-| 215 | [Data] | **`/delete_me` без подтверждения** — мгновенное удаление ВСЕХ данных. Два шага: `/delete_me` → предупреждение → `/delete_me_confirm`. Таймаут 5 мин. | `src/telegram/handlers/account.py` | ⬜ Sprint 24 |
-| 216 | [Data] | **ON DELETE CASCADE на TrainingSession** — если User удалён, каскадно удаляются ВСЕ тренировки. Заменить на RESTRICT. Миграция Alembic. | `src/domain/models/training.py:17` | ⬜ Sprint 24 |
-| 217 | [Data] | **startup.py: safety check** — после init_db() проверить user_count. Если 0 → WARNING в лог «Database has 0 users — possible volume loss». | `src/startup.py` | ⬜ Sprint 24 |
+| 211 | [Data] | **README.md: секция «Очистка БД»** (стр.674-684) содержит `docker volume rm running-coach_pgdata` —诱导 к потере данных при следовании инструкции. Удалить секцию, заменить на предупреждение. | `README.md:674-684` | ✅ Sprint 24 |
+| 212 | [Data] | **bin/docker.sh: защита от `-v`** — если передан флаг `-v`/`--volumes`, требовать ввод `CONFIRM` перед выполнением. Иначе — abort. | `bin/docker.sh` | ✅ Sprint 24 |
+| 213 | [Data] | **bin/backup_db.sh (новый)** — pg_dump из контейнера db в `backups/YYYY-MM-DD_HH-MMSS.sql.gz`, автоматическая ротация (хранить последние 7 бэкапов). | `bin/backup_db.sh` | ✅ Sprint 24 |
+| 214 | [Data] | **AGENTS.md правило #9: BACKUP BEFORE DEPLOY** — перед любым `docker compose build/up` → сначала `bin/backup_db.sh`. Никогда `down -v`, никогда `volume rm`. | `AGENTS.md` | ✅ Sprint 24 |
+| 215 | [Data] | **`/delete_me` без подтверждения** — мгновенное удаление ВСЕХ данных. Два шага: `/delete_me` → предупреждение → `/delete_me_confirm`. Таймаут 5 мин. | `src/telegram/handlers/account.py` | ✅ Sprint 24 |
+| 216 | [Data] | **ON DELETE CASCADE на TrainingSession** — если User удалён, каскадно удаляются ВСЕ тренировки. Заменить на RESTRICT. Миграция Alembic. | `src/domain/models/training.py:17` | ✅ Sprint 24 |
+| 217 | [Data] | **startup.py: safety check** — после init_db() проверить user_count. Если 0 → WARNING в лог «Database has 0 users — possible volume loss». | `src/startup.py` | ✅ Sprint 24 |

@@ -28,6 +28,11 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 logger = get_logger("auth")
 
 
+def _display_name(user: User) -> str:
+    """Отображаемое имя пользователя с фолбэком (display name with fallback)."""
+    return user.name or user.telegram_username or "Бегун"
+
+
 @router.get("/telegram")
 async def telegram_login(request: Request, token: str, db: Session = Depends(get_db)):
     """
@@ -52,7 +57,7 @@ async def telegram_login(request: Request, token: str, db: Session = Depends(get
     # Session fixation protection: очищаем сессию перед установкой (clear session before setting)
     request.session.clear()
     request.session["user_id"] = user.id
-    request.session["user_name"] = user.name or user.telegram_username or "Бегун"
+    request.session["user_name"] = _display_name(user)
     
     logger.info(
         "User %s logged in via Telegram",
@@ -100,7 +105,7 @@ async def password_login(
     # Session fixation protection
     request.session.clear()
     request.session["user_id"] = user.id
-    request.session["user_name"] = user.name or user.telegram_username or "Бегун"
+    request.session["user_name"] = _display_name(user)
     
     logger.info(
         "User %s logged in via password",
@@ -174,7 +179,7 @@ async def register(
     # Session fixation protection
     request.session.clear()
     request.session["user_id"] = user.id
-    request.session["user_name"] = user.name or user.telegram_username or "Бегун"
+    request.session["user_name"] = _display_name(user)
     
     logger.info(
         "User %s registered with email %s",

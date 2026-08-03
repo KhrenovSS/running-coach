@@ -2,6 +2,32 @@
 
 All notable changes to this project are tracked here.
 
+## [03.08.2026] — Tech-Debt Sprint: сверка BACKLOG + quick wins
+
+### Changed
+- **`BACKLOG.md`** — сверка статусов с кодом. 17 строк, помеченных ⬜, по факту уже исправлены —
+  закрыты как `✅ Сверка 03.08.2026`: **#218 (P0** — `users_id_seq`, уже безусловный `setval` в
+  `startup.py:60`**)**, #100, #101, #108 (analysis — уже с `round()`/guard/fallback), #93, #115
+  (=#215), #122 (=#177), #129, #144 (=#182), #153 (=#218), #180, #184, #185, #186, #187, #188, #76.
+
+### Fixed
+- **#137** `src/services/telegram_notify.py` — `httpx.Client()` создавался на каждый вызов. Введён
+  общий ленивый клиент `_get_client()` (double-checked locking, как у logger/fernet); соединения
+  переиспользуются.
+- **#200** `src/startup.py`, `src/web/routes/pages/index.py` — локальная `settings = get_settings(...)`
+  затеняла модульный `from src.config import settings`. Переименована в `user_settings`; удалён
+  ставший неиспользуемым импорт в `index.py`. Поведение сохранено.
+- **#56** `src/api/routes/auth.py` — тройное дублирование `user.name or user.telegram_username or
+  "Бегун"` вынесено в helper `_display_name(user)`.
+- **#201** `src/analysis/utils.py`, `src/config/constants.py` — magic numbers `3.0 < pace_val < 10.0`
+  в фильтре графика вынесены в `CHART_MIN_PACE_MIN_PER_KM` / `CHART_MAX_PACE_MIN_PER_KM`.
+
+### Notes
+- Вне скоупа (зафиксировано в `BACKLOG.md`): безопасность (#78/#116/#119/#123), архитектура
+  (#1/#16/#133 и др.), алгоритмы анализа (#109/#111–#114). Рекомендуется как следующий спринт: **#119**
+  (`/logs` без авторизации + сырые строки лога в HTML).
+- Верификация: `pytest` — 155 passed; `create_app()` загружается; CI forbidden-patterns чисты.
+
 ## [21.07.2026] — Orchestrator Agent: автоматический цикл исправления багов
 
 ### Added

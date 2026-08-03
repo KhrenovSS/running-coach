@@ -13,7 +13,6 @@ from src.models import get_db, User, TrainingSession, DailyMetrics, WeightMeasur
 from src.deps import templates
 from src.api.deps import get_current_user
 from src.services.stats import fmt_duration, calc_stats, get_zone_bars_data, MONTHS_RU
-from src.config import settings
 from src.services.recovery_view import hrv_status, tired_label, readiness_label
 from src.services.sync import get_auto_sync_status_snapshot
 from src.web.state import TRAINING_TYPES_RU
@@ -65,7 +64,7 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
     recent_sessions = db.query(TrainingSession).filter(
         TrainingSession.user_id == user_id
     ).order_by(TrainingSession.begin_ts.desc()).limit(200).all()
-    settings = get_settings(user_id)
+    user_settings = get_settings(user_id)
     weight_measurements = db.query(WeightMeasurement).filter(
         WeightMeasurement.user_id == user_id
     ).order_by(WeightMeasurement.measured_at).limit(365).all()
@@ -121,7 +120,7 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
     rows = ""
     for s in filtered:
         if s.begin_ts:
-            tz_name = tz_str or s.timezone or settings.timezone
+            tz_name = tz_str or s.timezone or user_settings.timezone
             local_begin = s.begin_ts.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(tz_name))
             t = local_begin.strftime("%d.%m.%Y %H:%M")
         else:
@@ -154,8 +153,8 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
     if not rows:
         rows = "<tr><td colspan='9' style='color:#888;padding:30px;'>Нет тренировок за выбранный период</td></tr>"
 
-    week_zones = get_zone_bars_data(week_stats['zone_min'], week_stats['total_min'], settings.max_hr) if week_stats else []
-    month_zones = get_zone_bars_data(month_stats['zone_min'], month_stats['total_min'], settings.max_hr) if month_stats else []
+    week_zones = get_zone_bars_data(week_stats['zone_min'], week_stats['total_min'], user_settings.max_hr) if week_stats else []
+    month_zones = get_zone_bars_data(month_stats['zone_min'], month_stats['total_min'], user_settings.max_hr) if month_stats else []
     week_types = _format_type_row(week_stats['type_count']) if week_stats else ""
     month_types = _format_type_row(month_stats['type_count']) if month_stats else ""
 
@@ -204,8 +203,8 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
         "nav_sel_month": sel_month,
         "nav_title": nav_title,
         "user_header": user_header,
-        "max_hr": settings.max_hr,
-        "weight": settings.weight,
+        "max_hr": user_settings.max_hr,
+        "weight": user_settings.weight,
         "week_km": week_stats['total_km'] if week_stats else 0,
         "week_dur": week_stats['total_dur'] if week_stats else "",
         "week_zones": week_zones,

@@ -6,6 +6,8 @@ from typing import TypedDict
 from zoneinfo import ZoneInfo
 from timezonefinder import TimezoneFinder
 
+from src.config.constants import CHART_MIN_PACE_MIN_PER_KM, CHART_MAX_PACE_MIN_PER_KM
+
 
 class TrackpointDict(TypedDict, total=False):
     """Трекпоинт: точка записи с данными датчиков (Trackpoint: sensor data point)"""
@@ -264,7 +266,7 @@ def build_hr_pace_series(times: list[float], hrs: list[int], dists: list[float],
                 total_weight += w
         if total_weight > 0:
             pace_val = weighted_sum / total_weight
-            if 3.0 < pace_val < 10.0:
+            if CHART_MIN_PACE_MIN_PER_KM < pace_val < CHART_MAX_PACE_MIN_PER_KM:
                 hr_pace_series.append({
                     'dist_km': round(dists[i] / 1000, 3),
                     'hr': smoothed_hrs[i],

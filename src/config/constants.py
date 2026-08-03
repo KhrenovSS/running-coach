@@ -63,6 +63,10 @@ RECOVERY_MAX_Z4_PCT: Final[float] = 5.0           # макс. % времени �
 LONG_MAX_Z4_PCT: Final[float] = 15.0              # макс. % времени в Z4+ для long
 EASY_MAX_Z4_SEGMENT_MIN: Final[float] = 3.0       # макс. длительность Z4+ сегмента для easy (мин)
 
+# Диапазон достоверного темпа для графика HR/pace (Plausible pace range for HR/pace chart, мин/км)
+CHART_MIN_PACE_MIN_PER_KM: Final[float] = 3.0     # быстрее — считаем GPS-шумом (faster → GPS noise)
+CHART_MAX_PACE_MIN_PER_KM: Final[float] = 10.0    # медленнее — ходьба/остановка (slower → walking/stop)
+
 # Интервалы синхронизации per-user (Per-user sync interval settings)
 MIN_ACTIVITY_SYNC_INTERVAL_MIN: Final[int] = 15
 MIN_HEALTH_SYNC_INTERVAL_MIN: Final[int] = 30
