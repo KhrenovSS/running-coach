@@ -13,6 +13,10 @@ All notable changes to this project are tracked here.
 - **`bin/backfill_avg_pace.py`** — прямой запуск `python bin/backfill_avg_pace.py` падал с
   `ModuleNotFoundError: No module named 'src'` (sys.path[0] = `bin/`, не корень). Добавлен bootstrap
   корня проекта в `sys.path`. В проде backfill отработал: `avg_pace` NULL = 0 (данные уже здоровы).
+- **`docker-compose.yml`** — healthcheck бота был `ps aux | grep ...`, но в образе `python-slim`
+  **нет `ps`** → контейнер вечно «unhealthy» (ложно; #178 был неполным фиксом). Заменено на
+  dependency-free `grep -q run_telegram_bot /proc/1/cmdline` → бот теперь корректно `healthy`.
+  Сам бот всё это время работал (шлёт/принимает сообщения) — баг был только в проверке.
 
 ### Added
 - **`tests/test_backfill.py`** (+3): заполнение NULL (`50/10=5.0`), не трогает заполненные,

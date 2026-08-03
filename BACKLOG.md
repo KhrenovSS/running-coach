@@ -431,3 +431,11 @@ MAJOR/тюнинг — «тихо-неверно», но не блокеры; п
 | 222 | [Classification] | Тюнинг порогов `classify.py` (tempo — catch-all) требует размеченной выборки тренировок; без неё менять пороги рискованно. Собрать labeled data → пересмотреть. | `src/analysis/classify.py` | ⬜ |
 | 223 | [Arch] | Планировщик стартует per-worker; синглтон только в пределах процесса → дубли синков при `--workers>1`. Advisory-lock / leader election перед масштабированием. | `src/scheduler.py`, `src/startup.py` | ⬜ |
 | 224 | [Arch] | Нет watchdog у потока планировщика: неперехваченное исключение вне внутренних try/except убивает `_loop` навсегда до рестарта. | `src/scheduler.py` | ⬜ |
+
+---
+
+## 🟢 Прод-деплой / ops (03.08.2026)
+
+| # | Тег | Описание | Файл / Источник | Статус |
+|---|-----|----------|-----------------|--------|
+| 225 | [Ops] | **Healthcheck бота был ложно-unhealthy** — `ps aux \| grep` в `docker-compose.yml`, но в образе `python-slim` нет `ps` (#178 был неполным фиксом). Заменено на `grep -q run_telegram_bot /proc/1/cmdline`. Бот работал, ломалась только проверка. | `docker-compose.yml` (bot healthcheck) | ✅ 03.08.2026 |
