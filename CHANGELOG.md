@@ -2,6 +2,22 @@
 
 All notable changes to this project are tracked here.
 
+## [03.08.2026] — Деплой ветки в прод + проверка backfill-модуля
+
+### Deployed
+- Ветка `feature/pre-analytics-prep` развёрнута в прод (docker compose build+up app). Миграция
+  `i2j3k4l5m6n7 → j3k4l5m6n7o8` применилась на существующей БД **без crash-loop** (R1-фикс в бою):
+  4 coach-таблицы созданы, `/health`=200, данные целы (users=2, sessions=30). Бэкап снят до деплоя.
+
+### Fixed
+- **`bin/backfill_avg_pace.py`** — прямой запуск `python bin/backfill_avg_pace.py` падал с
+  `ModuleNotFoundError: No module named 'src'` (sys.path[0] = `bin/`, не корень). Добавлен bootstrap
+  корня проекта в `sys.path`. В проде backfill отработал: `avg_pace` NULL = 0 (данные уже здоровы).
+
+### Added
+- **`tests/test_backfill.py`** (+3): заполнение NULL (`50/10=5.0`), не трогает заполненные,
+  идемпотентность, пропуск нулевой дистанции. Загрузка скрипта через importlib.
+
 ## [03.08.2026] — Ролевые субагенты Claude Code (лин-набор)
 
 ### Added
