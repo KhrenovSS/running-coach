@@ -127,6 +127,58 @@ def load_status_structured(training_load: float | None, cti: float | None = None
     }
 
 
+def readiness_structured(performance: float | None, recovery_pct: float | None = None,
+                          training_load_ratio: float | None = None) -> dict:
+    """Структурированная готовность: status ready/moderate/rest (Structured readiness).
+
+    Приоритет сигналов повторяет readiness_label: recovery_pct → training_load_ratio → performance.
+    """
+    if recovery_pct is not None:
+        status = 'ready' if recovery_pct >= 70 else ('moderate' if recovery_pct >= 30 else 'rest')
+        return {'status': status, 'value': round(recovery_pct, 1), 'confidence': 0.8,
+                'evidence': f'recovery_pct={recovery_pct}'}
+    if training_load_ratio is not None:
+        status = 'ready' if training_load_ratio < 0.8 else ('moderate' if training_load_ratio <= 1.2 else 'rest')
+        return {'status': status, 'value': round(training_load_ratio, 2), 'confidence': 0.6,
+                'evidence': f'training_load_ratio={training_load_ratio}'}
+    if performance is not None:
+        status = 'ready' if performance > 0.5 else ('moderate' if performance > -0.5 else 'rest')
+        return {'status': status, 'value': round(performance, 2), 'confidence': 0.5,
+                'evidence': f'performance={performance}'}
+    return {'status': 'unknown', 'value': None, 'confidence': 0.0, 'evidence': 'no readiness data'}
+
+
+def tired_rate_structured(tired_rate: int | None) -> dict:
+    """Структурированный уровень усталости: status low/moderate/high (Structured fatigue level)."""
+    if tired_rate is None:
+        return {'status': 'unknown', 'value': None, 'confidence': 0.0, 'evidence': 'no tired_rate data'}
+    if tired_rate <= -5:
+        status = 'low'
+    elif tired_rate <= 0:
+        status = 'moderate'
+    else:
+        status = 'high'
+    return {'status': status, 'value': tired_rate, 'confidence': 0.7, 'evidence': f'tired_rate={tired_rate}'}
+
+
+def recovery_pct_structured(recovery_pct: float | None) -> dict:
+    """Структурированный процент восстановления: recovered/partial/needs_rest (Structured recovery %)."""
+    if recovery_pct is None:
+        return {'status': 'unknown', 'value': None, 'confidence': 0.0, 'evidence': 'no recovery_pct data'}
+    if recovery_pct >= 70:
+        status = 'recovered'
+    elif recovery_pct >= 30:
+        status = 'partial'
+    else:
+        status = 'needs_rest'
+    return {'status': status, 'value': round(recovery_pct, 1), 'confidence': 0.8,
+            'evidence': f'recovery_pct={recovery_pct}'}
+
+
+# NB: READINESS_WEIGHTS содержит "sleep_quality", но выделенной колонки в DailyMetrics нет —
+# структурированный sleep-вывод отложен до появления источника данных (решается в дизайне движка).
+
+
 def rhr_anomaly(rhr: int | None, baseline_rhr: int | None = None) -> dict:
     """Детекция аномалии пульса покоя: +5 повышенный, +10 критический, -3 низкий.
     (RHR anomaly detection based on coros_health_metrics.md §6.)

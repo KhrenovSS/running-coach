@@ -2,6 +2,29 @@
 
 All notable changes to this project are tracked here.
 
+## [03.08.2026] — Трек 2: укрепление фундамента аналитики
+
+### Fixed (critical для будущего «коуча» — тихая некорректность)
+- **`src/coach/config.py`** — `RECOVERY_HOURS_BY_TYPE` не содержал `easy` (самый частый тип из
+  классификатора) и содержал только `race`. Добавлен `easy`, ключи выровнены по выходу
+  `classify.py`; добавлен безопасный аксессор `recovery_hours_for(type)` с дефолтом (без KeyError).
+- **`src/services/analytics_helpers.py`** — `compute_ewma` подставлял `0.0` вместо пропуска `None`
+  → разрыв в данных обваливал тренд к нулю. Теперь `None` пропускается (как в slope/MA).
+- **`src/services/repositories.py`** — `weekly_volume` использовал Postgres-only `date_trunc` →
+  падал под SQLite (нельзя было юнит-тестировать). Заменено на БД-агностичную группировку по неделям
+  в Python. Все методы получили параметр `db` (DI): без него открывают свою сессию, с ним — используют
+  внешнюю (тестируемость + транзакционность).
+
+### Added
+- **`src/services/recovery_view.py`** — structured-выводы `readiness_structured`,
+  `tired_rate_structured`, `recovery_pct_structured` (контракт `{status,value,confidence,evidence}`)
+  в дополнение к HRV/load/RHR. (sleep_quality отложен — нет колонки-источника.)
+- **Тесты фундамента** (+17): `tests/test_analytics_helpers.py`, `tests/test_repositories.py`
+  (под SQLite через DI), `tests/test_coach_config.py`. Задействованы ORM-фабрики `tests/helpers.py`
+  (ранее не использовались); фабрика `build_training_session` научилась принимать `begin_ts`.
+- **`bin/backfill_avg_pace.py`** — идемпотентный backfill `avg_pace` для исторических строк
+  (новые сессии уже заполняются из `process_trackpoints`). Только дописывает NULL, данные не теряет.
+
 ## [03.08.2026] — Fix R2: авто-синк коммитит last_*_sync_at (шторм ресинков)
 
 ### Fixed

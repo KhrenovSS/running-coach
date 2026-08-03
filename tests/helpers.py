@@ -293,9 +293,10 @@ def build_training_session(db, user_id: int,
                             **kwargs) -> TrainingSession:
     """Создать тестовую тренировку (Create test training session)."""
     pace = round(duration_minutes / total_distance_km, 2) if total_distance_km > 0 else None
+    begin_ts = kwargs.pop('begin_ts', utcnow())
     s = TrainingSession(
         user_id=user_id,
-        begin_ts=utcnow(),
+        begin_ts=begin_ts,
         total_distance_km=total_distance_km,
         duration_minutes=duration_minutes,
         training_type=training_type,

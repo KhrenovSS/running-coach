@@ -29,13 +29,26 @@ CONFIDENCE_MIN_DAYS = 14
 CONFIDENCE_MIN_SESSIONS = 10
 CONFIDENCE_LOW_THRESHOLD = 0.5
 
+# Часы восстановления по типу тренировки. Ключи ДОЛЖНЫ совпадать с выходом классификатора
+# (src/analysis/classify.py: easy/recovery/tempo/long/interval); `race` — для ручного/будущего типа.
+# Recovery hours by training type — keys must match classifier output.
 RECOVERY_HOURS_BY_TYPE = {
-    "interval": 48,
-    "tempo": 36,
-    "long": 30,
     "recovery": 12,
+    "easy": 18,
+    "long": 30,
+    "tempo": 36,
+    "interval": 48,
     "race": 72,
 }
+RECOVERY_HOURS_DEFAULT = 24  # безопасный дефолт для неизвестного типа (safe default)
+
+
+def recovery_hours_for(training_type: str | None) -> int:
+    """Часы восстановления по типу тренировки с безопасным дефолтом — без KeyError.
+
+    Recovery hours for a training type, with a safe default (never raises KeyError).
+    """
+    return RECOVERY_HOURS_BY_TYPE.get(training_type or "", RECOVERY_HOURS_DEFAULT)
 
 DISTRIBUTION_80_20 = {
     "easy_share_target": 0.80,

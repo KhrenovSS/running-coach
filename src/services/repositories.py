@@ -1,9 +1,14 @@
 # Слой агрегационных запросов для модуля аналитики
 # Aggregation query layer for the analytics module
+#
+# Все методы принимают опциональный `db` (dependency injection): если не передан —
+# открывают свою сессию и закрывают её; если передан — используют внешнюю и НЕ закрывают.
+# Это делает репозитории тестируемыми (в т.ч. под SQLite-харнессом) и транзакционно-совместимыми.
 
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from src.analysis.hr_zones import get_zone
 from src.config import settings
@@ -14,39 +19,54 @@ class TrainingRepository:
     """Агрегационные запросы для тренировок (Aggregation queries for training sessions)."""
 
     @staticmethod
-    def weekly_volume(user_id: int, weeks: int = 4) -> list[dict]:
-        """Объём тренировок по неделям (Weekly training volume)."""
-        db = SessionLocal()
+    def weekly_volume(user_id: int, weeks: int = 4, db: Session | None = None) -> list[dict]:
+        """Объём тренировок по неделям (Weekly training volume).
+
+        Недели считаются от понедельника в UTC. Группировка выполняется в Python (без
+        Postgres-only `date_trunc`), чтобы метод работал и на SQLite (тесты).
+        """
+        own = db is None
+        db = db or SessionLocal()
         try:
             since = datetime.now(timezone.utc) - timedelta(weeks=weeks)
-            results = db.query(
-                func.date_trunc('week', TrainingSession.begin_ts).label('week_start'),
-                func.sum(TrainingSession.total_distance_km).label('total_km'),
-                func.sum(TrainingSession.duration_minutes).label('total_minutes'),
-                func.count(TrainingSession.id).label('session_count'),
+            rows = db.query(
+                TrainingSession.begin_ts,
+                TrainingSession.total_distance_km,
+                TrainingSession.duration_minutes,
             ).filter(
                 TrainingSession.user_id == user_id,
                 TrainingSession.begin_ts >= since,
-            ).group_by(
-                func.date_trunc('week', TrainingSession.begin_ts)
-            ).order_by('week_start').all()
+            ).all()
+
+            buckets: dict = {}  # week_start(date) -> [km, minutes, count]
+            for begin_ts, km, minutes in rows:
+                if begin_ts is None:
+                    continue
+                d = begin_ts.date()
+                week_start = d - timedelta(days=d.weekday())  # понедельник недели
+                b = buckets.setdefault(week_start, [0.0, 0.0, 0])
+                b[0] += float(km or 0)
+                b[1] += float(minutes or 0)
+                b[2] += 1
 
             return [
                 {
-                    "week_start": r.week_start.date() if r.week_start else None,
-                    "total_km": float(r.total_km or 0),
-                    "total_minutes": float(r.total_minutes or 0),
-                    "session_count": r.session_count,
+                    "week_start": ws,
+                    "total_km": b[0],
+                    "total_minutes": b[1],
+                    "session_count": b[2],
                 }
-                for r in results
+                for ws, b in sorted(buckets.items())
             ]
         finally:
-            db.close()
+            if own:
+                db.close()
 
     @staticmethod
-    def zone_distribution(user_id: int, days: int = 28) -> dict:
+    def zone_distribution(user_id: int, days: int = 28, db: Session | None = None) -> dict:
         """Распределение времени по пульсовым зонам (Time distribution by HR zones)."""
-        db = SessionLocal()
+        own = db is None
+        db = db or SessionLocal()
         try:
             since = datetime.now(timezone.utc) - timedelta(days=days)
             user = db.query(User).filter(User.id == user_id).first()
@@ -70,12 +90,14 @@ class TrainingRepository:
 
             return zone_minutes
         finally:
-            db.close()
+            if own:
+                db.close()
 
     @staticmethod
-    def training_type_distribution(user_id: int, days: int = 28) -> dict:
+    def training_type_distribution(user_id: int, days: int = 28, db: Session | None = None) -> dict:
         """Распределение типов тренировок (Training type distribution)."""
-        db = SessionLocal()
+        own = db is None
+        db = db or SessionLocal()
         try:
             since = datetime.now(timezone.utc) - timedelta(days=days)
             results = db.query(
@@ -88,16 +110,18 @@ class TrainingRepository:
 
             return {r.training_type: r.count for r in results if r.training_type}
         finally:
-            db.close()
+            if own:
+                db.close()
 
 
 class HealthRepository:
     """Агрегационные запросы для метрик здоровья (Aggregation queries for health metrics)."""
 
     @staticmethod
-    def hrv_trend(user_id: int, days: int = 30) -> list[dict]:
+    def hrv_trend(user_id: int, days: int = 30, db: Session | None = None) -> list[dict]:
         """Тренд HRV за период (HRV trend over period)."""
-        db = SessionLocal()
+        own = db is None
+        db = db or SessionLocal()
         try:
             since = datetime.now(timezone.utc) - timedelta(days=days)
             results = db.query(
@@ -114,17 +138,19 @@ class HealthRepository:
                 {
                     "date": r.date,
                     "avg_sleep_hrv": float(r.avg_sleep_hrv),
-                    "baseline": float(r.sleep_hrv_baseline) if r.sleep_hrv_baseline else None,
+                    "baseline": float(r.sleep_hrv_baseline) if r.sleep_hrv_baseline is not None else None,
                 }
                 for r in results
             ]
         finally:
-            db.close()
+            if own:
+                db.close()
 
     @staticmethod
-    def vo2max_trend(user_id: int, days: int = 90) -> list[dict]:
+    def vo2max_trend(user_id: int, days: int = 90, db: Session | None = None) -> list[dict]:
         """Тренд VO2max за период (VO2max trend over period)."""
-        db = SessionLocal()
+        own = db is None
+        db = db or SessionLocal()
         try:
             since = datetime.now(timezone.utc) - timedelta(days=days)
             results = db.query(
@@ -138,12 +164,18 @@ class HealthRepository:
 
             return [{"date": r.date, "vo2max": float(r.vo2max)} for r in results]
         finally:
-            db.close()
+            if own:
+                db.close()
 
     @staticmethod
-    def load_ratio(user_id: int, days: int = 7) -> dict:
-        """Соотношение нагрузки (Acute:chronic load ratio)."""
-        db = SessionLocal()
+    def load_ratio(user_id: int, days: int = 7, db: Session | None = None) -> dict:
+        """Соотношение нагрузки (Acute:chronic load ratio).
+
+        NB (BACKLOG): дни отдыха исключаются (`training_load IS NOT NULL`), поэтому ACWR смещён;
+        `ratio=0.0` неотличим от «нет хронических данных». Рефактор — при реализации skills/load.
+        """
+        own = db is None
+        db = db or SessionLocal()
         try:
             acute_since = datetime.now(timezone.utc) - timedelta(days=days)
             chronic_since = datetime.now(timezone.utc) - timedelta(days=days * 4)
@@ -163,4 +195,5 @@ class HealthRepository:
             ratio = float(acute) / float(chronic) if chronic > 0 else 0.0
             return {"acute_load": float(acute), "chronic_load": float(chronic), "ratio": ratio}
         finally:
-            db.close()
+            if own:
+                db.close()

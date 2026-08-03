@@ -19,8 +19,13 @@ def compute_slope(series: Sequence[float | None], days: int = 30) -> float | Non
 
 
 def compute_ewma(series: Sequence[float | None], alpha: float = 0.3) -> list[float]:
-    """Экспоненциально взвешенное скользящее среднее (EWMA)."""
-    cleaned = [v if v is not None else 0.0 for v in series]
+    """Экспоненциально взвешенное скользящее среднее (EWMA).
+
+    None-значения ПРОПУСКАЮТСЯ (как в compute_slope/compute_moving_average), а не заменяются
+    на 0.0 — иначе разрыв в данных (пропущенный день синка) обваливал бы тренд к нулю.
+    None values are SKIPPED (not substituted with 0.0) to avoid corrupting the trend on gaps.
+    """
+    cleaned = [v for v in series if v is not None]
     if not cleaned:
         return []
     result = [cleaned[0]]
