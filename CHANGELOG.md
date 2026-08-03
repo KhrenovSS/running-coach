@@ -2,6 +2,19 @@
 
 All notable changes to this project are tracked here.
 
+## [03.08.2026] — Fix R2: авто-синк коммитит last_*_sync_at (шторм ресинков)
+
+### Fixed
+- **`src/services/sync/orchestrator.py`** — `_auto_sync` закрывал сессию до цикла и делал
+  `setattr(cred, last_field, …)` на detached-объектах **без commit** → `last_activity/health_sync_at`
+  никогда не двигались → `_is_sync_due` всегда True → каждый тик ре-синкал все креды (риск бана
+  Coros/watch-API). Теперь сессия держится открытой на весь цикл, `db.commit()` после обновления
+  таймстемпа (по образцу веб-пути `run_sync_for_user`), `db.rollback()` при ошибке кредо.
+
+### Added
+- **`tests/test_auto_sync.py`** — регресс-тесты: `last_*_sync_at` продвигается после авто-синка
+  (для synced>0 и empty=0). Подмена `run_async_in_thread` синхронной заглушкой (без сети).
+
 ## [03.08.2026] — Dev-процесс: ретирование opencode, переход на Claude-агента
 
 ### Removed

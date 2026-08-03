@@ -113,69 +113,75 @@ def _auto_sync(sync_type: str):
         _auto_sync_status[key]['message'] = 'Синхронизация...'
     try:
         now = datetime.now(timezone.utc)
+        # Сессия держится открытой на весь цикл, чтобы коммитить last_*_sync_at
+        # (иначе detached-объекты + отсутствие commit → таймстемпы не двигаются → шторм ресинков).
+        # Session stays open across the loop so last_*_sync_at actually commits.
         db = SessionLocal()
         try:
             credentials = db.query(WatchCredential).filter(
                 WatchCredential.is_active == True,
                 WatchCredential.encrypted_password.isnot(None),
             ).all()
-        finally:
-            db.close()
 
-        if not credentials:
-            logger.info("%s sync: нет учётных данных WatchCredential", label)
+            if not credentials:
+                logger.info("%s sync: нет учётных данных WatchCredential", label)
+                with _auto_sync_status_lock:
+                    s = _auto_sync_status[key]
+                    s['status'] = 'ok'
+                    s['last_run'] = now
+                    s['message'] = 'Нет учётных данных'
+                    s['next_run'] = now + timedelta(seconds=with_jitter(SYNC_TICK_INTERVAL))
+                return
+
+            total_synced = 0
+            total_empty = 0
+            total_failed = 0
+            min_next = None
+            for cred in credentials:
+                interval = cfg['interval_fn'](cred)
+                last_sync = getattr(cred, cfg['last_field'])
+                if not _is_sync_due(last_sync, interval):
+                    due = (last_sync + timedelta(seconds=interval) - now).total_seconds()
+                    if min_next is None or due < min_next:
+                        min_next = due
+                    continue
+                try:
+                    result = run_async_in_thread(cfg['sync_fn'](cred, cred.brand))
+                    if result > 0:
+                        total_synced += result
+                        logger.info("%s sync: brand=%s user=%s synced=%d", label, cred.brand, cred.user_id, result)
+                        setattr(cred, cfg['last_field'], datetime.now(timezone.utc))
+                        db.commit()
+                    elif result == 0:
+                        total_empty += 1
+                        logger.info("%s sync: brand=%s user=%s — %s", label, cred.brand, cred.user_id, cfg['empty_msg'])
+                        setattr(cred, cfg['last_field'], datetime.now(timezone.utc))
+                        db.commit()
+                    elif result == -1:
+                        total_failed += 1
+                        logger.warning("%s sync: brand=%s user=%s — ошибка аутентификации", label, cred.brand, cred.user_id)
+                except Exception as e:
+                    db.rollback()
+                    total_failed += 1
+                    logger.error("%s sync: brand=%s user=%s — исключение: %s", label, cred.brand, cred.user_id, e)
+
             with _auto_sync_status_lock:
                 s = _auto_sync_status[key]
                 s['status'] = 'ok'
                 s['last_run'] = now
-                s['message'] = 'Нет учётных данных'
-                s['next_run'] = now + timedelta(seconds=with_jitter(SYNC_TICK_INTERVAL))
-            return
-
-        total_synced = 0
-        total_empty = 0
-        total_failed = 0
-        min_next = None
-        for cred in credentials:
-            interval = cfg['interval_fn'](cred)
-            last_sync = getattr(cred, cfg['last_field'])
-            if not _is_sync_due(last_sync, interval):
-                due = (last_sync + timedelta(seconds=interval) - now).total_seconds()
-                if min_next is None or due < min_next:
-                    min_next = due
-                continue
-            try:
-                result = run_async_in_thread(cfg['sync_fn'](cred, cred.brand))
-                if result > 0:
-                    total_synced += result
-                    setattr(cred, cfg['last_field'], datetime.now(timezone.utc))
-                    logger.info("%s sync: brand=%s user=%s synced=%d", label, cred.brand, cred.user_id, result)
-                elif result == 0:
-                    total_empty += 1
-                    setattr(cred, cfg['last_field'], datetime.now(timezone.utc))
-                    logger.info("%s sync: brand=%s user=%s — %s", label, cred.brand, cred.user_id, cfg['empty_msg'])
-                elif result == -1:
-                    total_failed += 1
-                    logger.warning("%s sync: brand=%s user=%s — ошибка аутентификации", label, cred.brand, cred.user_id)
-            except Exception as e:
-                total_failed += 1
-                logger.error("%s sync: brand=%s user=%s — исключение: %s", label, cred.brand, cred.user_id, e)
-
-        with _auto_sync_status_lock:
-            s = _auto_sync_status[key]
-            s['status'] = 'ok'
-            s['last_run'] = now
-            if total_synced > 0:
-                s['message'] = f'✓ Синхронизировано: {total_synced}'
-            elif total_empty > 0 and total_failed == 0:
-                s['message'] = f'🟡 Синхронизация прошла, но {cfg["empty_label"]}'
-            elif total_failed > 0:
-                s['message'] = f'⚠ Ошибок: {total_failed}, пусто: {total_empty}'
-            else:
-                s['message'] = 'Нет учётных данных'
-            next_seconds = min_next if min_next is not None else SYNC_TICK_INTERVAL
-            s['next_run'] = now + timedelta(seconds=with_jitter(int(next_seconds)))
-        logger.info("%s sync: итого — synced=%d, empty=%d, failed=%d, next=%ds", label, total_synced, total_empty, total_failed, int(next_seconds))
+                if total_synced > 0:
+                    s['message'] = f'✓ Синхронизировано: {total_synced}'
+                elif total_empty > 0 and total_failed == 0:
+                    s['message'] = f'🟡 Синхронизация прошла, но {cfg["empty_label"]}'
+                elif total_failed > 0:
+                    s['message'] = f'⚠ Ошибок: {total_failed}, пусто: {total_empty}'
+                else:
+                    s['message'] = 'Нет учётных данных'
+                next_seconds = min_next if min_next is not None else SYNC_TICK_INTERVAL
+                s['next_run'] = now + timedelta(seconds=with_jitter(int(next_seconds)))
+            logger.info("%s sync: итого — synced=%d, empty=%d, failed=%d, next=%ds", label, total_synced, total_empty, total_failed, int(next_seconds))
+        finally:
+            db.close()
     except Exception as e:
         logger.exception("%s sync: глобальная ошибка", label)
         with _auto_sync_status_lock:
