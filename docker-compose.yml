@@ -17,7 +17,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    restart: on-failure
+    restart: unless-stopped
 
   # === FastAPI веб-приложение (FastAPI web application) ===
   app:
@@ -41,7 +41,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
-    restart: on-failure
+    restart: unless-stopped
 
   # === Telegram-бот (Telegram bot) ===
   bot:
@@ -62,7 +62,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
-    restart: on-failure
+    restart: unless-stopped
 
 volumes:
   pgdata:

@@ -2,6 +2,23 @@
 
 All notable changes to this project are tracked here.
 
+## [04.08.2026] — Ops: автозапуск прода после ребута + go.sh под Claude-агента
+
+### Changed
+- **`docker-compose.yml`** — политика перезапуска всех трёх сервисов (`db`/`app`/`bot`)
+  сменена с `restart: on-failure` на **`restart: unless-stopped`**. Причина: `on-failure`
+  перезапускает контейнер только при падении процесса, но **не поднимает его при перезагрузке
+  ОС** → после ребута прод требовал ручного старта. С `unless-stopped` Docker-демон (уже
+  `systemctl enabled` → стартует на буте) сам поднимает контейнеры при старте. Порядок держит
+  `depends_on: condition: service_healthy`. Выбран `unless-stopped`, а не `always` — ручная
+  остановка контейнера уважается (не воскресает до следующего явного `up`).
+- Политика применена к живым контейнерам через `docker update --restart=unless-stopped`
+  (без пересоздания, без даунтайма, без риска для тома `pgdata` — по data-safety CLAUDE.md §5–7).
+  Проверено: `RestartPolicy = unless-stopped` у всех трёх.
+- **`/home/nimda/go.sh`** (вне репозитория) — точка входа разработки переведена с ретированного
+  `opencode` на `claude` (`cd projects/running-coach && exec claude`). Ознакомление с проектом —
+  через авто-подгрузку `CLAUDE.md`, без принудительного чтения доков (минимум токенов).
+
 ## [03.08.2026] — Процесс: переход на trunk-based (всё в main)
 
 ### Changed
