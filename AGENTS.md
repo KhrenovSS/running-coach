@@ -31,11 +31,11 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 
    | Изменённый модуль | Пересобрать |
    |-------------------|-------------|
-   | `src/web/`, `src/api/`, `src/parsers/`, `src/services/`, `src/analysis/`, `src/models.py`, `src/config/` | `app` |
+   | `src/web/`, `src/api/` | `app` |
    | `src/telegram/` | `bot` |
-   | `src/watch/` | `app` + `bot` |
-   | `pyproject.toml`, `Dockerfile` | `app` + `bot` |
-   | `alembic/` | `app` (миграции при старте) |
+   | `src/services/`, `src/parsers/`, `src/analysis/`, `src/watch/`, `src/config/`, `src/domain/`, `src/models.py` | `app` + `bot` (бот сам синкает: sync → parse_fit → analysis) |
+   | `pyproject.toml`, `Dockerfile`, `docker-compose.yml` | `app` + `bot` |
+   | `alembic/` | `app` (миграции при старте; с ALTER — сначала `stop bot`) |
 
 6. **Безопасность данных.** Любое изменение, которое может привести к потере данных (удаление колонок, переименование таблиц, смена сигнатур сервисных функций, починка `startup.py`) — **остановись и предупреди пользователя** перед реализацией. Опиши:
    - Какие данные могут быть затронуты
@@ -46,7 +46,9 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 7. **DB SAFETY — ТЕСТЫ НИКОГДА НЕ ТРОГАЮТ PRODUCTION.** Главное правило: алгоритмы меняются, данные пользователей остаются. Конкретные запреты:
    - **НИКОГДА** не используй `os.environ.setdefault("DATABASE_URL", ...)` — это не переопределяет уже заданную переменную. В контейнере `DATABASE_URL` уже задан → setdefault = no-op → тесты пишут в production DB.
    - **НИКОГДА** не делай `drop_all` в autouse fixtures — если `DATABASE_URL` указывает на production, `drop_all` удалит ВСЕ таблицы и данные ВСЕХ пользователей.
-   - **conftest.py** ДОЛЖЕН强制设置 `os.environ["DATABASE_URL"] = "sqlite:///:memory:"` ДО любых import из `src.*`.
+   - **conftest.py** по умолчанию форсит `os.environ["DATABASE_URL"] = "sqlite:///:memory:"` ДО любых import из `src.*`.
+     Единственное исключение (05.08.2026): opt-in PG-режим через **отдельную** `TEST_PG_URL` — строго localhost
+     (hard fail иначе), схема через `alembic upgrade head`. Детали — `docs/TESTING.md`.
    - **Перед изменением любых файлов** в `tests/`, `src/startup.py`, `src/domain/models/base.py`, `alembic/` — проверь: не повлияет ли это на production DB?
    - **Проверка после изменений:** `docker compose exec app python -c "from sqlalchemy import text; from src.domain.models.base import SessionLocal; db=SessionLocal(); print(db.execute(text('SELECT count(*) FROM users')).scalar()); db.close()"` — должен вернуть >= 1 (наличие пользователя).
 
@@ -55,6 +57,18 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
    - НИКОГДА не `docker compose down -v` (это удаляет volume со всей БД)
    - НИКОГДА не `docker volume rm running-coach_pgdata`
    - Безопасные команды: `docker compose restart app`, `docker compose build app && docker compose up -d app`
+   - **Деплой миграций с ALTER/DDL: сначала `docker compose stop bot`** — бот держит транзакции,
+     `ALTER` виснет на локе, прерванная попытка ломает схему без штампа версии → crash-loop
+     (инцидент 05.08.2026, порядок восстановления — `docs/CHECKLIST_MIGRATION.md`).
+
+9. **Владение БД-сессией (Этап 6, 05.08.2026).** `SessionLocal()` — только в композиционных корнях
+   (allowlist в `tests/test_session_ownership.py` — тест-гвард валит CI при нарушении). Сервисы
+   получают `db` параметром. Объекты из `telegram/utils.get_user()` — detached: мутировать НЕЛЬЗЯ
+   (изменения молча теряются — класс багов стрелял дважды: вес, BACKLOG #236).
+
+10. **Контракт sync.** Возврат `-1` = ошибка → `last_*_sync_at` НЕ двигается (иначе данные теряются
+    навсегда); `>=0` = успех. Счётчики сбоев в `watch_credentials`, notify на 3-м, backoff.
+    Дедуп — по `external_activity_id` (UNIQUE в БД); окно ±120с — только legacy fallback.
 
 ## Документация для разработки
 **Перед написанием кода прочитай соответствующий раздел:**
@@ -108,10 +122,11 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 - `src/services/audit.py` — сервис аудита (БД + файл)
 - `src/services/auth.py` — генерация и проверка токенов Telegram-авторизации, bcrypt
 - `src/services/sync/` — пакет синхронизации:
-  - `utils.py` — SYNC_TICK_INTERVAL, _auto_sync_status, _make_client, интервалы
-  - `health.py` — sync_health_for_user, save_dashboard_data
-  - `activities.py` — sync_activities_for_user
-  - `orchestrator.py` — run_sync_for_user, auto_sync_health, auto_sync_activities
+  - `utils.py` — _make_client (+кэш токена reuse-until-failure), интервалы, backoff, `ensure_aware_utc`
+  - `health.py` — sync_health_for_user(cred, brand, **db**) — сессия от вызывающего; `-1` = ошибка
+  - `activities.py` — sync_activities_for_user(cred, brand, **db**) — сохраняет сырой FIT + external_activity_id
+  - `dedup.py` — дедуп: external_activity_id first, окно ±120с — только legacy fallback
+  - `orchestrator.py` — run_sync_for_user, _auto_sync, счётчики сбоев + telegram-notify + backoff
 - `src/services/sync_service.py` — shim для обратной совместимости (DeprecationWarning)
 - `src/services/async_utils.py` — `run_async_in_thread(coro)` (единый helper для async-from-thread)
 - `src/services/watch_credentials.py` — `upsert_watch_credential()` (шифрование + upsert)
@@ -119,11 +134,14 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 - `src/services/stats.py` — calc_stats, fmt_duration, get_zone_bars_data, get_nav_data, пульсовые зоны
 - `src/services/recovery_view.py` — hrv_status, tired_label, readiness_label, load_label + структурированные версии (hrv_status_structured, load_status_structured)
 - `src/services/telegram_notify.py` — отправка уведомлений в Telegram
-- `src/services/repositories.py` — ✅ Sprint 20c: слой агрегационных запросов (TrainingRepository, HealthRepository) для модуля аналитики
-- `src/services/analytics_helpers.py` — ✅ Sprint 20c: функции трендов (compute_slope, compute_ewma, compute_moving_average, compute_trend_direction)
-- `src/services/user_service.py` — ✅ Sprint 20c: сервисные функции для User (get_user_settings, get_user_by_telegram_id, get_or_create_user_by_telegram, get_user_by_id)
+- `src/services/repositories.py` — слой агрегационных запросов (Training/Health/FeedbackRepository); `db` — обязательный keyword-only
+- `src/services/analytics_helpers.py` — функции трендов (compute_slope, compute_ewma, compute_moving_average, compute_trend_direction)
+- `src/services/user_service.py` — get_user_settings(db, ...), get_user_by_telegram_id(db, ...) и т.д. — сессия ПЕРВЫМ параметром от вызывающего
+- `src/services/raw_files.py` — хранилище исходных FIT/TCX: `uploads/raw/<user_id>/<sha256>.<ext>` (content-addressed); reanalyze читает отсюда
+- `src/services/weight_service.py` — save_weight (измерение + профиль одной транзакцией), current_weight (последнее измерение)
 - `src/coach/` — пакет модуля аналитики и коучинга (Этап 0 — каркас):
-  - `config.py` — веса readiness/fatigue, пороги injury risk, EWMA, `recovery_hours_for()`
+  - `config.py` — **единственный исполняемый источник порогов** (readiness/RHR/tired/load, зеркалит
+    `docs/coros_health_metrics.md`; `recovery_view` импортирует отсюда; анти-дрейф-тесты в `test_coach_config.py`)
   - `contracts.py` — дата-классы движка: `SkillResult`, `AthleteState`, `Prescription`, `ReasoningStep`
   - `state.py` / `engine.py` / `prescriber.py` / `orchestrator.py` — верхний уровень (заглушки Этапа 0)
   - `skills/` (fatigue/load/distribution/progress/recovery/workout + base) — заглушки
@@ -155,8 +173,11 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
   - `segment_km.py` — km-segment fallback, compute_km_variability
   - `hr_zones.py` — пульсовые зоны
   - `utils.py` — форматирование, GPS-хелперы
-- `src/parsers/` — парсеры TCX/FIT (`tcx_parser.py`, `fit_parser.py`), GPS (`gps.py`), погода (`weather.py`)
-- `src/services/reanalyze.py` — сервис пересчёта тренировок с override типа
+- `src/parsers/` — парсеры TCX/FIT (`tcx_parser.py`, `fit_parser.py` — плюс `extract_*_trackpoints`
+  для reanalyze-от-сырья), GPS (`gps.py`), погода (`weather.py`)
+- `src/services/reanalyze.py` — пересчёт: сначала сырой файл (`raw_file_path`), fallback `trackpoints_json`
+- `bin/` — ops-скрипты (версионируются точечно через `.gitignore`): `backup_db.sh`, `docker.sh`,
+  `backfill_external_ids.py` / `backfill_raw_fits.py` / `backfill_avg_pace.py` (все с `--dry-run` по умолчанию)
 
 ## Реализованная логика (сегментация, классификация, пульсовые зоны, осцилляции)
 См. `docs/ARCHITECTURE.md` и `src/analysis/`.
@@ -168,6 +189,28 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 См. также `CLAUDE.md` → «Git / коммиты».
 
 ## Текущее состояние
+
+**Session 05.08.2026 — Аудит фундамента + ремедиация этапов 0–6 ✅** (задеплоено в прод):
+- **Аудит** выявил фундаментальные промахи; все закрыты за сессию (BACKLOG #226–#231 ✅, план —
+  6 этапов, db-safety-ревью GO). Детали — `CHANGELOG.md` (05.08.2026, три записи).
+- **Этап 0:** рантайм-фиксы — `/stats` бота (db.func), мёртвый reanalyze, `performance` Integer→Float.
+- **Этап 1:** PG-режим тестов (`TEST_PG_URL`, схема через alembic — ловит дрейф), FK pragma для SQLite,
+  CI гоняет оба режима.
+- **Этап 2:** sync больше не теряет данные молча: `-1` = ошибка (таймстемп стоит), счётчики сбоев в БД
+  + telegram-notify на 3-м, backoff, кэш токена, throttle.
+- **Этап 3:** честный дедуп — `external_activity_id` + частичные UNIQUE, `sync/dedup.py`, SHA256 для
+  ручных загрузок; backfill выполнен в проде (31/33 сессий с ID; 2 ambiguous = невалидные 0-км).
+- **Этап 4:** сырые FIT/TCX в `uploads/raw/` (31/31 скачаны в проде), reanalyze от сырья,
+  volume `./uploads` и у bot.
+- **Этап 5:** пороги — только `coach/config.py`; `sleep_quality` удалён из весов (нет данных), анти-дрейф-тесты.
+- **Этап 6:** владение сессией — один `get_db`, `db` параметром, `SessionLocal` только в корнях + тест-гвард.
+- **Инцидент деплоя:** первый `up` без остановки бота → лок на `ALTER` → crash-loop + фантомная колонка.
+  Восстановлено без потери данных; уроки — `docs/CHECKLIST_MIGRATION.md`, BACKLOG #234/#235.
+- **Фикс веса:** ввод веса не обновлял профиль (detached User), главная показывала снапшот →
+  `weight_service.py` (save_weight/current_weight). Тот же класс бага в `/delete_me` — BACKLOG #236.
+- Миграции: `k4l5m6n7o8p9 → l5m6n7o8p9q0 → m6n7o8p9q0r1 → n7o8p9q0r1s2`. **225 тестов** зелёные
+  в обоих режимах. Прод: db+app+bot healthy, данные целы (2 users / 33 sessions).
+- Открытое: BACKLOG #232 (repair округлённых `performance`), #234–#236.
 
 **Session 03.08.2026 — Pre-analytics prep + переход на Claude ✅** (всё в `main`, trunk-based):
 - Dev-процесс: ретирован opencode (роли/`.opencode`/`opencode.json`/`fixes`), создан `CLAUDE.md`
@@ -415,8 +458,13 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 классификация зафиксирована тестами; **Этап 0 модуля коуча построен** (4 таблицы + миграция + скелет
 `src/coach/` + `tests/skills/`). Детали — `CHANGELOG.md` (03.08.2026), новые находки — `BACKLOG.md` #219–224.
 
-🚀 **Следующий шаг — Этап 1 (Skills):** реализовать `src/coach/skills/*` (пороги из
-`docs/coros_health_metrics.md` → `SkillResult`), собрать `AthleteState` в `src/coach/state.py`, тесты в `tests/skills/`.
+✅ **Ремедиация фундамента (05.08.2026)** — все гейты перед коучем закрыты: честный дедуп,
+сырые файлы, надёжный sync, единые пороги, PG-тесты. Детали выше («Session 05.08.2026»).
+
+🚀 **Следующий шаг — Этап 1 (Skills):** реализовать `src/coach/skills/*` — чистые функции,
+пороги брать ИЗ `src/coach/config.py` (не из дока и не inline!), возвращать `SkillResult`;
+собрать `AthleteState` в `src/coach/state.py` (данные — через `repositories` с `db=`),
+тесты в `tests/skills/` на фабриках `tests/helpers.py`.
 
 ❄️ Заморожено (после аналитики): фильтры, multi-brand onboarding, факторы самочувствия, admin panel.
 

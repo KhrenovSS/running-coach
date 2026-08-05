@@ -44,6 +44,21 @@
 - [ ] Для больших таблиц — учтено время блокировки
 - [ ] Есть backup план (как откатить в production)
 
+## Деплой миграции в прод (Production deploy) — урок инцидента 05.08.2026
+
+Миграции применяются автоматически на старте `app`. Порядок:
+
+- [ ] `bin/backup_db.sh` — ВСЕГДА перед деплоем
+- [ ] Миграция проверена в PG-режиме тестов (`TEST_PG_URL`, CI это делает автоматически)
+- [ ] **Если миграция содержит `ALTER TABLE`/DDL по «живым» таблицам — СНАЧАЛА `docker compose stop bot`**,
+      потом `docker compose up -d app`, потом `up -d bot`. Бот держит транзакции
+      (sync-цикл) → `ALTER` ждёт лока, прерванная попытка может оставить
+      полупримененную схему без штампа версии → crash-loop app (BACKLOG #234)
+- [ ] После старта: `curl localhost:8000/health/` — блок `migrations.current_revision` = новый head
+- [ ] Если app в crash-loop на миграции: `docker compose stop app bot` →
+      `docker compose run --rm --no-deps app python -m alembic upgrade head` —
+      покажет реальный traceback (в логах контейнера его НЕТ — BACKLOG #235)
+
 ## Документация (Documentation)
 
 - [ ] CHANGELOG.md обновлён (секция `### Added` или `### Changed`)

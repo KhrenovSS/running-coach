@@ -6,42 +6,66 @@
 
 ```
 tests/
-├── conftest.py              # Фикстуры pytest (SessionLocal, create/drop tables)
-├── helpers.py               # builder-функции (build_trackpoints)
-├── fixtures/                # TCX/FIT файлы для тестов
-│   ├── tempo_run.tcx
-│   └── short_walk.tcx
+├── conftest.py              # Два режима БД: SQLite (дефолт) / PostgreSQL (opt-in, см. ниже)
+├── helpers.py               # Фабрики: build_trackpoints, make_user, build_training_session, build_daily_metrics
+├── fixtures/                # TCX/FIT файлы для тестов (tempo_run.tcx, short_walk.tcx)
+├── skills/                  # Тесты каркаса коуча (conftest + scaffold)
 ├── test_gps.py              # clean_trackpoints, haversine_m
-├── test_classify.py         # classify_training
+├── test_classify.py / test_classify_boundaries.py  # classify_training
 ├── test_hr_zones.py         # get_zone, get_band
 ├── test_oscillation.py      # detect_pace_oscillations, compute_hr_lag_correlation
 ├── test_segment.py          # segment_by_pace, km_segment_fallback
 ├── test_stats.py            # calc_stats, fmt_duration, zone_ranges
 ├── test_health.py           # /health/ endpoint
 ├── test_process_trackpoints.py  # process_trackpoints pipeline
-└── test_models.py           # SQLAlchemy model tests
+├── test_models.py           # SQLAlchemy model tests
+├── test_repositories.py     # Training/Health/FeedbackRepository (db — обязательный kwarg)
+├── test_analytics_helpers.py# compute_slope, compute_ewma
+├── test_coach_config.py     # таксономия recovery_hours + анти-дрейф порогов/весов
+├── test_auto_sync.py        # коды возврата sync (-1 = не двигать таймстемп), счётчики, notify, backoff
+├── test_dedup.py            # дедуп по external_activity_id + частичные UNIQUE-индексы
+├── test_raw_files.py        # хранилище сырых FIT/TCX + reanalyze от сырья
+├── test_weight_service.py   # save_weight/current_weight
+├── test_session_ownership.py# ГВАРД: SessionLocal() только в композиционных корнях (allowlist)
+├── test_stage0_fixes.py     # регрессы Этапа 0 (stats бота, reanalyze, performance Float)
+└── test_backfill.py         # backfill-скрипты
 ```
 
-| Тип | Скорость | БД |
-|-----|----------|----|
-| Unit (анализ) | быстро (< 1 сек) | нет (чистые функции) |
-| Unit (парсеры) | быстро (< 1 сек) | нет |
-| Integration (health) | средне (5-30 сек) | SQLite in-memory по умолчанию; PostgreSQL при явном `DATABASE_URL` |
+## Два режима БД (DB SAFETY, §6 CLAUDE.md)
 
-## Запуск тестов
+1. **SQLite in-memory (дефолт)** — `conftest.py` безусловно форсит
+   `DATABASE_URL=sqlite:///:memory:` до импорта `src.*`; схема через `create_all`;
+   `PRAGMA foreign_keys=ON` включён (FK проверяются).
+2. **PostgreSQL (opt-in)** — переменная **`TEST_PG_URL`** (НЕ `DATABASE_URL`!):
+   строго localhost (иначе hard fail); схема **пересоздаётся** и строится через
+   `alembic upgrade head` — ловит дрейф моделей/миграций, реальные типы колонок,
+   частичные индексы. CI гоняет оба режима.
 
 ```bash
-# Все тесты
-pytest
+# Дефолтный быстрый прогон (SQLite)
+.venv/bin/python -m pytest -q
 
-# С именем файла
-pytest tests/test_classify.py -v
+# PG-режим: одноразовый контейнер, НИКОГДА не прод
+docker run --rm -d --name pg-test -e POSTGRES_USER=running_coach \
+  -e POSTGRES_PASSWORD=testpass -e POSTGRES_DB=running_coach \
+  -p 127.0.0.1:55432:5432 postgres:16-alpine
+TEST_PG_URL="postgresql://running_coach:testpass@127.0.0.1:55432/running_coach" \
+  .venv/bin/python -m pytest -q
+docker stop pg-test
+```
 
-# С coverage
-pytest --cov=src --cov-report=html
+## ⚠️ Конвенция: уникальные chat_id/email на тест
 
-# Конкретный тест
-pytest tests/test_classify.py::test_interval_detection -v
+In-memory БД (и PG-схема) живёт **весь прогон** — данные тестов не чистятся между
+файлами. Поэтому `make_user` в каждом тесте должен получать уникальные
+`chat_id`/`email` (иначе `UNIQUE constraint failed`). Занятые диапазоны chat_id:
+`123456789/999/111/222` (test_models, auto_sync), `77xxx` (backfill), `90001-90002`
+(skills), `95xxx` (stage0), `96xxx` (auto_sync), `97xxx` (dedup), `98xxx` (raw_files),
+`99xxx` (weight). Для нового файла бери свободный диапазон и хелпер вида:
+
+```python
+def _user(db, n: int):
+    return make_user(db, chat_id=<база> + n, email=f"<префикс>_{n}@example.com")
 ```
 
 ## Конфигурация
@@ -55,41 +79,13 @@ python_files = test_*.py
 
 ## Фикстуры (conftest.py)
 
-```python
-# tests/conftest.py
-# !! DB SAFETY !! — НИКОГДА не используй setdefault или drop_all.
-# setdefault не переопределит уже заданный DATABASE_URL → тесты пишут в production.
-# drop_all удалит ВСЕ таблицы и данные ВСЕХ пользователей если DATABASE_URL указывает на production.
-# Используй прямое os.environ["DATABASE_URL"] = "sqlite:///:memory:" и ТОЛЬКО create_all.
+Актуальный код — в `tests/conftest.py` (не копируй сюда, чтобы не дрейфовал). Ключевое:
 
-import os
-
-os.environ["DATABASE_URL"] = "sqlite:///:memory:"
-
-import pytest
-from src.domain.models.base import get_engine
-from src.models import Base, SessionLocal
-
-
-@pytest.fixture(autouse=True)
-def setup_test_db():
-    """Авто-создание таблиц для каждого теста (Auto create tables per test).
-    drop_all УМЫШЛЕННО НЕ ИСПОЛЬЗУЕТСЯ — для защиты production данных (DB SAFETY rule #8).
-    SQLite in-memory удаляется автоматически после закрытия соединения."""
-    engine = get_engine()
-    Base.metadata.create_all(bind=engine)
-    yield
-
-
-@pytest.fixture
-def db_session():
-    """Сессия БД через SessionLocal приложения (DB session via app's SessionLocal)"""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-```
+- `DATABASE_URL` форсится ДО импорта `src.*`; **НИКОГДА** `setdefault` (no-op в контейнере →
+  тесты пишут в прод) и **НИКОГДА** `drop_all` в autouse-фикстурах.
+- Фикстура `db_session` — сессия через `SessionLocal` приложения.
+- PG-режим: `DROP SCHEMA public` + `alembic upgrade head` один раз на сессию — выполняется
+  ТОЛЬКО на явно указанном `TEST_PG_URL` с guard'ом «строго localhost».
 
 ## Примеры тестов
 
@@ -185,4 +181,4 @@ def test_km_fallback_short():
 
 ---
 
-**Последнее обновление:** 21.07.2026
+**Последнее обновление:** 05.08.2026 (PG-режим TEST_PG_URL, FK pragma, конвенция chat_id, новые тесты ремедиации)

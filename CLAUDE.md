@@ -48,6 +48,11 @@
 7. **Backup перед деплоем.** Перед `docker compose build/up` → `bin/backup_db.sh`.
    НИКОГДА `docker compose down -v`, НИКОГДА `docker volume rm running-coach_pgdata`.
    Безопасно: `docker compose restart app`, `docker compose build app && docker compose up -d app`.
+   **Миграции с ALTER/DDL: сначала `docker compose stop bot`** — иначе лок → crash-loop
+   (инцидент 05.08.2026; восстановление — `docs/CHECKLIST_MIGRATION.md`).
+8. **Владение БД-сессией.** `SessionLocal()` — только в композиционных корнях (allowlist —
+   тест-гвард `tests/test_session_ownership.py`); сервисы получают `db` параметром. Объекты из
+   `telegram/utils.get_user()` — detached: не мутировать (изменения молча теряются).
 
 ## Golden rules (код)
 1. Константы через `from src.config import settings` / `src.config.constants` — без magic numbers.
@@ -63,11 +68,11 @@
 ## Docker rebuild
 | Изменён | Пересобрать |
 |---------|-------------|
-| `src/web,api,parsers,services,analysis,config`, `src/models.py` | `app` |
+| `src/web/`, `src/api/` | `app` |
 | `src/telegram/` | `bot` |
-| `src/watch/` | `app` + `bot` |
-| `pyproject.toml`, `Dockerfile` | `app` + `bot` |
-| `alembic/` | `app` (миграции при старте) |
+| `src/services/`, `src/parsers/`, `src/analysis/`, `src/watch/`, `src/config/`, `src/domain/`, `src/models.py` | `app` + `bot` (бот сам синкает: sync → parse_fit → analysis) |
+| `pyproject.toml`, `Dockerfile`, `docker-compose.yml` | `app` + `bot` |
+| `alembic/` | `app` (миграции при старте; **с ALTER — сначала stop bot**, §7) |
 
 ## Git / коммиты
 - **Trunk-based: ведём всё в `main`** (не плодим ветки). Коммить логически завершёнными единицами;
@@ -85,19 +90,19 @@
 - **`test-writer`** — написать поведенческие pytest-тесты на готовых фабриках (`tests/helpers.py`) + DI.
 
 ## Модуль аналитики («коуч») — при работе над ним
-- Дизайн: `decision_module_design.md` (8 этапов). **Единственный источник порогов/формул для
-  skills/rules — `docs/coros_health_metrics.md`**; `skills/` и `rules/p1_safety.py` не должны расходиться.
+- Дизайн: `decision_module_design.md` (8 этапов). Человекочитаемый источник порогов —
+  `docs/coros_health_metrics.md`; **исполняемое зеркало — `src/coach/config.py`** (именованные
+  константы; `recovery_view` и будущие skills читают ТОЛЬКО отсюда, анти-дрейф-тесты сверяют).
 - Принципы: rules-first (детерминированный движок решает числа), LLM — только интерфейс/объяснение,
   никогда не меняет числа; каждое решение несёт `rationale`; обучение ограничено (min/max + EWMA).
-- **Готово к Этапу 1.** Этап 0 (каркас) завершён 03.08.2026: 4 таблицы `src/domain/models/coach.py`
-  (Recommendation/PredictionLog/UserModel/Lesson) + миграция; скелет `src/coach/{skills,rules,
-  personalization,knowledge,llm}` + контракты `src/coach/contracts.py` (SkillResult/AthleteState/
-  Prescription); `tests/skills/` + фикстура `athlete_with_history`. Фундамент (Sprint 20c):
-  `config.py` (+`recovery_hours_for`), `repositories.py` (+`FeedbackRepository`, DI), `analytics_helpers.py`,
-  structured-выводы `recovery_view.py`.
-- **Следующий шаг — Этап 1 (Skills):** превратить пороги из `docs/coros_health_metrics.md` в чистые
-  функции `src/coach/skills/*` (сейчас заглушки с `NotImplementedError`), возвращающие `SkillResult`;
-  собрать `AthleteState` в `src/coach/state.py`; тесты в `tests/skills/`.
+- **Готово к Этапу 1, все гейты закрыты (05.08.2026):** честный дедуп (external_activity_id + UNIQUE),
+  сырые FIT/TCX (`uploads/raw/`, reanalyze от сырья), надёжный sync (-1 = ошибка, счётчики+notify),
+  единые пороги, PG-режим тестов. Этап 0 (каркас, 03.08.2026): 4 таблицы `src/domain/models/coach.py`
+  + миграция; скелет `src/coach/{skills,rules,personalization,knowledge,llm}` + контракты
+  `src/coach/contracts.py` (SkillResult/AthleteState/Prescription); `tests/skills/`.
+- **Следующий шаг — Этап 1 (Skills):** чистые функции `src/coach/skills/*` (сейчас заглушки
+  с `NotImplementedError`), пороги из `src/coach/config.py`, возвращают `SkillResult`;
+  собрать `AthleteState` в `src/coach/state.py` (данные — `repositories` с `db=`); тесты в `tests/skills/`.
 
 ## Документация
 | Тема | Файл |

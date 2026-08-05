@@ -82,23 +82,28 @@ running-coach/
 │   │   ├── async_utils.py      # run_async_in_thread(coro)
 │   │   ├── sync/               # Пакет синхронизации
 │   │   │   ├── __init__.py     #   реэкспорт (run_sync_for_user и др.)
-│   │   │   ├── utils.py        #   SYNC_TICK_INTERVAL, _auto_sync_status, _make_client
-│   │   │   ├── health.py       #   sync_health_for_user, save_dashboard_data
-│   │   │   ├── activities.py   #   sync_activities_for_user
-│   │   │   └── orchestrator.py #   run_sync_for_user, _auto_sync, auto_sync_*
+│   │   │   ├── utils.py        #   _make_client (+кэш токена), интервалы, backoff, ensure_aware_utc
+│   │   │   ├── health.py       #   sync_health_for_user (db от вызывающего; -1 = ошибка)
+│   │   │   ├── activities.py   #   sync_activities_for_user (db от вызывающего; -1 = ошибка)
+│   │   │   ├── dedup.py        #   дедуп: external_activity_id first, окно ±120с — legacy fallback
+│   │   │   └── orchestrator.py #   run_sync_for_user, _auto_sync, счётчики сбоев + notify
 │   │   ├── sync_service.py     # Shim: DeprecationWarning (обратная совместимость)
 │   │   ├── watch_credentials.py# upsert_watch_credential (шифрование + upsert)
-│   │   ├── training_service.py # delete_training, upsert_feedback
-│   │   ├── reanalyze.py        # ReanalyzeService (пересчёт из trackpoints_json)
+│   │   ├── training_service.py # delete_training (переносит external_activity_id), upsert_feedback
+│   │   ├── reanalyze.py        # Пересчёт: сначала сырой FIT/TCX (raw_file_path), fallback trackpoints_json
+│   │   ├── raw_files.py        # Хранилище исходных FIT/TCX: uploads/raw/<user_id>/<sha256>.<ext>
+│   │   ├── weight_service.py   # save_weight (одна транзакция), current_weight (последнее измерение)
 │   │   ├── stats.py            # calc_stats, fmt_duration, zone_ranges, get_zone_bars_data
-│   │   ├── recovery_view.py    # hrv_status, tired_label, readiness_label, load_label
+│   │   ├── recovery_view.py    # hrv_status, readiness_label и structured-версии; пороги — из coach/config
 │   │   ├── telegram_notify.py  # Отправка уведомлений в Telegram
-│   │   ├── repositories.py     # TrainingRepository, HealthRepository (агрегационные запросы)
+│   │   ├── repositories.py     # TrainingRepository/HealthRepository/FeedbackRepository (db — обязательный kwarg)
 │   │   ├── analytics_helpers.py# compute_slope, compute_ewma, compute_moving_average
-│   │   └── user_service.py     # get_user_settings, get_or_create_user_by_telegram
-│   ├── coach/                  # Модуль аналитики и коучинга
-│   │   ├── __init__.py
-│   │   └── config.py           # Веса readiness/fatigue, пороги, EWMA-параметры
+│   │   └── user_service.py     # get_user_settings(db, ...) — сессию владеет вызывающий код
+│   ├── coach/                  # Модуль аналитики и коучинга (Этап 0 — каркас, логика в заглушках)
+│   │   ├── config.py           # ЕДИНСТВЕННЫЙ исполняемый источник порогов (зеркалит docs/coros_health_metrics.md)
+│   │   ├── contracts.py        # SkillResult, AthleteState, Prescription, ReasoningStep
+│   │   ├── state.py/engine.py/prescriber.py/orchestrator.py  # заглушки (NotImplementedError)
+│   │   └── skills/, rules/, personalization/, knowledge/, llm/  # заглушки Этапа 0
 │   ├── telegram/               # Пакет Telegram-бота (17 файлов)
 │   │   ├── __init__.py         #   экспорт run_bot
 │   │   ├── main.py             #   run_bot, Application сборка
@@ -132,8 +137,9 @@ running-coach/
 │       └── rate_limit.py       # In-memory rate limiter (Sprint 13)
 ├── tests/                      # Pytest-тесты
 │   └── ...
-├── uploads/                    # Загруженные файлы (.tcx, .fit)
-│   └── pending/                # Временные файлы до подтверждения
+├── uploads/                    # Загруженные файлы (.tcx, .fit); volume смонтирован в app И bot
+│   ├── pending/                # Временные файлы до подтверждения
+│   └── raw/<user_id>/          # Исходные FIT/TCX: <sha256>.<ext> (content-addressed, для reanalyze)
 ├── screenshots/                # Скриншоты для README
 ├── logs/                       # Ротируемые лог-файлы
 ├── Dockerfile                  # Python 3.13-slim, USER appuser
@@ -197,6 +203,27 @@ async def login(data: LoginRequest, db: Session = Depends(get_db)):
 
 - **Максимум ~400 строк.** Если больше — разбивай на модули.
 - **Роут — максимум ~80 строк.** Если больше — логика уходит в сервис.
+
+### Владение БД-сессией (Session ownership — Этап 6 ремедиации, 05.08.2026)
+
+- **`SessionLocal()` — только в композиционных корнях** (web `Depends(get_db)`, telegram-хендлеры/джобы,
+  `startup.py`, sync-оркестратор, `telegram_notify`). Список зафиксирован тестом-гвардом
+  `tests/test_session_ownership.py` — новый вызов вне списка валит CI.
+- Сервисы (`user_service`, `repositories`, `weight_service`, sync-функции) **получают `db` параметром**
+  и не открывают/не закрывают свои сессии.
+- Канонический `get_db` — один: `src/domain/models/base.py` (в `api/deps.py` — re-export).
+- ⚠️ Объекты из `telegram/utils.get_user()` — **detached**: читать можно, мутировать НЕЛЬЗЯ
+  (изменения не персистятся — этот класс багов уже стрелял дважды, см. BACKLOG #236).
+
+### Контракты синхронизации (Sync contracts — Этап 2 ремедиации)
+
+- Возврат sync-функций: `>= 0` — успех (оркестратор двигает `last_*_sync_at`),
+  **`-1` — ошибка (таймстемп НЕ двигается — иначе пропущенные данные теряются навсегда)**.
+- Подряд идущие сбои копятся в `watch_credentials.{activity,health}_sync_failures` (в БД —
+  синкают два процесса); на 3-м — telegram-уведомление; интервал растёт экспоненциально (backoff).
+- Дедуп активностей: primary — `external_activity_id` (частичный UNIQUE в БД),
+  окно ±120с — только fallback для legacy-строк без ID (`src/services/sync/dedup.py`).
+- Пороги коуча/readiness — **только** из `src/coach/config.py` (анти-дрейф-тесты сверяют).
 
 ### Legacy-код
 
@@ -266,4 +293,4 @@ src/telegram/main.py :: run_bot()
 
 ---
 
-**Последнее обновление:** 16.07.2026 (Sprint 19, docs audit)
+**Последнее обновление:** 05.08.2026 (ремедиация фундамента: этапы 0–6, session ownership, дедуп, сырые файлы)

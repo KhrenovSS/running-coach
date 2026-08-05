@@ -2,6 +2,22 @@
 
 All notable changes to this project are tracked here.
 
+## [05.08.2026] — Docs: документация синхронизирована с ремедиацией
+
+### Changed
+- **`CLAUDE.md`** — §7: stop bot перед миграциями с ALTER; §8 (новый): владение БД-сессией;
+  таблица Docker rebuild исправлена (бот сам синкает → `services/parsers/analysis/domain` = app+bot);
+  секция коуча: исполняемый источник порогов — `coach/config.py`, гейты Этапа 1 закрыты.
+- **`AGENTS.md`** — правила §7–10 (TEST_PG_URL, stop-bot, session ownership, sync-контракт `-1`);
+  карта `src/` дополнена (`sync/dedup.py`, `raw_files.py`, `weight_service.py`, `bin/backfill_*`);
+  сводка сессии 05.08.2026; «следующий шаг» уточнён (пороги из config, repositories с `db=`).
+- **`docs/ARCHITECTURE.md`** — актуальное дерево (dedup/raw_files/weight_service, coach-скелет,
+  `uploads/raw/`), новые разделы «Владение БД-сессией» и «Контракты синхронизации».
+- **`docs/TESTING.md`** — два режима БД (SQLite/`TEST_PG_URL`), конвенция уникальных chat_id
+  с картой занятых диапазонов, актуальный список тестовых файлов.
+- **`docs/CHECKLIST_MIGRATION.md`** — раздел «Деплой миграции в прод»: stop bot перед ALTER,
+  проверка `health/`, порядок восстановления из crash-loop (уроки инцидента 05.08.2026).
+
 ## [05.08.2026] — Фикс: главная показывала устаревший вес
 
 ### Fixed
