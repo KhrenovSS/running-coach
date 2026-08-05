@@ -1,17 +1,19 @@
 import os
 
-from sqlalchemy.orm import Session
-
-from src.models import get_db
-from src.models import User
+from src.models import SessionLocal, User
+from src.services.user_service import get_user_by_telegram_id
 
 
 def get_user(chat_id: int) -> User | None:
-    next_db: Session = next(get_db())
+    """Композиционный корень telegram-хендлеров: открывает сессию и делегирует сервису.
+    (Telegram handlers' composition root: opens the session, delegates to the service.)
+    Возвращаемый User — detached: читать только уже загруженные скалярные поля.
+    """
+    db = SessionLocal()
     try:
-        return next_db.query(User).filter(User.telegram_chat_id == chat_id).first()
+        return get_user_by_telegram_id(db, chat_id)
     finally:
-        next_db.close()
+        db.close()
 
 
 def _get_web_app_url() -> str:

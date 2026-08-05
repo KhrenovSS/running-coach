@@ -28,7 +28,14 @@ Thumbs.db
 # Environment
 .env
 .env.local
-bin/
+# bin/: игнорируем по умолчанию, но версионируем ops/backfill-скрипты
+# (ignore bin/ by default, but track ops/backfill scripts — db-safety review 05.08.2026)
+bin/*
+!bin/backup_db.sh
+!bin/docker.sh
+!bin/backfill_avg_pace.py
+!bin/backfill_external_ids.py
+!bin/backfill_raw_fits.py
 
 # Egg info
 *.egg-info/

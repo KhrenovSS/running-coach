@@ -2,6 +2,90 @@
 
 All notable changes to this project are tracked here.
 
+## [05.08.2026] — Ремедиация фундамента, этапы 1–6 (BACKLOG #226–#231)
+
+### Added
+- **Этап 1 — PG-режим тестов (#226).** `tests/conftest.py`: opt-in через `TEST_PG_URL`
+  (только localhost/CI, иначе hard fail; схема пересоздаётся и строится через
+  `alembic upgrade head` — ловит дрейф моделей/миграций); для SQLite включён
+  `PRAGMA foreign_keys=ON`. CI гоняет тесты в обоих режимах. §6 CLAUDE.md обновлён.
+- **Этап 3 — честный дедуп (#228).** `training_sessions.{external_activity_id,source_brand,
+  file_sha256}` + частичные UNIQUE-индексы (`WHERE ... IS NOT NULL`) — защита от дублей
+  на уровне БД; `deleted_trainings` хранит внешний ID для точного матчинга при ре-синке.
+  Новый `src/services/sync/dedup.py`: primary-ключ — внешний ID (Coros labelId),
+  окно ±120с — только fallback для legacy-строк. Ручные загрузки дедупятся по SHA256
+  контента. Backfill: `bin/backfill_external_ids.py` (`--dry-run` по умолчанию).
+  Миграция `m6n7o8p9q0r1`.
+- **Этап 4 — хранение сырых FIT/TCX (#229).** `src/services/raw_files.py`:
+  content-addressed хранилище `uploads/raw/<user_id>/<sha256>.<ext>`; sync и upload
+  сохраняют исходники (ошибка записи не роняет импорт); `reanalyze` пересчитывает
+  от сырья (полные точки ДО GPS-очистки) с fallback на `trackpoints_json`; в парсерах
+  выделены `extract_fit_trackpoints`/`extract_tcx_trackpoints`. Volume `./uploads`
+  смонтирован и в контейнер `bot` (он тоже синкает). Backfill: `bin/backfill_raw_fits.py`.
+  Миграция `n7o8p9q0r1s2` (`raw_file_path`).
+
+### Fixed
+- **Этап 2 — авто-sync больше не теряет данные молча (#227).** Исключение в
+  `sync/health.py`/`sync/activities.py` теперь возвращает `-1` (раньше `0` = «успех» →
+  `last_*_sync_at` уезжал вперёд и пропущенные тренировки терялись навсегда). Счётчики
+  подряд идущих сбоев в `watch_credentials` (в БД — синкают два процесса), на 3-м подряд
+  сбое — Telegram-уведомление; экспоненциальный backoff (cap 2^5); оживлён кэш токена
+  (`resume_session`, reuse-until-failure, +`api_user_id`); throttle между страницами
+  Coros API. Миграция `l5m6n7o8p9q0`. Также: `_is_sync_due` устойчив к naive datetime.
+
+### Changed
+- **Этап 5 — единый источник порогов (#230).** Все пороги readiness/RHR/tired/load —
+  именованные константы в `src/coach/config.py` (зеркалят `docs/coros_health_metrics.md`);
+  `recovery_view.py` импортирует их (inline-числа удалены). Из `READINESS_WEIGHTS` удалён
+  `sleep_quality` (источника данных сна нет), веса перенормированы к 1.0; анти-дрейф-тесты.
+- **Этап 6 — владение БД-сессией (#231).** Канонический `get_db` — один
+  (`domain/models/base`, `api/deps` re-export); `user_service.*` и `repositories.*`
+  принимают `db` от вызывающего (detached-объекты и «третья сессия в запросе» устранены);
+  sync-функции получают сессию от оркестратора/sync_runner и не закрывают её.
+  `SessionLocal()` остался только в композиционных корнях — инвариант зафиксирован
+  тестом-гвардом `tests/test_session_ownership.py`.
+
+### Tests
+- 222 теста, оба режима зелёные (SQLite + PostgreSQL/Alembic): дедуп и UNIQUE-индексы,
+  сырьё+reanalyze, коды возврата sync, счётчики/notify/backoff, пороги, session-гвард.
+
+### По итогам db-safety-ревью (вердикт GO)
+- `.gitignore`: `bin/` → `bin/*` + исключения — backfill/ops-скрипты теперь версионируются
+  (раньше `bin/backfill_*.py` молча игнорировались git).
+- `tests/conftest.py`: убран CI-байпас host-guard'а — `TEST_PG_URL` строго localhost.
+- `sync/utils.py`: `token_expires_at` нормализуется через `ensure_aware_utc` (naive legacy).
+- `uploads.py`: confirm-восстановление с уже известным SHA256 → graceful-возврат существующей
+  сессии вместо IntegrityError.
+- `telegram/sync_runner.py`: при сбое бренда пишется `log_sync_failed`, а не `log_sync_completed`.
+- ⚠️ Порядок деплоя: `bin/backup_db.sh` → deploy → `bin/backfill_external_ids.py --dry-run`
+  → `--apply` → `bin/backfill_raw_fits.py --apply` (история Coros API конечна — не откладывать;
+  до backfill'а legacy-строки дедупятся окном ±120с — теоретически может скрыть новую
+  активность в пределах 2 минут от старой).
+
+## [05.08.2026] — Аудит фундамента + Этап 0 ремедиации (3 рантайм-фикса)
+
+### Fixed
+- **`src/telegram/handlers/stats.py`** — `/stats` бота падал с `AttributeError` на первом же
+  вызове: агрегаты писались как `db.query(db.func.sum(...))`, а у `Session` нет атрибута `func`.
+  Заменено на `sqlalchemy.func`. Путь был полностью без тестового покрытия.
+- **Путь пересчёта тренировок (reanalyze) был мёртв** — `src/services/reanalyze.py:51` читал
+  `user.interval_min_phase_distance_m`, которой не было ни в модели `User`, ни в миграциях →
+  `AttributeError` до начала анализа. Колонка добавлена в модель + миграция.
+- **`DailyMetrics.performance`: Integer → Float** — Coros отдаёт float −2..+2 (пороги readiness
+  ±0.5), Integer-колонка в PostgreSQL округляла значение и убивала градацию основного сигнала
+  готовности. SQLite-тесты маскировали баг (loose affinity). Уже сохранённые значения округлены
+  необратимо — repair-скрипт по Coros API вынесен в BACKLOG (#232).
+
+### Added
+- Миграция `k4l5m6n7o8p9_stage0_runtime_fixes` (после `j3k4l5m6n7o8`): `users.
+  interval_min_phase_distance_m Integer NULL` + `daily_metrics.performance` Integer→Float
+  (upgrade lossless; downgrade помечен lossy).
+- `tests/test_stage0_fixes.py` — 8 поведенческих тестов на все три фикса (проверено, что на
+  откаченном коде тесты падают); фабрика `build_daily_metrics` принимает `performance: float`.
+- **BACKLOG #226–#232** — план ремедиации фундамента по итогам аудита (6 этапов): PG-режим
+  тестов, надёжный sync, дедуп по внешнему ID, хранение сырых FIT, единый источник порогов,
+  владение БД-сессией. Этапы 3–5 — гейт перед Этапом 1 коуча.
+
 ## [04.08.2026] — Ops: автозапуск прода после ребута + go.sh под Claude-агента
 
 ### Changed

@@ -31,6 +31,7 @@ class User(Base):
     timezone = Column(String(50), nullable=True)  # Часовой пояс пользователя (User timezone, e.g. "Europe/Moscow")
     interval_pace_threshold = Column(Float, nullable=True)        # Порог темпа: разница с базовым (мин/км)
     interval_min_phase_duration = Column(Integer, nullable=True)  # Мин. длительность фазы (сек)
+    interval_min_phase_distance_m = Column(Integer, nullable=True)  # Мин. дистанция фазы (м) — используется reanalyze
     interval_hr_lag_sec = Column(Integer, nullable=True)          # Лаг пульса (сек)
     interval_min_oscillations = Column(Integer, nullable=True)    # Мин. число осцилляций для interval
     created_at = Column(DateTime(timezone=True), default=utcnow)

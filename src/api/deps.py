@@ -12,35 +12,18 @@ API зависимости FastAPI (FastAPI dependencies)
 """
 
 import time
-from typing import Generator
 
 from fastapi import Depends, Request, HTTPException
 from sqlalchemy.orm import Session
 
-from src.models import SessionLocal, User
+# Канонический get_db живёт в src/domain/models/base (Этап 6, BACKLOG #231) —
+# здесь только re-export, чтобы не плодить две «канонические» зависимости.
+# (Canonical get_db lives in domain/models/base; re-exported here, not redefined.)
+from src.models import SessionLocal, User, get_db  # noqa: F401
+
 from src.utils.logger import get_logger
 
 logger = get_logger("api.deps")
-
-
-def get_db() -> Generator[Session, None, None]:
-    """
-    Зависимость: сессия базы данных
-    Dependency: database session
-    
-    Автоматически закрывает сессию после использования.
-    Automatically closes session after use.
-    
-    Использование (Usage):
-        @router.get("/")
-        async def endpoint(db: Session = Depends(get_db)):
-            items = db.query(Item).all()
-    """
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 async def log_request(request: Request) -> None:

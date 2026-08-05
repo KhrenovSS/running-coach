@@ -1,6 +1,6 @@
 # Модель тренировочной сессии + обратная связь + удалённые (Training session, feedback, deleted)
 
-from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey, JSON, Index
+from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey, JSON, Index, text
 from sqlalchemy.orm import relationship
 
 from src.domain.models.base import Base, utcnow
@@ -11,6 +11,17 @@ class TrainingSession(Base):
     __table_args__ = (
         Index('ix_training_user_begin', 'user_id', 'begin_ts'),
         Index('ix_training_begin', 'begin_ts'),
+        # Честный дедуп (BACKLOG #228): частичные UNIQUE — NULL не конфликтуют,
+        # поэтому legacy-строки и ручные загрузки без внешнего ID не ломаются.
+        # (Partial UNIQUE indexes: NULLs don't conflict — legacy/manual rows are safe.)
+        Index('uq_training_user_brand_extid', 'user_id', 'source_brand', 'external_activity_id',
+              unique=True,
+              postgresql_where=text('external_activity_id IS NOT NULL'),
+              sqlite_where=text('external_activity_id IS NOT NULL')),
+        Index('uq_training_user_file_sha', 'user_id', 'file_sha256',
+              unique=True,
+              postgresql_where=text('file_sha256 IS NOT NULL'),
+              sqlite_where=text('file_sha256 IS NOT NULL')),
     )
 
     id = Column(Integer, primary_key=True)                    # ID тренировки (training session ID)
@@ -39,6 +50,10 @@ class TrainingSession(Base):
     vo2max = Column(Float, nullable=True)
     calories = Column(Integer, nullable=True)
     avg_pace = Column(Float, nullable=True)  # Средний темп мин/км (avg pace min/km)
+    external_activity_id = Column(String(64), nullable=True)  # ID активности в API бренда (brand API activity id, e.g. Coros labelId)
+    source_brand = Column(String(50), nullable=True)  # 'coros'/'garmin'/... или 'manual' для ручных загрузок
+    file_sha256 = Column(String(64), nullable=True)  # SHA256 исходного файла — ключ дедупа ручных загрузок
+    raw_file_path = Column(String(255), nullable=True)  # путь к исходному FIT/TCX (raw file path — BACKLOG #229)
 
     user = relationship("User", back_populates="training_sessions")
 
@@ -60,6 +75,8 @@ class DeletedTraining(Base):
     vo2max = Column(Float, nullable=True)
     calories = Column(Integer, nullable=True)
     avg_pace = Column(Float, nullable=True)
+    external_activity_id = Column(String(64), nullable=True)  # для точного матчинга при ре-синке (exact match on re-sync)
+    source_brand = Column(String(50), nullable=True)
     deleted_at = Column(DateTime(timezone=True), default=utcnow)
 
     user = relationship("User", back_populates="deleted_trainings")

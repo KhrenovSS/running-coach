@@ -56,33 +56,43 @@ def run_sync_in_thread(chat_id: int) -> tuple[bool, str]:
 
         for cred in creds:
             brand = cred.brand
+            brand_failed: list[str] = []
             audit.log_sync_started(brand=brand, user_id=user.id, source="telegram")
 
             # Health sync / Синхронизация метрик здоровья
             try:
-                new_health = run_async_in_thread(sync_health_for_user(cred, brand))
+                new_health = run_async_in_thread(sync_health_for_user(cred, brand, db))
                 if new_health >= 0:
                     total_new_health += new_health
+                else:
+                    brand_failed.append("health: sync error")
             except Exception as e:
                 logger.warning("Health sync failed (brand=%s user=%s): %s", brand, user.id, e)
-                errors.append(f"{brand} health: {e}")
+                brand_failed.append(f"health: {e}")
 
             # Activity sync / Синхронизация тренировок
             try:
-                new_activities = run_async_in_thread(sync_activities_for_user(cred, brand))
+                new_activities = run_async_in_thread(sync_activities_for_user(cred, brand, db))
                 if new_activities >= 0:
                     total_new_activities += new_activities
+                else:
+                    brand_failed.append("activity: sync error")
             except Exception as e:
                 logger.warning("Activity sync failed (brand=%s user=%s): %s", brand, user.id, e)
-                errors.append(f"{brand} activity: {e}")
+                brand_failed.append(f"activity: {e}")
 
-            audit.log_sync_completed(
-                brand=brand,
-                user_id=user.id,
-                found=total_new_activities,
-                processed=total_new_activities,
-                source="telegram",
-            )
+            if brand_failed:
+                errors.extend(f"{brand} {msg}" for msg in brand_failed)
+                audit.log_sync_failed(brand=brand, user_id=user.id,
+                                      error="; ".join(brand_failed), source="telegram")
+            else:
+                audit.log_sync_completed(
+                    brand=brand,
+                    user_id=user.id,
+                    found=total_new_activities,
+                    processed=total_new_activities,
+                    source="telegram",
+                )
 
         # Итоговое сообщение / Summary message
         lines = ["✅ Синхронизация завершена!"]

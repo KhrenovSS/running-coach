@@ -16,6 +16,7 @@ class Settings(BaseSettings):
 
     # Пути (Paths)
     log_file: str = "app.log"
+    raw_files_dir: str = "uploads/raw"  # хранилище исходных FIT/TCX (raw FIT/TCX storage, BACKLOG #229)
 
     # Тайминги (Timing)
     http_timeout: int = 15

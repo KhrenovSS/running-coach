@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import func
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
@@ -40,10 +41,10 @@ class StatsPages:
     def _overview(self, db, now: datetime) -> str:
         user_id = self.user.id
         total_sessions = db.query(TrainingSession).filter(TrainingSession.user_id == user_id).count()
-        total_distance = db.query(db.func.sum(TrainingSession.total_distance_km)).filter(
+        total_distance = db.query(func.sum(TrainingSession.total_distance_km)).filter(
             TrainingSession.user_id == user_id,
         ).scalar() or 0
-        total_duration = db.query(db.func.sum(TrainingSession.duration_minutes)).filter(
+        total_duration = db.query(func.sum(TrainingSession.duration_minutes)).filter(
             TrainingSession.user_id == user_id,
         ).scalar() or 0
 

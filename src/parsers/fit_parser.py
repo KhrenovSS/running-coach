@@ -6,12 +6,10 @@ from src.config import settings
 # Константа для конвертации полуокружностей в градусы (Semicircles to degrees)
 SEMICIRCLE_TO_DEG = 180.0 / 2**31
 
-# Парсинг FIT-файла (FIT file parsing)
-def parse_fit(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130, coros_cadence_workaround=False):
-    if max_hr is None:
-        max_hr = settings.default_max_hr
+# Извлечь трекпоинты и калории из FIT-файла БЕЗ обработки (Extract raw trackpoints+calories, no processing)
+# Используется parse_fit и reanalyze-от-сырья (used by parse_fit and raw-file reanalyze, BACKLOG #229)
+def extract_fit_trackpoints(file_path, coros_cadence_workaround=False):
     trackpoints = []
-    start_time_utc = None
     calories = None
 
     with fitdecode.FitReader(file_path, check_crc=True) as fit:
@@ -55,6 +53,14 @@ def parse_fit(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.
                 if cal is not None:
                     calories = int(cal)
 
+    return trackpoints, calories
+
+
+# Парсинг FIT-файла (FIT file parsing)
+def parse_fit(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130, coros_cadence_workaround=False):
+    if max_hr is None:
+        max_hr = settings.default_max_hr
+    trackpoints, calories = extract_fit_trackpoints(file_path, coros_cadence_workaround=coros_cadence_workaround)
     if not trackpoints:
         return None
     start_time_utc = trackpoints[0]['time']

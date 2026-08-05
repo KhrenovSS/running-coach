@@ -76,7 +76,7 @@ def on_startup():
             db.commit()
             db.refresh(admin_user)
 
-        user_settings = get_settings(admin_user.id)
+        user_settings = get_settings(db, admin_user.id)
         existing = db.query(WeightMeasurement).filter(WeightMeasurement.user_id == admin_user.id).first()
         if not existing and user_settings.weight:
             wm = WeightMeasurement(weight_kg=user_settings.weight, measured_at=utcnow(), user_id=admin_user.id)

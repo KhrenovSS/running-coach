@@ -1,12 +1,39 @@
 # Сервис пересчёта тренировок (Training reanalysis service)
 
 from sqlalchemy.orm import Session
-from src.models import TrainingSession, User, get_settings
+from src.models import TrainingSession, User
 from src.analysis import process_trackpoints
 from src.config import settings as app_settings
+from src.services.raw_files import resolve_raw_file
 from src.utils.logger import get_logger
 
 logger = get_logger("analysis.reanalyze")
+
+
+def _trackpoints_from_raw(session: TrainingSession) -> list[dict] | None:
+    """Извлечь трекпоинты из исходного FIT/TCX, если сырьё сохранено (BACKLOG #229).
+    (Extract trackpoints from the stored raw file if present.)
+    Сырьё содержит ВСЕ точки до GPS-очистки — пересчёт получает выгоду от
+    улучшений алгоритма очистки, в отличие от кэша trackpoints_json.
+    """
+    raw = resolve_raw_file(session.raw_file_path)
+    if raw is None:
+        return None
+    try:
+        if raw.suffix.lower() == '.fit':
+            from src.parsers.fit_parser import extract_fit_trackpoints
+            workaround = session.source_brand == 'coros'  # каденс-фикс только для Coros
+            trackpoints, _calories = extract_fit_trackpoints(str(raw), coros_cadence_workaround=workaround)
+        elif raw.suffix.lower() == '.tcx':
+            from src.parsers.tcx_parser import extract_tcx_trackpoints
+            trackpoints, _start = extract_tcx_trackpoints(str(raw))
+        else:
+            return None
+        return trackpoints or None
+    except Exception:
+        logger.warning("Reanalyze: ошибка чтения сырья %s — fallback на trackpoints_json (raw read failed)",
+                       session.raw_file_path, exc_info=True)
+        return None
 
 
 def reanalyze_training(db: Session, session_id: int, user_id: int,
@@ -32,16 +59,20 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
         logger.warning("Reanalyze: тренировка %d не найдена ( Training %d not found)", session_id, session_id)
         return None
 
-    if not session.trackpoints_json:
-        logger.warning("Reanalyze: нет трекпоинтов для %d (No trackpoints for %d)", session_id, session_id)
-        return None
-
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         return None
 
-    # Восстановить трекпоинты (Restore trackpoints)
-    trackpoints = _restore_trackpoints(session.trackpoints_json)
+    # Сначала сырьё (полные точки до очистки), затем кэш trackpoints_json (legacy)
+    # (Prefer raw file — full pre-cleaning points; fall back to the trackpoints_json cache)
+    trackpoints = _trackpoints_from_raw(session)
+    from_raw = trackpoints is not None
+    if not from_raw:
+        if not session.trackpoints_json:
+            logger.warning("Reanalyze: нет ни сырья, ни трекпоинтов для %d (No raw file nor trackpoints for %d)",
+                           session_id, session_id)
+            return None
+        trackpoints = _restore_trackpoints(session.trackpoints_json)
     if not trackpoints:
         return None
 
@@ -81,6 +112,9 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
         session.training_type_override = None
 
     # Обновить сессию (Update session)
+    if from_raw and result.get('trackpoints_json'):
+        # Пересчёт от сырья → обновляем кэш очищенных трекпоинтов (refresh the cleaned-trackpoints cache)
+        session.trackpoints_json = result['trackpoints_json']
     session.training_type = result['training_type']
     session.segments_count = result['segments_count']
     session.segments_json = result['segments_json']

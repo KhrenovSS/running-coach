@@ -64,6 +64,9 @@ def delete_training(db: Session, user_id: int, session_id: int) -> bool:
         vo2max=s.vo2max,
         calories=s.calories,
         avg_pace=pace,
+        # Внешний ID сохраняем — иначе ре-синк не узнает удалённую тренировку (keep ext id for exact re-sync match)
+        external_activity_id=s.external_activity_id,
+        source_brand=s.source_brand,
     )
     db.add(deleted)
     db.delete(s)

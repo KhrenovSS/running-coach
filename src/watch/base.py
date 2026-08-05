@@ -11,6 +11,18 @@ class BaseWatchClient(ABC):
     async def authenticate(self) -> bool:
         ...
 
+    def resume_session(self, access_token: str, api_user_id: Optional[str]) -> bool:
+        """Восстановить сессию из кэшированного токена без повторного логина.
+        (Resume session from cached token without re-login.)
+        Возвращает False, если бренд не поддерживает resume — тогда вызывается authenticate().
+        """
+        return False
+
+    def session_token(self) -> tuple[Optional[str], Optional[str]]:
+        """Текущий (access_token, api_user_id) для кэширования; (None, None) если бренд не отдаёт.
+        (Current token pair for caching; (None, None) if the brand exposes none.)"""
+        return None, None
+
     @abstractmethod
     async def list_activities(self, since: Optional[datetime] = None) -> list[dict]:
         ...

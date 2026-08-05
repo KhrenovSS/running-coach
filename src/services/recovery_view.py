@@ -1,4 +1,25 @@
 # Классификация метрик здоровья для отображения (Health metrics display helpers)
+#
+# Все пороги — из src/coach/config.py (единый источник, BACKLOG #230).
+# (All thresholds come from src/coach/config.py — the single source.)
+
+from src.coach.config import (
+    HRV_SD_FALLBACK_FACTOR,
+    LOAD_RATIO_HIGH,
+    LOAD_RATIO_LOW,
+    PERFORMANCE_MODERATE,
+    PERFORMANCE_READY,
+    RECOVERY_PCT_MODERATE,
+    RECOVERY_PCT_READY,
+    RHR_CRITICAL_DIFF,
+    RHR_ELEVATED_DIFF,
+    RHR_LOW_DIFF,
+    TIRED_LOW_MAX,
+    TIRED_MODERATE_MAX,
+    TRAINING_LOAD_LIGHT_MAX,
+    TRAINING_LOAD_MEDIUM_MAX,
+)
+
 
 def hrv_status(hrv: float | None, baseline: float | None, sd: float | None,
                intervals: list[float] | None = None) -> tuple[str | None, str]:
@@ -16,7 +37,7 @@ def hrv_status(hrv: float | None, baseline: float | None, sd: float | None,
     if baseline is None or baseline == 0:
         return None, '{:.0f}'.format(hrv)
     if sd is None or sd == 0:
-        sd = baseline * 0.2
+        sd = baseline * HRV_SD_FALLBACK_FACTOR
     if hrv > baseline + sd:
         return 'elevated', '🟣 Повышенная ({:.0f})'.format(hrv)
     elif hrv >= baseline - sd:
@@ -30,9 +51,9 @@ def hrv_status(hrv: float | None, baseline: float | None, sd: float | None,
 def tired_label(tired_rate: int | None) -> str:
     if tired_rate is None:
         return ''
-    if tired_rate <= -5:
+    if tired_rate <= TIRED_LOW_MAX:
         return '🟢 Низкая'
-    elif tired_rate <= 0:
+    elif tired_rate <= TIRED_MODERATE_MAX:
         return '🟡 Умеренная'
     else:
         return '🔴 Высокая'
@@ -41,24 +62,24 @@ def tired_label(tired_rate: int | None) -> str:
 def readiness_label(performance: float | None, recovery_pct: float | None = None,
                     training_load_ratio: float | None = None) -> str:
     if recovery_pct is not None:
-        if recovery_pct >= 70:
+        if recovery_pct >= RECOVERY_PCT_READY:
             return '🟢 Готов к тренировкам'
-        elif recovery_pct >= 30:
+        elif recovery_pct >= RECOVERY_PCT_MODERATE:
             return '🟡 Умеренная готовность'
         else:
             return '🔴 Требуется отдых'
     if training_load_ratio is not None:
-        if training_load_ratio < 0.8:
+        if training_load_ratio < LOAD_RATIO_LOW:
             return '🟢 Низкая нагрузка'
-        elif training_load_ratio <= 1.2:
+        elif training_load_ratio <= LOAD_RATIO_HIGH:
             return '🟡 Оптимальная нагрузка'
         else:
             return '🔴 Перегрузка'
     if performance is None:
         return ''
-    if performance > 0.5:
+    if performance > PERFORMANCE_READY:
         return '🟢 Готов к тренировкам'
-    elif performance > -0.5:
+    elif performance > PERFORMANCE_MODERATE:
         return '🟡 Умеренная готовность'
     else:
         return '🔴 Требуется отдых'
@@ -67,9 +88,9 @@ def readiness_label(performance: float | None, recovery_pct: float | None = None
 def load_label(training_load: float | None) -> str:
     if training_load is None:
         return ''
-    if training_load < 50:
+    if training_load < TRAINING_LOAD_LIGHT_MAX:
         return 'Лёгкая'
-    elif training_load < 150:
+    elif training_load < TRAINING_LOAD_MEDIUM_MAX:
         return 'Средняя'
     else:
         return 'Высокая'
@@ -134,15 +155,18 @@ def readiness_structured(performance: float | None, recovery_pct: float | None =
     Приоритет сигналов повторяет readiness_label: recovery_pct → training_load_ratio → performance.
     """
     if recovery_pct is not None:
-        status = 'ready' if recovery_pct >= 70 else ('moderate' if recovery_pct >= 30 else 'rest')
+        status = ('ready' if recovery_pct >= RECOVERY_PCT_READY
+                  else ('moderate' if recovery_pct >= RECOVERY_PCT_MODERATE else 'rest'))
         return {'status': status, 'value': round(recovery_pct, 1), 'confidence': 0.8,
                 'evidence': f'recovery_pct={recovery_pct}'}
     if training_load_ratio is not None:
-        status = 'ready' if training_load_ratio < 0.8 else ('moderate' if training_load_ratio <= 1.2 else 'rest')
+        status = ('ready' if training_load_ratio < LOAD_RATIO_LOW
+                  else ('moderate' if training_load_ratio <= LOAD_RATIO_HIGH else 'rest'))
         return {'status': status, 'value': round(training_load_ratio, 2), 'confidence': 0.6,
                 'evidence': f'training_load_ratio={training_load_ratio}'}
     if performance is not None:
-        status = 'ready' if performance > 0.5 else ('moderate' if performance > -0.5 else 'rest')
+        status = ('ready' if performance > PERFORMANCE_READY
+                  else ('moderate' if performance > PERFORMANCE_MODERATE else 'rest'))
         return {'status': status, 'value': round(performance, 2), 'confidence': 0.5,
                 'evidence': f'performance={performance}'}
     return {'status': 'unknown', 'value': None, 'confidence': 0.0, 'evidence': 'no readiness data'}
@@ -152,9 +176,9 @@ def tired_rate_structured(tired_rate: int | None) -> dict:
     """Структурированный уровень усталости: status low/moderate/high (Structured fatigue level)."""
     if tired_rate is None:
         return {'status': 'unknown', 'value': None, 'confidence': 0.0, 'evidence': 'no tired_rate data'}
-    if tired_rate <= -5:
+    if tired_rate <= TIRED_LOW_MAX:
         status = 'low'
-    elif tired_rate <= 0:
+    elif tired_rate <= TIRED_MODERATE_MAX:
         status = 'moderate'
     else:
         status = 'high'
@@ -165,18 +189,14 @@ def recovery_pct_structured(recovery_pct: float | None) -> dict:
     """Структурированный процент восстановления: recovered/partial/needs_rest (Structured recovery %)."""
     if recovery_pct is None:
         return {'status': 'unknown', 'value': None, 'confidence': 0.0, 'evidence': 'no recovery_pct data'}
-    if recovery_pct >= 70:
+    if recovery_pct >= RECOVERY_PCT_READY:
         status = 'recovered'
-    elif recovery_pct >= 30:
+    elif recovery_pct >= RECOVERY_PCT_MODERATE:
         status = 'partial'
     else:
         status = 'needs_rest'
     return {'status': status, 'value': round(recovery_pct, 1), 'confidence': 0.8,
             'evidence': f'recovery_pct={recovery_pct}'}
-
-
-# NB: READINESS_WEIGHTS содержит "sleep_quality", но выделенной колонки в DailyMetrics нет —
-# структурированный sleep-вывод отложен до появления источника данных (решается в дизайне движка).
 
 
 def rhr_anomaly(rhr: int | None, baseline_rhr: int | None = None) -> dict:
@@ -188,13 +208,13 @@ def rhr_anomaly(rhr: int | None, baseline_rhr: int | None = None) -> dict:
     if baseline_rhr is None:
         return {'status': 'normal', 'value': rhr, 'confidence': 0.3, 'evidence': 'no baseline'}
     diff = rhr - baseline_rhr
-    if diff >= 10:
+    if diff >= RHR_CRITICAL_DIFF:
         status = 'critical_elevated'
         confidence = 0.9
-    elif diff >= 5:
+    elif diff >= RHR_ELEVATED_DIFF:
         status = 'elevated'
         confidence = 0.8
-    elif diff <= -3:
+    elif diff <= RHR_LOW_DIFF:
         status = 'low'
         confidence = 0.7
     else:

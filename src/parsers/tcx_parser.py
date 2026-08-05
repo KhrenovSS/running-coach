@@ -14,10 +14,9 @@ NS = {
 }
 
 
-# Основная функция парсинга TCX-файла (Main TCX file parsing function)
-def parse_tcx(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130):
-    if max_hr is None:
-        max_hr = settings.default_max_hr
+# Извлечь трекпоинты из TCX БЕЗ обработки (Extract raw trackpoints, no processing)
+# Используется parse_tcx и reanalyze-от-сырья (used by parse_tcx and raw-file reanalyze, BACKLOG #229)
+def extract_tcx_trackpoints(file_path):
     # Парсинг XML и получение корневого элемента (Parse XML and get root element)
     tree = ET.parse(file_path)
     root = tree.getroot()
@@ -45,6 +44,15 @@ def parse_tcx(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.
         lon = float(lon_str) if lon_str else None
         cad = int(float(cad_str)) if cad_str else None
         trackpoints.append({'time': t, 'hr': hr, 'dist': dist, 'alt': alt, 'lat': lat, 'lon': lon, 'cad': cad})
+
+    return trackpoints, start_time_utc
+
+
+# Основная функция парсинга TCX-файла (Main TCX file parsing function)
+def parse_tcx(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130):
+    if max_hr is None:
+        max_hr = settings.default_max_hr
+    trackpoints, start_time_utc = extract_tcx_trackpoints(file_path)
 
     # Обработка через общий процессор (Process through shared pipeline)
     return process_trackpoints(trackpoints, start_time_utc, max_hr,

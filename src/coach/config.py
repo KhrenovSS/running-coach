@@ -1,11 +1,34 @@
 # Конфигурация модуля аналитики и коучинга (Coach module configuration)
+#
+# ЕДИНСТВЕННЫЙ исполняемый источник порогов (BACKLOG #230, Этап 5).
+# Человекочитаемый источник — docs/coros_health_metrics.md; числа здесь зеркалят его
+# и потребляются recovery_view + будущими skills. НЕ дублировать значения inline.
+# (Single executable source of thresholds; mirrors docs/coros_health_metrics.md.)
 
+# --- Пороги метрик (Metric thresholds — см. §§ в docs/coros_health_metrics.md) ---
+RECOVERY_PCT_READY = 70        # §5: recovery_pct ≥ 70 → готов (ready)
+RECOVERY_PCT_MODERATE = 30     # §5: ≥ 30 → умеренная готовность (moderate), ниже — отдых (rest)
+LOAD_RATIO_LOW = 0.8           # §7: ratio < 0.8 → низкая нагрузка (low load)
+LOAD_RATIO_HIGH = 1.2          # §7: ratio > 1.2 → перегрузка (overload)
+PERFORMANCE_READY = 0.5        # §4: performance > 0.5 → готов (float −2..+2)
+PERFORMANCE_MODERATE = -0.5    # §4: > −0.5 → умеренная, ниже — отдых
+TIRED_LOW_MAX = -5             # §3: tired_rate ≤ −5 → низкая усталость
+TIRED_MODERATE_MAX = 0         # §3: ≤ 0 → умеренная, выше — высокая
+TRAINING_LOAD_LIGHT_MAX = 50   # §7: training_load < 50 → лёгкая
+TRAINING_LOAD_MEDIUM_MAX = 150 # §7: < 150 → средняя, выше — высокая
+RHR_ELEVATED_DIFF = 5          # §6: RHR − baseline ≥ +5 → повышенный
+RHR_CRITICAL_DIFF = 10         # §6: ≥ +10 → критический
+RHR_LOW_DIFF = -3              # §6: ≤ −3 → аномально низкий
+HRV_SD_FALLBACK_FACTOR = 0.2   # §2: sd ≈ baseline·0.2, когда API не отдаёт sleepHrvSd
+
+# Веса readiness. NB: sleep_quality удалён 05.08.2026 — источника данных сна в DailyMetrics
+# нет, вес по несуществующей метрике опаснее его отсутствия; веса перенормированы к 1.0.
+# Вернуть sleep при появлении данных (re-add sleep when a data source exists).
 READINESS_WEIGHTS = {
-    "hrv_status": 0.30,
-    "rhr_deviation": 0.20,
-    "tired_rate": 0.15,
-    "recovery_pct": 0.20,
-    "sleep_quality": 0.15,
+    "hrv_status": 0.35,
+    "rhr_deviation": 0.24,
+    "tired_rate": 0.18,
+    "recovery_pct": 0.23,
 }
 
 FATIGUE_WEIGHTS = {

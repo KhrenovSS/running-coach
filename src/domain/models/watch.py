@@ -16,8 +16,13 @@ class WatchCredential(Base):
     encrypted_password = Column(String(255), nullable=True)  # encrypted password
     access_token = Column(String(512), nullable=True)  # cached API token
     token_expires_at = Column(DateTime(timezone=True), nullable=True)
+    api_user_id = Column(String(64), nullable=True)  # ID пользователя в API бренда — нужен для resume токена (brand API user id for token resume)
     last_activity_sync_at = Column(DateTime(timezone=True), nullable=True)
     last_health_sync_at = Column(DateTime(timezone=True), nullable=True)
+    # Счётчики ПОДРЯД идущих сбоев авто-синка: в БД, т.к. синкают два процесса — app и bot
+    # (Consecutive auto-sync failure counters: DB-backed — two processes sync: app and bot)
+    activity_sync_failures = Column(Integer, nullable=False, default=0, server_default='0')
+    health_sync_failures = Column(Integer, nullable=False, default=0, server_default='0')
     activity_sync_interval = Column(Integer, nullable=True)  # minutes, NULL = default 60
     health_sync_interval = Column(Integer, nullable=True)  # minutes, NULL = default 480
     is_active = Column(Boolean, default=True)

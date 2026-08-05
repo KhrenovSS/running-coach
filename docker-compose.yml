@@ -51,6 +51,10 @@ services:
     environment:
       DATABASE_URL: postgresql://running_coach:${POSTGRES_PASSWORD}@db:5432/running_coach
       TZ: Europe/Moscow
+    volumes:
+      # Бот тоже синкает активности (sync_runner) — сырые FIT должны жить на хосте,
+      # а не умирать с контейнером (bot also syncs — raw FITs must persist on the host)
+      - ./uploads:/app/uploads
     depends_on:
       db:
         condition: service_healthy

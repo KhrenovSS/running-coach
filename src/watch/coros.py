@@ -1,4 +1,5 @@
 # Клиент для неофициального API Coros Training Hub (Coros Training Hub API client — httpx async)
+import asyncio
 import hashlib
 from datetime import datetime, timezone
 from typing import Optional
@@ -7,6 +8,7 @@ import bcrypt
 import httpx
 
 from src.utils.logger import get_logger
+from src.config.constants import WATCH_API_PAGE_THROTTLE_SEC
 from src.watch.base import BaseWatchClient
 from src.exceptions import WatchAPIError, WatchAuthError
 
@@ -75,6 +77,19 @@ class CorosWatchClient(BaseWatchClient):
         except httpx.RequestError as e:
             raise WatchAuthError(f"Network error: {e}", brand="coros") from e
 
+    # Восстановить сессию из кэшированного токена — без повторного логина (Resume session from cached token — no re-login)
+    def resume_session(self, access_token: str, api_user_id: Optional[str]) -> bool:
+        if not access_token or not api_user_id:
+            return False  # без userId заголовок yfheader не собрать (yfheader needs userId)
+        self.accesstoken = access_token
+        self.user_id = api_user_id
+        self.client.cookies["CPL-coros-token"] = access_token
+        return True
+
+    # Текущая пара токена для кэширования (Current token pair for caching)
+    def session_token(self) -> tuple[Optional[str], Optional[str]]:
+        return self.accesstoken, self.user_id
+
     # Заголовки авторизации для API-запросов (Authorization headers for API requests)
     def _auth_headers(self) -> dict:
         return {
@@ -97,6 +112,8 @@ class CorosWatchClient(BaseWatchClient):
         all_items = list(data.get("data", {}).get("dataList", []))
 
         for page in range(2, total_pages + 1):
+            # Throttle: неофициальный API — не льём страницы без пауз (unofficial API — pace the pagination)
+            await asyncio.sleep(WATCH_API_PAGE_THROTTLE_SEC)
             params["pageNumber"] = page
             resp = await self.client.get(ACTIVITIES_URL, params=params, headers=self._auth_headers())
             resp.raise_for_status()

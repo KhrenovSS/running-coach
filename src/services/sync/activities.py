@@ -5,20 +5,23 @@ import tempfile
 from datetime import timedelta, datetime, timezone
 
 from src.utils.logger import get_logger
-from src.models import SessionLocal, User, TrainingSession, DeletedTraining
+from src.models import User, TrainingSession, DeletedTraining
 from src.services.audit import AuditService
 from src.services.sync.utils import _make_client
+from src.services.sync.dedup import load_dedup_state, is_duplicate, find_deleted_match
+from src.services.raw_files import save_raw_file, sha256_hex
 from src.services.telegram_notify import telegram_notify
 
 logger = get_logger("app")
 
 
 # Синхронизация тренировок для пользователя (Sync activities for a user)
-async def sync_activities_for_user(cred, brand: str,
+async def sync_activities_for_user(cred, brand: str, db,
                                   progress: dict | None = None,
                                   pending: dict | None = None) -> int:
     """Возвращает количество новых синхронизированных тренировок (Return count of synced activities).
 
+    db       — сессия ВЫЗЫВАЮЩЕГО кода (Этап 6, BACKLOG #231): не открываем и не закрываем.
     progress — dict для отслеживания прогресса (web UI); None для автосинхронизации.
     pending  — dict для кэширования pending-deleted тренировок (web UI); None для автосинхронизации.
     """
@@ -26,22 +29,24 @@ async def sync_activities_for_user(cred, brand: str,
     from src.analysis.utils import format_pace, format_duration
 
     async def _download_parse(act):
-        """Скачать FIT и распарсить; вернуть data dict или None (Download+parse FIT; return data or None)."""
+        """Скачать FIT и распарсить; вернуть (data, fit_bytes) или (None, None)
+        (Download+parse FIT; return (data, fit_bytes) or (None, None))."""
         fit_data = await client.download_activity(act['id'], act['sport_type'])
         if not fit_data:
-            return None
+            return None, None
         with tempfile.NamedTemporaryFile(delete=False, suffix=".fit") as tmp:
             tmp.write(fit_data)
             tmp_path = tmp.name
         try:
-            return parse_fit(tmp_path, max_hr=us.max_hr,
+            data = parse_fit(tmp_path, max_hr=us.max_hr,
                              max_credible_pace=us.max_credible_pace,
                              max_gps_jump_m=us.max_gps_jump_m,
                              min_hr_for_fast_pace=us.min_hr_for_fast_pace,
                              coros_cadence_workaround=True)
+            return data, fit_data
         except Exception:
             logger.warning("Parse error for %s", act.get('name'), exc_info=True)
-            return None
+            return None, None
         finally:
             os.unlink(tmp_path)
 
@@ -58,7 +63,6 @@ async def sync_activities_for_user(cred, brand: str,
         progress['step'] = 'fetch'
         progress['message'] = f'Получение списка активностей из {brand.capitalize()}...'
 
-    db = SessionLocal()
     audit = AuditService(db)
     try:
         us = db.query(User).filter(User.id == cred.user_id).first()
@@ -85,51 +89,35 @@ async def sync_activities_for_user(cred, brand: str,
 
         db_since = since - timedelta(days=1) if since else (datetime.now(timezone.utc) - timedelta(days=90))
 
-        existing_begin = {r[0] for r in db.query(TrainingSession.begin_ts).filter(
-            TrainingSession.user_id == cred.user_id,
-            TrainingSession.begin_ts >= db_since,
-        ).all()}
-        all_deleted = db.query(DeletedTraining).filter(
-            DeletedTraining.user_id == cred.user_id,
-            DeletedTraining.begin_ts >= db_since,
-        ).all()
+        # Дедуп (BACKLOG #228): primary — внешний ID активности; окно по времени —
+        # только fallback для legacy-строк без ID (Dedup: external id first, time window is legacy fallback)
+        dedup_state = load_dedup_state(db, cred.user_id, brand, db_since)
 
-        deleted_lookup: dict = {}
-        for d in all_deleted:
-            if d.begin_ts:
-                key = d.begin_ts.replace(second=0, microsecond=0)
-                if key not in deleted_lookup:
-                    deleted_lookup[key] = []
-                deleted_lookup[key].append(d)
-
-        new_acts = [a for a in activities if a.get('start_time') and a['start_time'] not in existing_begin]
+        new_acts = [a for a in activities
+                    if not is_duplicate(dedup_state, a.get('id'), a.get('start_time'))]
 
         # Фильтруем already-deleted, кэшируем в pending если предоставлен (Filter already-deleted, cache in pending if provided)
         acts_to_sync = []
         skipped_deleted = 0
         for act in new_acts:
-            bt = act.get('start_time')
-            deleted_match = None
-            if bt:
-                bt_min = bt.replace(second=0, microsecond=0)
-                for offset in range(-2, 3):
-                    for d in deleted_lookup.get(bt_min + timedelta(minutes=offset), []):
-                        if abs((d.begin_ts - bt).total_seconds()) < 120:
-                            deleted_match = d
-                            break
-                    if deleted_match:
-                        break
+            deleted_match = find_deleted_match(dedup_state, act.get('id'), act.get('start_time'))
             if deleted_match:
                 skipped_deleted += 1
                 if pending is not None:
                     # Скачиваем и парсим FIT, чтобы confirm_deleted мог восстановить (Download+parse FIT so confirm_deleted can restore)
-                    data = await _download_parse(act)
+                    data, fit_bytes = await _download_parse(act)
                     if data and data.get('training_type') not in ('invalid', None):
                         import uuid as _uuid
                         tid = str(_uuid.uuid4())
+                        raw_path = save_raw_file(cred.user_id, fit_bytes, 'fit') if fit_bytes else None
                         pending[tid] = {
                             'path': '', 'filename': act.get('name', 'activity'),
                             'data': data,
+                            # для точного дедупа при подтверждении восстановления (for exact dedup on confirm)
+                            'external_activity_id': act.get('id'),
+                            'source_brand': brand,
+                            'sha256': sha256_hex(fit_bytes) if fit_bytes else None,
+                            'raw_path': raw_path,
                         }
                         if 'pending_deleted' not in progress:
                             progress['pending_deleted'] = []
@@ -175,7 +163,7 @@ async def sync_activities_for_user(cred, brand: str,
                 progress['step'] = 'parse'
                 progress['message'] = f'Обработка {i+1}/{len(acts_to_sync)}: {act.get("name", "activity")}'
 
-            data = await _download_parse(act)
+            data, fit_bytes = await _download_parse(act)
             if not data:
                 if progress is not None:
                     progress['errors'].append(f"{act.get('name', '?')}: download/parse failed")
@@ -188,6 +176,14 @@ async def sync_activities_for_user(cred, brand: str,
 
             session = TrainingSession(**data)
             session.user_id = cred.user_id
+            # Стабильный ключ дедупа (BACKLOG #228): защищён частичным UNIQUE-индексом в БД
+            session.external_activity_id = act.get('id')
+            session.source_brand = brand
+            dedup_state.ext_ids.add(act.get('id'))  # защита от дублей внутри одного батча (intra-batch guard)
+            # Сырьё (BACKLOG #229): исходный FIT сохраняем — ошибка записи не роняет импорт
+            if fit_bytes:
+                session.file_sha256 = sha256_hex(fit_bytes)
+                session.raw_file_path = save_raw_file(cred.user_id, fit_bytes, 'fit')
             tz = data.get('timezone')
             if tz and not us.timezone:
                 us.timezone = tz
@@ -242,13 +238,17 @@ async def sync_activities_for_user(cred, brand: str,
         return synced
     except Exception as e:
         logger.exception("Activity sync error for brand=%s user=%s", brand, cred.user_id)
+        db.rollback()  # чужая сессия не должна остаться в failed-состоянии (don't poison the caller's session)
         if progress is not None:
             progress['step'] = 'error'
             progress['message'] = f'Ошибка: {type(e).__name__}: {e}'
             progress['done'] = True
-        return 0
+        # -1 = ошибка: таймстемп НЕ двигать. Раньше тут был 0 (=успех) →
+        # окно since уезжало вперёд (буфер всего 2ч) и тренировки терялись навсегда.
+        # (-1 = error: do NOT advance the timestamp; 0 here used to lose activities forever.)
+        return -1
     finally:
-        db.close()
+        # db НЕ закрываем — сессией владеет вызывающий код (caller owns the session)
         try:
             await client.close()
         except Exception:

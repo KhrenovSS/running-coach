@@ -1,5 +1,6 @@
 # Роуты для загрузки TCX/FIT-файлов (Upload TCX/FIT file routes)
 
+import hashlib
 import os
 import tempfile
 import time
@@ -15,6 +16,7 @@ from src.analysis.utils import format_pace, format_duration
 from src.utils.logger import get_logger
 from src.api.deps import get_current_user
 from src.services.audit import AuditService
+from src.services.raw_files import save_raw_file
 from src.services.telegram_notify import telegram_notify
 from src.web.state import _pending, _pending_lock, _cleanup_stale_pending
 from src.utils.rate_limit import rate_limit
@@ -31,7 +33,9 @@ def _build_rating_keyboard(session_id: int) -> dict:
 
 
 def _save_session_from_data(data: dict, db: Session, current_user: User,
-                             pending: dict | None = None) -> TrainingSession:
+                             pending: dict | None = None,
+                             file_sha256: str | None = None,
+                             raw_file_path: str | None = None) -> TrainingSession:
     """
     Создать и сохранить TrainingSession из данных трекпоинтов.
     Create and save a TrainingSession from trackpoint data.
@@ -47,6 +51,26 @@ def _save_session_from_data(data: dict, db: Session, current_user: User,
         session.suspect_flags = flags_val
     if trackpoints_json_val:
         session.trackpoints_json = trackpoints_json_val
+    # Дедуп (BACKLOG #228): ручная загрузка — по SHA256 контента; sync-restore — по внешнему ID
+    if file_sha256:
+        # Graceful-skip: sha уже в БД (например, файл импортирован раньше вручную) →
+        # вернуть существующую сессию вместо IntegrityError на частичном UNIQUE
+        # (return the existing session instead of tripping the partial UNIQUE index)
+        existing = db.query(TrainingSession).filter(
+            TrainingSession.user_id == current_user.id,
+            TrainingSession.file_sha256 == file_sha256,
+        ).first()
+        if existing:
+            return existing
+        session.file_sha256 = file_sha256
+        session.source_brand = 'manual'
+    if pending and pending.get('external_activity_id'):
+        session.external_activity_id = pending['external_activity_id']
+        session.source_brand = pending.get('source_brand')
+    if raw_file_path:
+        session.raw_file_path = raw_file_path
+    elif pending and pending.get('raw_path'):
+        session.raw_file_path = pending['raw_path']
     db.add(session)
     db.commit()
     db.refresh(session)
@@ -76,7 +100,7 @@ def _notify_new_session(session: TrainingSession, current_user: User,
 async def upload_files(files: list[UploadFile] = File(...), db: Session = Depends(get_db),
                        current_user: User = Depends(get_current_user),
                        _: None = Depends(rate_limit(max_requests=30, window_seconds=60))):
-    settings = get_settings(current_user.id)
+    settings = get_settings(db, current_user.id)
     saved = 0
     deleted_hit = None
     temp_id = None
@@ -94,6 +118,20 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
             logger.warning("Upload: file too large — %s (%d bytes)", file.filename, len(contents))
             parse_errors.append(file.filename or "unknown")
             continue
+
+        # Дедуп по контенту (BACKLOG #228): тот же файл — не парсим повторно
+        # (Content dedup: identical file — skip without re-parsing)
+        file_sha = hashlib.sha256(contents).hexdigest()
+        sha_exists = db.query(TrainingSession).filter(
+            TrainingSession.user_id == current_user.id,
+            TrainingSession.file_sha256 == file_sha,
+        ).first()
+        if sha_exists:
+            logger.info("Upload: %s уже импортирован (sha256 match, session=%d)", file.filename, sha_exists.id)
+            continue
+
+        # Сырьё (BACKLOG #229): сохраняем исходник до парсинга — ошибка записи не роняет импорт
+        raw_path = save_raw_file(current_user.id, contents, ext)
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(contents)
@@ -130,7 +168,8 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
         if deleted_match:
             tid = str(uuid.uuid4())
             with _pending_lock:
-                _pending[tid] = {'path': tmp_path, 'filename': file.filename, 'data': data, '_created': time.time()}
+                _pending[tid] = {'path': tmp_path, 'filename': file.filename, 'data': data,
+                                 'sha256': file_sha, 'raw_path': raw_path, '_created': time.time()}
                 _cleanup_stale_pending()
             pace_str = format_pace(deleted_match.avg_pace) if deleted_match.avg_pace else '—'
             deleted_hit = {
@@ -158,7 +197,8 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
                 db_user = db.query(User).filter(User.id == current_user.id).first()
                 if db_user and not db_user.timezone:
                     db_user.timezone = tz
-            session = _save_session_from_data(data, db, current_user)
+            session = _save_session_from_data(data, db, current_user,
+                                              file_sha256=file_sha, raw_file_path=raw_path)
             saved += 1
             _notify_new_session(session, current_user, filename=file.filename or "unknown")
             audit.log_training_uploaded(
@@ -201,7 +241,8 @@ async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(
             TrainingSession.user_id == current_user.id
         ).first()
         if not exists:
-            session = _save_session_from_data(data, db, current_user, pending)
+            session = _save_session_from_data(data, db, current_user, pending,
+                                              file_sha256=pending.get('sha256'))
             confirmed += 1
             _notify_new_session(session, current_user, source="confirm_upload",
                                 filename=pending.get('filename', 'unknown'))
@@ -252,7 +293,8 @@ async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db
         TrainingSession.user_id == current_user.id
     ).first()
     if not exists:
-        session = _save_session_from_data(data, db, current_user, pending)
+        session = _save_session_from_data(data, db, current_user, pending,
+                                          file_sha256=pending.get('sha256'))
         _notify_new_session(session, current_user, source="confirm_deleted",
                             filename=pending.get('filename', 'unknown'))
         logger.info("Удалённая тренировка от %s повторно импортирована (Deleted training re-imported)", bt)

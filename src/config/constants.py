@@ -73,3 +73,12 @@ MIN_HEALTH_SYNC_INTERVAL_MIN: Final[int] = 30
 MAX_SYNC_INTERVAL_MIN: Final[int] = 1440
 DEFAULT_ACTIVITY_SYNC_INTERVAL_MIN: Final[int] = 60
 DEFAULT_HEALTH_SYNC_INTERVAL_MIN: Final[int] = 480
+
+# Дедупликация тренировок (Training dedup — BACKLOG #228)
+DEDUP_TIME_WINDOW_SEC: Final[int] = 120  # окно матчинга по времени для legacy-строк без внешнего ID
+
+# Надёжность синхронизации (Sync reliability — BACKLOG #227)
+SYNC_FAILURE_NOTIFY_THRESHOLD: Final[int] = 3    # подряд сбоев до Telegram-уведомления (consecutive failures before notify)
+SYNC_BACKOFF_MAX_EXP: Final[int] = 5             # cap экспоненты backoff: 2^5 = 32× интервала (backoff exponent cap)
+WATCH_API_PAGE_THROTTLE_SEC: Final[float] = 0.5  # пауза между страницами list_activities (page throttle, unofficial API)
+WATCH_TOKEN_TTL_HOURS: Final[int] = 24           # консервативный TTL кэша токена (conservative token cache TTL)

@@ -4,7 +4,7 @@ import json
 from datetime import timedelta, date, datetime, timezone
 
 from src.utils.logger import get_logger
-from src.models import SessionLocal, DailyMetrics
+from src.models import DailyMetrics
 from src.services.sync.utils import _make_client
 from src.config.constants import HEALTH_SYNC_DAYS
 from src.watch import BaseWatchClient
@@ -53,10 +53,11 @@ async def save_dashboard_data(client: BaseWatchClient, db, user_id: int, brand: 
 
 
 # Синхронизация метрик здоровья для пользователя (Sync health metrics for a user)
-async def sync_health_for_user(cred, brand: str,
+async def sync_health_for_user(cred, brand: str, db,
                                progress: dict | None = None) -> int:
     """Возвращает количество новых синхронизированных записей (Return count of new synced records).
 
+    db — сессия ВЫЗЫВАЮЩЕГО кода (Этап 6, BACKLOG #231): функция её не открывает и не закрывает.
     progress — dict для отслеживания прогресса (web UI); None для автосинхронизации.
     """
     client = await _make_client(cred)
@@ -68,7 +69,6 @@ async def sync_health_for_user(cred, brand: str,
             progress['done'] = True
         return -1
 
-    db = SessionLocal()
     try:
         if progress is not None:
             progress['step'] = 'fetch'
@@ -187,13 +187,17 @@ async def sync_health_for_user(cred, brand: str,
         return synced
     except Exception as e:
         logger.exception("Health sync error for brand=%s user=%s", brand, cred.user_id)
+        db.rollback()  # чужая сессия не должна остаться в failed-состоянии (don't poison the caller's session)
         if progress is not None:
             progress['step'] = 'error'
             progress['message'] = f'Ошибка: {type(e).__name__}: {e}'
             progress['done'] = True
-        return 0
+        # -1 = ошибка: таймстемп НЕ двигать. Раньше тут был 0 (=успех) →
+        # окно since уезжало вперёд и пропущенные данные терялись навсегда.
+        # (-1 = error: do NOT advance the timestamp; 0 here used to lose data forever.)
+        return -1
     finally:
-        db.close()
+        # db НЕ закрываем — сессией владеет вызывающий код (caller owns the session)
         try:
             await client.close()
         except Exception:

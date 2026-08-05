@@ -54,9 +54,19 @@ jobs:
           ! grep -rn "except: pass" src/
           ! grep -rn "os.environ.setdefault" src/
       
-      - name: Run tests
+      # Быстрый дефолтный режим: SQLite in-memory (conftest форсит DATABASE_URL)
+      - name: Run tests (SQLite)
         env:
-          DATABASE_URL: postgresql://running_coach:test_password@localhost:5432/running_coach
+          SECRET_KEY: test_secret_key_for_ci
+          FERNET_KEY: test_fernet_key_for_ci
+        run: |
+          python -m pytest tests/ -v --tb=short
+
+      # PG-режим (BACKLOG #226): схема через alembic upgrade head — ловит дрейф
+      # моделей/миграций, реальные типы колонок и FK CASCADE/RESTRICT
+      - name: Run tests (PostgreSQL + Alembic)
+        env:
+          TEST_PG_URL: postgresql://running_coach:test_password@localhost:5432/running_coach
           SECRET_KEY: test_secret_key_for_ci
           FERNET_KEY: test_fernet_key_for_ci
         run: |

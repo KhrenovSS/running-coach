@@ -36,10 +36,15 @@
    сигнатур сервисов, правка `startup.py`/`domain/models/base.py`/`alembic/`) → **сначала предупреди
    пользователя**: какие данные затронуты, есть ли миграция/fallback, обратимо ли. Без подтверждения — не применяй.
 6. **DB SAFETY — тесты НИКОГДА не трогают production.**
-   - `conftest.py` ДОЛЖЕН выставлять `os.environ["DATABASE_URL"] = "sqlite:///:memory:"` ДО импорта `src.*`.
+   - По умолчанию `conftest.py` выставляет `os.environ["DATABASE_URL"] = "sqlite:///:memory:"` ДО импорта `src.*`.
+   - Единственное исключение (одобрено 05.08.2026): opt-in PG-режим через **отдельную** переменную
+     `TEST_PG_URL` (не `DATABASE_URL`!) — только localhost/CI (hard fail иначе), схема строится
+     через `alembic upgrade head` (ловит дрейф миграций), схема пересоздаётся на старте сессии.
+     Прод-контейнер никогда не выставляет `TEST_PG_URL`.
    - НИКОГДА `os.environ.setdefault("DATABASE_URL", ...)` (no-op в контейнере → тесты пишут в прод).
    - НИКОГДА `drop_all` в autouse-фикстурах.
-   - CI дублирует это grep-гвардами (`from src.database`, `except: pass`, `os.environ.setdefault`).
+   - CI дублирует это grep-гвардами (`from src.database`, `except: pass`, `os.environ.setdefault`)
+     и гоняет тесты в обоих режимах (SQLite + PostgreSQL/Alembic).
 7. **Backup перед деплоем.** Перед `docker compose build/up` → `bin/backup_db.sh`.
    НИКОГДА `docker compose down -v`, НИКОГДА `docker volume rm running-coach_pgdata`.
    Безопасно: `docker compose restart app`, `docker compose build app && docker compose up -d app`.

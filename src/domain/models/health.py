@@ -22,7 +22,7 @@ class DailyMetrics(Base):
     tired_rate = Column(Integer, nullable=True)
     training_load = Column(Float, nullable=True)
     training_load_ratio = Column(Float, nullable=True)
-    performance = Column(Integer, nullable=True)
+    performance = Column(Float, nullable=True)  # Coros performance: float −2..+2 (не Integer — теряется градация)
     ati = Column(Float, nullable=True)
     cti = Column(Float, nullable=True)
     vo2max = Column(Float, nullable=True)
