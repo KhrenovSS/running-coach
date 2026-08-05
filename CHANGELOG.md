@@ -2,6 +2,19 @@
 
 All notable changes to this project are tracked here.
 
+## [05.08.2026] — Фикс: главная показывала устаревший вес
+
+### Fixed
+- **Ввод веса в Telegram не обновлял профиль.** Хендлер писал `user.weight_kg` в
+  detached-объект (из `get_user`, сессия уже закрыта) и коммитил другую сессию —
+  `WeightMeasurement` сохранялся, профиль нет. Логика вынесена в
+  `src/services/weight_service.save_weight(db, ...)`: измерение + профиль в одной транзакции.
+- **Главная страница показывала профильный снапшот вместо текущего веса.** Теперь
+  `weight_service.current_weight`: последнее измерение с fallback на профиль
+  (страница настроек уже работала так). `tests/test_weight_service.py` — 3 теста.
+- BACKLOG #236: та же болезнь detached-мутации найдена в `/delete_me`
+  (`account.py:60` — `telegram_chat_id = None` не персистится) — отложено.
+
 ## [05.08.2026] — Ремедиация фундамента, этапы 1–6 (BACKLOG #226–#231)
 
 ### Added

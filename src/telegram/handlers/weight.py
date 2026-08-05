@@ -5,6 +5,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from src.models import SessionLocal, User, WeightMeasurement, utcnow
+from src.services.weight_service import save_weight
 from src.telegram.utils import get_user
 from src.telegram.state import _awaiting_weight, _awaiting_weight_lock
 from src.services.audit import AuditService
@@ -84,14 +85,7 @@ async def handle_weight_message(update: Update, context: ContextTypes.DEFAULT_TY
     db = SessionLocal()
     audit = AuditService(db)
     try:
-        measurement = WeightMeasurement(
-            user_id=user.id,
-            weight_kg=weight,
-            measured_at=utcnow(),
-        )
-        db.add(measurement)
-        user.weight_kg = weight
-        db.commit()
+        save_weight(db, user.id, weight)
         with _awaiting_weight_lock:
             _awaiting_weight[chat_id] = False
         audit.log_telegram_received(

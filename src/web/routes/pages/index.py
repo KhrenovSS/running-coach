@@ -13,6 +13,7 @@ from src.models import get_db, User, TrainingSession, DailyMetrics, WeightMeasur
 from src.deps import templates
 from src.api.deps import get_current_user
 from src.services.stats import fmt_duration, calc_stats, get_zone_bars_data, MONTHS_RU
+from src.services.weight_service import current_weight
 from src.services.recovery_view import hrv_status, tired_label, readiness_label
 from src.services.sync import get_auto_sync_status_snapshot
 from src.web.state import TRAINING_TYPES_RU
@@ -204,7 +205,9 @@ def render_page(db, user_id: int, user_name: str = "Бегун", year=None, mont
         "nav_title": nav_title,
         "user_header": user_header,
         "max_hr": user_settings.max_hr,
-        "weight": user_settings.weight,
+        # Текущий вес = последнее измерение, а не профильный снапшот
+        # (current weight = the latest measurement, not the profile snapshot)
+        "weight": current_weight(db, user_id, fallback=user_settings.weight),
         "week_km": week_stats['total_km'] if week_stats else 0,
         "week_dur": week_stats['total_dur'] if week_stats else "",
         "week_zones": week_zones,
