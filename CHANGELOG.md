@@ -2,6 +2,36 @@
 
 All notable changes to this project are tracked here.
 
+## [06.08.2026] — Адаптивный максимальный пульс
+
+### Added
+- **`src/services/hr_max.py`** — адаптивный `User.max_hr` по данным тренировок:
+  - *Повышение:* пик тренировки считается по скользящей медиане
+    (`analysis/utils.smoothed_hr_peak`, окно 5 — одиночные выбросы датчика отбрасываются;
+    жёсткий кап 220). 1–2 превышения профильного max_hr за 30 дней — Telegram-предупреждение
+    с кнопками «Обновить до X»/«Игнорировать»; превышения в ≥3 РАЗНЫХ дня — принудительное
+    обновление до 3-го по величине дневного пика + уведомление «Максимальный пульс обновлён:
+    177 → 182» (bulk-загрузка одним днём не форсит — db-safety review). Сервис никогда не
+    роняет вызывающий код (изоляция исключений — сбой фичи не маскируется под сбой синка).
+    Встроено во все пути ингеста (одно уведомление на батч): бот-синк
+    (`sync/activities.py`), веб-загрузка (`/upload`, confirm, confirm_deleted), reanalyze.
+  - *Снижение:* еженедельная джоба (пн 10:05, `telegram/jobs/hr_max.py`) — если за 90 дней
+    в ≥5 интервальных/темповых пульс не поднимался выше max_hr−5, предложение снизить
+    (только по кнопке, никогда автоматически; кулдаун 30 дней через аудит-событие
+    `settings.max_hr_suggest`).
+  - Кнопки обрабатывает `telegram/handlers/hr_max.py` (`maxhr:set:<v>` / `maxhr:ignore`),
+    авто-изменения аудируются как `settings.changed` (source=`auto_max_hr`/`telegram_button`).
+- **Миграция `o8p9q0r1s2t3`** — `training_sessions.hr_peak_smoothed` (Integer, nullable,
+  аддитивная; legacy-строки NULL → потребители делают coalesce на `max_heart_rate`;
+  reanalyze постепенно заполняет). Деплой: DDL → **stop bot перед миграцией** (§7 CLAUDE.md).
+- Константы `HR_SMOOTH_MEDIAN_WINDOW`, `MAX_HR_CAP`, `MAX_HR_CONFIRM_*`, `MAX_HR_LOWER_*`,
+  `MAX_HR_SUGGEST_COOLDOWN_DAYS` в `src/config/constants.py`.
+- `tests/test_hr_max.py` — 19 тестов (сглаживание, warning/force-update, разные дни vs
+  bulk-загрузка, окно 30д, кап, изоляция исключений, coalesce для legacy, снижение+кулдаун,
+  кнопки бота); диапазон chat_id `94xxx` (карта — `docs/TESTING.md`).
+- BACKLOG #237–#239: авто-reanalyze после смены max_hr, эвристика раннего пика на низком
+  темпе, валидация ручного ввода max_hr — отложены.
+
 ## [05.08.2026] — Docs: документация синхронизирована с ремедиацией
 
 ### Changed

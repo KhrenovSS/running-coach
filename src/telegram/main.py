@@ -14,8 +14,10 @@ from src.telegram.handlers.trainings import cmd_trainings, trainings_callback
 from src.telegram.handlers.weight import cmd_weight, handle_weight_message
 from src.telegram.handlers.account import cmd_delete_me, cmd_delete_me_confirm, cmd_login_info, cmd_reset_password, get_new_password, cancel_reset_password
 from src.telegram.handlers.feedback import feedback_callback
+from src.telegram.handlers.hr_max import hr_max_callback
 from src.telegram.jobs.weight import daily_weight_job
 from src.telegram.jobs.recovery import daily_recovery_check_job
+from src.telegram.jobs.hr_max import weekly_max_hr_check_job
 from src.utils.logger import get_logger
 
 logger = get_logger("telegram.main")
@@ -64,6 +66,7 @@ def run_bot():
     application.add_handler(reset_pw_handler)
 
     application.add_handler(CallbackQueryHandler(feedback_callback, pattern="^feedback:"))
+    application.add_handler(CallbackQueryHandler(hr_max_callback, pattern="^maxhr:"))
     application.add_handler(CallbackQueryHandler(stats_callback, pattern="^stats:"))
     application.add_handler(CallbackQueryHandler(trainings_callback, pattern="^trainings:"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_weight_message))
@@ -79,6 +82,11 @@ def run_bot():
 
     application.job_queue.run_daily(daily_recovery_check_job, time=dt_time(hour=10, minute=0))
     logger.info("Проверка данных сна запланирована на 10:00")
+
+    # Понедельник, 10:05 — предложение снизить max_hr (кулдаун 30д внутри сервиса)
+    # (Monday 10:05 — max HR lowering suggestion; 30-day cooldown lives in the service)
+    application.job_queue.run_daily(weekly_max_hr_check_job, time=dt_time(hour=10, minute=5), days=(1,))
+    logger.info("Еженедельная проверка снижения max_hr запланирована на понедельник 10:05")
 
     logger.info("Telegram bot polling started")
     application.run_polling(allowed_updates=Update.ALL_TYPES)

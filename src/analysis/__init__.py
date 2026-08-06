@@ -15,7 +15,7 @@ from src.analysis.utils import (
     format_duration, calc_elevation, find_timezone,
     compute_rolling_pace, interpolate_paces, smooth_paces,
     is_km_segmentation, serialize_trackpoints, build_hr_pace_series,
-    TrackpointDict, AnalysisResult,
+    smoothed_hr_peak, TrackpointDict, AnalysisResult,
 )
 from src.config import settings
 
@@ -196,6 +196,9 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
         'total_distance_km': total_dist_km,
         'avg_heart_rate': avg_hr,
         'max_heart_rate': max_hr_val,
+        # Пик по скользящей медиане — для адаптивного max_hr (spike-фильтр)
+        # (Rolling-median peak — feeds adaptive max HR, filters sensor spikes)
+        'hr_peak_smoothed': smoothed_hr_peak(hr_values),
         'training_type': t_type,
         'segments_count': segments_count,
         'duration_minutes': round(total_duration_min, 1),

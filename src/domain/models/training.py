@@ -30,6 +30,7 @@ class TrainingSession(Base):
     total_distance_km = Column(Float)
     avg_heart_rate = Column(Integer)
     max_heart_rate = Column(Integer)
+    hr_peak_smoothed = Column(Integer, nullable=True)  # пик по скользящей медиане — база адаптивного max_hr; NULL у legacy-строк (rolling-median peak; NULL for legacy rows)
     training_type = Column(String(50))
     training_type_override = Column(String(50), nullable=True)  # Ручная установка типа (NULL = авто)
     trackpoints_json = Column(JSON, nullable=True)              # Сырые трекпоинты для пересчёта

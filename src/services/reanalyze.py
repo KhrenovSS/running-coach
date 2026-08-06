@@ -121,6 +121,7 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
     session.hr_pace_series = result['hr_pace_series']
     session.avg_heart_rate = result['avg_heart_rate']
     session.max_heart_rate = result['max_heart_rate']
+    session.hr_peak_smoothed = result.get('hr_peak_smoothed')  # постепенно заполняет legacy-строки (gradually backfills legacy rows)
     session.duration_minutes = result['duration_minutes']
     session.avg_cadence = result.get('avg_cadence')
     session.elevation_gain = result.get('elevation_gain')
@@ -133,6 +134,11 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
     logger.info("Reanalyze: тренировка %d пересчитана → %s, %d сегментов (Training %d reanalyzed → %s, %d segments)",
                 session_id, result['training_type'], result['segments_count'],
                 session_id, result['training_type'], result['segments_count'])
+    # Адаптивный max_hr: пересчёт мог поднять пик выше профильного (adaptive max HR check)
+    from src.services.hr_max import evaluate_max_hr_raise
+    evaluate_max_hr_raise(db, user_id,
+                          result.get('hr_peak_smoothed') or result.get('max_heart_rate'),
+                          source="reanalyze")
     return result
 
 

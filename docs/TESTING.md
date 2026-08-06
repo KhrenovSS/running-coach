@@ -60,8 +60,8 @@ In-memory БД (и PG-схема) живёт **весь прогон** — да�
 файлами. Поэтому `make_user` в каждом тесте должен получать уникальные
 `chat_id`/`email` (иначе `UNIQUE constraint failed`). Занятые диапазоны chat_id:
 `123456789/999/111/222` (test_models, auto_sync), `77xxx` (backfill), `90001-90002`
-(skills), `95xxx` (stage0), `96xxx` (auto_sync), `97xxx` (dedup), `98xxx` (raw_files),
-`99xxx` (weight). Для нового файла бери свободный диапазон и хелпер вида:
+(skills), `94xxx` (hr_max), `95xxx` (stage0), `96xxx` (auto_sync), `97xxx` (dedup),
+`98xxx` (raw_files), `99xxx` (weight). Для нового файла бери свободный диапазон и хелпер вида:
 
 ```python
 def _user(db, n: int):

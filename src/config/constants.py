@@ -77,6 +77,16 @@ DEFAULT_HEALTH_SYNC_INTERVAL_MIN: Final[int] = 480
 # Дедупликация тренировок (Training dedup — BACKLOG #228)
 DEDUP_TIME_WINDOW_SEC: Final[int] = 120  # окно матчинга по времени для legacy-строк без внешнего ID
 
+# Адаптивный максимальный пульс (Adaptive max HR — auto-raise / suggest lowering)
+HR_SMOOTH_MEDIAN_WINDOW: Final[int] = 5      # окно скользящей медианы пика — фильтр одиночных выбросов (rolling-median window, spike filter)
+MAX_HR_CAP: Final[int] = 220                 # выше — артефакт датчика; диапазон согласован с src/exceptions.py (above → sensor artifact)
+MAX_HR_CONFIRM_COUNT: Final[int] = 3         # превышений за окно для принудительного обновления (exceedances to force-update)
+MAX_HR_CONFIRM_WINDOW_DAYS: Final[int] = 30  # окно подтверждения превышений (confirmation window)
+MAX_HR_LOWER_WINDOW_DAYS: Final[int] = 90    # окно наблюдения для предложения снизить (lowering observation window)
+MAX_HR_LOWER_MIN_INTENSE: Final[int] = 5     # минимум интервальных/темповых в окне (min intense workouts in window)
+MAX_HR_LOWER_MARGIN_BPM: Final[int] = 5      # пик ≤ max_hr − margin → кандидат на снижение (peak below profile by margin → suggest)
+MAX_HR_SUGGEST_COOLDOWN_DAYS: Final[int] = 30  # не повторять предложение чаще (suggestion cooldown)
+
 # Надёжность синхронизации (Sync reliability — BACKLOG #227)
 SYNC_FAILURE_NOTIFY_THRESHOLD: Final[int] = 3    # подряд сбоев до Telegram-уведомления (consecutive failures before notify)
 SYNC_BACKOFF_MAX_EXP: Final[int] = 5             # cap экспоненты backoff: 2^5 = 32× интервала (backoff exponent cap)

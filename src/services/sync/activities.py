@@ -11,6 +11,7 @@ from src.services.sync.utils import _make_client
 from src.services.sync.dedup import load_dedup_state, is_duplicate, find_deleted_match
 from src.services.raw_files import save_raw_file, sha256_hex
 from src.services.telegram_notify import telegram_notify
+from src.services.hr_max import evaluate_max_hr_raise
 
 logger = get_logger("app")
 
@@ -194,6 +195,7 @@ async def sync_activities_for_user(cred, brand: str, db,
                 'distance': data.get('total_distance_km', 0),
                 'training_type': data.get('training_type', ''),
                 'begin_ts': data.get('begin_ts', datetime.now(timezone.utc)),
+                'hr_peak': session.hr_peak_smoothed or session.max_heart_rate or 0,
             })
             synced += 1
             if progress is not None:
@@ -227,6 +229,11 @@ async def sync_activities_for_user(cred, brand: str, db,
                          f"`10` — очень тяжело",
                     reply_markup={"inline_keyboard": [row1, row2]},
                 )
+            # Адаптивный max_hr: один вызов на батч по максимальному пику
+            # (Adaptive max HR: one call per batch with the batch peak)
+            evaluate_max_hr_raise(db, cred.user_id,
+                                  max(nt['hr_peak'] for nt in new_trainings),
+                                  source=f"{brand}_sync")
         else:
             logger.info("Activity sync: brand=%s user=%s — новых тренировок нет (всего=%d, already_exist=%d, deleted=%d)",
                          brand, cred.user_id, len(activities), skipped_existing, skipped_deleted)

@@ -18,6 +18,7 @@ from src.api.deps import get_current_user
 from src.services.audit import AuditService
 from src.services.raw_files import save_raw_file
 from src.services.telegram_notify import telegram_notify
+from src.services.hr_max import evaluate_max_hr_raise
 from src.web.state import _pending, _pending_lock, _cleanup_stale_pending
 from src.utils.rate_limit import rate_limit
 
@@ -102,6 +103,7 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
                        _: None = Depends(rate_limit(max_requests=30, window_seconds=60))):
     settings = get_settings(db, current_user.id)
     saved = 0
+    hr_peak = 0  # пик батча для адаптивного max_hr (batch peak for adaptive max HR)
     deleted_hit = None
     temp_id = None
     audit = AuditService(db)
@@ -200,6 +202,7 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
             session = _save_session_from_data(data, db, current_user,
                                               file_sha256=file_sha, raw_file_path=raw_path)
             saved += 1
+            hr_peak = max(hr_peak, session.hr_peak_smoothed or session.max_heart_rate or 0)
             _notify_new_session(session, current_user, filename=file.filename or "unknown")
             audit.log_training_uploaded(
                 user_id=current_user.id,
@@ -210,6 +213,10 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
             )
         logger.info("Temp file удалён: %s", tmp_path)
         os.unlink(tmp_path)
+
+    # Адаптивный max_hr: один вызов на мультифайловый батч; строго ПОСЛЕ коммитов —
+    # сервис коммитит сессию (one call per batch, strictly after commits — service commits)
+    evaluate_max_hr_raise(db, current_user.id, hr_peak, source="upload")
 
     if parse_errors:
         audit.log_event(
@@ -229,6 +236,7 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
 async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(get_db),
                           current_user: User = Depends(get_current_user)):
     confirmed = 0
+    hr_peak = 0  # пик батча для адаптивного max_hr (batch peak for adaptive max HR)
     audit = AuditService(db)
     for temp_id in temp_ids:
         with _pending_lock:
@@ -244,6 +252,7 @@ async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(
             session = _save_session_from_data(data, db, current_user, pending,
                                               file_sha256=pending.get('sha256'))
             confirmed += 1
+            hr_peak = max(hr_peak, session.hr_peak_smoothed or session.max_heart_rate or 0)
             _notify_new_session(session, current_user, source="confirm_upload",
                                 filename=pending.get('filename', 'unknown'))
             audit.log_training_uploaded(
@@ -255,6 +264,8 @@ async def confirm_upload(temp_ids: list[str] = Form(...), db: Session = Depends(
                 source="confirm_upload",
             )
         Path(pending['path']).unlink(missing_ok=True)
+    # Адаптивный max_hr — строго после коммитов, сервис коммитит сессию (after commits only)
+    evaluate_max_hr_raise(db, current_user.id, hr_peak, source="confirm_upload")
     audit.log_event(
         event_type="training.confirm_upload",
         message=f"Confirmed problematic uploads: {confirmed} saved",
@@ -297,6 +308,10 @@ async def confirm_deleted(temp_id: str = Form(...), db: Session = Depends(get_db
                                           file_sha256=pending.get('sha256'))
         _notify_new_session(session, current_user, source="confirm_deleted",
                             filename=pending.get('filename', 'unknown'))
+        # Адаптивный max_hr — строго после коммита, сервис коммитит сессию (after commit only)
+        evaluate_max_hr_raise(db, current_user.id,
+                              session.hr_peak_smoothed or session.max_heart_rate or 0,
+                              source="confirm_deleted")
         logger.info("Удалённая тренировка от %s повторно импортирована (Deleted training re-imported)", bt)
         audit.log_training_uploaded(
             user_id=current_user.id,

@@ -2,11 +2,14 @@
 # Analysis utilities: formatting, elevation, timezone, rolling pace
 
 from datetime import datetime
+from statistics import median
 from typing import TypedDict
 from zoneinfo import ZoneInfo
 from timezonefinder import TimezoneFinder
 
-from src.config.constants import CHART_MIN_PACE_MIN_PER_KM, CHART_MAX_PACE_MIN_PER_KM
+from src.config.constants import (
+    CHART_MIN_PACE_MIN_PER_KM, CHART_MAX_PACE_MIN_PER_KM, HR_SMOOTH_MEDIAN_WINDOW,
+)
 
 
 class TrackpointDict(TypedDict, total=False):
@@ -26,6 +29,7 @@ class AnalysisResult(TypedDict, total=False):
     total_distance_km: float
     avg_heart_rate: int
     max_heart_rate: int
+    hr_peak_smoothed: int | None
     training_type: str
     segments_count: int
     duration_minutes: float
@@ -162,6 +166,25 @@ def interpolate_paces(raw_paces: list[float | None]) -> list[float]:
             elif next_val is not None:
                 result[i] = next_val
     return [p if p is not None else 5.0 for p in result]
+
+
+def smoothed_hr_peak(hr_values: list[int], window: int = HR_SMOOTH_MEDIAN_WINDOW) -> int | None:
+    """
+    Пик пульса по скользящей медиане: одиночные выбросы датчика (230 на 1 сэмпл)
+    исчезают, устойчивый высокий пульс сохраняется.
+    (HR peak over a rolling median: single-sample sensor spikes vanish,
+    sustained high HR survives.)
+    """
+    if not hr_values:
+        return None
+    n = len(hr_values)
+    if n < window:
+        return int(median(hr_values))
+    half = window // 2
+    return int(max(
+        median(hr_values[max(0, i - half):min(n, i + half + 1)])
+        for i in range(n)
+    ))
 
 
 def smooth_paces(paces: list[float], window: int = 5) -> list[float]:
