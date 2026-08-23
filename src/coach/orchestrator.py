@@ -159,7 +159,7 @@ def handle_chat(user_id: int, message: str, *, db: Session,
     except (LLMUnavailableError, CoachError) as e:
         logger.info("LLM chat fallback for user=%s: %s", user_id, e)
         state = assess_state(user_id, db=db)
-        text = ("Чат с тренером пока работает в базовом режиме (LLM не настроен).\n"
+        text = ("Тренер сейчас отвечает в базовом режиме.\n"
                 "Вот твоё текущее состояние:\n\n" + render_state_card(state))
         CoachRepository.save_message(user_id, "user", message, db=db, kind=kind)
         CoachRepository.save_message(user_id, "assistant", text, db=db, kind=kind,

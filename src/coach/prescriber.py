@@ -45,9 +45,11 @@ def finalize(proposal: WorkoutProposal | None, state: AthleteState, *,
 def _save(p: Prescription, state: AthleteState, *, db: Session) -> Recommendation:
     """Записать назначение в recommendations (persist prescription).
 
-    proposal_json/safety_json/clamped/source появятся в миграции C3 —
-    до неё сохраняются только существующие колонки.
+    proposal_json — предложение ДО урезания, safety_json — вердикт: метрика
+    дрейфа LLM (DEV_PLAN §1.6). (Pre-clamp proposal + verdict = drift metric.)
     """
+    from src.coach.tools.serialize import jsonable
+
     rec = Recommendation(
         user_id=state.user_id,
         for_date=p.when,
@@ -59,6 +61,10 @@ def _save(p: Prescription, state: AthleteState, *, db: Session) -> Recommendatio
         predicted_json=p.predicted,
         confidence=p.confidence,
         status="proposed",
+        proposal_json=jsonable(p.proposal) if p.proposal else None,
+        safety_json=jsonable(p.safety),
+        clamped=p.clamped,
+        source=p.source,
     )
     db.add(rec)
     db.commit()

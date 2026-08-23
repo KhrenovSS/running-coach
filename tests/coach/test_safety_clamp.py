@@ -163,3 +163,21 @@ def test_finalize_persists_recommendation(athlete_with_history, db_session):
     assert rec is not None
     assert rec.status == "proposed"
     assert rec.workout_type == p.workout_type
+
+
+def test_finalize_persists_observability_columns(athlete_with_history, db_session):
+    """C3-колонки наблюдаемости заполняются: source/clamped/safety/proposal."""
+    from src.coach.contracts import WorkoutProposal
+    from src.coach.prescriber import finalize
+    from src.coach.state import assess_state
+    from src.models import Recommendation
+
+    state = assess_state(athlete_with_history.id, db=db_session)
+    finalize(WorkoutProposal(workout_type="interval", target_zone=5, duration_min=60),
+             state, db=db_session, persist=True, source="llm")
+    rec = db_session.query(Recommendation).filter_by(
+        user_id=athlete_with_history.id).order_by(Recommendation.id.desc()).first()
+    assert rec.source == "llm"
+    assert rec.clamped is not None
+    assert rec.safety_json is not None
+    assert rec.proposal_json["workout_type"] == "interval"  # ДО урезания
