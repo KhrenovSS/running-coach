@@ -2,6 +2,37 @@
 
 All notable changes to this project are tracked here.
 
+## [23.08.2026] — C1: фундамент коуча — скиллы, state, репозиторий
+
+### Added
+- **Скиллы коуча реализованы** (были заглушки `NotImplementedError`): `fatigue` (HRV +
+  аномалия RHR от медианной базы + tired_rate), `recovery` (recovery_pct + расчётные
+  часы до восстановления с учётом `training_type_override`), `load` (честный ACWR +
+  ATI/CTI), `distribution` (баланс 80/20 по минутам зон), `progress` (тренды VO2max /
+  веса / темпа лёгких за 90 дней), `workout.evaluate_session` (факты сессии + RPE,
+  ownership-проверка). Контракт: `evaluate(user_id, *, db)`; нет данных →
+  `unknown`/confidence 0.0, никаких исключений.
+- **`src/coach/state.py::assess_state`** — сборка `AthleteState`: readiness/fatigue
+  0–100 по весам из `config.py` (перенормировка по присутствующим компонентам; при
+  полном отсутствии данных — None, не 0), injury_risk 0–1, zone_balance, last_workout,
+  data_confidence, список `missing` (чего система не знает — честность для LLM).
+- **`src/services/repositories_coach.py`** — `CoachRepository`: latest_metrics,
+  metrics_series (whitelist полей), weight_series, last_sessions, session_with_feedback,
+  consecutive_hard_days, baseline_rhr (медиана без сегодняшнего дня), `acwr`
+  (**закрывает BACKLOG #219**: дни отдыха = 0 нагрузки, < 14 дней данных → ratio=None).
+- **Контракты v2** (`contracts.py`): `SkillResult` + `unit`/`as_of`; `AthleteState` +
+  `user_id`/`as_of`/`missing`; новые `SafetyVerdict`, `WorkoutProposal`;
+  `Prescription(kw_only)` с ОБЯЗАТЕЛЬНЫМ полем `safety` — без вердикта безопасности
+  назначение не собирается (инвариант DEV_PLAN §1). `src/coach/util.py` —
+  `effective_training_type` (override приоритетнее авто).
+- Константы безопасности в `coach/config.py`: пороги боли, лестница интенсивности,
+  окна ACWR/baseline RHR (DEV_PLAN §4).
+- `tests/coach/` — 14 тестов: пороги из config, вырожденные случаи, ownership.
+
+### Removed
+- `HealthRepository.load_ratio` + его тест — заменён `CoachRepository.acwr` (#219);
+  потребителей вне тестов не было.
+
 ## [23.08.2026] — C0: единый план гибридного ИИ-коуча
 
 ### Added

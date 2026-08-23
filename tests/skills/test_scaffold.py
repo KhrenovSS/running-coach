@@ -4,7 +4,9 @@
 import pytest
 
 from src.models import SessionLocal, Recommendation, PredictionLog, UserModel, Lesson
-from src.coach.contracts import SkillResult, AthleteState, Prescription, ReasoningStep
+from src.coach.contracts import (
+    AthleteState, Prescription, ReasoningStep, SafetyVerdict, SkillResult, WorkoutProposal,
+)
 from tests.helpers import make_user
 
 
@@ -19,8 +21,14 @@ def test_contracts_instantiable():
     assert sr.key == "fatigue" and sr.confidence == 0.8
     st = AthleteState()
     assert st.skills == {} and st.data_confidence == 0.0
-    p = Prescription(workout_type="easy", rationale=[ReasoningStep("p1_safety", "allow", "recovered")])
+    # Prescription невозможно собрать без SafetyVerdict — это гарантия границы (DEV_PLAN §1)
+    with pytest.raises(TypeError):
+        Prescription(workout_type="easy")  # type: ignore[call-arg]
+    p = Prescription(safety=SafetyVerdict(), workout_type="easy",
+                     rationale=[ReasoningStep("p1_safety", "allow", "recovered")])
     assert p.workout_type == "easy" and p.rationale[0].rule == "p1_safety"
+    wp = WorkoutProposal(workout_type="interval", target_zone=5)
+    assert wp.target_zone == 5
 
 
 def test_can_persist_coach_rows(db_session):
@@ -35,9 +43,9 @@ def test_can_persist_coach_rows(db_session):
 
 
 def test_stub_entrypoints_raise_not_implemented():
-    from src.coach import state, engine, prescriber, orchestrator
+    # assess_state реализован в C1; движок/прескрайбер/оркестратор — заглушки до C2/C4.
+    from src.coach import engine, prescriber, orchestrator
     for call in (
-        lambda: state.assess_state(1),
         lambda: engine.decide(None),
         lambda: prescriber.prescribe(None),
         lambda: orchestrator.morning_check(1),

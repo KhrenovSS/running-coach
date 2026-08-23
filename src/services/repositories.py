@@ -138,30 +138,9 @@ class HealthRepository:
 
         return [{"date": r.date, "vo2max": float(r.vo2max)} for r in results]
 
-    @staticmethod
-    def load_ratio(user_id: int, days: int = 7, *, db: Session) -> dict:
-        """Соотношение нагрузки (Acute:chronic load ratio).
-
-        NB (BACKLOG): дни отдыха исключаются (`training_load IS NOT NULL`), поэтому ACWR смещён;
-        `ratio=0.0` неотличим от «нет хронических данных». Рефактор — при реализации skills/load.
-        """
-        acute_since = datetime.now(timezone.utc) - timedelta(days=days)
-        chronic_since = datetime.now(timezone.utc) - timedelta(days=days * 4)
-
-        acute = db.query(func.avg(DailyMetrics.training_load)).filter(
-            DailyMetrics.user_id == user_id,
-            DailyMetrics.date >= acute_since.date(),
-            DailyMetrics.training_load.isnot(None),
-        ).scalar() or 0.0
-
-        chronic = db.query(func.avg(DailyMetrics.training_load)).filter(
-            DailyMetrics.user_id == user_id,
-            DailyMetrics.date >= chronic_since.date(),
-            DailyMetrics.training_load.isnot(None),
-        ).scalar() or 0.0
-
-        ratio = float(acute) / float(chronic) if chronic > 0 else 0.0
-        return {"acute_load": float(acute), "chronic_load": float(chronic), "ratio": ratio}
+    # load_ratio удалён (BACKLOG #219): ACWR смещался (дни отдыха исключались),
+    # ratio=0.0 был неотличим от «нет данных». Замена — CoachRepository.acwr
+    # в src/services/repositories_coach.py. (Removed; replaced by CoachRepository.acwr.)
 
 
 class FeedbackRepository:

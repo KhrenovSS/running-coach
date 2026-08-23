@@ -174,7 +174,7 @@ Index(user_id, created_at)); `recommendations` += `proposal_json`, `safety_json`
   в `CLAUDE.md`; `AGENTS.md` («следующий шаг» → ссылка сюда); `README.md` (секция «8 этапов» →
   3–5 строк + ссылка); дисклеймер SUPERSEDED в `decision_module_design.md`; BACKLOG #9.
   Проверка: grep-набор из §11.3; `pytest -q` зелёный.
-- ⬜ **C1 — Фундамент** (без LLM/Telegram): `contracts.py`, `config.py` (+константы §4),
+- ✅ **C1 — Фундамент** (без LLM/Telegram): `contracts.py`, `config.py` (+константы §4),
   `skills/base.py`, скиллы `fatigue/recovery/load/distribution/progress/workout` на
   `recovery_view`/`repositories`/`analytics_helpers`, `state.py::assess_state`, `util.py`
   (`effective_training_type` = `override or training_type`), `repositories_coach.py`;

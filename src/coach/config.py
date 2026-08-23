@@ -73,6 +73,27 @@ def recovery_hours_for(training_type: str | None) -> int:
     """
     return RECOVERY_HOURS_BY_TYPE.get(training_type or "", RECOVERY_HOURS_DEFAULT)
 
+# --- Безопасность и боль (Safety & pain — DEV_PLAN §4) ---
+PAIN_SCALE_MAX = 10            # шкала боли 0..10 (pain scale)
+PAIN_CAUTION_LEVEL = 3         # боль ≥ 3 → осторожный режим (caution mode)
+PAIN_STOP_LEVEL = 5            # боль ≥ 5 → тренировка запрещена (no training)
+PAIN_PERSIST_DAYS = 3          # боль N дней подряд → осторожный режим даже при низком уровне
+SAFETY_MAX_ZONE_DEFAULT = 5    # потолок зоны по умолчанию (нет ограничений)
+SAFETY_MAX_DURATION_CAUTION_MIN = 40  # потолок длительности в осторожном режиме, мин
+
+# Лестница интенсивности — порядок = порядок опасности; clamp() двигает только ВНИЗ.
+# (Intensity ladder — order equals danger order; clamp() only moves DOWN.)
+TYPE_INTENSITY_ORDER = ("rest", "recovery", "easy", "long", "tempo", "interval", "race")
+HARD_TYPES = ("tempo", "interval", "race")
+EASY_TYPES = ("recovery", "easy")
+
+# --- ACWR / baseline RHR (skills/load, skills/fatigue) ---
+ACWR_ACUTE_DAYS = 7            # острое окно ACWR (acute window)
+ACWR_CHRONIC_DAYS = 28         # хроническое окно ACWR (chronic window)
+ACWR_CHRONIC_MIN_DAYS = 14     # меньше данных в хроническом окне → ratio=None (не 0.0!)
+RHR_BASELINE_DAYS = 30         # окно медианы для baseline RHR
+RHR_BASELINE_MIN_POINTS = 7    # меньше точек → baseline нет (None)
+
 DISTRIBUTION_80_20 = {
     "easy_share_target": 0.80,
     "hard_share_target": 0.20,

@@ -72,17 +72,6 @@ def test_hrv_and_vo2max_trends(db_session):
     assert hrv[0]["date"] <= hrv[-1]["date"]  # отсортировано по дате
 
 
-def test_load_ratio(db_session):
-    user = _new_user(db_session)
-    today = utcnow().date()
-    # свежая нагрузка выше хронической → ratio > 1
-    build_daily_metrics(db_session, user.id, metric_date=today, training_load=200.0)
-    build_daily_metrics(db_session, user.id, metric_date=today - timedelta(days=20), training_load=100.0)
-    res = HealthRepository.load_ratio(user.id, days=7, db=db_session)
-    assert res["acute_load"] > 0 and res["chronic_load"] > 0
-    assert res["ratio"] > 1.0
-
-
 def test_feedback_repository(db_session):
     user = _new_user(db_session)
     s1 = build_training_session(db_session, user.id, training_type="interval")
