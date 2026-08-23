@@ -20,7 +20,8 @@ from src.coach.config import (
     RHR_BASELINE_MIN_POINTS,
 )
 from src.coach.util import effective_training_type
-from src.models import DailyMetrics, TrainingFeedback, TrainingSession, WeightMeasurement
+from src.models import (CoachMessage, DailyMetrics, TrainingFeedback,
+                        TrainingSession, WeightMeasurement)
 
 # Whitelist полей DailyMetrics для рядов — никакого getattr по строке от LLM.
 # (Whitelist of DailyMetrics fields for series — never getattr on an LLM string.)
@@ -192,3 +193,35 @@ class CoachRepository:
             TrainingSession.user_id == user_id,
             TrainingSession.begin_ts >= since,
         ).count()
+
+    @staticmethod
+    def turns_today(user_id: int, *, db: Session) -> int:
+        """Сколько LLM-ходов сегодня — дневной бюджет (LLM turns today, budget gate)."""
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0,
+                                                         second=0, microsecond=0)
+        return db.query(CoachMessage).filter(
+            CoachMessage.user_id == user_id,
+            CoachMessage.role == "assistant",
+            CoachMessage.created_at >= today_start,
+        ).count()
+
+    @staticmethod
+    def recent_messages(user_id: int, limit: int = 8, *, db: Session) -> list[CoachMessage]:
+        """Последние сообщения диалога, старые первыми (recent chat, oldest first)."""
+        rows = db.query(CoachMessage).filter(
+            CoachMessage.user_id == user_id,
+        ).order_by(CoachMessage.created_at.desc(), CoachMessage.id.desc()).limit(limit).all()
+        return list(reversed(rows))
+
+    @staticmethod
+    def save_message(user_id: int, role: str, text: str, *, db: Session,
+                     kind: str = "chat", meta: dict | None = None,
+                     tokens_in: int | None = None, tokens_out: int | None = None,
+                     cost_usd: float | None = None) -> CoachMessage:
+        """Записать сообщение диалога (persist one chat message)."""
+        msg = CoachMessage(user_id=user_id, role=role, kind=kind, text=text,
+                           meta_json=meta, tokens_in=tokens_in,
+                           tokens_out=tokens_out, cost_usd=cost_usd)
+        db.add(msg)
+        db.commit()
+        return msg

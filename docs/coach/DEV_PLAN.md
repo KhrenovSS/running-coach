@@ -210,7 +210,7 @@ Index(user_id, created_at)); `recommendations` += `proposal_json`, `safety_json`
   `source: hand-written seed`); удалить `rag.py`, `distill.py`, `personalization/`.
   Проверка: каждый tool json-сериализуем; read-only гвард; `get_athlete_state` на фикстуре
   даёт все ключи скиллов.
-- ⬜ **C6 — LLM за интерфейсом**: `llm/{config,schemas,prompts,client,null,anthropic_client,agent}.py`;
+- ✅ **C6 — LLM за интерфейсом**: `llm/{config,schemas,prompts,client,null,anthropic_client,agent}.py`;
   `+anthropic` в pyproject; `ANTHROPIC_API_KEY=` (пустой) в `.env.example`; настройки в
   `src/config/settings.py`. Проверка: цикл агента на `ScriptedLLM`; `test_prompt_stability`;
   без ключа поведение = C4, один WARNING в логах.

@@ -80,8 +80,9 @@ def test_morning_verdict_and_chat_deterministic(athlete_with_history, db_session
 
     verdict_text = orchestrator.morning_verdict(athlete_with_history.id, db=db_session)
     assert "Состояние" in verdict_text
-    chat_text = orchestrator.handle_chat(athlete_with_history.id, "привет", db=db_session)
-    assert "состояние" in chat_text.lower()
+    chat_reply = orchestrator.handle_chat(athlete_with_history.id, "привет", db=db_session)
+    assert chat_reply.source == "fallback"  # без ключа — детерминированный режим
+    assert "состояние" in chat_reply.text.lower()
 
     session = db_session.query(TrainingSession).filter_by(
         user_id=athlete_with_history.id).first()

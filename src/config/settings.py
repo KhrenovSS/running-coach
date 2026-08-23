@@ -27,5 +27,9 @@ class Settings(BaseSettings):
 
     # Коуч (Hybrid coach — DEV_PLAN); рубильник свободного чата и проактивности
     coach_enabled: bool = True
+    # LLM: пустой ключ = детерминированный режим (empty key = deterministic mode)
+    anthropic_api_key: str = ""
+    coach_llm_model: str = "claude-opus-5"
+    coach_llm_effort: str = "low"          # low для чата; medium для плана (C7+)
 
     model_config = {"env_prefix": ""}

@@ -2,6 +2,32 @@
 
 All notable changes to this project are tracked here.
 
+## [23.08.2026] — C6: LLM за интерфейсом (дефолт — NullLLM)
+
+### Added
+- **LLM-слой** (`src/coach/llm/`): Protocol `CoachLLM` + `get_llm()` (AnthropicLLM
+  при ключе, иначе NullLLM → LLMUnavailableError → fallback); `AnthropicLLM` —
+  `claude-opus-5`, `thinking=adaptive`, `output_config.effort/format`
+  (structured output CoachTurn), типизированная цепочка ошибок SDK; ленивый
+  импорт — тесты и бот работают без пакета/ключа.
+- **Ручной tool-loop** (`llm/agent.py`): tool_use → run_tool → tool_result
+  (все результаты одним user-сообщением, ошибки tool'ов — данные, не крах),
+  лимит COACH_MAX_TOOL_ITERATIONS=6, невалидный JSON/схема → CoachError → fallback.
+  tool_runner SDK не используется сознательно: некуда прокинуть request-scoped
+  Session (§8 CLAUDE.md).
+- **Промпты и кэш** (`llm/prompts.py`): персона «беговой старший товарищ» +
+  контракт безопасности + контракт вывода + дайджест key_rules — 2 кэшируемых
+  system-блока без единой даты/UUID; «сегодня» только в последнем user-блоке.
+  Тест побайтной стабильности.
+- **handle_chat через LLM**: state+verdict в контекст → агент → предложение
+  через `finalize(source="llm")` → clamp → детерминированная карточка; followup
+  и log_suggestion (кнопка «записать дискомфорт» — запись только по тапу);
+  дневной бюджет 40 ходов (при исчерпании LLM не вызывается); каждый ход в
+  `coach_messages` с usage/cost. Fallback: поведение = C4, один WARNING на старте.
+- `anthropic==1.0.0` в зависимостях; `ANTHROPIC_API_KEY=` (пустой) в
+  `.env.example`; тесты: ScriptedLLM/FailingLLM, агент, стабильность промпта,
+  clamp предложения LLM, бюджет.
+
 ## [23.08.2026] — C5: read-only tools для LLM + база знаний
 
 ### Added

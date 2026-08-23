@@ -32,6 +32,8 @@ def run_bot():
     if not token:
         logger.warning("TELEGRAM_BOT_TOKEN не задан — бот не запущен")
         return
+    if not settings.anthropic_api_key:
+        logger.warning("ANTHROPIC_API_KEY не задан — коуч в детерминированном режиме (без LLM)")
 
     from telegram.ext import JobQueue
     application = (

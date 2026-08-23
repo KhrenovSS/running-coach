@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from src.config import settings
@@ -57,7 +57,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     try:
         reply = orchestrator.handle_chat(user.id, update.message.text or "", db=db)
-        await update.message.reply_text(reply, parse_mode="Markdown")
+        markup = None
+        if reply.log_suggestion is not None:
+            # Запись боли — только по явному тапу пользователя (log via explicit tap)
+            v = reply.log_suggestion.value
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton(
+                f"📝 записать дискомфорт {v}/10", callback_data=f"pain:today:{v}")]])
+        await update.message.reply_text(reply.text, parse_mode="Markdown",
+                                        reply_markup=markup)
     except CoachError as e:
         logger.error("Coach chat error for user=%s: %s", user.id, e)
         await update.message.reply_text("😔 Тренер сейчас недоступен.")
