@@ -14,7 +14,7 @@ from src.coach.skills.base import unknown_result
 from src.models import TrainingFeedback, WellnessReport
 
 
-def _recent_pain_by_day(user_id: int, days: int, *, db: Session) -> dict:
+def recent_pain_by_day(user_id: int, days: int, *, db: Session) -> dict:
     """Максимальная боль по дням из feedback+wellness (max daily pain, both sources)."""
     since_dt = datetime.now(timezone.utc) - timedelta(days=days)
     by_day: dict = {}
@@ -38,7 +38,7 @@ def _recent_pain_by_day(user_id: int, days: int, *, db: Session) -> dict:
 
 def consecutive_pain_days(user_id: int, *, db: Session) -> int:
     """Дней подряд с болью > 0, начиная с последнего дня с данными (consecutive pain days)."""
-    by_day = _recent_pain_by_day(user_id, days=14, db=db)
+    by_day = recent_pain_by_day(user_id, days=14, db=db)
     if not by_day:
         return 0
     day = max(by_day)
@@ -54,7 +54,7 @@ def evaluate(user_id: int, *, db: Session) -> SkillResult:
 
     (Pain over the last 14 days: latest level plus streak length.)
     """
-    by_day = _recent_pain_by_day(user_id, days=14, db=db)
+    by_day = recent_pain_by_day(user_id, days=14, db=db)
     if not by_day:
         return unknown_result("pain", "no pain reports")
 

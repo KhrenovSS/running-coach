@@ -2,6 +2,30 @@
 
 All notable changes to this project are tracked here.
 
+## [23.08.2026] — C5: read-only tools для LLM + база знаний
+
+### Added
+- **Реестр tools** (`src/coach/tools/registry.py`) — 7 read-only инструментов
+  (DEV_PLAN §5): `get_athlete_state` (все скиллы внутри одного tool — добавление
+  скилла не рушит prompt cache), `get_safety_verdict` (границы ДО предложения),
+  `get_recent_workouts`, `get_workout_detail` (зоны/сегменты/боль,
+  ownership-проверка), `get_metrics_series` (whitelist-enum, slope+direction),
+  `get_weekly_summary` (числа бывшего P3: 80/20, WoW, потолок роста),
+  `search_guides`. Явный кортеж — порядок фиксирован; схемы strict;
+  `db` только из ToolContext (композиционный корень). Source-гвард: tools
+  не пишут в БД.
+- **База знаний** (`knowledge/loader.py` + 4 seed-guide, помечены
+  `source: hand-written seed`): аэробная база (Лидьярд), 80/20 (Фицджеральд),
+  прогрессия 10%/цикл 3:1 (Дэниелс), **колено: светофор боли и паттерн
+  «расходится к 5-му км»**. Front-matter парсится без PyYAML; `key_rules_digest()`
+  для кэшируемого блока промпта; keyword-поиск по чанкам (эмбеддинги отменены
+  сознательно — DEV_PLAN §2).
+
+### Removed
+- `knowledge/rag.py`, `knowledge/distill.py`, весь `personalization/` —
+  заглушки Этапа 0 без данных под ними (DEV_PLAN §2; вернутся при накоплении
+  фидбека / появлении книг).
+
 ## [23.08.2026] — C4: коуч в Telegram (детерминированный, без LLM)
 
 ### Added

@@ -205,7 +205,7 @@ Index(user_id, created_at)); `recommendations` += `proposal_json`, `safety_json`
   **Smoke на живом токене — при деплое** (совмещён со стоп-поинтом наката C3):
   `/start`; вес «75.5» сохраняется; «привет» → карточка; RPE-тап → строка боли → тап →
   `pain_level` в БД; `/verdict` работает.
-- ⬜ **C5 — Tools**: `tools/*`, `knowledge/loader.py`, 4 seed-guide
+- ✅ **C5 — Tools**: `tools/*`, `knowledge/loader.py`, 4 seed-guide
   (`00_principles`, `10_easy_80_20`, `20_progression`, `30_knee_and_pain` — во front-matter
   `source: hand-written seed`); удалить `rag.py`, `distill.py`, `personalization/`.
   Проверка: каждый tool json-сериализуем; read-only гвард; `get_athlete_state` на фикстуре
