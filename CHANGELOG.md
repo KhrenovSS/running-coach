@@ -2,6 +2,17 @@
 
 All notable changes to this project are tracked here.
 
+## [23.08.2026] — C7: утренний вердикт и настройка инициативы
+
+### Added
+- **`jobs/coach_morning.py`** — утренний вердикт в 09:30 (не сливается с проверкой
+  синка в 10:00): `handle_chat(kind="morning")` — LLM при доступном бэкенде,
+  детерминированный вердикт при fallback; гейт `initiative ∈ {normal, high}`;
+  сбой на одном пользователе не роняет джобу.
+- **`/coach_settings`** — уровень инициативы кнопками (🔕 выкл / 🔈 минимум /
+  🔔 обычная / 📣 максимум) + callback `initiative:{level}`; текущий уровень
+  помечен галочкой.
+
 ## [23.08.2026] — LLM-мост через подписку Claude Code + деплой C3–C6
 
 ### Deployed

@@ -89,3 +89,16 @@ def test_morning_verdict_and_chat_deterministic(athlete_with_history, db_session
     review = orchestrator.on_workout_completed(
         athlete_with_history.id, session.id, db=db_session)
     assert "Разбор тренировки" in review
+
+
+def test_morning_kind_recorded_and_fallback(athlete_with_history, db_session):
+    """Утренний ход с kind='morning' пишется в coach_messages; FailingLLM → fallback."""
+    from src.models import CoachMessage
+    from tests.coach.fakes import FailingLLM
+
+    reply = orchestrator.handle_chat(athlete_with_history.id, "Утренний вердикт",
+                                     db=db_session, llm=FailingLLM(), kind="morning")
+    assert reply.source == "fallback"
+    msg = db_session.query(CoachMessage).filter_by(
+        user_id=athlete_with_history.id, kind="morning").first()
+    assert msg is not None

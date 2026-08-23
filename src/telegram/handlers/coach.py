@@ -44,6 +44,55 @@ async def cmd_verdict(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
+_INITIATIVE_LABELS = (("off", "🔕 выкл"), ("low", "🔈 минимум"),
+                      ("normal", "🔔 обычная"), ("high", "📣 максимум"))
+
+
+async def cmd_coach_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /coach_settings — уровень инициативы бота (initiative setting)."""
+    user = get_user(update.effective_chat.id)
+    if not user:
+        await update.message.reply_text(
+            "❌ Сначала используй /start чтобы зарегистрироваться.")
+        return
+    db = SessionLocal()
+    try:
+        current = orchestrator.get_initiative(user.id, db=db)
+    finally:
+        db.close()
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton(("✅ " if lvl == current else "") + label,
+                             callback_data=f"initiative:{lvl}")
+        for lvl, label in _INITIATIVE_LABELS
+    ]])
+    await update.message.reply_text(
+        "Насколько активно тренер пишет сам?\n"
+        "📣 максимум — утро, разбор, вечерний вопрос, недельный итог\n"
+        "🔔 обычная — утро и разбор\n"
+        "🔈 минимум — только разбор тренировок\n"
+        "🔕 выкл — только по твоему запросу",
+        reply_markup=keyboard)
+
+
+async def initiative_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Тап уровня инициативы: initiative:{level} (initiative tap)."""
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split(":")
+    if len(parts) != 2:
+        return
+    user = get_user(update.effective_chat.id)
+    if not user:
+        return
+    db = SessionLocal()
+    try:
+        level = orchestrator.set_initiative(user.id, parts[1], db=db)
+    finally:
+        db.close()
+    label = dict(_INITIATIVE_LABELS).get(level, level)
+    await query.edit_message_text(f"✅ Инициатива тренера: {label}")
+
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Роутер свободного текста: вес (приоритет старого флоу) → коуч (text router)."""
     chat_id = update.effective_chat.id

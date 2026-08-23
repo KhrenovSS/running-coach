@@ -214,12 +214,17 @@ Index(user_id, created_at)); `recommendations` += `proposal_json`, `safety_json`
   `+anthropic` в pyproject; `ANTHROPIC_API_KEY=` (пустой) в `.env.example`; настройки в
   `src/config/settings.py`. Проверка: цикл агента на `ScriptedLLM`; `test_prompt_stability`;
   без ключа поведение = C4, один WARNING в логах.
-- ⬜ 🛑 **СТОП: запросить у владельца `ANTHROPIC_API_KEY`** (Console + биллинг; подписка
-  Claude Code API-доступа не даёт; в контейнер — только env-var). Плейсхолдеры запрещены.
-- ⬜ **C7 — Включение LLM**: ключ в `.env`, `jobs/coach_morning.py` (09:30), `/coach_settings`,
-  выверка seed-guides владельцем. Проверка: живой диалог 3 хода; SQL по `coach_messages` —
-  `cache_read_input_tokens > 0` со 2-го хода; ручной тест границы (pain_level=6 + «дай интервалы»
-  → карточка «Отдых» + блок ограничения).
+- ✅ 🛑 **СТОП пройден иначе (решение владельца 23.08.2026):** API-ключа нет и не будет
+  в ближайшее время — LLM подключён **мостом через подписку Claude Code**
+  (`bin/coach_llm_bridge.py` + `running-coach-llm-bridge.service` + `BridgeLLM`;
+  `get_llm()`: ключ → мост → NullLLM). Ограничение режима: tool-цикл неактивен,
+  компенсирован обогащением today-блока (recent_workouts + weekly_summary).
+  Переезд на личный ключ = строка в `.env` (BACKLOG #241).
+- ✅ **C7 — Включение LLM** (код; включение — env моста): `jobs/coach_morning.py` (09:30,
+  гейт initiative ∈ {normal, high}), `/coach_settings` (4 уровня инициативы кнопками).
+  Критерий кэша (`cache_read_input_tokens > 0`) в режиме моста неприменим — заменён на
+  «ходы записаны с cost_usd». Живой smoke (3 хода + тест границы pain=6 → «Отдых») —
+  после запуска моста и рестарта бота.
 - ⬜ **C8 — Разбор + недельный отчёт + инициатива**: `on_workout_completed` через LLM,
   `jobs/coach_weekly.py`, гейт `initiative`. Проверка: `/sync` с новой активностью → разбор +
   кнопки; `initiative=off` → тишина.
