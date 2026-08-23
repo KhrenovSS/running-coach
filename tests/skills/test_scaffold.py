@@ -46,16 +46,6 @@ def test_can_persist_coach_rows(db_session):
     assert db_session.query(UserModel).filter_by(user_id=user.id).first().params_json["hrv_baseline"] == 65
 
 
-def test_stub_entrypoints_raise_not_implemented():
-    # state (C1) и prescriber (C2) реализованы; оркестратор — заглушка до C4.
-    from src.coach import orchestrator
-    for call in (
-        lambda: orchestrator.morning_check(1),
-    ):
-        with pytest.raises(NotImplementedError):
-            call()
-
-
 def test_fixture_athlete_with_history(athlete_with_history, db_session):
     from src.models import DailyMetrics, TrainingSession
     uid = athlete_with_history.id

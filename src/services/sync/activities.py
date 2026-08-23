@@ -12,6 +12,7 @@ from src.services.sync.dedup import load_dedup_state, is_duplicate, find_deleted
 from src.services.raw_files import save_raw_file, sha256_hex
 from src.services.telegram_notify import telegram_notify
 from src.services.hr_max import evaluate_max_hr_raise
+from src.exceptions import CoachError
 
 logger = get_logger("app")
 
@@ -234,6 +235,17 @@ async def sync_activities_for_user(cred, brand: str, db,
             evaluate_max_hr_raise(db, cred.user_id,
                                   max(nt['hr_peak'] for nt in new_trainings),
                                   source=f"{brand}_sync")
+            # Разбор тренировки коучем — сбой коуча НЕ роняет синк (DEV_PLAN §9 C4)
+            # (Coach review; a coach failure must never break the sync.)
+            try:
+                from src.coach import orchestrator as coach_orchestrator
+                if coach_orchestrator.get_initiative(cred.user_id, db=db) != "off":
+                    for nt in new_trainings:
+                        review = coach_orchestrator.on_workout_completed(
+                            cred.user_id, nt['session_id'], db=db)
+                        telegram_notify(user_id=cred.user_id, text=review)
+            except CoachError as e:
+                logger.error("Coach review failed (sync continues): %s", e)
         else:
             logger.info("Activity sync: brand=%s user=%s — новых тренировок нет (всего=%d, already_exist=%d, deleted=%d)",
                          brand, cred.user_id, len(activities), skipped_existing, skipped_deleted)

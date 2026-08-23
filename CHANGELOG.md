@@ -2,6 +2,33 @@
 
 All notable changes to this project are tracked here.
 
+## [23.08.2026] — C4: коуч в Telegram (детерминированный, без LLM)
+
+### Added
+- **Роутер свободного текста** (`handlers/coach.py::handle_text`) — чинит дефект:
+  catch-all висел на `handle_weight_message`, который молча `return`'ил вне режима
+  ожидания веса — любой новый текстовый хендлер не получил бы ни одного сообщения.
+  Теперь: флоу веса приоритетом → гейт `COACH_ENABLED` → детерминированный ответ
+  коуча (карточка состояния). Команда **`/verdict`** — вердикт по запросу.
+- **Сбор боли в 2–3 тапа** (`handlers/pain.py`): после RPE-тапа то же сообщение
+  показывает строку «Колено? [🚫 не беспокоило][🟡 немного][🔴 мешало]» → при боли
+  уточнение фазы [старт][середина][конец][после] (прямо про «первые 400–800 м»).
+  Запись в `training_feedback.pain_*`; `pain:today:N` и вечерний `wellness:N` —
+  в `wellness_reports`.
+- **Вечерний вопрос о самочувствии** (`jobs/coach_evening.py`, 21:00): только при
+  `initiative=high`, пропускается, если боль сегодня уже записана.
+- **Оркестратор C4** (`orchestrator.py`): `morning_verdict` (state + finalize +
+  карточка), `handle_chat` (детерминированный до LLM), `on_workout_completed`
+  (разбор из скилла workout), `get/set_initiative` (UserModel.params_json,
+  дефолт high). Разбор тренировки подключён к синку под `try/except CoachError` —
+  сбой коуча не роняет синхронизацию.
+- `CoachError/LLMUnavailableError/ToolExecutionError` в `src/exceptions.py`;
+  `coach_enabled` в настройках (рубильник).
+
+### Notes
+- Smoke на живом токене — при деплое (совмещён с накатом миграции C3:
+  backup → stop bot → build/up app+bot → start).
+
 ## [23.08.2026] — C3: данные боли/wellness/чата + скилл pain
 
 ### Added

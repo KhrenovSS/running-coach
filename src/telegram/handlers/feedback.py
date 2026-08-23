@@ -3,6 +3,7 @@ from telegram.ext import ContextTypes
 
 from src.models import SessionLocal
 from src.models import TrainingFeedback
+from src.telegram.handlers.pain import pain_keyboard
 from src.telegram.utils import get_user
 from src.utils.logger import get_logger
 
@@ -57,8 +58,12 @@ async def feedback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.commit()
         labels = {0: "😴", 1: "😌", 2: "🙂", 3: "😐", 4: "😅", 5: "💪",
                   6: "😤", 7: "🥵", 8: "😵", 9: "💀", 10: "⚰️"}
+        # После RPE — сразу строка боли в ТОМ ЖЕ сообщении: хороший день = 2 тапа
+        # (After RPE, the pain row replaces the keyboard in the same message.)
         await query.edit_message_text(
-            f"✅ Спасибо! Оценка {rating}/10 {labels.get(rating, '')} сохранена."
+            f"✅ Оценка {rating}/10 {labels.get(rating, '')} сохранена.\n"
+            f"Колено?",
+            reply_markup=pain_keyboard(session_id),
         )
     except Exception as e:
         db.rollback()

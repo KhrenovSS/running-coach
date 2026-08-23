@@ -25,4 +25,7 @@ class Settings(BaseSettings):
     # Часовой пояс по умолчанию (Default timezone)
     timezone: str = "UTC"
 
+    # Коуч (Hybrid coach — DEV_PLAN); рубильник свободного чата и проактивности
+    coach_enabled: bool = True
+
     model_config = {"env_prefix": ""}

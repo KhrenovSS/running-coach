@@ -160,3 +160,18 @@ class RateLimitError(AppError):
             status_code=429,
             details={"retry_after": retry_after}
         )
+
+
+class CoachError(AppError):
+    """Ошибка модуля коуча (Coach module error) — не должна ронять синк/бот."""
+
+    def __init__(self, message: str, details: dict | None = None):
+        super().__init__(message, status_code=500, details=details)
+
+
+class LLMUnavailableError(CoachError):
+    """LLM недоступен: нет ключа/сети — оркестратор уходит в fallback (LLM unavailable)."""
+
+
+class ToolExecutionError(CoachError):
+    """Ошибка выполнения tool'а LLM (LLM tool execution error)."""

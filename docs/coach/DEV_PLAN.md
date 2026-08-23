@@ -195,12 +195,16 @@ Index(user_id, created_at)); `recommendations` += `proposal_json`, `safety_json`
   `docker compose stop bot` → `docker compose build app && docker compose up -d app` (миграция
   применится на старте) → проверить `alembic_version=p9q0r1s2t3u4` и count(training_feedback)
   до/после → `docker compose start bot`. Можно совместить с деплоем C4.
-- ⬜ **C4 — Telegram без LLM**: `handlers/{pain,coach}.py`, `jobs/coach_evening.py`,
-  `skills/pain.py`; роутер вместо catch-all в `main.py`; `on_workout_completed` в
-  `sync/activities.py` под `try/except CoachError` (падение коуча не роняет синк).
-  Проверка — smoke на живом токене: `/start`; вес «75.5» сохраняется (старый флоу цел);
-  «привет» → детерминированная карточка; RPE-тап → строка боли → тап → `pain_level` в БД;
-  `/verdict` работает.
+- ✅ **C4 — Telegram без LLM** (код; smoke на живом токене — после наката C3+деплоя):
+  `handlers/{pain,coach}.py` (роутер текста: вес приоритетом → коуч; /verdict; callbacks
+  pain/painphase/wellness), `jobs/coach_evening.py` (21:00, гейт initiative=high, пропуск
+  при записанной боли); feedback: после RPE-тапа строка «Колено?» в том же сообщении
+  (2 тапа хороший день, 3 — плохой); `on_workout_completed` в `sync/activities.py` под
+  `try/except CoachError`; оркестратор: morning_verdict/handle_chat/on_workout_completed
+  детерминированные + get/set_initiative. Проверка: 287 тестов, импорт бота OK.
+  **Smoke на живом токене — при деплое** (совмещён со стоп-поинтом наката C3):
+  `/start`; вес «75.5» сохраняется; «привет» → карточка; RPE-тап → строка боли → тап →
+  `pain_level` в БД; `/verdict` работает.
 - ⬜ **C5 — Tools**: `tools/*`, `knowledge/loader.py`, 4 seed-guide
   (`00_principles`, `10_easy_80_20`, `20_progression`, `30_knee_and_pain` — во front-matter
   `source: hand-written seed`); удалить `rag.py`, `distill.py`, `personalization/`.
