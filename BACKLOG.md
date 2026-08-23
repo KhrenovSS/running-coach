@@ -20,10 +20,10 @@
 | 6 | [Фикс] | AUDIT-012: Type hints не везде. `mypy src/ --strict` не проходит. | Весь `src/` | ⬜ Отложено |
 | 7 | [Фикс] | AUDIT-014: Сегментация привязана к км-блокам — `segment_by_km()` не работает для коротких интервалов (10×200м+600м). Замена на `segment_by_pace()`. | `src/parsers/segmentation.py` | ✅ Выполнено |
 | 8 | [Идея] | Sprint 7: Admin panel — дашборд, управление пользователями, просмотр аудита, принудительный sync. Отложено до >1 пользователя. | PROJECT_AUDIT.md | ⬜ Отложено |
-| 9 | [Идея] | Гибридный ИИ-коуч (пересмотр «8 этапов»: LLM рассуждает, скиллы — tools, safety — фильтр). Нормативный план — `docs/coach/DEV_PLAN.md` (чек-листы C0–C9). | `docs/coach/DEV_PLAN.md` | 🔄 В работе с 23.08.2026 |
-| 10 | [Идея] | Фильтр по типу тренировки на главной, общая дистанция/время за неделю/месяц. | PROJECT_AUDIT.md | ⬜ Заморожено (после аналитики) |
+| 9 | [Coach] | Гибридный ИИ-коуч (пересмотр «8 этапов»: LLM рассуждает, скиллы — tools, safety — фильтр). Нормативный план — `docs/coach/DEV_PLAN.md`. | `docs/coach/DEV_PLAN.md` | 🔄 **В проде C0–C7** (деплой 23.08.2026, LLM-мост); открыты C8 (LLM-разбор+недельный отчёт), C9 |
+| 10 | [Идея] | Фильтр по типу тренировки на главной, общая дистанция/время за неделю/месяц. | PROJECT_AUDIT.md | ⬜ Заморожено (после C8/C9 DEV_PLAN) |
 | 11 | [Идея] | Sprint 14: Multi-brand onboarding — выбор бренда при `/start`, заглушки для Polar/Garmin/Suunto. | PROJECT_AUDIT.md | ⬜ Sprint 14 (заморожен) |
-| 12 | [Идея] | Sprint 15: Факторы самочувствия — multi-select (ноги, дыхание, пульс, жара, недосып, стресс), адаптивные подсказки, хранение для аналитики. | PROJECT_AUDIT.md | ⬜ Sprint 15 (заморожен) |
+| 12 | [Идея] | Факторы самочувствия — multi-select (ноги, дыхание, пульс, жара, недосып, стресс), адаптивные подсказки. | PROJECT_AUDIT.md | 🔶 Частично закрыт C3/C4 23.08.2026 (`wellness_reports`: боль/крепатура/настроение/сон + вечерний опрос); полный multi-select открыт |
 | 13 | [Идея] | Мобильное PWA (Progressive Web App). | README.md | ⬜ Идея |
 | 14 | [Фикс] | `docs/ARCHITECTURE.md` устарел: описывает SQLite, `src/logger.py`, `src/telegram_bot.py`, не описывает `src/watch/`, `src/telegram/`, `src/services/`. | `docs/ARCHITECTURE.md` | ✅ Sprint 19 (DOC-01) |
 | 15 | [Вопрос] | AUDIT-008: выделять ли sync в отдельный процесс/контейнер или оставить `run_async_in_thread`? | `src/services/sync_service.py` | ⬜ Вопрос |
@@ -423,9 +423,17 @@
 
 | # | Тип | Описание | Файлы | Статус |
 |---|-----|----------|-------|--------|
-| 240 | [Docs] | `CHECKLIST_MIGRATION.md`/CLAUDE.md §7 советуют `docker compose start bot` после миграции, но `start` НЕ пересоздаёт контейнер из нового образа — бот остаётся на старом коде (поймано 23.08). Заменить на `docker compose up -d bot`. | `docs/CHECKLIST_MIGRATION.md`, `CLAUDE.md` | ⬜ |
+| 240 | [Docs] | `docker compose start` НЕ пересоздаёт контейнер из нового образа — бот остаётся на старом коде (поймано 23.08). | `CLAUDE.md`, `AGENTS.md`, `docs/coach/DEV_PLAN.md` | ✅ C9 23.08.2026 (предупреждение в CLAUDE.md §7, AGENTS.md §8, DEV_PLAN C3; CHECKLIST_MIGRATION.md уже был корректен — там `up -d`) |
 | 241 | [Coach] | Переезд с моста на личный API-ключ: положить `ANTHROPIC_API_KEY` в `.env`, убрать `COACH_LLM_BRIDGE_URL` — код готов (`get_llm()` приоритет). Мост и юнит можно ретировать. | `.env`, `bin/coach_llm_bridge.py` | ⬜ когда появится ключ |
 | 242 | [Coach] | В режиме моста tool-цикл агента неактивен (компенсирован обогащением today-блока). При переезде на API-ключ — проверить, что search_guides реально используется моделью. | `src/coach/llm/bridge_client.py` | ⬜ |
+| 243 | [Coach] | Правило P4 (план/цель): нет `race_date` и шаблонов планов — завести поля цели с датой и генерацию плана (DEV_PLAN §2, C8+). | `src/domain/models/user.py`, `src/coach/` | ⬜ |
+| 244 | [Coach] | Правило P5 (persональные уроки): вернуть `lessons`-продюсер, когда накопится фидбек (RPE/боль); предпочтения — в профильный блок промпта. | `src/coach/` | ⬜ |
+| 245 | [Coach] | Офлайн-дистилляция книг (Лидьярд/Фицджеральд/Дэниелс) в guides/*.md — скрипт в `bin/`, когда владелец добавит файлы книг; формат чанков уже совместим с loader. | `bin/`, `src/coach/knowledge/` | ⬜ |
+| 246 | [Coach] | Вернуть персонализацию (EWMA-калибровка UserModel, PredictionLog residuals), когда feedback coverage вырастет (сейчас копится через боль/RPE). | `src/coach/` | ⬜ |
+| 247 | [Coach] | Numeric-consistency checker: проза LLM не должна противоречить числам карточки (сейчас — только правило промпта, остаточный риск в ADR). | `src/coach/render.py` | ⬜ |
+| 248 | [Arch] | `training_type_override` не слит с `training_type` в web/`/stats` (коуч решает сам через `effective_training_type`). Слить в остальном приложении. | `src/web/`, `src/telegram/handlers/stats.py` | ⬜ |
+| 249 | [Config] | Привести recovery-шкалу к Coros §12 (20/70/90): сейчас `RECOVERY_PCT_MODERATE=30` — исторический порог display-слоя. | `src/coach/config.py`, `src/services/recovery_view.py` | ⬜ |
+| 250 | [Docs] | В BACKLOG дублируется номер 139 (две разные записи). Не перенумеровывать (ссылки в коммитах); при следующей чистке пометить вторую как 139-bis. | `BACKLOG.md` | ⬜ |
 
 ## 🟠 Отложенные находки ревью (03.08.2026 — подготовка к аналитике)
 

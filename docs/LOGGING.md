@@ -40,6 +40,13 @@ logger = get_logger("app")
 logger.info("Sync completed", extra={"count": 5})
 ```
 
+### Конвенция имён логгеров
+
+Имя — иерархическое, по модулю: `get_logger("coach.orchestrator")`, `get_logger("telegram.handlers.coach")`.
+Используемые пространства: `app` (общий), `coach.*` (agent, llm, orchestrator, prescriber, tools),
+`telegram.handlers.*`, `telegram.jobs.*`, `telegram.main`. Новый модуль коуча/бота получает
+логгер по своему пути — не переиспользуй `"app"`.
+
 ## Аудит-события (Audit events)
 
 Аудит пишется в таблицу `audit_events` и параллельно в `logs/audit_*.log`.

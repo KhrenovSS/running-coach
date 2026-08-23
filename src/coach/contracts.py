@@ -1,8 +1,8 @@
 # Контракты данных гибридного коуча (Hybrid coach data contracts) — DEV_PLAN §3
 #
-# Ключевой инвариант: `Prescription` создаётся ТОЛЬКО через safety.clamp()
-# (единственные конструкторы — prescriber.py/fallback.py, source-гвард в тестах).
-# (Key invariant: Prescription is constructed only via safety.clamp().)
+# Ключевой инвариант: `Prescription` создаётся ТОЛЬКО в safety.py::clamp() —
+# единственный конструктор; source-гвард tests/coach/test_no_prescription_bypass.py.
+# (Key invariant: Prescription is constructed only inside safety.clamp().)
 
 from __future__ import annotations
 

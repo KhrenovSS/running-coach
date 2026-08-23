@@ -9,7 +9,8 @@
 
 ## Стек
 Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через ИИ (open code style).
-Сервер: Docker Compose — 3 контейнера (`db`, `app`, `bot`).
+Сервер: Docker Compose — 3 контейнера (`db`, `app`, `bot`) + systemd-юнит на хосте
+`running-coach-llm-bridge.service` (LLM-мост коуча, :8765, конфиг `.env.bridge` вне git).
 Локальная разработка: `docker compose up db -d && DATABASE_URL=postgresql://running_coach:<PASSWORD>@localhost:5432/running_coach uvicorn main:app --host 0.0.0.0 --port 8000`.
 
 ## Дисциплина работы ИИ-агента (AI Agent Discipline)
@@ -34,7 +35,9 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
    | `src/web/`, `src/api/` | `app` |
    | `src/telegram/` | `bot` |
    | `src/services/`, `src/parsers/`, `src/analysis/`, `src/watch/`, `src/config/`, `src/domain/`, `src/models.py` | `app` + `bot` (бот сам синкает: sync → parse_fit → analysis) |
+   | `src/coach/` | `bot` (коуч живёт в боте) |
    | `pyproject.toml`, `Dockerfile`, `docker-compose.yml` | `app` + `bot` |
+   | `bin/coach_llm_bridge.py`, `.env.bridge` | не пересборка — `systemctl restart running-coach-llm-bridge` |
    | `alembic/` | `app` (миграции при старте; с ALTER — сначала `stop bot`) |
 
 6. **Безопасность данных.** Любое изменение, которое может привести к потере данных (удаление колонок, переименование таблиц, смена сигнатур сервисных функций, починка `startup.py`) — **остановись и предупреди пользователя** перед реализацией. Опиши:
@@ -57,6 +60,8 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
    - НИКОГДА не `docker compose down -v` (это удаляет volume со всей БД)
    - НИКОГДА не `docker volume rm running-coach_pgdata`
    - Безопасные команды: `docker compose restart app`, `docker compose build app && docker compose up -d app`
+   - **После пересборки образа — только `docker compose up -d <svc>`**: `start` НЕ пересоздаёт
+     контейнер из нового образа, сервис останется на старом коде (инцидент 23.08.2026, #240)
    - **Деплой миграций с ALTER/DDL: сначала `docker compose stop bot`** — бот держит транзакции,
      `ALTER` виснет на локе, прерванная попытка ломает схему без штампа версии → crash-loop
      (инцидент 05.08.2026, порядок восстановления — `docs/CHECKLIST_MIGRATION.md`).
@@ -112,7 +117,8 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
   - `models/health.py` — DailyMetrics, WeightMeasurement
   - `models/auth.py` — AuthToken
   - `models/audit.py` — AuditEvent
-  - `models/coach.py` — Recommendation, PredictionLog, UserModel, Lesson (модуль аналитики, Этап 0)
+  - `models/coach.py` — Recommendation, PredictionLog, UserModel, Lesson, CoachMessage (коуч)
+  - `models/health.py` — DailyMetrics, WeightMeasurement, WellnessReport (вечерний самоотчёт)
 - `src/config/settings.py` — `Settings(BaseSettings)` из pydantic-settings
 - `src/config/constants.py` — плоские module-level константы
 - `src/exceptions.py` — типизированные исключения приложения (`WatchAPIError`, `WatchAuthError`, `NotFoundError`, etc.)
@@ -139,22 +145,32 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 - `src/services/user_service.py` — get_user_settings(db, ...), get_user_by_telegram_id(db, ...) и т.д. — сессия ПЕРВЫМ параметром от вызывающего
 - `src/services/raw_files.py` — хранилище исходных FIT/TCX: `uploads/raw/<user_id>/<sha256>.<ext>` (content-addressed); reanalyze читает отсюда
 - `src/services/weight_service.py` — save_weight (измерение + профиль одной транзакцией), current_weight (последнее измерение)
-- `src/coach/` — пакет гибридного ИИ-коуча (**состав меняется по ходу C1–C9 — см.
-  `docs/coach/DEV_PLAN.md` §2**: часть заглушек Этапа 0 удаляется, а не реализуется):
-  - `config.py` — **единственный исполняемый источник порогов** (readiness/RHR/tired/load, зеркалит
-    `docs/coros_health_metrics.md`; `recovery_view` импортирует отсюда; анти-дрейф-тесты в `test_coach_config.py`)
-  - `contracts.py` — дата-классы: `SkillResult`, `AthleteState`, `SafetyVerdict`, `WorkoutProposal`,
-    `Prescription`, `ReasoningStep` (целевой вид — DEV_PLAN §3)
-  - актуальную карту файлов (skills/tools/safety/llm) смотри в DEV_PLAN §2/§5, не здесь
+- `src/services/repositories_coach.py` — CoachRepository: выборки для скиллов/state коуча, честный ACWR (#219), coach_messages
+- `src/services/hr_max.py` — адаптивный max_hr (авто-повышение по пикам, еженедельное предложение снижения)
+- `src/coach/` — пакет гибридного ИИ-коуча (**в проде с 23.08.2026**; C0–C7 закрыты,
+  полная карта модулей — `docs/coach/ARCHITECTURE.md`):
+  - `config.py` — **единственный исполняемый источник порогов** (метрики зеркалят
+    `docs/coros_health_metrics.md`, safety/pain — DEV_PLAN §4; анти-дрейф-тесты в `test_coach_config.py`)
+  - `contracts.py` — реализованные дата-классы: `SkillResult`, `AthleteState(+signals)`,
+    `SafetyVerdict`, `WorkoutProposal`, `Prescription(kw_only)`, `ReasoningStep`
+  - `rules/p1_safety.py` + `safety.py` — граница: evaluate_safety + clamp (единственный
+    конструктор Prescription); `state.py`, `prescriber.py`, `render.py`, `fallback.py`,
+    `orchestrator.py`, `util.py`
+  - `skills/` (fatigue/recovery/load/distribution/progress/pain + workout), `tools/` (7 read-only),
+    `knowledge/guides/` (4 seed-руководства), `llm/` (anthropic / **bridge_client — мост
+    подписки, прод сейчас** / null + ручной agent-цикл)
   - Источник порогов для skills/rules — `docs/coros_health_metrics.md`
-- `src/telegram/` — пакет Telegram-бота (17 файлов, разделён):
+- `src/telegram/` — пакет Telegram-бота (handlers + jobs + инфраструктура):
   - `main.py` — `run_bot`, Application сборка
   - `config.py` — константы состояний
   - `state.py` — `_awaiting_weight`
   - `utils.py` — `get_user`, `_get_web_app_url`
   - `sync_runner.py` — `run_sync_in_thread`
-  - `handlers/start.py`, `sync.py`, `stats.py`, `trainings.py`, `weight.py`, `account.py`, `feedback.py`
-  - `jobs/weight.py`, `recovery.py`
+  - `handlers/start.py`, `sync.py`, `stats.py`, `trainings.py`, `weight.py`, `account.py`,
+    `feedback.py` (RPE → строка «Колено?»), `coach.py` (роутер текста, /verdict,
+    /coach_settings), `pain.py` (callbacks pain/painphase/wellness), `hr_max.py`
+  - `jobs/weight.py`, `recovery.py`, `hr_max.py`, `coach_morning.py` (вердикт 09:30),
+    `coach_evening.py` (вопрос о самочувствии 21:00)
 - `src/api/middleware.py` — централизованная обработка ошибок, логирование запросов и session middleware
 - `src/api/deps.py` — `get_current_user` dependency (session-cookie)
 - `src/api/routes/health.py` — health check endpoint
@@ -177,7 +193,8 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
   для reanalyze-от-сырья), GPS (`gps.py`), погода (`weather.py`)
 - `src/services/reanalyze.py` — пересчёт: сначала сырой файл (`raw_file_path`), fallback `trackpoints_json`
 - `bin/` — ops-скрипты (версионируются точечно через `.gitignore`): `backup_db.sh`, `docker.sh`,
-  `backfill_external_ids.py` / `backfill_raw_fits.py` / `backfill_avg_pace.py` (все с `--dry-run` по умолчанию)
+  `backfill_external_ids.py` / `backfill_raw_fits.py` / `backfill_avg_pace.py` (все с `--dry-run` по умолчанию);
+  `coach_llm_bridge.py` — НЕ backfill, а рантайм-компонент прода: LLM-мост коуча (systemd, :8765)
 
 ## Реализованная логика (сегментация, классификация, пульсовые зоны, осцилляции)
 См. `docs/ARCHITECTURE.md` и `src/analysis/`.
@@ -190,20 +207,38 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 
 ## Текущее состояние
 
+**Session 23.08.2026 — Гибридный ИИ-коуч C0–C7 + LLM-мост, задеплоено в прод ✅:**
+- План пересмотрен владельцем: rules-first → гибрид; единый нормативный план `docs/coach/DEV_PLAN.md`
+  (C0), ADR — `docs/coach/ARCHITECTURE.md`. Реализованы скиллы+AthleteState (C1), граница
+  evaluate_safety+clamp — единственный конструктор Prescription (C2), миграция `p9q0r1s2t3u4`:
+  боль/wellness_reports/coach_messages + скилл pain (C3), Telegram: роутер текста, /verdict,
+  боль в 2 тапа, вечерний опрос (C4), 7 read-only tools + 4 seed-guide (C5), LLM за интерфейсом
+  CoachLLM + ручной tool-loop (C6), утренний вердикт 09:30 + /coach_settings (C7).
+- **LLM без API-ключа**: мост через подписку Claude Code — `bin/coach_llm_bridge.py` + systemd
+  `running-coach-llm-bridge.service`; `get_llm()`: ключ → мост → NullLLM. Ограничение моста:
+  tool-цикл неактивен (компенсация — обогащение today-блока). Live e2e: SOURCE=llm, карточка
+  через clamp, cost_usd в coach_messages.
+- Прод: backup → stop bot → build → up -d app (миграция) → **up -d bot** (`start` не пересоздаёт
+  контейнер — инцидент, #240). Полный набор тестов зелёный (без сети/ключа).
+- Открытое: #232, #234–#239 (прежние), #240–#242 (находки деплоя коуча).
+
+**Session 06.08.2026 — Адаптивный максимальный пульс ✅:** `src/services/hr_max.py` +
+`handlers/hr_max.py` + `jobs/hr_max.py` (пн 10:05), миграция `o8p9q0r1s2t3` (`hr_peak_smoothed`).
+
 **Session 05.08.2026 — Аудит фундамента + ремедиация этапов 0–6 ✅** (задеплоено в прод):
 - **Аудит** выявил фундаментальные промахи; все закрыты за сессию (BACKLOG #226–#231 ✅, план —
   6 этапов, db-safety-ревью GO). Детали — `CHANGELOG.md` (05.08.2026, три записи).
 - **Этап 0:** рантайм-фиксы — `/stats` бота (db.func), мёртвый reanalyze, `performance` Integer→Float.
-- **Этап 1:** PG-режим тестов (`TEST_PG_URL`, схема через alembic — ловит дрейф), FK pragma для SQLite,
+- **Шаг 1 ремедиации:** PG-режим тестов (`TEST_PG_URL`, схема через alembic — ловит дрейф), FK pragma для SQLite,
   CI гоняет оба режима.
-- **Этап 2:** sync больше не теряет данные молча: `-1` = ошибка (таймстемп стоит), счётчики сбоев в БД
+- **Шаг 2 ремедиации:** sync больше не теряет данные молча: `-1` = ошибка (таймстемп стоит), счётчики сбоев в БД
   + telegram-notify на 3-м, backoff, кэш токена, throttle.
-- **Этап 3:** честный дедуп — `external_activity_id` + частичные UNIQUE, `sync/dedup.py`, SHA256 для
+- **Шаг 3 ремедиации:** честный дедуп — `external_activity_id` + частичные UNIQUE, `sync/dedup.py`, SHA256 для
   ручных загрузок; backfill выполнен в проде (31/33 сессий с ID; 2 ambiguous = невалидные 0-км).
-- **Этап 4:** сырые FIT/TCX в `uploads/raw/` (31/31 скачаны в проде), reanalyze от сырья,
+- **Шаг 4 ремедиации:** сырые FIT/TCX в `uploads/raw/` (31/31 скачаны в проде), reanalyze от сырья,
   volume `./uploads` и у bot.
-- **Этап 5:** пороги — только `coach/config.py`; `sleep_quality` удалён из весов (нет данных), анти-дрейф-тесты.
-- **Этап 6:** владение сессией — один `get_db`, `db` параметром, `SessionLocal` только в корнях + тест-гвард.
+- **Шаг 5 ремедиации:** пороги — только `coach/config.py`; `sleep_quality` удалён из весов (нет данных), анти-дрейф-тесты.
+- **Шаг 6 ремедиации:** владение сессией — один `get_db`, `db` параметром, `SessionLocal` только в корнях + тест-гвард.
 - **Инцидент деплоя:** первый `up` без остановки бота → лок на `ALTER` → crash-loop + фантомная колонка.
   Восстановлено без потери данных; уроки — `docs/CHECKLIST_MIGRATION.md`, BACKLOG #234/#235.
 - **Фикс веса:** ввод веса не обновлял профиль (detached User), главная показывала снапшот →
@@ -462,12 +497,15 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 ✅ **Ремедиация фундамента (05.08.2026)** — все гейты перед коучем закрыты: честный дедуп,
 сырые файлы, надёжный sync, единые пороги, PG-тесты. Детали выше («Session 05.08.2026»).
 
-🚀 **Текущая работа — гибридный ИИ-коуч (с 23.08.2026).** Rules-first пересмотрен владельцем в
-пользу гибрида (LLM рассуждает, скиллы — детерминированные tools, safety — непробиваемый фильтр).
-**Единственный нормативный план и следующий шаг — `docs/coach/DEV_PLAN.md`** (чек-листы C0–C9;
-пороги по-прежнему ТОЛЬКО из `src/coach/config.py`; тесты на фабриках `tests/helpers.py`).
+🚀 **Гибридный ИИ-коуч — В ПРОДЕ с 23.08.2026** (C0–C7 закрыты; LLM — мост через подписку
+Claude Code). Rules-first пересмотрен владельцем в пользу гибрида (LLM рассуждает, скиллы —
+детерминированные tools, safety — непробиваемый фильтр). **Единственный нормативный план —
+`docs/coach/DEV_PLAN.md`** (следующий шаг — первый ⬜, сейчас C8); решения и карта модулей —
+`docs/coach/ARCHITECTURE.md`. Пороги ТОЛЬКО из `src/coach/config.py`.
 
-❄️ Заморожено (после аналитики): фильтры, multi-brand onboarding, факторы самочувствия, admin panel.
+❄️ Заморожено (после C8/C9 DEV_PLAN): фильтры, multi-brand onboarding, admin panel.
+Факторы самочувствия — частично реализованы в C3/C4 (wellness_reports + вечерний опрос);
+полный multi-select — #12.
 
 ### Команды управления:
 ```bash

@@ -6,12 +6,14 @@
 ## Что это за проект
 Персональный AI-тренер для бега. Парсит TCX/FIT-файлы (Garmin, Coros, Polar, Suunto), анализирует
 тренировки (тип, сегменты, пульсовые зоны, GPS-очистка), синхронизируется с Coros. Интерфейсы:
-веб (FastAPI + Jinja2) и Telegram-бот. Следующий большой этап — **модуль аналитики/рекомендаций**
-(«коуч», см. `decision_module_design.md`).
+веб (FastAPI + Jinja2) и Telegram-бот. **Гибридный ИИ-коуч работает в проде** (LLM — мост через
+подписку Claude Code); нормативный план — `docs/coach/DEV_PLAN.md`.
 
 ## Стек и запуск
-- Python 3.12, FastAPI, SQLAlchemy 2.0, PostgreSQL 16, Alembic; Telegram — python-telegram-bot.
-- Прод: Docker Compose — 3 контейнера (`db`, `app`, `bot`).
+- Python 3.13 (Dockerfile: python:3.13-slim), FastAPI, SQLAlchemy 2.0, PostgreSQL 16, Alembic;
+  Telegram — python-telegram-bot; LLM — anthropic SDK / мост подписки.
+- Прод: Docker Compose — 3 контейнера (`db`, `app`, `bot`) + systemd-юнит на хосте
+  `running-coach-llm-bridge.service` (LLM-мост, :8765, конфиг `.env.bridge`).
 - Локальная разработка:
   ```bash
   docker compose up db -d
@@ -48,6 +50,9 @@
 7. **Backup перед деплоем.** Перед `docker compose build/up` → `bin/backup_db.sh`.
    НИКОГДА `docker compose down -v`, НИКОГДА `docker volume rm running-coach_pgdata`.
    Безопасно: `docker compose restart app`, `docker compose build app && docker compose up -d app`.
+   **После пересборки образа поднимать контейнер ТОЛЬКО `docker compose up -d <svc>`**:
+   `docker compose start` НЕ пересоздаёт контейнер из нового образа — бот останется на
+   старом коде (инцидент 23.08.2026, BACKLOG #240).
    **Миграции с ALTER/DDL: сначала `docker compose stop bot`** — иначе лок → crash-loop
    (инцидент 05.08.2026; восстановление — `docs/CHECKLIST_MIGRATION.md`).
 8. **Владение БД-сессией.** `SessionLocal()` — только в композиционных корнях (allowlist —
@@ -71,7 +76,9 @@
 | `src/web/`, `src/api/` | `app` |
 | `src/telegram/` | `bot` |
 | `src/services/`, `src/parsers/`, `src/analysis/`, `src/watch/`, `src/config/`, `src/domain/`, `src/models.py` | `app` + `bot` (бот сам синкает: sync → parse_fit → analysis) |
+| `src/coach/` | `bot` (коуч живёт в боте; веб коуч не использует) |
 | `pyproject.toml`, `Dockerfile`, `docker-compose.yml` | `app` + `bot` |
+| `bin/coach_llm_bridge.py`, `.env.bridge` | не пересборка — `systemctl restart running-coach-llm-bridge` |
 | `alembic/` | `app` (миграции при старте; **с ALTER — сначала stop bot**, §7) |
 
 ## Git / коммиты
@@ -101,7 +108,9 @@
 - Человекочитаемый источник порогов — `docs/coros_health_metrics.md`; **исполняемое зеркало —
   `src/coach/config.py`** (именованные константы; `recovery_view` и skills читают ТОЛЬКО отсюда,
   анти-дрейф-тесты сверяют).
-- **Следующий шаг — см. первый ⬜ в чек-листах `docs/coach/DEV_PLAN.md` §9.**
+- LLM-бэкенды: `get_llm()` = ключ → **мост подписки** (прод сейчас; `bin/coach_llm_bridge.py`,
+  ограничение — tool-цикл неактивен) → NullLLM/fallback. Решения и причины — `docs/coach/ARCHITECTURE.md`.
+- **Следующий шаг — первый ⬜ в чек-листах `docs/coach/DEV_PLAN.md` §9 (сейчас — C8).**
 
 ## Документация
 | Тема | Файл |
@@ -116,4 +125,5 @@
 | Чеклисты | `docs/CHECKLIST_FEATURE.md`, `docs/CHECKLIST_MIGRATION.md`, `docs/CHECKLIST_NEW_PROVIDER.md` |
 | Метрики здоровья (пороги) | `docs/coros_health_metrics.md` |
 | Аудит/бэклог | `PROJECT_AUDIT.md`, `BACKLOG.md` |
+| План и архитектура коуча | `docs/coach/DEV_PLAN.md`, `docs/coach/ARCHITECTURE.md` |
 | Расширенный контекст + история спринтов + карта `src/` | `AGENTS.md` |

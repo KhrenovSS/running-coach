@@ -9,7 +9,11 @@ tests/
 ├── conftest.py              # Два режима БД: SQLite (дефолт) / PostgreSQL (opt-in, см. ниже)
 ├── helpers.py               # Фабрики: build_trackpoints, make_user, build_training_session, build_daily_metrics
 ├── fixtures/                # TCX/FIT файлы для тестов (tempo_run.tcx, short_walk.tcx)
-├── skills/                  # Тесты каркаса коуча (conftest + scaffold)
+├── skills/                  # Фикстуры каркаса коуча (conftest + scaffold-гейт)
+├── coach/                   # Тесты гибридного коуча: скиллы, state, safety/clamp (табличный),
+│                            #   source-гварды (Prescription только из clamp; tools read-only),
+│                            #   tools, agent (ScriptedLLM), промпт-стабильность, оркестратор,
+│                            #   pain-флоу, рендер, BridgeLLM (httpx.MockTransport); fakes.py
 ├── test_gps.py              # clean_trackpoints, haversine_m
 ├── test_classify.py / test_classify_boundaries.py  # classify_training
 ├── test_hr_zones.py         # get_zone, get_band
@@ -28,8 +32,16 @@ tests/
 ├── test_weight_service.py   # save_weight/current_weight
 ├── test_session_ownership.py# ГВАРД: SessionLocal() только в композиционных корнях (allowlist)
 ├── test_stage0_fixes.py     # регрессы Этапа 0 (stats бота, reanalyze, performance Float)
+├── test_hr_max.py           # адаптивный max_hr (повышение/снижение)
 └── test_backfill.py         # backfill-скрипты
 ```
+
+## Инвариант: тесты не ходят в сеть
+
+Ни один тест не делает сетевых вызовов, и **весь набор зелёный при отсутствующем
+`ANTHROPIC_API_KEY`**. LLM в тестах — фейки из `tests/coach/fakes.py` (`ScriptedLLM` с записью
+вызовов, `FailingLLM` для fallback-пути); HTTP моста — `httpx.MockTransport`. Тест, которому
+нужна сеть или ключ, — ошибка дизайна (DEV_PLAN §1.7).
 
 ## Два режима БД (DB SAFETY, §6 CLAUDE.md)
 
@@ -61,7 +73,8 @@ In-memory БД (и PG-схема) живёт **весь прогон** — да�
 `chat_id`/`email` (иначе `UNIQUE constraint failed`). Занятые диапазоны chat_id:
 `123456789/999/111/222` (test_models, auto_sync), `77xxx` (backfill), `90001-90002`
 (skills), `94xxx` (hr_max), `95xxx` (stage0), `96xxx` (auto_sync), `97xxx` (dedup),
-`98xxx` (raw_files), `99xxx` (weight). Для нового файла бери свободный диапазон и хелпер вида:
+`98xxx` (raw_files), `99xxx` (weight), `92xxx` (coach — счётчик `tests/coach/conftest._seq`).
+Для нового файла бери свободный диапазон и хелпер вида:
 
 ```python
 def _user(db, n: int):
@@ -181,4 +194,4 @@ def test_km_fallback_short():
 
 ---
 
-**Последнее обновление:** 05.08.2026 (PG-режим TEST_PG_URL, FK pragma, конвенция chat_id, новые тесты ремедиации)
+**Последнее обновление:** 23.08.2026 (tests/coach/, инвариант «без сети/без ключа», диапазон 92xxx)

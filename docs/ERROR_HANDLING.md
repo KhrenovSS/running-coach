@@ -22,7 +22,10 @@ Exception
         ├── WatchAuthError         # 401
         ├── FileProcessingError    # 422
         ├── DatabaseError          # 500
-        └── RateLimitError         # 429
+        ├── RateLimitError         # 429
+        └── CoachError             # 500 — модуль коуча; НЕ должен ронять синк/бот
+              ├── LLMUnavailableError   # LLM недоступен → детерминированный fallback (не 5xx юзеру)
+              └── ToolExecutionError    # сбой tool'а LLM → is_error tool_result, не крах хода
 ```
 
 ## Исключения проекта
@@ -37,6 +40,9 @@ Exception
 | `FileProcessingError(filename, reason)` | 422 | Ошибка парсинга файла |
 | `DatabaseError(operation, details)` | 500 | Ошибка базы данных |
 | `RateLimitError(message, retry_after)` | 429 | Превышен лимит запросов |
+| `CoachError(message)` | 500 | Ошибки коуча; вызывающий код обязан ловить — падение коуча не роняет синк |
+| `LLMUnavailableError(message)` | — | Нет ключа/моста/сети: оркестратор уходит в fallback, пользователю не 5xx |
+| `ToolExecutionError(message)` | — | Ошибка tool'а: агент возвращает её модели как is_error tool_result |
 
 ## Примеры
 

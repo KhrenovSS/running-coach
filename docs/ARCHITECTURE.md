@@ -7,10 +7,11 @@
 - **Backend:** Python 3.13+, FastAPI
 - **База данных:** PostgreSQL 16 + SQLAlchemy ORM
 - **Миграции:** Alembic (автоматически при старте контейнера `app`)
-- **Тесты:** pytest, freezegun
+- **Тесты:** pytest (SQLite in-memory по умолчанию; opt-in PG через TEST_PG_URL)
 - **Логирование:** структурированное, ежедневная ротация (`TimedRotatingFileHandler`), JSON/text
 - **Frontend:** Jinja2 templates + Chart.js (vanilla JS)
-- **Docker:** Docker Compose — 3 контейнера (`db`, `app`, `bot`)
+- **Docker:** Docker Compose — 3 контейнера (`db`, `app`, `bot`); на хосте — systemd-юнит
+  `running-coach-llm-bridge.service` (LLM-мост коуча, :8765)
 - **Аутентификация:** bcrypt + session-cookie (`SessionMiddleware`)
 - **Шифрование:** Fernet (пароли часов, email)
 
@@ -21,8 +22,11 @@ running-coach/
 ├── alembic/                    # Миграции Alembic
 │   ├── versions/               # Файлы миграций
 │   └── env.py                  # Конфигурация Alembic
-├── bin/
-│   └── docker.sh               # Защищённая обёртка docker compose (создаётся локально, .gitignore)
+├── bin/                        # Ops-скрипты и рантайм-компоненты хоста
+│   ├── docker.sh               # Защищённая обёртка docker compose
+│   ├── backup_db.sh            # Бэкап БД (обязателен перед деплоем)
+│   ├── backfill_*.py           # Разовые backfill-скрипты (external_ids, raw_fits, avg_pace)
+│   └── coach_llm_bridge.py     # LLM-мост коуча: headless Claude Code по подписке (systemd, :8765)
 ├── docs/                       # Документация
 │   ├── ARCHITECTURE.md
 │   ├── CODE_GUIDELINES.md
@@ -36,7 +40,8 @@ running-coach/
 │   ├── CHECKLIST_MIGRATION.md
 │   ├── CHECKLIST_NEW_PROVIDER.md
 │   ├── DEVELOPMENT_GUIDELINES.md
-│   └── coros_health_metrics.md
+│   ├── coros_health_metrics.md
+│   └── coach/                  # DEV_PLAN.md (нормативный план) + ARCHITECTURE.md (ADR коуча)
 ├── main.py                     # 7 строк: create_app() + uvicorn.run()
 ├── run_telegram_bot.py         # Запуск Telegram-бота (pip install -e .)
 ├── src/                        # Исходный код
@@ -44,7 +49,7 @@ running-coach/
 │   ├── scheduler.py            # AutoSyncScheduler (threading.Event)
 │   ├── models.py               # Shim: реэкспорт из src/domain/models/ + хелперы
 │   ├── deps.py                 # Jinja2Templates, local_dt helper
-│   ├── exceptions.py           # WatchAPIError, WatchAuthError, NotFoundError и др.
+│   ├── exceptions.py           # WatchAPIError, NotFoundError…; CoachError → LLMUnavailableError/ToolExecutionError
 │   ├── crypto.py               # Fernet encrypt/decrypt (пароли часов, email)
 │   ├── config/                 # Конфигурация
 │   │   ├── __init__.py         #   Экспорт settings + constants
@@ -57,7 +62,8 @@ running-coach/
 │   │       ├── user.py         #   User
 │   │       ├── training.py     #   TrainingSession, TrainingFeedback, DeletedTraining
 │   │       ├── watch.py        #   WatchCredential
-│   │       ├── health.py       #   DailyMetrics, WeightMeasurement
+│   │       ├── health.py       #   DailyMetrics, WeightMeasurement, WellnessReport
+│   │       ├── coach.py        #   Recommendation, PredictionLog, UserModel, Lesson, CoachMessage
 │   │       ├── auth.py         #   AuthToken
 │   │       └── audit.py        #   AuditEvent
 │   ├── api/                    # FastAPI роуты и middleware
@@ -98,23 +104,29 @@ running-coach/
 │   │   ├── telegram_notify.py  # Отправка уведомлений в Telegram
 │   │   ├── repositories.py     # TrainingRepository/HealthRepository/FeedbackRepository (db — обязательный kwarg)
 │   │   ├── analytics_helpers.py# compute_slope, compute_ewma, compute_moving_average
+│   │   ├── repositories_coach.py # CoachRepository: выборки для скиллов/state, честный ACWR, coach_messages
+│   │   ├── hr_max.py           # Адаптивный max_hr (авто-повышение по пикам, предложение снижения)
 │   │   └── user_service.py     # get_user_settings(db, ...) — сессию владеет вызывающий код
-│   ├── coach/                  # Гибридный ИИ-коуч (состав меняется по C1–C9 — см. docs/coach/DEV_PLAN.md §2)
-│   │   ├── config.py           # ЕДИНСТВЕННЫЙ исполняемый источник порогов (зеркалит docs/coros_health_metrics.md)
-│   │   ├── contracts.py        # SkillResult, AthleteState, Prescription, ReasoningStep
-│   │   ├── state.py            # assess_state → AthleteState (C1)
-│   │   ├── rules/p1_safety.py + safety.py  # граница: evaluate_safety + clamp (C2)
-│   │   ├── prescriber.py/render.py/fallback.py  # finalize → карточка; работает без LLM (C2)
-│   │   └── skills/ (реализованы C1), personalization/, knowledge/, llm/ (см. DEV_PLAN §2)
-│   ├── telegram/               # Пакет Telegram-бота (17 файлов)
+│   ├── coach/                  # Гибридный ИИ-коуч (в проде; полная карта — docs/coach/ARCHITECTURE.md)
+│   │   ├── config.py           # ЕДИНСТВЕННЫЙ исполняемый источник порогов
+│   │   ├── contracts.py        # SkillResult, AthleteState, SafetyVerdict, WorkoutProposal, Prescription
+│   │   ├── state.py            # assess_state → AthleteState (скиллы + скоры + signals)
+│   │   ├── rules/p1_safety.py + safety.py  # граница: evaluate_safety + clamp (единств. конструктор Prescription)
+│   │   ├── prescriber.py / render.py / fallback.py / orchestrator.py / util.py
+│   │   ├── skills/             # fatigue, recovery, load, distribution, progress, pain + workout
+│   │   ├── tools/              # 7 read-only tools для LLM (registry + handlers)
+│   │   ├── knowledge/          # loader + guides/*.md (4 seed-руководства)
+│   │   └── llm/                # CoachLLM: anthropic_client / bridge_client (мост подписки) / null + agent
+│   ├── telegram/               # Пакет Telegram-бота
 │   │   ├── __init__.py         #   экспорт run_bot
 │   │   ├── main.py             #   run_bot, Application сборка
 │   │   ├── config.py           #   Константы состояний (EMAIL, PASSWORD, NEW_PASSWORD)
 │   │   ├── state.py            #   _awaiting_weight
 │   │   ├── utils.py            #   get_user, _get_web_app_url
 │   │   ├── sync_runner.py      #   run_sync_in_thread
-│   │   ├── handlers/           #   start, sync, stats, trainings, weight, account, feedback
-│   │   └── jobs/               #   weight, recovery
+│   │   ├── handlers/           #   start, sync, stats, trainings, weight, account, feedback,
+│   │   │                       #   coach (/verdict, /coach_settings, роутер текста), pain, hr_max
+│   │   └── jobs/               #   weight, recovery, hr_max, coach_morning (09:30), coach_evening (21:00)
 │   ├── watch/                  # Мульти-брендовая абстракция часов
 │   │   ├── __init__.py         #   register("coros", CorosWatchClient)
 │   │   ├── base.py             #   BaseWatchClient(ABC)
@@ -137,15 +149,18 @@ running-coach/
 │   └── utils/
 │       ├── logger.py           # Структурированное логирование с ротацией
 │       └── rate_limit.py       # In-memory rate limiter (Sprint 13)
-├── tests/                      # Pytest-тесты
-│   └── ...
+├── tests/                      # Pytest-тесты (без сети; зелёные без ANTHROPIC_API_KEY)
+│   ├── coach/                  #   тесты коуча: safety/clamp, tools, agent, мост, промпт-стабильность
+│   ├── skills/                 #   фикстуры + scaffold-гейт
+│   └── ...                     #   остальные (web, sync, parsers, session-гвард и т.д.)
 ├── uploads/                    # Загруженные файлы (.tcx, .fit); volume смонтирован в app И bot
 │   ├── pending/                # Временные файлы до подтверждения
 │   └── raw/<user_id>/          # Исходные FIT/TCX: <sha256>.<ext> (content-addressed, для reanalyze)
 ├── screenshots/                # Скриншоты для README
 ├── logs/                       # Ротируемые лог-файлы
 ├── Dockerfile                  # Python 3.13-slim, USER appuser
-├── docker-compose.yml          # 3 сервиса: db (postgres:16-alpine), app, bot
+├── docker-compose.yml          # 3 сервиса: db, app, bot (+extra_hosts для LLM-моста)
+├── running-coach-*.service     # systemd-юниты: bot, web, llm-bridge (LLM-мост коуча)
 ├── pyproject.toml              # Зависимости (version 2.0.0)
 ├── alembic.ini
 ├── pytest.ini
@@ -153,7 +168,7 @@ running-coach/
 ├── AGENTS.md                   # Контекст для ИИ-агента
 ├── BACKLOG.md                  # Парковка TODO/идей
 ├── PROJECT_AUDIT.md            # Аудит и план рефакторинга
-├── decision_module_design.md   # Архитектура модуля аналитики
+├── decision_module_design.md   # SUPERSEDED — историческая деривация (норматив: docs/coach/DEV_PLAN.md)
 ├── .env.example                # Шаблон переменных окружения
 └── README.md                   # Описание проекта
 ```
@@ -282,7 +297,10 @@ src/telegram/main.py :: run_bot()
   ├── /stats → статистика
   ├── /trainings → последние 5 тренировок
   ├── /weight → ручной ввод веса
-  └── jobs/ → daily_weight_job, daily_recovery_check_job
+  ├── jobs/ → daily_weight_job, daily_recovery_check_job, weekly_max_hr_check_job
+  ├── jobs/ → morning_verdict_job (09:30, вердикт коуча), evening_wellness_job (21:00, вопрос о колене)
+  └── коуч: /verdict, /coach_settings; любой свободный текст → orchestrator.handle_chat
+      (LLM через get_llm: ключ → мост подписки → детерминированный fallback)
 ```
 
 ## Важные ограничения
@@ -295,4 +313,4 @@ src/telegram/main.py :: run_bot()
 
 ---
 
-**Последнее обновление:** 05.08.2026 (ремедиация фундамента: этапы 0–6, session ownership, дедуп, сырые файлы)
+**Последнее обновление:** 23.08.2026 (гибридный ИИ-коуч C0–C7 + LLM-мост; сверка C9)

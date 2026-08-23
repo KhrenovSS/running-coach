@@ -64,20 +64,29 @@
   (защита от «сегодня HRV 62» по позавчерашним данным). `evidence` остаётся `str` —
   шесть `*_structured()` в `recovery_view.py` уже отдают строку; число есть в `value`.
 - `AthleteState` += `user_id`, `as_of`, `missing: list[str]` (например `['sleep','stress','rpe']`) —
-  LLM обязан видеть, чего не знает.
+  LLM обязан видеть, чего не знает; += `signals: dict` — сырьё для чистой safety-функции
+  (hrv_status, rhr_status, recovery_pct, ati_cti_ratio, acwr_ratio, consecutive_hard_days,
+  pain_level, pain_days; заполняется в `state.py`, LLM в tool `get_athlete_state` НЕ отдаётся —
+  модель видит вердикт, не сырьё).
 - Новые: `SafetyVerdict(allow_training, max_zone, max_duration_min, allowed_types,
   earliest_next_hard, triggered, reasons)`; `WorkoutProposal(workout_type, target_zone,
   duration_min, distance_km, structure, rationale)`.
 - `Prescription` += `safety: SafetyVerdict` (обязательное), `clamped: bool`,
   `source: "llm"|"fallback"`, `earliest: datetime | None`, `proposal: WorkoutProposal | None`
-  (что предлагали до урезания). `when` остаётся `date`.
-- `skills/base.py`: модульные функции, не классы — `SkillFn` Protocol + `SKILL_KEYS`.
-  Сигнатура скилла: `evaluate(user_id: int, *, db: Session) -> SkillResult`.
+  (что предлагали до урезания). `when` остаётся `date`. Класс объявлен
+  `@dataclass(kw_only=True)` — все поля keyword-only, назначение не собрать позиционно.
+- `skills/base.py`: модульные функции, не классы — `SkillFn` Protocol + `SKILL_KEYS`
+  (6 state-скиллов: fatigue, recovery, load, distribution, progress, pain).
+  Сигнатура state-скилла: `evaluate(user_id: int, *, db: Session) -> SkillResult`.
+  `skills/workout.py` — per-session разбор, ВНЕ SKILL_KEYS, своя сигнатура
+  `evaluate_session(user_id, session_id, *, db)`.
 
 ## 4. Граница безопасности P1
 
-`rules/p1_safety.py :: evaluate_safety(state) -> SafetyVerdict` + `safety.py :: clamp()`.
-`clamp(proposal, verdict, state) -> tuple[Prescription, bool]` может только **сужать**:
+`rules/p1_safety.py :: evaluate_safety(state, *, now=None) -> SafetyVerdict` +
+`safety.py :: clamp(proposal, verdict, state, *, now=None, source="fallback")
+-> tuple[Prescription, bool]` (`now` — параметр ради реплеябельности, `source` пишется в
+`Prescription.source`). clamp может только **сужать**:
 даунгрейд по лестнице `rest < recovery < easy < long < tempo < interval < race`, усечение зоны и
 длительности (дистанция пересчитывается вниз пропорционально), hard-тип при
 `now < earliest_next_hard` → `easy`. Любое срабатывание → `clamped=True` +
@@ -86,22 +95,26 @@
 
 Триггеры v1 (пороги — только из `coach/config.py`):
 
-| Триггер | Действие |
-|---|---|
-| RHR Δ ≥ `RHR_CRITICAL_DIFF` (10) | `allow_training=False` |
-| HRV `very_low` | `max_zone=2`, allowed `{rest,recovery,easy}` |
-| HRV `low` | `max_zone=2`, без `interval/tempo` |
-| `recovery_pct < RECOVERY_PCT_MODERATE` | `max_zone=2` |
-| ati/cti > 1.5 | `max_zone=3`, без `interval` |
-| ACWR > `INJURY_RISK_THRESHOLDS['load_ratio_high']` (1.5) | `max_zone=3` |
-| `consecutive_hard_days >= 4` | `max_zone=2` |
-| `pain_level >= PAIN_STOP_LEVEL` (5) | `allow_training=False` |
-| `pain_level >= PAIN_CAUTION_LEVEL` (3) или боль ≥ `PAIN_PERSIST_DAYS` дней подряд | `max_zone=2`, `max_duration_min=40` |
-| `recovery_hours_left > 0` | `earliest_next_hard` |
+| # | Триггер (сигнал из `state.signals`) | Действие |
+|---|---|---|
+| 0 | `no_data` — нет метрик вовсе (`state.as_of is None`) | `max_zone=2`, без hard-типов и `long` (инвариант §1.5) |
+| 1 | `rhr_status == "critical_elevated"` (Δ ≥ `RHR_CRITICAL_DIFF`, порог применяется в `recovery_view.rhr_anomaly`) | `allow_training=False` |
+| 2 | HRV `very_low` | `max_zone=2`, без `HARD_TYPES` и `long` (allowed `{rest,recovery,easy}`) |
+| 3 | HRV `low` | `max_zone=2`, без `HARD_TYPES` (tempo/interval/race) |
+| 4 | `recovery_pct < RECOVERY_PCT_MODERATE` | `max_zone=2` |
+| 5 | ati/cti > `ATI_CTI_HIGH` (1.5) | `max_zone=3`, без `interval` |
+| 6 | ACWR > `INJURY_RISK_THRESHOLDS['load_ratio_high']` (1.5) | `max_zone=3` |
+| 7 | `consecutive_hard_days >= 4` | `max_zone=2` |
+| 8 | `pain_level >= PAIN_STOP_LEVEL` (5) | `allow_training=False` |
+| 9 | `pain_level >= PAIN_CAUTION_LEVEL` (3) или боль ≥ `PAIN_PERSIST_DAYS` дней подряд | `max_zone=2`, `max_duration_min=40`, без `HARD_TYPES` |
+| 10 | `recovery_hours_left > 0` | `earliest_next_hard` |
 
-Новые константы (C1): `PAIN_CAUTION_LEVEL=3`, `PAIN_STOP_LEVEL=5`, `PAIN_PERSIST_DAYS=3`,
-`SAFETY_MAX_ZONE_DEFAULT=5`, `SAFETY_MAX_DURATION_CAUTION_MIN=40`, `HARD_TYPES`,
-`TYPE_INTENSITY_ORDER`, `ACWR_CHRONIC_MIN_DAYS=14`.
+Константы границы в `coach/config.py`: `PAIN_SCALE_MAX=10`, `PAIN_CAUTION_LEVEL=3`,
+`PAIN_STOP_LEVEL=5`, `PAIN_PERSIST_DAYS=3`, `SAFETY_MAX_ZONE_DEFAULT=5`,
+`SAFETY_MAX_DURATION_CAUTION_MIN=40`, `TYPE_INTENSITY_ORDER`, `HARD_TYPES`, `EASY_TYPES`,
+`TYPE_MIN_ZONE` (минимальная зона типа — clamp даунгрейдит тип, не влезающий под потолок),
+`ATI_CTI_HIGH=1.5`, `ACWR_ACUTE_DAYS=7`, `ACWR_CHRONIC_DAYS=28`, `ACWR_CHRONIC_MIN_DAYS=14`,
+`RHR_BASELINE_DAYS=30`, `RHR_BASELINE_MIN_POINTS=7`.
 
 ## 5. Tools для LLM (7, все read-only)
 
@@ -117,9 +130,14 @@
 Tool-loop — **ручной** (`llm/agent.py`), не `tool_runner`: runner'у некуда прокинуть
 request-scoped `Session` (глобал/contextvar нарушают §8 CLAUDE.md). Лимит `COACH_MAX_TOOL_ITERATIONS=6`.
 
+**Обогащение контекста:** оркестратор перед каждым ходом инлайнит в today-блок результаты
+`get_recent_workouts {limit:5}` и `get_weekly_summary {weeks:4}` (`build_today_block(...,
+extras=)`). В API-режиме это сокращает tool round-trip'ы; **в режиме моста (см. §8) tool-цикл
+неактивен, и обогащение — основной источник фактов для модели.**
+
 ## 6. Миграция `p9q0r1s2t3u4_coach_pain_chat_wellness` (down_revision `o8p9q0r1s2t3`)
 
-Только аддитивно: `training_feedback` += `pain_level SMALLINT NULL`, `pain_location VARCHAR(30) NULL`,
+Только аддитивно: `training_feedback` += `pain_level INTEGER NULL` (0–10), `pain_location VARCHAR(30) NULL`,
 `pain_phase VARCHAR(20) NULL` (start/middle/end/after/none); новая `wellness_reports`
 (user_id, report_date UNIQUE(user_id, report_date), pain_level, pain_location, soreness, mood,
 sleep_quality_self, note); новая `coach_messages` (user_id, created_at, role,
@@ -128,10 +146,14 @@ Index(user_id, created_at)); `recommendations` += `proposal_json`, `safety_json`
 `downgrade()` пишется, в шапке предупреждение: откат необратимо удаляет данные о боли.
 
 Новый `src/services/repositories_coach.py` (все методы `*, db: Session`): `latest_metrics`,
-`metrics_series` (whitelist полей), `last_sessions`, `session_with_feedback`,
-`consecutive_hard_days`, `baseline_rhr`, `acwr`, `pain_history`, `turns_today`, `recent_messages`,
-`save_message`. `acwr()` исправляет BACKLOG #219 (дни отдыха = 0, а не исключаются; мало данных →
-`ratio=None`, не 0.0); старый `HealthRepository.load_ratio` удаляется (потребителей вне тестов нет).
+`metrics_series` (whitelist полей), `weight_series`, `last_sessions`, `session_with_feedback`,
+`consecutive_hard_days`, `baseline_rhr`, `acwr`, `turns_today`, `recent_messages`, `save_message`,
+`metric_days_count`, `sessions_count`. История боли живёт НЕ в репозитории, а в
+`skills/pain.py::recent_pain_by_day/consecutive_pain_days` (union feedback+wellness).
+`acwr()` исправляет BACKLOG #219 (дни отдыха = 0, а не исключаются; мало данных →
+`ratio=None`, не 0.0); старый `HealthRepository.load_ratio` удалён.
+Индексы новых таблиц: составной `(user_id, created_at)`/UNIQUE + одиночный `user_id`
+(одиночный сохранён сознательно — стиль всех таблиц проекта).
 
 ## 7. Telegram: сбор боли и фидбека
 
@@ -152,8 +174,14 @@ Index(user_id, created_at)); `recommendations` += `proposal_json`, `safety_json`
 
 ## 8. LLM-слой, кэш, лимиты
 
-`CoachLLM` Protocol; `get_llm()` → `AnthropicLLM` при ключе, иначе `NullLLM`
-(→ `LLMUnavailableError` → `fallback.py`). Модель `claude-opus-5`, `max_tokens=4000`,
+`CoachLLM` Protocol; `get_llm()` — приоритет **API-ключ → мост подписки → NullLLM**:
+`AnthropicLLM` (при `ANTHROPIC_API_KEY`), **`BridgeLLM`** (при `COACH_LLM_BRIDGE_URL` —
+host-мост `bin/coach_llm_bridge.py` + systemd `running-coach-llm-bridge.service` + `.env.bridge`;
+headless `claude -p` под подпиской владельца, модель `BRIDGE_MODEL`, по умолчанию `sonnet` —
+бережём лимиты), иначе `NullLLM` (→ `LLMUnavailableError` → `fallback.py`).
+Ограничения режима моста: tool-цикл неактивен (компенсация — обогащение §5), prompt-cache
+между ходами не гарантирован, `cost_usd` считается по ценам opus → в мосте величина условная
+(реальная цена — лимиты подписки). API-режим: модель `claude-opus-5`, `max_tokens=4000`,
 `thinking={"type":"adaptive"}`, `output_config={"effort": "low"|"medium", "format":
 {"type":"json_schema","schema": CoachTurn}}`. **Не использовать** (удалено из API, вернёт 400):
 `temperature`, `budget_tokens`, assistant prefill, устаревший `output_format`.
@@ -189,19 +217,20 @@ Index(user_id, created_at)); `recommendations` += `proposal_json`, `safety_json`
   тест clamp (все триггеры × «interval 10×400 Z5» → разрешённое, `clamped=True`).
 - ✅ **C3 — Миграция** (код; ⚠️ накат на прод — отдельный шаг, см. ниже): модели + миграция §6 +
   скилл `pain` (SKILL_KEYS += pain, боль доезжает до signals и P1). db-safety-reviewer: **GO**
-  (server_default kind + дубль-индекс поправлены по ревью). Проверка: 282 теста в SQLite и
+  (server_default kind + дубль-индекс поправлены по ревью). Проверка: полный набор тестов зелёный в SQLite и
   `TEST_PG_URL` (alembic head, дрейфа нет).
-- ⬜ 🛑 **Накат C3 на прод** (по подтверждению владельца): `bin/backup_db.sh` →
-  `docker compose stop bot` → `docker compose build app && docker compose up -d app` (миграция
-  применится на старте) → проверить `alembic_version=p9q0r1s2t3u4` и count(training_feedback)
-  до/после → `docker compose start bot`. Можно совместить с деплоем C4.
+- ✅ 🛑 **Накат C3 на прод — выполнен 23.08.2026** (одобрено владельцем): backup 2,9M →
+  `stop bot` → build → `up -d app` (миграция применена, `alembic_version=p9q0r1s2t3u4`) →
+  данные целы (4/36/2 без изменений) → **`docker compose up -d bot`** (⚠️ именно `up -d`:
+  `start` НЕ пересоздаёт контейнер из нового образа — поймано на этом деплое, BACKLOG #240).
+
 - ✅ **C4 — Telegram без LLM** (код; smoke на живом токене — после наката C3+деплоя):
   `handlers/{pain,coach}.py` (роутер текста: вес приоритетом → коуч; /verdict; callbacks
   pain/painphase/wellness), `jobs/coach_evening.py` (21:00, гейт initiative=high, пропуск
   при записанной боли); feedback: после RPE-тапа строка «Колено?» в том же сообщении
   (2 тапа хороший день, 3 — плохой); `on_workout_completed` в `sync/activities.py` под
   `try/except CoachError`; оркестратор: morning_verdict/handle_chat/on_workout_completed
-  детерминированные + get/set_initiative. Проверка: 287 тестов, импорт бота OK.
+  детерминированные + get/set_initiative. Проверка: полный набор тестов зелёный, импорт бота OK.
   **Smoke на живом токене — при деплое** (совмещён со стоп-поинтом наката C3):
   `/start`; вес «75.5» сохраняется; «привет» → карточка; RPE-тап → строка боли → тап →
   `pain_level` в БД; `/verdict` работает.
@@ -223,23 +252,33 @@ Index(user_id, created_at)); `recommendations` += `proposal_json`, `safety_json`
 - ✅ **C7 — Включение LLM** (код; включение — env моста): `jobs/coach_morning.py` (09:30,
   гейт initiative ∈ {normal, high}), `/coach_settings` (4 уровня инициативы кнопками).
   Критерий кэша (`cache_read_input_tokens > 0`) в режиме моста неприменим — заменён на
-  «ходы записаны с cost_usd». Живой smoke (3 хода + тест границы pain=6 → «Отдых») —
-  после запуска моста и рестарта бота.
+  «ходы записаны с cost_usd». **Live e2e пройден 23.08 из контейнера бота**: SOURCE=llm,
+  проза + карточка «Лёгкий бег Z2 35 мин» + earliest + вопрос про колено; usage/cost в
+  `coach_messages`. Граница pain=6 → «Отдых» закрыта юнит-тестами (`test_safety_clamp`,
+  `test_pain_flow`); живой повтор — по желанию владельца.
 - ⬜ **C8 — Разбор + недельный отчёт + инициатива**: `on_workout_completed` через LLM,
   `jobs/coach_weekly.py`, гейт `initiative`. Проверка: `/sync` с новой активностью → разбор +
   кнопки; `initiative=off` → тишина.
-- ⬜ **C9 — Финальная сверка доков**: `docs/coach/ARCHITECTURE.md` (ADR: почему гибрид, почему
-  ручной tool-loop, остаточный риск прозы — ссылается сюда, не дублирует); сверка
-  CLAUDE/AGENTS/docs/ARCHITECTURE (дерево)/docs/TESTING (`tests/coach/`); чистка BACKLOG;
-  повторить grep-набор §11.3.
+- ✅ **C9 — Финальная сверка доков (23.08.2026)**: три параллельных аудита нашли 55+
+  несоответствий — все исправлены. Создан `docs/coach/ARCHITECTURE.md` (ADR: гибрид, ручной
+  tool-loop, мост и его ограничения, остаточный риск прозы + полная карта модулей).
+  Сверены: CLAUDE.md (самопротиворечие шапки устранено, Python 3.13, мост, up -d),
+  AGENTS.md (сессии 06.08/23.08, карты src/), README.md (коуч в возможностях/командах/env/
+  systemd-секция, анти-протухание чисел), docs/{ARCHITECTURE,TESTING,ERROR_HANDLING,LOGGING}.md,
+  BACKLOG (#240 закрыт; #243–#250 заведены), coros-док (обратная ссылка на config),
+  комментарии config/contracts. Grep-набор §11.3 перекалиброван и чист.
 
 Зависимости: C0 первым; C1–C2 и seed-guides независимы; C3→C4; C5→C6→C7 последовательны.
 
 ## 10. Тесты (`tests/coach/`)
 
-Фикстуры — `tests/skills/conftest.py::athlete_with_history` + `tests/helpers.py`.
+Фикстуры — `tests/coach/conftest.py` (сознательный дубль `athlete_with_history` с
+уникальными chat_id 92xxx: in-memory БД живёт всю pytest-сессию, drop_all запрещён §6 CLAUDE.md)
++ `tests/helpers.py`.
 `fakes.py`: `ScriptedLLM` (записывает `calls`), `FailingLLM`. DI: оркестратор принимает
-`llm: CoachLLM | None = None` — как `db`.
+`llm: CoachLLM | None = None` — как `db`. `test_bridge_client` — BridgeLLM на
+`httpx.MockTransport`: JSON в фенсах → parsed, ошибки/таймаут → LLMUnavailableError,
+приоритет get_llm (ключ > мост > Null).
 Ключевые: `test_skills` (норма + нет данных + пороги из config), `test_state`,
 `test_safety_clamp` (табличный; идемпотентность `clamp(clamp(x))==clamp(x)`; при
 `allow_training=False` любое предложение → rest), `test_no_prescription_bypass` (source-гвард),
@@ -254,9 +293,12 @@ Index(user_id, created_at)); `recommendations` += `proposal_json`, `safety_json`
 1. **Data-safety (перед C3):** см. чек-лист C3. `downgrade()` миграции необратимо удаляет данные
    о боли. Пересборка при правке models/services: `app` + `bot`.
 2. **Секреты (перед C7):** ключ только от владельца, плейсхолдеры запрещены (§3 CLAUDE.md).
-3. **Grep-набор «один план» (гоняется в C0 и C9):**
-   `grep -rn "rules-first|LLM — только интерфейс|Следующий шаг — Этап 1" CLAUDE.md AGENTS.md README.md` → 0;
-   `grep -c "SUPERSEDED" decision_module_design.md` → 1; `grep -n "8 этапов" README.md` → 0.
+3. **Grep-набор «один план» (гоняется в C0 и C9; перекалиброван в C9):**
+   `grep -rn "LLM — только интерфейс\|Следующий шаг — Этап 1\|8 этапов" CLAUDE.md AGENTS.md README.md` → 0;
+   `grep -c "SUPERSEDED" decision_module_design.md` → 1.
+   «rules-first» из набора исключён: паттерн ловил собственные тексты об отмене; допустим
+   ТОЛЬКО в контексте «пересмотрен/отменён».
+
 4. **Перевешивание catch-all** — самое рискованное изменение: после C4 каждый текст = обращение к
    коучу (после C7 — платное). Митигация: приоритет веса, `turns_today`, `COACH_ENABLED`.
 5. **Проза LLM может исказить число** — гарантирована только карточка. Numeric-checker → BACKLOG.
@@ -265,11 +307,14 @@ Index(user_id, created_at)); `recommendations` += `proposal_json`, `safety_json`
 
 ## 12. Принятые допущения (менять по слову владельца)
 
-- Боль — 3 кнопки (колонка SMALLINT держит 0–10). Утренний вердикт — 09:30.
+- Боль — 3 кнопки: `PAIN_LEVELS = (0 «не беспокоило», 2 «немного», 5 «мешало»)`;
+  третья = `PAIN_STOP_LEVEL` → немедленный вердикт «Отдых». Колонка Integer держит шкалу 0–10.
+  Боль вне тренировки — callback `pain:today:{level}` → wellness_reports. Утренний вердикт — 09:30.
 - Многонедельный план не персистится построчно: `coach_messages` c `kind='plan'`; в БД живёт
   только дневная рекомендация.
 - Инициатива стартует на `high`.
 - Пороги `RECOVERY_PCT_MODERATE=30` / `LOAD_RATIO_HIGH=1.2` не трогаем (потребители — display-слой
   и тесты; для ACWR — отдельный `INJURY_RISK_THRESHOLDS['load_ratio_high']=1.5`). Приведение шкалы
   к Coros (20/70/90) → BACKLOG.
-- LLM: Anthropic `claude-opus-5`; смена провайдера — только через `CoachLLM` Protocol.
+- LLM: три бэкенда за `CoachLLM` Protocol; в проде сейчас — мост подписки
+  (`BRIDGE_MODEL=sonnet` по умолчанию); API-режим — `claude-opus-5`. Переезд на ключ — #241.

@@ -1,21 +1,21 @@
-# Конфигурация модуля аналитики и коучинга (Coach module configuration)
+# Конфигурация модуля коуча (Coach module configuration)
 #
-# ЕДИНСТВЕННЫЙ исполняемый источник порогов (BACKLOG #230, Этап 5).
-# Человекочитаемый источник — docs/coros_health_metrics.md; числа здесь зеркалят его
-# и потребляются recovery_view + будущими skills. НЕ дублировать значения inline.
-# (Single executable source of thresholds; mirrors docs/coros_health_metrics.md.)
+# ЕДИНСТВЕННЫЙ исполняемый источник порогов (BACKLOG #230). ДВА человекочитаемых
+# источника: метрики здоровья — docs/coros_health_metrics.md; safety/pain и лестница
+# интенсивности — docs/coach/DEV_PLAN.md §4. Потребители: recovery_view + skills + safety.
+# НЕ дублировать значения inline. (Single executable source; two human-readable sources.)
 
 # --- Пороги метрик (Metric thresholds — см. §§ в docs/coros_health_metrics.md) ---
-RECOVERY_PCT_READY = 70        # §5: recovery_pct ≥ 70 → готов (ready)
-RECOVERY_PCT_MODERATE = 30     # §5: ≥ 30 → умеренная готовность (moderate), ниже — отдых (rest)
-LOAD_RATIO_LOW = 0.8           # §7: ratio < 0.8 → низкая нагрузка (low load)
-LOAD_RATIO_HIGH = 1.2          # §7: ratio > 1.2 → перегрузка (overload)
+RECOVERY_PCT_READY = 70        # §12 coros-дока: recovery_pct ≥ 70 → готов (ready)
+RECOVERY_PCT_MODERATE = 30     # исторический порог display-слоя; шкала Coros §12 — 20/70/90 (приведение — BACKLOG #249)
+LOAD_RATIO_LOW = 0.8           # display-ярлык нагрузки (UI); травмоопасные пороги ACWR — INJURY_RISK_THRESHOLDS
+LOAD_RATIO_HIGH = 1.2          # display-ярлык нагрузки (UI)
 PERFORMANCE_READY = 0.5        # §4: performance > 0.5 → готов (float −2..+2)
 PERFORMANCE_MODERATE = -0.5    # §4: > −0.5 → умеренная, ниже — отдых
 TIRED_LOW_MAX = -5             # §3: tired_rate ≤ −5 → низкая усталость
 TIRED_MODERATE_MAX = 0         # §3: ≤ 0 → умеренная, выше — высокая
-TRAINING_LOAD_LIGHT_MAX = 50   # §7: training_load < 50 → лёгкая
-TRAINING_LOAD_MEDIUM_MAX = 150 # §7: < 150 → средняя, выше — высокая
+TRAINING_LOAD_LIGHT_MAX = 50   # §5 coros-дока: training_load < 50 → лёгкая
+TRAINING_LOAD_MEDIUM_MAX = 150 # §5: < 150 → средняя, выше — высокая
 RHR_ELEVATED_DIFF = 5          # §6: RHR − baseline ≥ +5 → повышенный
 RHR_CRITICAL_DIFF = 10         # §6: ≥ +10 → критический
 RHR_LOW_DIFF = -3              # §6: ≤ −3 → аномально низкий
@@ -89,7 +89,7 @@ EASY_TYPES = ("recovery", "easy")
 # Минимальная зона, в которой тип имеет смысл: потолок зоны ниже → тип даунгрейдится.
 # (Minimal zone a type makes sense in; a lower zone cap downgrades the type.)
 TYPE_MIN_ZONE = {"rest": 1, "recovery": 1, "easy": 2, "long": 2, "tempo": 4, "interval": 5, "race": 4}
-ATI_CTI_HIGH = 1.5             # §7: ATI/CTI > 1.5 → перекос в анаэробную нагрузку
+ATI_CTI_HIGH = 1.5             # §7 coros-дока: ATI/CTI > 1.5 → перекос в анаэробную нагрузку
 
 # --- ACWR / baseline RHR (skills/load, skills/fatigue) ---
 ACWR_ACUTE_DAYS = 7            # острое окно ACWR (acute window)

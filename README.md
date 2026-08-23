@@ -25,6 +25,12 @@
 - **🔔 Автоматическая синхронизация** – фоновая проверка новых данных по настроенному интервалу для каждого бренда (тренировки + метрики здоровья)
 - **🔑 Telegram‑аутентификация** – одноразовые токены для регистрации, bcrypt-хеширование паролей, вход по email+паролю, session-cookie в веб-интерфейсе
 - **📝 Структурированное логирование и аудит** – ежедневная ротация, JSON/text формат, запись событий аудита в БД и файл
+- **🤖 ИИ-коуч (гибрид)** – LLM рассуждает и предлагает тренировку, детерминированная граница
+  безопасности урезает всё рискованное (числа в карточке — только из кода): утренний вердикт
+  (09:30), разбор тренировки, свободный чат в Telegram, команда `/verdict`
+- **🦵 Трекинг боли** – после оценки RPE бот спрашивает про колено (2–3 тапа: уровень + фаза
+  «старт/середина/конец/после»); вечерний опрос самочувствия в 21:00; боль ≥5/10 автоматически
+  запрещает тренировку на день
 
 ---
 
@@ -41,7 +47,11 @@
 - **Аудит**: события в БД (`audit_events`) + файл (`logs/audit_*.log`)
 - **Планировщик**: `threading.Thread` с jitter (фоновые задачи, автосинхронизация)
 - **Шифрование**: Fernet (ключ из окружения)
-- **Развёртывание**: Docker Compose — 3 контейнера: `db` (postgres:16-alpine), `app` (uvicorn), `bot` (run_telegram_bot.py)
+- **ИИ-коуч**: `src/coach/` — скиллы/граница безопасности/tools/LLM-слой (`anthropic==1.0.0`);
+  LLM-бэкенды: API-ключ → **мост через подписку Claude Code** (`bin/coach_llm_bridge.py`,
+  systemd, :8765) → детерминированный fallback. Карта модулей: `docs/coach/ARCHITECTURE.md`
+- **Развёртывание**: Docker Compose — 3 контейнера: `db` (postgres:16-alpine), `app` (uvicorn),
+  `bot` (run_telegram_bot.py) + systemd-юнит `running-coach-llm-bridge.service` на хосте
 
 ## 🗄️ Структура базы данных
 
@@ -58,6 +68,14 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 - **`auth_tokens`** — одноразовые токены входа (Telegram → web). Поля: `id`, `user_id`, `token` (String(64), генерируется через `secrets.token_urlsafe`), `expires_at`, `used_at` (DateTime, nullable), `created_at`.
 - **`audit_events`** — события аудита. Поля: `id`, `user_id`, `event_type`, `metadata_json` (JSON), `severity` (String), `message` (Text), `ip_address`, `created_at`.
 - **`watch_credentials`** — учётные данные часов (мульти-бренд). Поля: `id`, `user_id`, `brand`, `encrypted_user`, `encrypted_password`, `access_token`, `token_expires_at`, `last_activity_sync_at`, `last_health_sync_at`, `activity_sync_interval`, `health_sync_interval`, `is_active`.
+
+- **Таблицы коуча** (миграции `j3k4l5m6n7o8` + `p9q0r1s2t3u4`): `recommendations` (назначения:
+  тип/цель/объём/rationale + наблюдаемость `proposal_json`/`safety_json`/`clamped`/`source`),
+  `prediction_logs` (прогноз vs факт, UNIQUE по session_id), `user_models` (персональные параметры,
+  1 строка/юзер), `lessons` (извлечённые уроки), `coach_messages` (история диалога + токены/стоимость
+  LLM), `wellness_reports` (вечерний самоотчёт: боль/крепатура/настроение/сон, UNIQUE user+date).
+- В `training_feedback` добавлены колонки боли: `pain_level` (0–10), `pain_location`, `pain_phase`
+  (start/middle/end/after/none).
 
 Также в `daily_metrics` добавлена колонка `sleep_hrv_interval_list` (TEXT, JSON) — интервалы HRV из Coros (минимальное, низкое, норма start, норма end).
 
@@ -208,23 +226,17 @@ created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 
 ### Миграции схемы (Alembic)
 
-Управление схемой БД — через **Alembic**. При старте контейнера `app` выполняется `alembic upgrade head`:
+Управление схемой БД — через **Alembic**. При старте контейнера `app` выполняется
+`alembic upgrade head`. Полный и всегда актуальный список — файлы в `alembic/versions/`
+(порядок задаёт цепочка `down_revision`); ключевые вехи:
 
-- `f75d2362cf9f` (fresh baseline) — единая database-agnostic миграция: все таблицы
-- `3205fe660d47` — add `timezone` column to `users`
-- `4201426df9cc` — add `timezone` column to `training_sessions`
-- `a1b2c3d4e5f6` — data migration: конвертация старых naive-local `begin_ts` → naive UTC
-- `5e287a9fc289` — convert all DateTime columns to `TIMESTAMP WITH TIME ZONE`
-- `b6c7d8e9f0a1` — add `watch_credentials` table, `source_brand` to `daily_metrics`
-- `c9d8e7f6a0b2` — remove `coros_email`, `coros_password`, `last_coros_sync` from `users`
-- `d1e2f3a4b5c6` — add `training_type_override`, `trackpoints_json` to `training_sessions`; add interval settings to `users`
-- `e5f6a7b8c9d0` — rename `interval_oscillation_amplitude` → `interval_pace_threshold`, update defaults
-- `f7g8h9i0j1k2` — data integrity: NOT NULL + CASCADE on FKs, Text→JSON for HRV and metadata
-- `g9h0i1j2k3l4` — analytics preparation: indexes, `avg_pace` on `training_sessions`, `performance` → `Integer`
-- `h1i2j3k4l5m6` — add `ON DELETE CASCADE` to `watch_credentials` and `auth_tokens` FKs
-- `i2j3k4l5m6n7` — add `ON DELETE RESTRICT` to `training_sessions` FK
-
-> **Примечание:** порядок соответствует цепочке `down_revision` в файлах миграций, а не хронологии создания.
+- `f75d2362cf9f` — fresh baseline: все таблицы одной database-agnostic миграцией
+- `g9h0i1j2k3l4` — analytics preparation: индексы, `avg_pace`, `performance`
+- `j3k4l5m6n7o8` — 4 таблицы модуля коуча (recommendations, prediction_logs, user_models, lessons)
+- `m6n7o8p9q0r1`/`n7o8p9q0r1s2` — честный дедуп (`external_activity_id`) + сырые FIT/TCX
+- `o8p9q0r1s2t3` — адаптивный max_hr (`hr_peak_smoothed`)
+- `p9q0r1s2t3u4` — **текущий head**: боль (`training_feedback.pain_*`), `wellness_reports`,
+  `coach_messages`, наблюдаемость решений в `recommendations`
 
 Файлы миграций: `alembic/versions/`. Конфигурация: `alembic.ini`, `alembic/env.py` (`DATABASE_URL` из env).
 
@@ -251,8 +263,12 @@ training_sessions.id                     │
 running-coach/
 ├── main.py                          # 7 строк — create_app() + uvicorn.run()
 ├── run_telegram_bot.py              # Запуск Telegram‑бота
-├── bin/
-│   └── docker.sh                    # Защищённая обёртка docker compose (права 700, в .gitignore — создать вручную)
+├── bin/                             # Ops-скрипты + рантайм-компоненты хоста
+│   ├── docker.sh                    # Защищённая обёртка docker compose (права 700, создать вручную)
+│   ├── backup_db.sh                 # Бэкап БД (обязателен перед деплоем)
+│   ├── backfill_*.py                # Разовые backfill-скрипты
+│   └── coach_llm_bridge.py          # LLM-мост коуча (headless Claude Code по подписке, systemd :8765)
+├── running-coach-*.service          # systemd-юниты: bot, web, llm-bridge
 ├── src/
 │   ├── startup.py                   # create_app() фабрика + startup-событие
 │   ├── scheduler.py                 # AutoSyncScheduler (одиночка)
@@ -264,8 +280,9 @@ running-coach/
 │   │   ├── state.py                  #   _awaiting_weight
 │   │   ├── utils.py                  #   get_user, _get_web_app_url
 │   │   ├── sync_runner.py            #   run_sync_in_thread
-│   │   ├── handlers/                 #   start, sync, stats, trainings, weight, account, feedback
-│   │   └── jobs/                     #   weight, recovery
+│   │   ├── handlers/                 #   start, sync, stats, trainings, weight, account, feedback,
+│   │   │                             #   coach (/verdict, /coach_settings, роутер текста), pain, hr_max
+│   │   └── jobs/                     #   weight, recovery, hr_max, coach_morning (09:30), coach_evening (21:00)
 │   ├── models.py                    # Shim: реэкспорт из src/domain/models/ + хелперы
 │   ├── domain/
 │   │   └── models/                  # Доменные модели (User, TrainingSession, WatchCredential, …)
@@ -274,7 +291,8 @@ running-coach/
 │   │       ├── user.py              #   User
 │   │       ├── training.py          #   TrainingSession, TrainingFeedback, DeletedTraining
 │   │       ├── watch.py             #   WatchCredential
-│   │       ├── health.py            #   DailyMetrics, WeightMeasurement
+│   │       ├── health.py            #   DailyMetrics, WeightMeasurement, WellnessReport
+│   │       ├── coach.py             #   Recommendation, PredictionLog, UserModel, Lesson, CoachMessage
 │   │       ├── auth.py              #   AuthToken
 │   │       └── audit.py             #   AuditEvent
 │   ├── watch/                       # Мульти-брендовая абстракция часов
@@ -283,10 +301,16 @@ running-coach/
 │   │   ├── coros.py                 #   CorosWatchClient на httpx.AsyncClient
 │   │   └── factory.py               #   Реестр брендов (register / get_watch_client)
 │   ├── crypto.py                    # Шифрование паролей (Fernet, требует CRED_KEY)
-│   ├── exceptions.py                # WatchAPIError, WatchAuthError, NotFoundError, …
-│   ├── coach/                       # Пакет модуля аналитики и коучинга
-│   │   ├── __init__.py
-│   │   └── config.py                # Конфигурация аналитики (веса, пороги, EWMA-параметры)
+│   ├── exceptions.py                # WatchAPIError, NotFoundError, …; CoachError → LLMUnavailable/ToolExecution
+│   ├── coach/                       # Гибридный ИИ-коуч (полная карта — docs/coach/ARCHITECTURE.md)
+│   │   ├── config.py                #   пороги/веса (единственный исполняемый источник)
+│   │   ├── contracts.py / state.py  #   контракты + сборка AthleteState
+│   │   ├── rules/p1_safety.py + safety.py  # граница безопасности (clamp)
+│   │   ├── prescriber / render / fallback / orchestrator / util
+│   │   ├── skills/                  #   fatigue, recovery, load, distribution, progress, pain, workout
+│   │   ├── tools/                   #   7 read-only tools для LLM
+│   │   ├── knowledge/guides/        #   методические руководства (loader + 4 seed)
+│   │   └── llm/                     #   CoachLLM: anthropic / bridge (мост подписки) / null + agent
 │   ├── api/
 │   │   ├── __init__.py              # re-export: register_middleware, get_db
 │   │   ├── deps.py                  # get_current_user dependency (session-cookie)
@@ -331,7 +355,11 @@ running-coach/
 │   │   ├── telegram_notify.py       # Отправка уведомлений в Telegram
 │   │   ├── user_service.py          # get_user_settings, get_or_create_user_by_telegram
 │   │   ├── analytics_helpers.py     # compute_slope, compute_ewma, moving average
-│   │   └── repositories.py          # TrainingRepository, HealthRepository (агрегационные запросы)
+│   │   ├── repositories.py          # TrainingRepository, HealthRepository, FeedbackRepository
+│   │   ├── repositories_coach.py    # CoachRepository: выборки для коуча, честный ACWR, coach_messages
+│   │   ├── hr_max.py                # Адаптивный max_hr (пики/снижение)
+│   │   ├── raw_files.py             # Хранилище исходных FIT/TCX (uploads/raw/)
+│   │   └── weight_service.py        # save_weight, current_weight
 │   ├── web/
 │   │   ├── state.py                 # Глобальное состояние (_pending, _sync_tasks)
 │   │   ├── templates/               # 6 Jinja2-шаблонов + __init__.py
@@ -352,7 +380,8 @@ running-coach/
 │   ├── env.py
 │   ├── script.py.mako
 │   └── versions/                    # Миграции (fresh baseline f75d2362cf9f)
-├── docs/                            # 13 документов
+├── docs/                            # Документация (см. таблицу в CLAUDE.md)
+│   ├── coach/                       #   DEV_PLAN.md (нормативный план) + ARCHITECTURE.md (ADR коуча)
 │   ├── ARCHITECTURE.md
 │   ├── CODE_GUIDELINES.md
 │   ├── API_ROUTES_GUIDE.md
@@ -380,7 +409,7 @@ running-coach/
 ├── AGENTS.md                        # Контекст для ИИ‑агента
 ├── BACKLOG.md                       # Парковка TODO/идей/вопросов
 ├── PROJECT_AUDIT.md                 # Аудит и план рефакторинга
-└── decision_module_design.md        # Архитектура модуля аналитики
+└── decision_module_design.md        # SUPERSEDED — историческая деривация (норматив: docs/coach/DEV_PLAN.md)
 ```
 
 ---
@@ -418,13 +447,22 @@ running-coach/
 - `/weight <кг>` – ручной ввод веса (например, `/weight 75.5`)
 - `/login_info` – показать email для входа в веб-интерфейс
 - `/reset_password` – сменить пароль (бот показывает 2 сек и удаляет)
-- `/delete_me` – удалить все данные пользователя (тренировки, метрики, настройки)
+- `/verdict` – вердикт коуча по запросу: состояние + назначение тренировки через границу безопасности
+- `/coach_settings` – уровень инициативы коуча (🔕 выкл / 🔈 минимум / 🔔 обычная / 📣 максимум)
+- `/delete_me` – удалить все данные пользователя; `/delete_me_confirm` – подтверждение (5 минут)
 - `/cancel` – отмена текущего диалога (ConversationHandler)
+
+**Свободный текст** (не команда) — чат с ИИ-коучем: вопросы о состоянии, самочувствии,
+плане («что мне сегодня делать?»). Лимит 40 LLM-ходов/день; без LLM-бэкенда бот отвечает
+детерминированной карточкой состояния.
 
 ### Обратная связь по тренировкам
 - **Оценка 0–10** – пользователь оценивает каждую новую тренировку по шкале сложности
 - **Inline‑кнопки** – два ряда (0‑5 и 6‑10) после импорта тренировки
 - **Эмодзи‑обратная связь**: 0=😴, 1=😌, 2=🙂, 3=😐, 4=😅, 5=💪, 6=😤, 7=🥵, 8=😵, 9=💀, 10=⚰️
+- **Боль (колено)** – после тапа RPE то же сообщение спрашивает «Колено?»
+  (🚫 не беспокоило / 🟡 немного / 🔴 мешало), при боли — фаза (старт/середина/конец/после).
+  Хороший день = 2 тапа. Боль ≥5/10 → коуч назначает отдых (граница безопасности).
 - **Одна оценка на тренировку** – нельзя переоценить после сохранения
 - **Уведомления** – при автосинхронизации и ручном `/sync`
 
@@ -435,6 +473,12 @@ running-coach/
   - Если данных **нет** – проверка каждые 2 часа (12:00, 14:00, 16:00, 18:00)
   - Ночью (0:00–8:00) и после 20:00 уведомления **не отправляются** (пользователь спит)
   - При отсутствии данных – сообщение «🌙 Нет данных о восстановлении — используй /sync»
+- **Утренний вердикт коуча** – 09:30 (гейт: инициатива «обычная» или «максимум»);
+  состояние + назначение тренировки, LLM-проза при доступном бэкенде
+- **Вечерний вопрос о самочувствии** – 21:00 (только «максимум»): «Колено сегодня?»
+  → wellness_reports; пропускается, если боль уже записана из тренировки
+- **Разбор тренировки** – после каждой синхронизации новой тренировки (гейт: инициатива ≠ выкл)
+- **Еженедельная проверка max_hr** – понедельник 10:05 (предложение снизить, кулдаун 30 дней)
 - **Безопасность пароля** – сообщение с паролем Coros автоматически удаляется через 2 секунды
 
 ---
@@ -460,9 +504,9 @@ running-coach/
 - **LTHR** – порог лактата (ЧСС)
 - **Stamina** – уровень выносливости
 
-### Метрики здоровья — аналитические тренды (планируется, Sprint 21+)
+### Метрики здоровья — аналитические тренды (частично в коуче; развитие — C8+, docs/coach/DEV_PLAN.md)
 
-> ⚠️ **Не реализовано.** Generic-хелперы трендов (slope, EWMA, MA) есть в `analytics_helpers.py`, но конкретные расчёты VO₂max/LTHR/Stamina/Performance trend не реализованы. Запланированы в рамках модуля аналитики (`src/coach/`, Sprint 21+).
+> ⚠️ **Не реализовано.** Generic-хелперы трендов (slope, EWMA, MA) есть в `analytics_helpers.py`, но конкретные расчёты VO₂max/LTHR/Stamina/Performance trend не реализованы. Тренды VO2max/веса/темпа уже считает скилл `progress` (`src/coach/skills/progress.py`); выделенные веб-графики трендов — в рамках C8+ (`docs/coach/DEV_PLAN.md`).
 
 Данные для расчётов загружаются через внешние эндпоинты Coros API `/dashboard/query` и `/analyse/dayDetail/query` (за последние 180 дней, инкрементально).
 
@@ -500,7 +544,21 @@ LOG_FORMAT=text                  # Формат: text или json
 LOGS_DIR=logs                    # Папка логов
 SLOW_REQUEST_MS=1000            # Порог медленного запроса для лога
 GITHUB_TOKEN=                    # Токен для пуша в GitHub
+SUDO_PASSWORD=                   # Для bin/backup_db.sh и docker-обёртки (только локально)
+RAW_FILES_DIR=uploads/raw        # Хранилище исходных FIT/TCX
+
+# --- ИИ-коуч ---
+COACH_ENABLED=true               # Рубильник коуча (свободный чат + проактивность)
+ANTHROPIC_API_KEY=               # API-ключ (пусто = ключа нет; тогда работает мост или fallback)
+COACH_LLM_MODEL=claude-opus-5    # Модель API-режима
+COACH_LLM_EFFORT=low             # Глубина рассуждений API-режима
+COACH_LLM_BRIDGE_URL=            # URL LLM-моста (http://host.docker.internal:8765) — прод сейчас
+COACH_LLM_BRIDGE_TOKEN=          # Токен моста (совпадает с .env.bridge)
 ```
+
+Отдельный **`.env.bridge`** (только на хосте, вне git) — конфиг systemd-юнита моста:
+`COACH_LLM_BRIDGE_TOKEN`, `BRIDGE_MODEL` (по умолчанию `sonnet`), `BRIDGE_TIMEOUT`,
+опционально `CLAUDE_CODE_OAUTH_TOKEN` (от `claude setup-token`).
 
 ### Настройки `settings.py` (pydantic-settings, читаются из env)
 
@@ -514,10 +572,33 @@ GITHUB_TOKEN=                    # Токен для пуша в GitHub
 | `password_min_length` | `6` | Минимальная длина пароля |
 | `slow_request_ms` | `1000` | Порог медленного запроса (мс) |
 | `web_app_url` | `""` | URL веб-приложения для CSRF и ссылок из бота |
+| `log_file` | `app.log` | Имя лог-файла |
+| `raw_files_dir` | `uploads/raw` | Хранилище исходных FIT/TCX |
+| `coach_enabled` | `True` | Рубильник коуча |
+| `anthropic_api_key` | `""` | API-ключ Anthropic (пусто = API-режим выключен) |
+| `coach_llm_model` | `claude-opus-5` | Модель API-режима |
+| `coach_llm_effort` | `low` | Глубина рассуждений API-режима |
+| `coach_llm_bridge_url` | `""` | URL LLM-моста (пусто = мост выключен) |
+| `coach_llm_bridge_token` | `""` | Токен LLM-моста |
 
 ### Запуск через Docker Compose (рекомендуется)
 
 3 контейнера: `db` (PostgreSQL 16), `app` (FastAPI/uvicorn), `bot` (Telegram-бот).
+LLM-часть коуча дополнительно требует host-сервис — см. «Системные сервисы (systemd)» ниже.
+
+## 🖥️ Системные сервисы (systemd)
+
+В корне репозитория — три юнита (копируются в `/etc/systemd/system/`):
+
+| Юнит | Что делает |
+|---|---|
+| `running-coach-web.service` | Веб-приложение без Docker (legacy-вариант запуска) |
+| `running-coach-bot.service` | Telegram-бот без Docker (legacy-вариант запуска) |
+| `running-coach-llm-bridge.service` | **LLM-мост коуча** (прод): uvicorn `bin/coach_llm_bridge.py` на :8765, headless Claude Code по подписке; конфиг — `EnvironmentFile=.env.bridge` |
+
+Мост обязателен для LLM-части коуча в текущей конфигурации (API-ключа нет). Управление:
+`sudo systemctl {status|restart} running-coach-llm-bridge`. Правка `bin/coach_llm_bridge.py`
+или `.env.bridge` требует только рестарта юнита, не пересборки контейнеров.
 
 > **Примечание:** `bin/docker.sh` — защищённая обёртка (права 700, пароль из .env). Не отслеживается git — создать вручную по образцу из `.env.example` или использовать `docker compose` напрямую.
 
@@ -583,28 +664,30 @@ python run_telegram_bot.py
 - [x] Мульти-брендовая архитектура (`BaseWatchClient`, `WatchCredential`, `factory.py`)
 - [x] Оценка тренировок 0–10 (Telegram inline + веб-форма)
 - [x] Per-user интервалы синхронизации
-- [x] Рефакторинг: main.py 2776→7, parsers разбиты на 5 файлов (tcx, fit, gps, weather + __init__), telegram разбит на 17 файлов, тонкие роуты
+- [x] Рефакторинг: main.py 2776→7, parsers разбиты на 5 файлов (tcx, fit, gps, weather + __init__), telegram разбит на пакет handlers/jobs, тонкие роуты
 - [x] Пакет `src/analysis/` — модуль анализа тренировок (классификация, сегментация, осцилляции, HR-зоны)
 - [x] Новый алгоритм детекции интервалов: base_pace + pace_gap + HR-lag корреляция
 - [x] Пересчёт тренировок (`POST /session/{id}/reanalyze`) с ручной сменой типа
 - [x] Хранение трекпоинтов (`trackpoints_json`) для повторного анализа
 
 ### ⬜ Запланировано
-- [x] Тесты (120 тестов, реальные TCX/FIT-фикстуры)
+- [x] Тесты (полный набор, реальные TCX/FIT-фикстуры; зелёный без сети и API-ключа)
 - [x] Разбивка models.py + sync_service.py на пакеты
 - [ ] Фильтр по типу тренировки, общая дистанция/время за неделю/месяц
 - [ ] Multi-brand onboarding (выбор бренда при регистрации)
-- [ ] Факторы самочувствия после тренировки
+- [~] Факторы самочувствия — частично в коуче (wellness_reports: боль/крепатура/настроение/сон); полный multi-select — BACKLOG #12
 - [ ] Панель администрирования
-- [x] Модуль коуча — в работе, см. [`docs/coach/DEV_PLAN.md`](docs/coach/DEV_PLAN.md)
+- [x] Гибридный ИИ-коуч — **в проде** (C0–C7, деплой 23.08.2026); осталось C8/C9 — см. [`docs/coach/DEV_PLAN.md`](docs/coach/DEV_PLAN.md)
 
 ---
 
-## 🧠 План развития: гибридный ИИ-коуч
+## 🧠 Гибридный ИИ-коуч (в проде с 23.08.2026)
 
-Главное направление — **гибридный ИИ-тренер в Telegram**: LLM рассуждает и предлагает тренировки,
-детерминированные скиллы поставляют факты (read-only tools), а слой безопасности — непробиваемый
-фильтр поверх (числа для пользователя всегда рендерятся детерминированно).
+**Работает**: LLM рассуждает и предлагает тренировки, детерминированные скиллы поставляют факты
+(read-only tools), слой безопасности — непробиваемый фильтр поверх (числа для пользователя всегда
+рендерятся детерминированно). Реализовано C0–C7: скиллы, граница (clamp), Telegram-интеграция,
+tools, LLM-мост через подписку Claude Code, утренний вердикт и сбор боли. Открыты C8 (LLM-разбор
+тренировки + недельный отчёт) и C9 (сверка документации).
 
 > **Единственный нормативный план разработки — [`docs/coach/DEV_PLAN.md`](docs/coach/DEV_PLAN.md)**
 > (инварианты, чек-листы C0–C9, статусы). Дорожная карта здесь не дублируется.
