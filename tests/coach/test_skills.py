@@ -3,7 +3,7 @@ from datetime import timedelta
 
 from src.coach.config import INJURY_RISK_THRESHOLDS, RHR_BASELINE_MIN_POINTS
 from src.coach.contracts import STATUS_UNKNOWN
-from src.coach.skills import distribution, fatigue, load, progress, recovery, workout
+from src.coach.skills import distribution, fatigue, load, pain, progress, recovery, workout
 from src.coach.skills.base import SKILL_KEYS
 from src.domain.models.base import utcnow
 from tests.coach.conftest import _unique_user
@@ -19,6 +19,7 @@ STATE_SKILLS = {
     "load": load.evaluate,
     "distribution": distribution.evaluate,
     "progress": progress.evaluate,
+    "pain": pain.evaluate,
 }
 
 
@@ -134,3 +135,48 @@ def test_workout_review(athlete_with_history, db_session):
     stranger = _unique_user(db_session)
     res2 = workout.evaluate_session(stranger.id, session.id, db=db_session)
     assert res2.status == STATUS_UNKNOWN  # ownership: чужая сессия не читается
+
+
+def test_pain_skill_levels_and_streak(db_session):
+    """Боль ≥5 → danger; ≥3 → warning; серия ≥3 дней малой боли → warning."""
+    from datetime import timedelta
+
+    from src.coach.config import PAIN_CAUTION_LEVEL, PAIN_STOP_LEVEL
+    from src.models import WellnessReport
+
+    user = _unique_user(db_session)
+    today = utcnow().date()
+    # 3 дня подряд слабая боль (1/10) → warning по серии
+    for i in range(3):
+        db_session.add(WellnessReport(user_id=user.id,
+                                      report_date=today - timedelta(days=i), pain_level=1))
+    db_session.commit()
+    res = pain.evaluate(user.id, db=db_session)
+    assert res.status == "warning"
+    assert res.value == 1
+
+    # Сегодня боль 5/10 → danger
+    rep = db_session.query(WellnessReport).filter_by(
+        user_id=user.id, report_date=today).first()
+    rep.pain_level = PAIN_STOP_LEVEL
+    db_session.commit()
+    res = pain.evaluate(user.id, db=db_session)
+    assert res.status == "danger"
+    assert res.value == PAIN_STOP_LEVEL
+
+
+def test_pain_feeds_safety_signals(db_session):
+    """Боль из wellness доезжает до signals и до вердикта P1 (pain → safety)."""
+    from src.coach.rules.p1_safety import evaluate_safety
+    from src.coach.state import assess_state
+    from src.models import WellnessReport
+
+    user = _unique_user(db_session)
+    db_session.add(WellnessReport(user_id=user.id, report_date=utcnow().date(),
+                                  pain_level=6, pain_location="knee_left"))
+    db_session.commit()
+    state = assess_state(user.id, db=db_session)
+    assert state.signals["pain_level"] == 6
+    verdict = evaluate_safety(state)
+    assert verdict.allow_training is False
+    assert "pain_stop" in verdict.triggered

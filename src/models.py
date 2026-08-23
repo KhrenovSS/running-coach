@@ -4,9 +4,9 @@
 from src.domain.models import (  # noqa: F401
     Base, utcnow, get_engine, SessionLocal, get_db, init_db,
     User, TrainingSession, TrainingFeedback, DeletedTraining,
-    WatchCredential, DailyMetrics, WeightMeasurement,
+    WatchCredential, DailyMetrics, WeightMeasurement, WellnessReport,
     AuthToken, AuditEvent,
-    Recommendation, PredictionLog, UserModel, Lesson,
+    Recommendation, PredictionLog, UserModel, Lesson, CoachMessage,
 )
 
 # Deprecated: использовать src.services.user_service

@@ -3,15 +3,15 @@ from src.domain.models.base import Base, utcnow, get_engine, SessionLocal, get_d
 from src.domain.models.user import User
 from src.domain.models.training import TrainingSession, TrainingFeedback, DeletedTraining
 from src.domain.models.watch import WatchCredential
-from src.domain.models.health import DailyMetrics, WeightMeasurement
+from src.domain.models.health import DailyMetrics, WeightMeasurement, WellnessReport
 from src.domain.models.auth import AuthToken
 from src.domain.models.audit import AuditEvent
-from src.domain.models.coach import Recommendation, PredictionLog, UserModel, Lesson
+from src.domain.models.coach import Recommendation, PredictionLog, UserModel, Lesson, CoachMessage
 
 __all__ = [
     'Base', 'utcnow', 'get_engine', 'SessionLocal', 'get_db', 'init_db',
     'User', 'TrainingSession', 'TrainingFeedback', 'DeletedTraining',
-    'WatchCredential', 'DailyMetrics', 'WeightMeasurement',
+    'WatchCredential', 'DailyMetrics', 'WeightMeasurement', 'WellnessReport',
     'AuthToken', 'AuditEvent',
-    'Recommendation', 'PredictionLog', 'UserModel', 'Lesson',
+    'Recommendation', 'PredictionLog', 'UserModel', 'Lesson', 'CoachMessage',
 ]

@@ -52,3 +52,30 @@ class WeightMeasurement(Base):
     measured_at = Column(DateTime(timezone=True), default=utcnow)
 
     user = relationship("User", back_populates="weight_measurements")
+
+
+class WellnessReport(Base):
+    """Вечерний самоотчёт — в т.ч. в дни без тренировки (evening self-report).
+
+    Боль приходит и в дни отдыха — привязка к сессии её потеряла бы (DEV_PLAN §6).
+    sleep_quality_self закрывает дыру, из-за которой sleep_quality удалён из
+    READINESS_WEIGHTS (нет источника данных сна с часов).
+    """
+    __tablename__ = 'wellness_reports'
+    __table_args__ = (
+        # Составной индекс не нужен: UNIQUE уже даёт индекс (user_id, report_date).
+        # (No separate composite index — the UNIQUE constraint already provides one.)
+        UniqueConstraint('user_id', 'report_date', name='uq_wellness_user_date'),
+    )
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    report_date = Column(Date, nullable=False)
+    pain_level = Column(Integer, nullable=True)          # 0–10
+    pain_location = Column(String(30), nullable=True)
+    soreness = Column(Integer, nullable=True)            # мышечная крепатура 0–10
+    mood = Column(Integer, nullable=True)                # 0–10
+    sleep_quality_self = Column(Integer, nullable=True)  # субъективное качество сна 0–10
+    note = Column(String(300), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    user = relationship("User")

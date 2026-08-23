@@ -2,7 +2,7 @@
 # По decision_module_design.md §11. Все таблицы per-user (FK user_id, CASCADE).
 
 from sqlalchemy import (
-    Column, Integer, Float, String, DateTime, Date, JSON, Boolean,
+    Column, Integer, Float, String, Text, DateTime, Date, JSON, Boolean,
     ForeignKey, UniqueConstraint, Index,
 )
 
@@ -27,6 +27,12 @@ class Recommendation(Base):
     confidence = Column(Float, nullable=True)
     status = Column(String(20), default='proposed')         # proposed/accepted/done/skipped
     linked_session_id = Column(Integer, ForeignKey('training_sessions.id', ondelete='SET NULL'), nullable=True)
+    # C3 (DEV_PLAN §6): наблюдаемость гибрида — предложение LLM ДО урезания + вердикт.
+    # (Hybrid observability: the raw proposal BEFORE clamp + the safety verdict.)
+    proposal_json = Column(JSON, nullable=True)             # WorkoutProposal до clamp
+    safety_json = Column(JSON, nullable=True)               # SafetyVerdict на момент решения
+    clamped = Column(Boolean, nullable=True)                # safety урезал предложение
+    source = Column(String(20), nullable=True)              # llm | fallback
 
 
 class PredictionLog(Base):
@@ -73,3 +79,21 @@ class Lesson(Base):
     adjustment_json = Column(JSON, nullable=True)          # как корректировать поведение
     source = Column(String(20), nullable=True)            # user/auto
     active = Column(Boolean, default=True)
+
+
+class CoachMessage(Base):
+    """История диалога с коучем + учёт стоимости LLM (chat history + cost accounting)."""
+    __tablename__ = 'coach_messages'
+    __table_args__ = (
+        Index('ix_coach_messages_user_created', 'user_id', 'created_at'),
+    )
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    role = Column(String(10), nullable=False)               # user/assistant/system
+    kind = Column(String(20), nullable=False, default='chat', server_default='chat')  # chat/morning/evening/review/plan/weekly
+    text = Column(Text, nullable=False)
+    meta_json = Column(JSON, nullable=True)                 # usage/cache/tool_calls/stop_reason
+    tokens_in = Column(Integer, nullable=True)
+    tokens_out = Column(Integer, nullable=True)
+    cost_usd = Column(Float, nullable=True)

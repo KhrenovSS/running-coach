@@ -2,6 +2,27 @@
 
 All notable changes to this project are tracked here.
 
+## [23.08.2026] — C3: данные боли/wellness/чата + скилл pain
+
+### Added
+- **Миграция `p9q0r1s2t3u4`** (аддитивная; db-safety-reviewer: GO):
+  `training_feedback` += `pain_level/pain_location/pain_phase` (боль по тренировке,
+  фаза start/middle/end/after/none — «дискомфорт первые 400–800 м»); новая
+  `wellness_reports` (вечерний самоотчёт: боль/крепатура/настроение/сон, UNIQUE
+  user+date); новая `coach_messages` (история диалога + токены/стоимость LLM);
+  `recommendations` += `proposal_json/safety_json/clamped/source` (предложение LLM
+  ДО урезания — метрика дрейфа). ⚠️ downgrade необратимо удаляет данные о боли.
+  **Накат на прод — отдельным шагом**: backup → stop bot → up app → start bot.
+- **`src/coach/skills/pain.py`** — боль как ранний датчик: max по дням из
+  feedback+wellness, уровень + серия дней; ≥5 → danger, ≥3 или серия ≥3 дней →
+  warning. Подключён в SKILL_KEYS/AthleteState; боль доезжает до signals и
+  триггеров P1 (pain_stop/pain_caution) — проверено тестом «боль 6/10 →
+  allow_training=False».
+
+### Fixed
+- По ревью db-safety: `CoachMessage.kind` — server_default зеркален модели;
+  убран дубль-индекс `ix_wellness_user_date` (UNIQUE уже даёт индекс).
+
 ## [23.08.2026] — C2: граница безопасности — P1, clamp, рендер, fallback
 
 ### Added

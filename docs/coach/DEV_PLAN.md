@@ -187,10 +187,14 @@ Index(user_id, created_at)); `recommendations` += `proposal_json`, `safety_json`
   поправить `tests/skills/test_scaffold.py`; обновить дерево в `docs/ARCHITECTURE.md`.
   Проверка: `grep -rn "coach.engine|coach.rules.p2|coach.rules.p5" src/ tests/` → 0; табличный
   тест clamp (все триггеры × «interval 10×400 Z5» → разрешённое, `clamped=True`).
-- ⬜ **C3 — Миграция** ⚠️ DATA-SAFETY: модели + миграция §6. **Перед накатом: предупредить
-  владельца → `bin/backup_db.sh` → `docker compose stop bot` → build/up app → start bot;
-  правки моделей прогнать через субагента `db-safety-reviewer`.** Проверка: pytest в SQLite и
-  `TEST_PG_URL` (alembic head, дрейфа нет); count(training_feedback) до/после совпадает.
+- ✅ **C3 — Миграция** (код; ⚠️ накат на прод — отдельный шаг, см. ниже): модели + миграция §6 +
+  скилл `pain` (SKILL_KEYS += pain, боль доезжает до signals и P1). db-safety-reviewer: **GO**
+  (server_default kind + дубль-индекс поправлены по ревью). Проверка: 282 теста в SQLite и
+  `TEST_PG_URL` (alembic head, дрейфа нет).
+- ⬜ 🛑 **Накат C3 на прод** (по подтверждению владельца): `bin/backup_db.sh` →
+  `docker compose stop bot` → `docker compose build app && docker compose up -d app` (миграция
+  применится на старте) → проверить `alembic_version=p9q0r1s2t3u4` и count(training_feedback)
+  до/после → `docker compose start bot`. Можно совместить с деплоем C4.
 - ⬜ **C4 — Telegram без LLM**: `handlers/{pain,coach}.py`, `jobs/coach_evening.py`,
   `skills/pain.py`; роутер вместо catch-all в `main.py`; `on_workout_completed` в
   `sync/activities.py` под `try/except CoachError` (падение коуча не роняет синк).

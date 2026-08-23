@@ -94,6 +94,10 @@ class TrainingFeedback(Base):
     rating = Column(Integer, nullable=False)  # 0–10 (тяжесть тренировки)
     notes = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
+    # Трекинг боли (C3, DEV_PLAN §6) — ранний датчик для колена (pain tracking)
+    pain_level = Column(Integer, nullable=True)         # 0–10
+    pain_location = Column(String(30), nullable=True)   # knee_left/knee_right/...
+    pain_phase = Column(String(20), nullable=True)      # start/middle/end/after/none
 
     session = relationship("TrainingSession")
     user = relationship("User")

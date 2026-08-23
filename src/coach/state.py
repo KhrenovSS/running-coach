@@ -18,7 +18,7 @@ from src.coach.config import (
     READINESS_WEIGHTS,
 )
 from src.coach.contracts import AthleteState, SkillResult
-from src.coach.skills import distribution, fatigue, load, progress, recovery
+from src.coach.skills import distribution, fatigue, load, pain, progress, recovery
 from src.coach.util import clamp_value, effective_training_type, safe_div
 from src.services.recovery_view import hrv_status, rhr_anomaly
 from src.services.repositories import FeedbackRepository, TrainingRepository
@@ -119,13 +119,15 @@ def _hrv_very_low_days(user_id: int, *, db: Session) -> int:
     return count
 
 
-def _missing(dm, rpe_coverage: float | None) -> list[str]:
+def _missing(dm, rpe_coverage: float | None, pain_known: bool) -> list[str]:
     """Чего система не знает — честность для LLM (what the system does not know)."""
-    missing = ["sleep", "stress", "per_session_tss", "pain"]  # pain — до миграции C3
+    missing = ["sleep", "stress", "per_session_tss"]
     if dm is None or dm.avg_sleep_hrv is None:
         missing.append("hrv")
     if rpe_coverage is None or rpe_coverage < 0.5:
         missing.append("rpe")
+    if not pain_known:
+        missing.append("pain")
     return missing
 
 
@@ -146,6 +148,7 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
         "load": load.evaluate(user_id, db=db),
         "distribution": distribution.evaluate(user_id, db=db),
         "progress": progress.evaluate(user_id, db=db),
+        "pain": pain.evaluate(user_id, db=db),
     }
 
     hrv_st = None
@@ -191,7 +194,7 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
         rpe_coverage = len(ratings) / n_sessions
 
     # Сырьё для evaluate_safety(state) — чистая функция без db (DEV_PLAN §4).
-    # pain_level/pain_days появятся в C4 (после миграции C3) — до тех пор None/0.
+    pain_res = skills["pain"]
     signals = {
         "hrv_status": hrv_st,
         "rhr_status": (rhr_anomaly(dm.rhr, baseline_rhr)["status"]
@@ -200,8 +203,8 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
         "ati_cti_ratio": safe_div(dm.ati, dm.cti) if dm else None,
         "acwr_ratio": acwr["ratio"],
         "consecutive_hard_days": hard_days,
-        "pain_level": None,
-        "pain_days": 0,
+        "pain_level": pain_res.value,
+        "pain_days": pain.consecutive_pain_days(user_id, db=db) if pain_res.value is not None else 0,
     }
 
     return AthleteState(
@@ -218,6 +221,6 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
         progress={"message": skills["progress"].message} if skills["progress"].value is not None else {},
         skills=skills,
         data_confidence=data_confidence,
-        missing=_missing(dm, rpe_coverage),
+        missing=_missing(dm, rpe_coverage, pain_res.value is not None),
         signals=signals,
     )

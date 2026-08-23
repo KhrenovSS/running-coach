@@ -21,9 +21,9 @@ class SkillFn(Protocol):
 
 
 # State-скиллы, входящие в AthleteState.skills. Порядок стабилен (детерминированный
-# вывод для LLM). `pain` добавится в C4 — нужны поля боли в БД (миграция C3).
-# (State skills aggregated into AthleteState; `pain` joins in C4 after the migration.)
-SKILL_KEYS: Final[tuple[str, ...]] = ("fatigue", "recovery", "load", "distribution", "progress")
+# вывод для LLM). (State skills aggregated into AthleteState; stable order.)
+SKILL_KEYS: Final[tuple[str, ...]] = ("fatigue", "recovery", "load", "distribution",
+                                      "progress", "pain")
 
 
 def unknown_result(key: str, reason: str = "no data") -> SkillResult:
