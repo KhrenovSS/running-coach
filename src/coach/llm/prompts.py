@@ -79,10 +79,19 @@ def build_messages(history: list[dict], today_block: str, user_message: str) -> 
     return messages
 
 
-def build_today_block(state_json: dict, verdict_json: dict, today_iso: str) -> str:
-    """Сегодняшний контекст — единственное место с датой (the only dated block)."""
-    return (f"Сегодня: {today_iso}\n"
-            f"Состояние (get_athlete_state):\n"
-            f"{json.dumps(state_json, ensure_ascii=False, sort_keys=True)}\n"
-            f"Границы (get_safety_verdict):\n"
-            f"{json.dumps(verdict_json, ensure_ascii=False, sort_keys=True)}")
+def build_today_block(state_json: dict, verdict_json: dict, today_iso: str,
+                      extras: dict[str, Any] | None = None) -> str:
+    """Сегодняшний контекст — единственное место с датой (the only dated block).
+
+    extras — предзагруженные данные (recent_workouts, weekly_summary): сокращают
+    tool round-trip'ы в API-режиме и компенсируют неактивный tool-цикл в мосте.
+    """
+    parts = [f"Сегодня: {today_iso}",
+             "Состояние (get_athlete_state):",
+             json.dumps(state_json, ensure_ascii=False, sort_keys=True),
+             "Границы (get_safety_verdict):",
+             json.dumps(verdict_json, ensure_ascii=False, sort_keys=True)]
+    for key, value in (extras or {}).items():
+        parts.append(f"{key}:")
+        parts.append(json.dumps(value, ensure_ascii=False, sort_keys=True))
+    return "\n".join(parts)

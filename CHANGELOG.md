@@ -2,6 +2,37 @@
 
 All notable changes to this project are tracked here.
 
+## [23.08.2026] — LLM-мост через подписку Claude Code + деплой C3–C6
+
+### Deployed
+- **C3–C6 на проде** (одобрено владельцем): backup 2,9M → stop bot → build →
+  миграция `p9q0r1s2t3u4` применена (данные целы: 4/36/2 без изменений) →
+  бот на новом образе (вечерний опрос запланирован, WARNING детерминированного
+  режима в логе). NB: `docker compose start` НЕ пересоздаёт контейнер из нового
+  образа — нужен `up -d` (поймано на этом деплое; чек-лист поправить — BACKLOG).
+
+### Added
+- **LLM-мост через подписку** (у владельца нет API-ключа — только корпоративная
+  подписка Claude Code; решение 23.08.2026): `bin/coach_llm_bridge.py` —
+  host-сервис (FastAPI, порт 8765, X-Bridge-Token), вызывает headless
+  `claude -p --output-format json --max-turns 1 --tools ""` (инструменты CLI
+  отключены — чистый вызов модели); `running-coach-llm-bridge.service` —
+  systemd-юнит (EnvironmentFile=.env.bridge, НЕ в git).
+- **`BridgeLLM`** — третья реализация `CoachLLM`; `get_llm()`: ключ → мост →
+  NullLLM (появится личный ключ — мост отключается одной строкой .env).
+  Ошибки моста → LLMUnavailableError → детерминированный fallback.
+  `extract_json` — устойчивый парс (фенсы/преамбула).
+- **Обогащение контекста**: today-блок теперь всегда включает последние 5
+  тренировок и недельную сводку (в API-режиме сокращает tool round-trip'ы;
+  в режиме моста tool-цикл неактивен — это его основной источник фактов).
+- compose: `extra_hosts host.docker.internal` для бота; настройки
+  `COACH_LLM_BRIDGE_URL/TOKEN`. Тесты моста на httpx.MockTransport (318 всего).
+
+### Known limitations (режим моста)
+- Tool-цикл агента неактивен (headless CLI не отдаёт невыполненный tool_use);
+  prompt-cache между ходами не гарантирован; расходуются лимиты подписки
+  (BRIDGE_MODEL=sonnet по умолчанию — беречь лимиты).
+
 ## [23.08.2026] — C6: LLM за интерфейсом (дефолт — NullLLM)
 
 ### Added

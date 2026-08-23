@@ -99,8 +99,17 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
     verdict = evaluate_safety(state)
     state_json = jsonable(state)
     state_json.pop("signals", None)
+    # Обогащение: меньше tool round-trip'ов в API-режиме; в режиме моста tool-цикл
+    # неактивен — это его основной источник фактов (context enrichment).
+    from src.coach.tools.registry import run_tool
+    extras = {
+        "recent_workouts (get_recent_workouts)": run_tool(
+            "get_recent_workouts", {"limit": 5}, user_id=user_id, db=db),
+        "weekly_summary (get_weekly_summary)": run_tool(
+            "get_weekly_summary", {"weeks": 4}, user_id=user_id, db=db),
+    }
     today_block = build_today_block(state_json, jsonable(verdict),
-                                    _date.today().isoformat())
+                                    _date.today().isoformat(), extras=extras)
     system = build_system_blocks(_profile(user))
     messages = build_messages(_history(user_id, db=db), today_block, message)
 

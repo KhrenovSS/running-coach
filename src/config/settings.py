@@ -31,5 +31,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     coach_llm_model: str = "claude-opus-5"
     coach_llm_effort: str = "low"          # low для чата; medium для плана (C7+)
+    # Мост через подписку Claude Code (subscription bridge; пусто = не используется)
+    coach_llm_bridge_url: str = ""
+    coach_llm_bridge_token: str = ""
 
     model_config = {"env_prefix": ""}

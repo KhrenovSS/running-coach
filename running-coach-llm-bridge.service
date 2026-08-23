@@ -1,0 +1,19 @@
+[Unit]
+Description=Running Coach LLM Bridge (headless Claude Code, subscription auth)
+After=network.target
+
+[Service]
+Type=simple
+User=nimda
+WorkingDirectory=/home/nimda/projects/running-coach
+# .env.bridge (НЕ в git): COACH_LLM_BRIDGE_TOKEN=..., BRIDGE_MODEL=sonnet,
+# CLAUDE_CODE_OAUTH_TOKEN=... (от `claude setup-token`)
+EnvironmentFile=/home/nimda/projects/running-coach/.env.bridge
+# PATH должен содержать claude CLI (~/.local/bin)
+Environment=PATH=/home/nimda/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/nimda/projects/running-coach/.venv/bin/uvicorn bin.coach_llm_bridge:app --host 0.0.0.0 --port 8765
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -51,6 +51,9 @@ services:
     environment:
       DATABASE_URL: postgresql://running_coach:${POSTGRES_PASSWORD}@db:5432/running_coach
       TZ: Europe/Moscow
+    # Доступ к LLM-мосту на хосте (host-side subscription bridge, DEV_PLAN §8)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Бот тоже синкает активности (sync_runner) — сырые FIT должны жить на хосте,
       # а не умирать с контейнером (bot also syncs — raw FITs must persist on the host)

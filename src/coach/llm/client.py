@@ -40,11 +40,17 @@ class CoachLLM(Protocol):
 
 
 def get_llm() -> CoachLLM:
-    """Фабрика: AnthropicLLM при наличии ключа, иначе NullLLM (keyed → real, else null)."""
+    """Фабрика по приоритету: API-ключ → мост подписки → NullLLM.
+
+    (Factory priority: API key → subscription bridge → NullLLM.)
+    """
     from src.config import settings
 
     if settings.anthropic_api_key:
         from src.coach.llm.anthropic_client import AnthropicLLM
         return AnthropicLLM()
+    if settings.coach_llm_bridge_url:
+        from src.coach.llm.bridge_client import BridgeLLM
+        return BridgeLLM()
     from src.coach.llm.null import NullLLM
     return NullLLM()
