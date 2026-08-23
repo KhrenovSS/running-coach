@@ -5,9 +5,12 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from src.coach import orchestrator
 from src.config import settings
 from src.models import SessionLocal, User
+from src.telegram.utils import send_md_safe
 from src.utils.logger import get_logger
 
 logger = get_logger("telegram.jobs.coach_morning")
@@ -16,26 +19,45 @@ MORNING_PROMPT = ("Утренний вердикт: что мне сегодня
                   "отдыхать, и если бежать, то как?")
 
 
+def _morning_turn_blocking(user_id: int) -> str | None:
+    """Sync-обёртка: сессия живёт только внутри треда (session never crosses threads).
+
+    None — инициатива пользователя ниже normal (вердикт не шлём).
+    """
+    db = SessionLocal()
+    try:
+        if orchestrator.get_initiative(user_id, db=db) not in ("normal", "high"):
+            return None
+        return orchestrator.handle_chat(user_id, MORNING_PROMPT,
+                                        db=db, kind="morning").text
+    finally:
+        db.close()
+
+
 async def morning_verdict_job(context) -> None:
     """Разослать утренний вердикт активным пользователям (send morning verdicts)."""
     if not settings.coach_enabled:
         return
     db = SessionLocal()
     try:
-        users = db.query(User).filter(
+        # (user_id, chat_id) — скаляры, дальше сессия не нужна (scalars only)
+        targets = [(u.id, u.telegram_chat_id) for u in db.query(User).filter(
             User.telegram_chat_id.isnot(None),
             User.is_active.is_(True),
-        ).all()
-        for user in users:
-            if orchestrator.get_initiative(user.id, db=db) not in ("normal", "high"):
-                continue
-            try:
-                reply = orchestrator.handle_chat(user.id, MORNING_PROMPT,
-                                                 db=db, kind="morning")
-                await context.bot.send_message(chat_id=user.telegram_chat_id,
-                                               text=reply.text, parse_mode="Markdown")
-            except Exception as e:  # джоба не должна умирать на одном пользователе
-                logger.error("Morning verdict failed for user=%s: %s",
-                             user.id, e, exc_info=True)
+        ).all()]
     finally:
         db.close()
+
+    for user_id, chat_id in targets:
+        try:
+            text = await asyncio.to_thread(_morning_turn_blocking, user_id)
+            if text is None:
+                continue
+
+            async def _send(t, **kw):
+                return await context.bot.send_message(chat_id=chat_id, text=t, **kw)
+
+            await send_md_safe(_send, text)
+        except Exception as e:  # джоба не должна умирать на одном пользователе
+            logger.error("Morning verdict failed for user=%s: %s",
+                         user_id, e, exc_info=True)

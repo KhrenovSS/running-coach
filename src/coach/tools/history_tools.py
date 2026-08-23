@@ -21,9 +21,12 @@ MAX_POINTS = 60     # даунсэмпл рядов (series downsampling cap)
 
 
 def _session_brief(s: TrainingSession, rpe: int | None, pain: int | None) -> dict:
+    today = datetime.now(timezone.utc).date()
     return {
         "session_id": s.id,
         "date": s.begin_ts.date().isoformat() if s.begin_ts else None,
+        # 0 = сегодня, 1 = вчера — LLM считает относительные даты ТОЛЬКО отсюда
+        "days_ago": (today - s.begin_ts.date()).days if s.begin_ts else None,
         "type": effective_training_type(s),
         "km": s.total_distance_km,
         "duration_min": s.duration_minutes,

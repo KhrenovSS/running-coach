@@ -172,6 +172,8 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
         last_workout = {
             "session_id": s.id,
             "date": s.begin_ts.date().isoformat() if s.begin_ts else None,
+            "days_ago": ((datetime.now(timezone.utc).date() - s.begin_ts.date()).days
+                         if s.begin_ts else None),
             "type": effective_training_type(s),
             "km": s.total_distance_km,
             "duration_min": s.duration_minutes,

@@ -74,3 +74,28 @@ def test_agent_schema_violation_raises(empty_user, db_session):
     with pytest.raises(CoachError, match="валидац"):
         run_turn(llm, user_id=empty_user.id, db=db_session,
                  system=[], messages=[{"role": "user", "content": "?"}])
+
+
+def test_rest_proposal_with_zero_volumes_validates():
+    """Инцидент 23.08: sonnet заполнил нули для rest → схема отвергала → fallback.
+
+    0 → None (нет объёма); CoachTurn валидируется.
+    """
+    from src.coach.llm.schemas import CoachTurn
+
+    turn = CoachTurn.model_validate({
+        "message": "Сегодня отдых.",
+        "proposal": {"workout_type": "rest", "target_zone": 1,
+                     "duration_min": 0, "distance_km": 0,
+                     "structure": None, "rationale": []},
+        "followup_question": None, "log_suggestion": None,
+    })
+    assert turn.proposal.duration_min is None
+    assert turn.proposal.distance_km is None
+
+    # null-зона для rest (второй live-случай 23.08) → Z1
+    turn2 = CoachTurn.model_validate({
+        "message": "Отдых.", "proposal": {"workout_type": "rest", "target_zone": None},
+        "followup_question": None, "log_suggestion": None,
+    })
+    assert turn2.proposal.target_zone == 1

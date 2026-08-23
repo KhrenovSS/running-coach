@@ -79,3 +79,18 @@ def test_key_rules_digest_stable():
     from src.coach.knowledge.loader import key_rules_digest
     a, b = key_rules_digest(), key_rules_digest()
     assert a == b and "weekly_volume_increase_max_pct" in a
+
+
+def test_session_brief_has_days_ago(athlete_with_history, db_session):
+    """Инцидент 23.08: LLM назвал сегодняшнюю тренировку «вчерашней».
+
+    days_ago (0 = сегодня) — единственный источник относительных дат для модели.
+    """
+    result = run_tool("get_recent_workouts", {"limit": 5},
+                      user_id=athlete_with_history.id, db=db_session)
+    newest = result["workouts"][0]
+    assert newest["days_ago"] == 0
+
+    from src.coach.state import assess_state
+    state = assess_state(athlete_with_history.id, db=db_session)
+    assert state.last_workout["days_ago"] == 0

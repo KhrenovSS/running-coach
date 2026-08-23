@@ -8,17 +8,34 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class WorkoutProposalIn(BaseModel):
     """Предложение тренировки от LLM — до границы safety (LLM proposal, pre-clamp)."""
     workout_type: Literal["rest", "recovery", "easy", "long", "tempo", "interval", "race"]
-    target_zone: int = Field(ge=1, le=5)
+    target_zone: int = Field(default=1, ge=1, le=5)
     duration_min: int | None = Field(default=None, ge=10, le=240)
     distance_km: float | None = Field(default=None, ge=1, le=60)
     structure: str | None = Field(default=None, max_length=200)
     rationale: list[str] = Field(default_factory=list, max_length=5)
+
+    @field_validator("target_zone", mode="before")
+    @classmethod
+    def _zone_null_is_one(cls, v):
+        """null/0 → 1: для rest модели шлют null-зону — семантически Z1 (инцидент 23.08)."""
+        return 1 if v in (None, 0, "0") else v
+
+    @field_validator("duration_min", "distance_km", mode="before")
+    @classmethod
+    def _zero_is_none(cls, v):
+        """0 → None: модели заполняют нули для rest — семантически «нет объёма».
+
+        (Zero means no volume — models emit zeros for rest proposals; incident 23.08.)
+        """
+        if v in (0, 0.0, "0"):
+            return None
+        return v
 
 
 class LogSuggestion(BaseModel):

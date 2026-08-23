@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+import asyncio
+
+import telegram.error
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
@@ -15,7 +18,7 @@ from src.models import SessionLocal
 from src.coach import orchestrator
 from src.telegram.handlers.weight import handle_weight_message
 from src.telegram.state import _awaiting_weight, _awaiting_weight_lock
-from src.telegram.utils import get_user
+from src.telegram.utils import get_user, send_md_safe
 from src.utils.logger import get_logger
 
 logger = get_logger("telegram.handlers.coach")
@@ -33,13 +36,19 @@ async def cmd_verdict(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "❌ Сначала используй /start чтобы зарегистрироваться.")
         return
-    db = SessionLocal()
     try:
-        text = orchestrator.morning_verdict(user.id, db=db)
-        await update.message.reply_text(text, parse_mode="Markdown")
-    except CoachError as e:
+        text = await asyncio.to_thread(_verdict_blocking, user.id)
+        await send_md_safe(update.message.reply_text, text)
+    except (CoachError, telegram.error.TelegramError) as e:
         logger.error("Verdict error for user=%s: %s", user.id, e)
         await update.message.reply_text("😔 Не удалось собрать вердикт.")
+
+
+def _verdict_blocking(user_id: int) -> str:
+    """Sync-обёртка вердикта: сессия живёт только внутри этого треда (thread-local session)."""
+    db = SessionLocal()
+    try:
+        return orchestrator.morning_verdict(user_id, db=db)
     finally:
         db.close()
 
@@ -103,19 +112,28 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(chat_id)
     if not user:
         return
-    db = SessionLocal()
     try:
-        reply = orchestrator.handle_chat(user.id, update.message.text or "", db=db)
+        # to_thread: синхронный LLM-вызов (до ~150с) не должен морозить event loop
+        # всего бота (инцидент 23.08). Сессия БД живёт внутри треда целиком.
+        reply = await asyncio.to_thread(_chat_turn_blocking, user.id,
+                                        update.message.text or "")
         markup = None
         if reply.log_suggestion is not None:
             # Запись боли — только по явному тапу пользователя (log via explicit tap)
             v = reply.log_suggestion.value
             markup = InlineKeyboardMarkup([[InlineKeyboardButton(
                 f"📝 записать дискомфорт {v}/10", callback_data=f"pain:today:{v}")]])
-        await update.message.reply_text(reply.text, parse_mode="Markdown",
-                                        reply_markup=markup)
-    except CoachError as e:
-        logger.error("Coach chat error for user=%s: %s", user.id, e)
-        await update.message.reply_text("😔 Тренер сейчас недоступен.")
+        await send_md_safe(update.message.reply_text, reply.text, reply_markup=markup)
+    except (CoachError, telegram.error.TelegramError) as e:
+        # Последний рубеж: пользователь ВСЕГДА получает ответ (bot must never go silent)
+        logger.error("Coach chat error for user=%s: %s", user.id, e, exc_info=True)
+        await update.message.reply_text("😔 Тренер сейчас недоступен — попробуй ещё раз чуть позже.")
+
+
+def _chat_turn_blocking(user_id: int, text: str, kind: str = "chat"):
+    """Sync-обёртка хода коуча: сессия живёт только внутри этого треда."""
+    db = SessionLocal()
+    try:
+        return orchestrator.handle_chat(user_id, text, db=db, kind=kind)
     finally:
         db.close()

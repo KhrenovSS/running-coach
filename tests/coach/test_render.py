@@ -44,3 +44,41 @@ def test_render_state_card_low_confidence_warns():
     state = AthleteState(user_id=1, data_confidence=0.2)
     text = render_state_card(state)
     assert "Данных мало" in text
+
+
+def test_render_no_unbalanced_markdown():
+    """Инцидент 23.08: одиночный `_` (tired_rate) ломал legacy-Markdown Telegram.
+
+    Вне backticks в карточках не должно быть `_`; `*` — парные.
+    """
+    import re
+
+    from src.coach.contracts import SkillResult
+    from src.coach.render import render_state_card
+
+    state = AthleteState(user_id=1, data_confidence=0.9, skills={
+        "fatigue": SkillResult(key="fatigue", status="warning", value=-26,
+                               unit="tired_rate", confidence=0.8),
+        "load": SkillResult(key="load", status="danger", value=1.68, unit="ratio"),
+    })
+    text = render_state_card(state)
+    outside_code = re.sub(r"`[^`]*`", "", text)   # вырезать code-entities
+    assert "_" not in outside_code, f"голый _ вне backticks: {outside_code!r}"
+    assert outside_code.count("*") % 2 == 0, "непарные * в карточке"
+
+
+def test_render_earliest_in_local_timezone(monkeypatch):
+    """Инцидент 23.08: earliest показывался в UTC (17:59 вместо 20:59 мск)."""
+    from datetime import datetime
+
+    from src.config import settings
+
+    monkeypatch.setattr(settings, "timezone", "Europe/Moscow")
+    state = _state()
+    state.recovery_hours_left = 1.0
+    verdict = evaluate_safety(state, now=datetime(2026, 8, 23, 16, 59))
+    p, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2), verdict, state,
+                 now=datetime(2026, 8, 23, 16, 59))
+    text = render_prescription(p)
+    assert "20:59" in text     # 17:59 UTC → 20:59 MSK
+    assert "17:59" not in text

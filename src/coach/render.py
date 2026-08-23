@@ -6,7 +6,11 @@
 
 from __future__ import annotations
 
+from datetime import timezone as _tz
+from zoneinfo import ZoneInfo
+
 from src.coach.contracts import AthleteState, Prescription, SafetyVerdict, SkillResult
+from src.config import settings
 
 _TYPE_LABEL = {
     "rest": "🛌 Отдых",
@@ -33,7 +37,10 @@ def render_prescription(p: Prescription) -> str:
             parts.append(p.target["structure"])
         lines.append(" · ".join(parts))
     if p.earliest is not None and p.workout_type != "rest":
-        lines.append(f"Интенсив — не раньше {p.earliest:%d.%m %H:%M}")
+        # naive-UTC → часовой пояс пользователя (инцидент 23.08: показывали UTC)
+        earliest = p.earliest if p.earliest.tzinfo else p.earliest.replace(tzinfo=_tz.utc)
+        earliest = earliest.astimezone(ZoneInfo(settings.timezone))
+        lines.append(f"Интенсив — не раньше {earliest:%d.%m %H:%M}")
     if p.clamped:
         lines.append("")
         lines.append(render_safety_note(p.safety))
@@ -50,7 +57,8 @@ def _skill_line(sr: SkillResult) -> str:
     icon = _STATUS_ICON.get(sr.status, "⚪")
     val = ""
     if sr.value is not None:
-        val = f" — {sr.value}{(' ' + sr.unit) if sr.unit else ''}"
+        # backticks: внутри code-entity `_` безопасен для legacy-Markdown (инцидент 23.08)
+        val = f" — `{sr.value}{(' ' + sr.unit) if sr.unit else ''}`"
     return f"{icon} {sr.key}{val}"
 
 
