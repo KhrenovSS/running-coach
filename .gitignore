@@ -28,10 +28,12 @@ Thumbs.db
 # Environment
 .env
 .env.local
+.env.bridge
 # bin/: игнорируем по умолчанию, но версионируем ops/backfill-скрипты
 # (ignore bin/ by default, but track ops/backfill scripts — db-safety review 05.08.2026)
 bin/*
 !bin/backup_db.sh
+!bin/coach_llm_bridge.py
 !bin/docker.sh
 !bin/backfill_avg_pace.py
 !bin/backfill_external_ids.py
