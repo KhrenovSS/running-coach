@@ -190,6 +190,20 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
         ratings = FeedbackRepository.ratings_with_sessions(user_id, days=90, db=db)
         rpe_coverage = len(ratings) / n_sessions
 
+    # Сырьё для evaluate_safety(state) — чистая функция без db (DEV_PLAN §4).
+    # pain_level/pain_days появятся в C4 (после миграции C3) — до тех пор None/0.
+    signals = {
+        "hrv_status": hrv_st,
+        "rhr_status": (rhr_anomaly(dm.rhr, baseline_rhr)["status"]
+                       if dm is not None and dm.rhr is not None else None),
+        "recovery_pct": dm.recovery_pct if dm else None,
+        "ati_cti_ratio": safe_div(dm.ati, dm.cti) if dm else None,
+        "acwr_ratio": acwr["ratio"],
+        "consecutive_hard_days": hard_days,
+        "pain_level": None,
+        "pain_days": 0,
+    }
+
     return AthleteState(
         user_id=user_id,
         as_of=dm.date if dm else None,
@@ -205,4 +219,5 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
         skills=skills,
         data_confidence=data_confidence,
         missing=_missing(dm, rpe_coverage),
+        signals=signals,
     )

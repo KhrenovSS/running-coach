@@ -86,6 +86,10 @@ SAFETY_MAX_DURATION_CAUTION_MIN = 40  # потолок длительности 
 TYPE_INTENSITY_ORDER = ("rest", "recovery", "easy", "long", "tempo", "interval", "race")
 HARD_TYPES = ("tempo", "interval", "race")
 EASY_TYPES = ("recovery", "easy")
+# Минимальная зона, в которой тип имеет смысл: потолок зоны ниже → тип даунгрейдится.
+# (Minimal zone a type makes sense in; a lower zone cap downgrades the type.)
+TYPE_MIN_ZONE = {"rest": 1, "recovery": 1, "easy": 2, "long": 2, "tempo": 4, "interval": 5, "race": 4}
+ATI_CTI_HIGH = 1.5             # §7: ATI/CTI > 1.5 → перекос в анаэробную нагрузку
 
 # --- ACWR / baseline RHR (skills/load, skills/fatigue) ---
 ACWR_ACUTE_DAYS = 7            # острое окно ACWR (acute window)

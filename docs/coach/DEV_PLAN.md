@@ -26,8 +26,9 @@
 
 1. **Два типа.** `WorkoutProposal` — предложение (от LLM или fallback). `Prescription` — только
    результат `safety.clamp()`; поле `safety: SafetyVerdict` обязательное, без дефолта.
-2. **Единственный конструктор.** `Prescription(...)` создаётся только в `prescriber.py` и
-   `fallback.py` — source-гвард `tests/coach/test_no_prescription_bypass.py`.
+2. **Единственный конструктор.** `Prescription(...)` создаётся только в `safety.py::clamp()`
+   (уточнено в C2: это строже исходной формулировки «prescriber/fallback» — те лишь вызывают
+   clamp) — source-гвард `tests/coach/test_no_prescription_bypass.py`.
 3. **Числа рендерятся детерминированно.** Карточка тренировки — всегда шаблон `render.py` из
    заклэмпленного `Prescription`. Проза LLM идёт над карточкой и не называет чисел (правило промпта;
    гарантия — карточка, не проза).
@@ -181,7 +182,7 @@ Index(user_id, created_at)); `recommendations` += `proposal_json`, `safety_json`
   удалить `HealthRepository.load_ratio` (#219). Проверка: `pytest -q`;
   `python -c "from src.startup import create_app; create_app()"`; тесты скиллов включая
   «нет метрик → unknown/0.0 без исключений».
-- ⬜ **C2 — Граница**: реализовать `rules/p1_safety.py`; создать `safety.py`, `render.py`,
+- ✅ **C2 — Граница**: реализовать `rules/p1_safety.py`; создать `safety.py`, `render.py`,
   `fallback.py`, `prescriber.finalize`; удалить `engine.py`, `rules/base.py`, `p2..p5`;
   поправить `tests/skills/test_scaffold.py`; обновить дерево в `docs/ARCHITECTURE.md`.
   Проверка: `grep -rn "coach.engine|coach.rules.p2|coach.rules.p5" src/ tests/` → 0; табличный

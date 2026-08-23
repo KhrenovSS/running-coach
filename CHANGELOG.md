@@ -2,6 +2,34 @@
 
 All notable changes to this project are tracked here.
 
+## [23.08.2026] — C2: граница безопасности — P1, clamp, рендер, fallback
+
+### Added
+- **`src/coach/rules/p1_safety.py`** — `evaluate_safety(state) -> SafetyVerdict`:
+  чистая функция над снимком (без db, `now` — параметр, реплеябельна). 10 триггеров
+  из DEV_PLAN §4, включая боль в колене и «незнание = опасность» (нет метрик →
+  потолок Z2, а не свобода).
+- **`src/coach/safety.py::clamp()`** — единственный конструктор `Prescription`:
+  может только сужать (даунгрейд типа по лестнице интенсивности с учётом
+  `TYPE_MIN_ZONE`, усечение зоны/длительности с пропорциональным пересчётом
+  дистанции, сдвиг интенсива на `earliest_next_hard`). Тотальная: мусорный тип /
+  None-предложение → консервативный выход, не исключение. Структура интервалов
+  при урезании отбрасывается (её числа уже неверны).
+- **`src/coach/render.py`** — детерминированный рендер: числа для пользователя
+  только из заклэмпленного Prescription; при `clamped=True` — фиксированный
+  не-LLM-блок «⚠️ Ограничение по безопасности».
+- **`src/coach/fallback.py` + `prescriber.finalize()`** — продукт работает без LLM:
+  табличное предложение из readiness → safety → clamp → (опционально) запись в
+  `recommendations`.
+- `AthleteState.signals` — сырьё для чистой safety-функции; `TYPE_MIN_ZONE`,
+  `ATI_CTI_HIGH` в config. Тесты: табличный по всем триггерам, идемпотентность
+  clamp, фаззинг, source-гвард `test_no_prescription_bypass`, рендер.
+
+### Removed
+- Каскад правил Этапа 0: `engine.py`, `rules/base.py`, `rules/p2..p5` (DEV_PLAN §2 —
+  P2 растворён в скилле recovery + `earliest_next_hard`; P3 уйдёт в guides; P4/P5 —
+  BACKLOG до появления данных).
+
 ## [23.08.2026] — C1: фундамент коуча — скиллы, state, репозиторий
 
 ### Added

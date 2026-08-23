@@ -102,8 +102,10 @@ running-coach/
 │   ├── coach/                  # Гибридный ИИ-коуч (состав меняется по C1–C9 — см. docs/coach/DEV_PLAN.md §2)
 │   │   ├── config.py           # ЕДИНСТВЕННЫЙ исполняемый источник порогов (зеркалит docs/coros_health_metrics.md)
 │   │   ├── contracts.py        # SkillResult, AthleteState, Prescription, ReasoningStep
-│   │   ├── state.py/engine.py/prescriber.py/orchestrator.py  # заглушки (NotImplementedError)
-│   │   └── skills/, rules/, personalization/, knowledge/, llm/  # заглушки Этапа 0
+│   │   ├── state.py            # assess_state → AthleteState (C1)
+│   │   ├── rules/p1_safety.py + safety.py  # граница: evaluate_safety + clamp (C2)
+│   │   ├── prescriber.py/render.py/fallback.py  # finalize → карточка; работает без LLM (C2)
+│   │   └── skills/ (реализованы C1), personalization/, knowledge/, llm/ (см. DEV_PLAN §2)
 │   ├── telegram/               # Пакет Telegram-бота (17 файлов)
 │   │   ├── __init__.py         #   экспорт run_bot
 │   │   ├── main.py             #   run_bot, Application сборка

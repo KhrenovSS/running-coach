@@ -57,6 +57,9 @@ class AthleteState:
     skills: dict[str, SkillResult] = field(default_factory=dict)
     data_confidence: float = 0.0
     missing: list[str] = field(default_factory=list)  # чего система НЕ знает ('sleep', 'rpe', …)
+    # Сырьё для evaluate_safety(state) — чистая функция без db, реплеябельна по снимку.
+    # (Raw signals for the pure safety function — replayable from the snapshot alone.)
+    signals: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

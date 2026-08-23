@@ -11,9 +11,13 @@ from tests.helpers import make_user
 
 
 def test_coach_tables_created(db_session):
-    """init_db()/create_all создаёт 4 таблицы модуля (в т.ч. под SQLite)."""
+    """init_db()/create_all создаёт 4 таблицы модуля (в т.ч. под SQLite).
+
+    Проверяется существование таблиц (query не падает), а не пустота — другие
+    тесты сессии могут писать в общую in-memory БД (drop_all запрещён, §6).
+    """
     for model in (Recommendation, PredictionLog, UserModel, Lesson):
-        assert db_session.query(model).count() == 0
+        assert db_session.query(model).count() >= 0
 
 
 def test_contracts_instantiable():
@@ -43,11 +47,9 @@ def test_can_persist_coach_rows(db_session):
 
 
 def test_stub_entrypoints_raise_not_implemented():
-    # assess_state реализован в C1; движок/прескрайбер/оркестратор — заглушки до C2/C4.
-    from src.coach import engine, prescriber, orchestrator
+    # state (C1) и prescriber (C2) реализованы; оркестратор — заглушка до C4.
+    from src.coach import orchestrator
     for call in (
-        lambda: engine.decide(None),
-        lambda: prescriber.prescribe(None),
         lambda: orchestrator.morning_check(1),
     ):
         with pytest.raises(NotImplementedError):
