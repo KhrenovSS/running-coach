@@ -99,7 +99,7 @@ running-coach/
 │   │   ├── repositories.py     # TrainingRepository/HealthRepository/FeedbackRepository (db — обязательный kwarg)
 │   │   ├── analytics_helpers.py# compute_slope, compute_ewma, compute_moving_average
 │   │   └── user_service.py     # get_user_settings(db, ...) — сессию владеет вызывающий код
-│   ├── coach/                  # Модуль аналитики и коучинга (Этап 0 — каркас, логика в заглушках)
+│   ├── coach/                  # Гибридный ИИ-коуч (состав меняется по C1–C9 — см. docs/coach/DEV_PLAN.md §2)
 │   │   ├── config.py           # ЕДИНСТВЕННЫЙ исполняемый источник порогов (зеркалит docs/coros_health_metrics.md)
 │   │   ├── contracts.py        # SkillResult, AthleteState, Prescription, ReasoningStep
 │   │   ├── state.py/engine.py/prescriber.py/orchestrator.py  # заглушки (NotImplementedError)

@@ -139,13 +139,13 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 - `src/services/user_service.py` — get_user_settings(db, ...), get_user_by_telegram_id(db, ...) и т.д. — сессия ПЕРВЫМ параметром от вызывающего
 - `src/services/raw_files.py` — хранилище исходных FIT/TCX: `uploads/raw/<user_id>/<sha256>.<ext>` (content-addressed); reanalyze читает отсюда
 - `src/services/weight_service.py` — save_weight (измерение + профиль одной транзакцией), current_weight (последнее измерение)
-- `src/coach/` — пакет модуля аналитики и коучинга (Этап 0 — каркас):
+- `src/coach/` — пакет гибридного ИИ-коуча (**состав меняется по ходу C1–C9 — см.
+  `docs/coach/DEV_PLAN.md` §2**: часть заглушек Этапа 0 удаляется, а не реализуется):
   - `config.py` — **единственный исполняемый источник порогов** (readiness/RHR/tired/load, зеркалит
     `docs/coros_health_metrics.md`; `recovery_view` импортирует отсюда; анти-дрейф-тесты в `test_coach_config.py`)
-  - `contracts.py` — дата-классы движка: `SkillResult`, `AthleteState`, `Prescription`, `ReasoningStep`
-  - `state.py` / `engine.py` / `prescriber.py` / `orchestrator.py` — верхний уровень (заглушки Этапа 0)
-  - `skills/` (fatigue/load/distribution/progress/recovery/workout + base) — заглушки
-  - `rules/` (p1_safety…p5_personal + base), `personalization/`, `knowledge/` (+guides/), `llm/` — заглушки
+  - `contracts.py` — дата-классы: `SkillResult`, `AthleteState`, `SafetyVerdict`, `WorkoutProposal`,
+    `Prescription`, `ReasoningStep` (целевой вид — DEV_PLAN §3)
+  - актуальную карту файлов (skills/tools/safety/llm) смотри в DEV_PLAN §2/§5, не здесь
   - Источник порогов для skills/rules — `docs/coros_health_metrics.md`
 - `src/telegram/` — пакет Telegram-бота (17 файлов, разделён):
   - `main.py` — `run_bot`, Application сборка
@@ -226,7 +226,8 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
   попутно починены баг импорта backfill-скрипта и ложный healthcheck бота (`ps` нет в python-slim →
   `grep /proc/1/cmdline`). Итого **190 тестов** зелёные.
 - Процесс: перешли на **trunk-based** — всё ведём в `main`, лишние ветки удалены.
-- **Следующий шаг — Этап 1 (Skills).** Полные детали — `CHANGELOG.md` (03.08.2026);
+- ~~Следующий шаг — реализация skills по старому плану~~ (историческая запись; план пересмотрен
+  23.08.2026 — см. `docs/coach/DEV_PLAN.md`). Полные детали — `CHANGELOG.md` (03.08.2026);
   отложенные находки — `BACKLOG.md` #219–225.
 
 ---
@@ -279,7 +280,7 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 **Pre-Sprint 21 cleanup ✅:** Закрыты замечания аудита #177-#183: `psutil` в dependencies, healthcheck бота исправлен (`ps aux`), `bin/docker.sh` в .gitignore, `max_hr` через `settings.default_max_hr`, `zone_distribution()` реализована, `_cleanup_stale_pending()` с lock.
 
 **Этап 0 модуля аналитики ✅ (03.08.2026):** каркас и данные — 4 таблицы (`src/domain/models/coach.py`),
-миграция `j3k4l5m6n7o8`, скелет `src/coach/` + `contracts.py`, `tests/skills/`. Следующий — Этап 1 (Skills).
+миграция `j3k4l5m6n7o8`, скелет `src/coach/` + `contracts.py`, `tests/skills/`. (План далее пересмотрен 23.08.2026 → `docs/coach/DEV_PLAN.md`.)
 
 ### Что сделано в сессии (14.07.2026) — Sprint 20 / Tests:
 
@@ -461,10 +462,10 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 ✅ **Ремедиация фундамента (05.08.2026)** — все гейты перед коучем закрыты: честный дедуп,
 сырые файлы, надёжный sync, единые пороги, PG-тесты. Детали выше («Session 05.08.2026»).
 
-🚀 **Следующий шаг — Этап 1 (Skills):** реализовать `src/coach/skills/*` — чистые функции,
-пороги брать ИЗ `src/coach/config.py` (не из дока и не inline!), возвращать `SkillResult`;
-собрать `AthleteState` в `src/coach/state.py` (данные — через `repositories` с `db=`),
-тесты в `tests/skills/` на фабриках `tests/helpers.py`.
+🚀 **Текущая работа — гибридный ИИ-коуч (с 23.08.2026).** Rules-first пересмотрен владельцем в
+пользу гибрида (LLM рассуждает, скиллы — детерминированные tools, safety — непробиваемый фильтр).
+**Единственный нормативный план и следующий шаг — `docs/coach/DEV_PLAN.md`** (чек-листы C0–C9;
+пороги по-прежнему ТОЛЬКО из `src/coach/config.py`; тесты на фабриках `tests/helpers.py`).
 
 ❄️ Заморожено (после аналитики): фильтры, multi-brand onboarding, факторы самочувствия, admin panel.
 
