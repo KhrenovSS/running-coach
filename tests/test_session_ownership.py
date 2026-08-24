@@ -15,6 +15,7 @@ ALLOWED = {
     "domain/models/base.py",        # канонический get_db + инфраструктура
     "startup.py",                   # bootstrap приложения
     "services/sync/orchestrator.py",  # корень цикла синхронизации (web + auto)
+    "services/sync/activities.py",  # daemon-тред разбора коуча владеет своей сессией (C8)
     "services/telegram_notify.py",  # fire-and-forget из фоновых контекстов (документированное исключение)
     "telegram/utils.py",            # корень telegram-хендлеров (get_user)
     "telegram/sync_runner.py",      # корень синка из бота

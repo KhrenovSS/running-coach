@@ -39,7 +39,7 @@ host-сервис `bin/coach_llm_bridge.py` (systemd `running-coach-llm-bridge.s
 блок «⚠️ Ограничение по безопасности». Проза LLM инструктирована не называть чисел тренировки,
 но это правило промпта, не гарантия. Numeric-consistency checker — BACKLOG.
 
-## Карта модулей `src/coach/` (фактическая, C0–C7)
+## Карта модулей `src/coach/` (фактическая, C0–C8)
 
 ```
 coach/
@@ -53,7 +53,9 @@ coach/
 ├── prescriber.py      # finalize(): proposal → evaluate_safety → clamp → persist
 ├── fallback.py        # табличное предложение без LLM (readiness → easy/recovery/rest)
 ├── render.py          # детерминированный рендер карточек — числа только отсюда
-├── orchestrator.py    # morning_verdict, handle_chat (LLM+fallback), on_workout_completed,
+│                      #   (+ render_weekly — дайджест-fallback недельного отчёта, C8)
+├── orchestrator.py    # morning_verdict, handle_chat (LLM+fallback), on_workout_completed
+│                      #   (C8: LLM-разбор, proposal отбрасывается), weekly_report (C8),
 │                      #   get/set_initiative; ChatReply
 ├── rules/p1_safety.py # evaluate_safety(state) — 11 триггеров границы (чистая функция)
 ├── skills/            # base(SkillFn, SKILL_KEYS=6) + fatigue, recovery, load,
@@ -68,6 +70,9 @@ coach/
 ```
 
 Смежное: `src/services/repositories_coach.py` (CoachRepository — выборки для скиллов/state,
-честный ACWR), `src/telegram/handlers/{coach,pain}.py`, `src/telegram/jobs/coach_{morning,evening}.py`,
+честный ACWR), `src/telegram/handlers/{coach,pain}.py`,
+`src/telegram/jobs/coach_{morning,evening,weekly}.py` (09:30 / 21:00 / вс 19:00),
+`src/services/sync/activities.py::_coach_reviews` (post-sync разборы в daemon-треде:
+гейт initiative, LLM только для самой свежей тренировки батча),
 `src/domain/models/coach.py` (5 таблиц) + `WellnessReport` в `health.py`,
-миграция `p9q0r1s2t3u4`, `tests/coach/` (12 модулей + fakes).
+миграция `p9q0r1s2t3u4`, `tests/coach/` (13 модулей + fakes).

@@ -86,3 +86,22 @@ def render_review(sr: SkillResult) -> str:
     icon = _STATUS_ICON.get(sr.status, "⚪")
     lines = [f"{icon} *Разбор тренировки*", sr.message.replace("; ", "\n")]
     return "\n".join(lines)
+
+
+def render_weekly(summary: dict) -> str:
+    """Детерминированный недельный дайджест (deterministic weekly digest) — fallback C8.
+
+    summary — выход tool'а get_weekly_summary; значения в backticks (инцидент 23.08).
+    """
+    lines = ["*Итоги недели*"]
+    for w in summary.get("weeks", []):
+        parts = [f"нед. {w['week_start']}:",
+                 f"`{w['km']} км`", f"`{w['sessions']} трен.`"]
+        if w.get("easy_share") is not None:
+            parts.append(f"easy `{w['easy_share']:.0%}`")
+        lines.append(" · ".join(parts))
+    if summary.get("wow_change_pct") is not None:
+        lines.append(f"Объём к прошлой неделе: `{summary['wow_change_pct']:+.1f}%`")
+    if summary.get("avg_rpe") is not None:
+        lines.append(f"Средний RPE: `{summary['avg_rpe']:.1f}`")
+    return "\n".join(lines)

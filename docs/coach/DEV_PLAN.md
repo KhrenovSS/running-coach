@@ -256,9 +256,18 @@ headless `claude -p` под подпиской владельца, модель 
   проза + карточка «Лёгкий бег Z2 35 мин» + earliest + вопрос про колено; usage/cost в
   `coach_messages`. Граница pain=6 → «Отдых» закрыта юнит-тестами (`test_safety_clamp`,
   `test_pain_flow`); живой повтор — по желанию владельца.
-- ⬜ **C8 — Разбор + недельный отчёт + инициатива**: `on_workout_completed` через LLM,
-  `jobs/coach_weekly.py`, гейт `initiative`. Проверка: `/sync` с новой активностью → разбор +
-  кнопки; `initiative=off` → тишина.
+- ✅ **C8 — Разбор + недельный отчёт + инициатива (24.08.2026)**: `on_workout_completed`
+  через LLM (kind=review, `workout_detail` инлайнится в extras — мост без tool-цикла),
+  `weekly_report` + `jobs/coach_weekly.py` (вс 19:00, kind=weekly, effort=plan),
+  `render_weekly` (детерминированный дайджест-fallback). Решения владельца: гейты «как утро» —
+  LLM-разбор и отчёт при `initiative ∈ {normal, high}`, при `low` — детерминированная карточка
+  разбора без LLM, при `off` — тишина; в разборе/отчёте `proposal` жёстко отбрасывается
+  (назначение даёт утренний вердикт/чат); из батча синка LLM-разбор — только самой свежей
+  тренировки, остальные детерминированно. Разбор ушёл в daemon-тред
+  (`sync/activities.py::_coach_reviews`, свой `SessionLocal` — allowlist
+  `test_session_ownership`): мост до 150 с не держит sync/progress. Проверка: 334 теста
+  зелёные (+10 в `tests/coach/test_review_weekly.py`), импорт app/bot OK.
+  Live-критерий (`/sync` → разбор вторым сообщением; `off` → тишина) — при деплое.
 - ✅ **C9 — Финальная сверка доков (23.08.2026)**: три параллельных аудита нашли 55+
   несоответствий — все исправлены. Создан `docs/coach/ARCHITECTURE.md` (ADR: гибрид, ручной
   tool-loop, мост и его ограничения, остаточный риск прозы + полная карта модулей).

@@ -13,14 +13,29 @@ from sqlalchemy.orm import Session
 from src.coach.contracts import WorkoutProposal
 from src.coach.llm.agent import run_turn
 from src.coach.llm.client import CoachLLM, get_llm
-from src.coach.llm.config import COACH_HISTORY_TURNS, COACH_MAX_TURNS_PER_DAY
+from src.coach.llm.config import (
+    COACH_EFFORT_CHAT,
+    COACH_EFFORT_PLAN,
+    COACH_ENRICH_RECENT_LIMIT,
+    COACH_ENRICH_WEEKS,
+    COACH_HISTORY_TURNS,
+    COACH_MAX_TURNS_PER_DAY,
+    COACH_WEEKLY_REPORT_RECENT,
+    COACH_WEEKLY_REPORT_WEEKS,
+)
 from src.coach.llm.prompts import build_messages, build_system_blocks, build_today_block
 from src.coach.llm.schemas import LogSuggestion
 from src.coach.prescriber import finalize
-from src.coach.render import render_prescription, render_review, render_state_card
+from src.coach.render import (
+    render_prescription,
+    render_review,
+    render_state_card,
+    render_weekly,
+)
 from src.coach.rules.p1_safety import evaluate_safety
 from src.coach.skills import workout
 from src.coach.state import assess_state
+from src.coach.tools.registry import run_tool
 from src.coach.tools.serialize import jsonable
 from src.exceptions import CoachError, LLMUnavailableError
 from src.models import TrainingFeedback, User, UserModel, WellnessReport
@@ -89,8 +104,31 @@ def _history(user_id: int, *, db: Session) -> list[dict]:
             for m in rows if m.role in ("user", "assistant")]
 
 
+def _build_extras(user_id: int, *, db: Session,
+                  weeks: int = COACH_ENRICH_WEEKS,
+                  limit: int = COACH_ENRICH_RECENT_LIMIT,
+                  session_id: int | None = None) -> dict:
+    """Обогащение today-блока: меньше tool round-trip'ов в API-режиме; в режиме
+    моста tool-цикл неактивен — это его основной источник фактов (enrichment).
+
+    session_id — добавить детали конкретной тренировки (для разбора, C8).
+    """
+    extras = {
+        "recent_workouts (get_recent_workouts)": run_tool(
+            "get_recent_workouts", {"limit": limit}, user_id=user_id, db=db),
+        "weekly_summary (get_weekly_summary)": run_tool(
+            "get_weekly_summary", {"weeks": weeks}, user_id=user_id, db=db),
+    }
+    if session_id is not None:
+        extras["workout_detail (get_workout_detail)"] = run_tool(
+            "get_workout_detail", {"session_id": session_id}, user_id=user_id, db=db)
+    return extras
+
+
 def _llm_chat_turn(user_id: int, message: str, *, db: Session,
-                   llm: CoachLLM, kind: str) -> ChatReply:
+                   llm: CoachLLM, kind: str, extras: dict | None = None,
+                   allow_proposal: bool = True,
+                   effort: str = COACH_EFFORT_CHAT) -> ChatReply:
     """LLM-ход: state+verdict в контекст → агент → clamp → рендер (one LLM turn)."""
     from datetime import date as _date
 
@@ -99,25 +137,22 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
     verdict = evaluate_safety(state)
     state_json = jsonable(state)
     state_json.pop("signals", None)
-    # Обогащение: меньше tool round-trip'ов в API-режиме; в режиме моста tool-цикл
-    # неактивен — это его основной источник фактов (context enrichment).
-    from src.coach.tools.registry import run_tool
-    extras = {
-        "recent_workouts (get_recent_workouts)": run_tool(
-            "get_recent_workouts", {"limit": 5}, user_id=user_id, db=db),
-        "weekly_summary (get_weekly_summary)": run_tool(
-            "get_weekly_summary", {"weeks": 4}, user_id=user_id, db=db),
-    }
+    if extras is None:
+        extras = _build_extras(user_id, db=db)
     today_block = build_today_block(state_json, jsonable(verdict),
                                     _date.today().isoformat(), extras=extras)
     system = build_system_blocks(_profile(user))
     messages = build_messages(_history(user_id, db=db), today_block, message)
 
     turn, usage = run_turn(llm, user_id=user_id, db=db,
-                           system=system, messages=messages)
+                           system=system, messages=messages, effort=effort)
 
     text = turn.message
-    if turn.proposal is not None:
+    if turn.proposal is not None and not allow_proposal:
+        # Разбор/отчёт — про прошлое: назначение даёт утренний вердикт/чат (C8).
+        # (Reviews look backward: proposals are dropped, not clamped/persisted.)
+        logger.info("Proposal dropped for kind=%s user=%s", kind, user_id)
+    elif turn.proposal is not None:
         proposal = WorkoutProposal(
             workout_type=turn.proposal.workout_type,
             target_zone=turn.proposal.target_zone,
@@ -167,10 +202,74 @@ def handle_chat(user_id: int, message: str, *, db: Session,
         return ChatReply(text=text, source="fallback")
 
 
-def on_workout_completed(user_id: int, session_id: int, *, db: Session, llm=None) -> str:
-    """Разбор завершённой тренировки (workout review). C4: детерминированный."""
-    review = workout.evaluate_session(user_id, session_id, db=db)
-    return render_review(review)
+REVIEW_PROMPT = (
+    "Только что синхронизировалась новая тренировка — её детали в блоке "
+    "workout_detail. Разбери её: как она легла на моё текущее состояние и "
+    "неделю, что получилось, на что обратить внимание (пульс относительно "
+    "зон, темп, колено, восстановление). Новую тренировку НЕ предлагай "
+    "(proposal=null). Закончи одним коротким вопросом о самочувствии.")
+
+WEEKLY_PROMPT = (
+    "Недельный отчёт. Подведи итог прошедшей недели по weekly_summary и "
+    "recent_workouts: объём и его динамика, доля лёгкого бега (80/20), "
+    "что удалось, что настораживает. Затем — план на следующую неделю "
+    "прозой: сколько тренировок, какие акценты, ориентиры объёма "
+    "диапазонами. Конкретную тренировку не назначай (proposal=null) — "
+    "её даст утренний вердикт. В конце — один короткий вопрос о целях недели.")
+
+
+def _deterministic_review(user_id: int, session_id: int, *, db: Session) -> str:
+    """Детерминированный разбор + персист в историю (deterministic review path)."""
+    text = render_review(workout.evaluate_session(user_id, session_id, db=db))
+    CoachRepository.save_message(user_id, "assistant", text, db=db,
+                                 kind="review", meta={"fallback": True})
+    return text
+
+
+def on_workout_completed(user_id: int, session_id: int, *, db: Session,
+                         llm: CoachLLM | None = None, use_llm: bool = True) -> str:
+    """Разбор завершённой тренировки (workout review). C8: через LLM с fallback.
+
+    use_llm=False — сразу детерминированная карточка (гейт initiative=low,
+    старые тренировки батча). Дневной бюджет ходов уважается.
+    """
+    if not use_llm or CoachRepository.turns_today(user_id, db=db) >= COACH_MAX_TURNS_PER_DAY:
+        return _deterministic_review(user_id, session_id, db=db)
+    llm = llm if llm is not None else get_llm()
+    try:
+        reply = _llm_chat_turn(
+            user_id, REVIEW_PROMPT, db=db, llm=llm, kind="review",
+            extras=_build_extras(user_id, db=db, session_id=session_id),
+            allow_proposal=False)
+        return reply.text
+    except (LLMUnavailableError, CoachError) as e:
+        logger.info("LLM review fallback for user=%s: %s", user_id, e)
+        return _deterministic_review(user_id, session_id, db=db)
+
+
+def weekly_report(user_id: int, *, db: Session,
+                  llm: CoachLLM | None = None) -> ChatReply:
+    """Недельный отчёт (weekly report, C8): итоги недели + план прозой.
+
+    План недели живёт только строкой coach_messages kind='weekly' (DEV_PLAN §12).
+    """
+    llm = llm if llm is not None else get_llm()
+    try:
+        if CoachRepository.turns_today(user_id, db=db) >= COACH_MAX_TURNS_PER_DAY:
+            raise LLMUnavailableError("дневной бюджет ходов исчерпан")
+        return _llm_chat_turn(
+            user_id, WEEKLY_PROMPT, db=db, llm=llm, kind="weekly",
+            extras=_build_extras(user_id, db=db, weeks=COACH_WEEKLY_REPORT_WEEKS,
+                                 limit=COACH_WEEKLY_REPORT_RECENT),
+            allow_proposal=False, effort=COACH_EFFORT_PLAN)
+    except (LLMUnavailableError, CoachError) as e:
+        logger.info("LLM weekly fallback for user=%s: %s", user_id, e)
+        summary = run_tool("get_weekly_summary", {"weeks": COACH_ENRICH_WEEKS},
+                           user_id=user_id, db=db)
+        text = render_weekly(summary)
+        CoachRepository.save_message(user_id, "assistant", text, db=db,
+                                     kind="weekly", meta={"fallback": True})
+        return ChatReply(text=text, source="fallback")
 
 
 def evening_check_needed(user_id: int, *, db: Session) -> bool:

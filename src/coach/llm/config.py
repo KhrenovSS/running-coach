@@ -7,6 +7,12 @@ COACH_MAX_TURNS_PER_DAY = 40     # дневной бюджет LLM-ходов
 COACH_EFFORT_CHAT = "low"
 COACH_EFFORT_PLAN = "medium"
 
+# Обогащение today-блока (context enrichment) — DEV_PLAN §5
+COACH_ENRICH_RECENT_LIMIT = 5    # последних тренировок в контексте хода
+COACH_ENRICH_WEEKS = 4           # недель сводки в контексте хода
+COACH_WEEKLY_REPORT_WEEKS = 8    # горизонт недельного отчёта (C8)
+COACH_WEEKLY_REPORT_RECENT = 10  # тренировок в контексте недельного отчёта (C8)
+
 # Цены claude-opus-5 за 1M токенов (prices per 1M tokens, USD)
 PRICE_INPUT_PER_M = 5.0
 PRICE_OUTPUT_PER_M = 25.0

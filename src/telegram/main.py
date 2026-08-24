@@ -22,6 +22,7 @@ from src.telegram.jobs.weight import daily_weight_job
 from src.telegram.jobs.recovery import daily_recovery_check_job
 from src.telegram.jobs.coach_evening import evening_wellness_job
 from src.telegram.jobs.coach_morning import morning_verdict_job
+from src.telegram.jobs.coach_weekly import coach_weekly_job
 from src.telegram.jobs.hr_max import weekly_max_hr_check_job
 from src.utils.logger import get_logger
 
@@ -112,6 +113,11 @@ def run_bot():
     # (Monday 10:05 — max HR lowering suggestion; 30-day cooldown lives in the service)
     application.job_queue.run_daily(weekly_max_hr_check_job, time=dt_time(hour=10, minute=5), days=(1,))
     logger.info("Еженедельная проверка снижения max_hr запланирована на понедельник 10:05")
+
+    # Воскресенье, 19:00 — недельный отчёт коуча, до вечернего опроса 21:00
+    # (Sunday 19:00 weekly coach report; PTB days: 0 = Sunday)
+    application.job_queue.run_daily(coach_weekly_job, time=dt_time(hour=19, minute=0), days=(0,))
+    logger.info("Недельный отчёт коуча запланирован на воскресенье 19:00")
 
     logger.info("Telegram bot polling started")
     application.run_polling(allowed_updates=Update.ALL_TYPES)

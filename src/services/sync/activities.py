@@ -2,10 +2,11 @@
 
 import os
 import tempfile
+import threading
 from datetime import timedelta, datetime, timezone
 
 from src.utils.logger import get_logger
-from src.models import User, TrainingSession, DeletedTraining
+from src.models import SessionLocal, User, TrainingSession, DeletedTraining
 from src.services.audit import AuditService
 from src.services.sync.utils import _make_client
 from src.services.sync.dedup import load_dedup_state, is_duplicate, find_deleted_match
@@ -15,6 +16,37 @@ from src.services.hr_max import evaluate_max_hr_raise
 from src.exceptions import CoachError
 
 logger = get_logger("app")
+
+
+def _coach_reviews(user_id: int, trainings: list[dict]) -> None:
+    """Разборы коуча после синка (post-sync coach reviews) — DEV_PLAN §9 C8.
+
+    Живёт в daemon-треде: своя сессия (композиционный корень, гвард
+    test_session_ownership). Гейт initiative: off → тишина; low →
+    детерминированные карточки; normal/high → LLM-разбор, но только для
+    самой свежей тренировки батча (батч ≈ бэкфилл: LLM по старым тратит
+    бюджет и путает относительные даты).
+    """
+    def _ts(nt: dict) -> float:
+        return nt["begin_ts"].timestamp() if nt.get("begin_ts") else float("-inf")
+
+    db = SessionLocal()
+    try:
+        from src.coach import orchestrator as coach
+        initiative = coach.get_initiative(user_id, db=db)
+        if initiative == "off":
+            return
+        llm_allowed = initiative in ("normal", "high")
+        latest_sid = max(trainings, key=_ts)["session_id"]
+        for nt in sorted(trainings, key=_ts):
+            review = coach.on_workout_completed(
+                user_id, nt["session_id"], db=db,
+                use_llm=llm_allowed and nt["session_id"] == latest_sid)
+            telegram_notify(user_id=user_id, text=review)
+    except CoachError as e:
+        logger.error("Coach review failed (sync unaffected): %s", e)
+    finally:
+        db.close()
 
 
 # Синхронизация тренировок для пользователя (Sync activities for a user)
@@ -235,17 +267,14 @@ async def sync_activities_for_user(cred, brand: str, db,
             evaluate_max_hr_raise(db, cred.user_id,
                                   max(nt['hr_peak'] for nt in new_trainings),
                                   source=f"{brand}_sync")
-            # Разбор тренировки коучем — сбой коуча НЕ роняет синк (DEV_PLAN §9 C4)
-            # (Coach review; a coach failure must never break the sync.)
-            try:
-                from src.coach import orchestrator as coach_orchestrator
-                if coach_orchestrator.get_initiative(cred.user_id, db=db) != "off":
-                    for nt in new_trainings:
-                        review = coach_orchestrator.on_workout_completed(
-                            cred.user_id, nt['session_id'], db=db)
-                        telegram_notify(user_id=cred.user_id, text=review)
-            except CoachError as e:
-                logger.error("Coach review failed (sync continues): %s", e)
+            # Разбор тренировки коучем — в daemon-треде: LLM-мост отвечает до
+            # 150 с и не должен держать sync/progress (DEV_PLAN §9 C8).
+            # (Coach review in a daemon thread; must never block or break the sync.)
+            threading.Thread(
+                target=_coach_reviews,
+                args=(cred.user_id, [dict(nt) for nt in new_trainings]),
+                daemon=True,
+            ).start()
         else:
             logger.info("Activity sync: brand=%s user=%s — новых тренировок нет (всего=%d, already_exist=%d, deleted=%d)",
                          brand, cred.user_id, len(activities), skipped_existing, skipped_deleted)

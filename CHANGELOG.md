@@ -2,6 +2,39 @@
 
 All notable changes to this project are tracked here.
 
+## [24.08.2026] — C8: LLM-разбор тренировки + недельный отчёт + гейт инициативы
+
+### Added
+- **`on_workout_completed` через LLM** (kind=review): детали сессии
+  (`get_workout_detail`) инлайнятся в today-блок — работает и в режиме моста
+  без tool-цикла. `proposal` в разборе жёстко отбрасывается (не clamp'ится,
+  Recommendation не пишется): разбор — про прошлое, назначение даёт утренний
+  вердикт/чат. Fallback (LLM недоступен / бюджет / `use_llm=False`) —
+  детерминированный `render_review` с персистом в историю (`meta.fallback`).
+- **Недельный отчёт** (`orchestrator.weekly_report`, kind=weekly,
+  effort=plan, горизонт 8 недель): итоги + план следующей недели прозой;
+  fallback — детерминированный дайджест `render_weekly` (км/тренировки/доля
+  easy по неделям, WoW-динамика, средний RPE). Джоба
+  `jobs/coach_weekly.py` — воскресенье 19:00 (PTB: days=(0,)), гейт
+  `initiative ∈ {normal, high}`, LLM-вызов в `asyncio.to_thread`.
+- **Гейт инициативы в sync-пути** (`activities._coach_reviews`): `off` —
+  тишина; `low` — детерминированные карточки без LLM; `normal/high` —
+  LLM-разбор, но только для самой свежей тренировки батча (батч ≈ бэкфилл),
+  остальные — детерминированно, в хронологическом порядке.
+
+### Changed
+- Разбор после синка ушёл в **daemon-тред** со своей сессией (allowlist
+  `test_session_ownership` расширен осознанно): LLM-мост отвечает до 150 с
+  и не должен держать sync/progress и ответ `/sync`.
+- Обогащение today-блока вынесено в `orchestrator._build_extras`; числа
+  5/4 (recent/weeks) — в константы `llm/config.py` (`COACH_ENRICH_*`,
+  `COACH_WEEKLY_REPORT_*`).
+
+### Tests
+- +10 в `tests/coach/test_review_weekly.py` (ScriptedLLM/FailingLLM: разбор,
+  отброс proposal, fallback, бюджет, гейты off/low, «LLM только свежая»,
+  weekly LLM+fallback). Всего 334, зелёные без сети и ключа.
+
 ## [23.08.2026] — Хотфикс: «бот молчит» + вчера/сегодня (инцидент первого дня)
 
 ### Fixed

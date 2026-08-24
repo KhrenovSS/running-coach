@@ -207,6 +207,17 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 
 ## Текущее состояние
 
+**Session 24.08.2026 — C8: LLM-разбор тренировки + недельный отчёт + гейт инициативы ✅ (код; деплой — отдельно):**
+- `on_workout_completed` через LLM (kind=review, `workout_detail` в extras; proposal
+  отбрасывается — назначает утренний вердикт/чат); `weekly_report` + `jobs/coach_weekly.py`
+  (вс 19:00, kind=weekly, effort=plan, горизонт 8 недель) + `render_weekly` (fallback-дайджест).
+- Гейты (решение владельца): LLM-разбор и отчёт при `initiative ∈ {normal, high}`; `low` —
+  детерминированная карточка разбора; `off` — тишина. Из батча синка LLM — только самой свежей.
+- Разбор после синка — daemon-тред `sync/activities.py::_coach_reviews` (свой `SessionLocal`,
+  allowlist test_session_ownership): мост до 150 с не держит sync. 334 теста зелёные
+  (+10 `tests/coach/test_review_weekly.py`). Чек-листы DEV_PLAN §9 закрыты полностью (C0–C9);
+  дальше — BACKLOG (#241/#242/#247 и др.). Деплой C8: пересборка `app` + `bot`, миграций нет.
+
 **Session 23.08.2026 — Гибридный ИИ-коуч C0–C7 + LLM-мост, задеплоено в прод ✅:**
 - План пересмотрен владельцем: rules-first → гибрид; единый нормативный план `docs/coach/DEV_PLAN.md`
   (C0), ADR — `docs/coach/ARCHITECTURE.md`. Реализованы скиллы+AthleteState (C1), граница

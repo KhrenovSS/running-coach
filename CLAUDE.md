@@ -110,7 +110,8 @@
   анти-дрейф-тесты сверяют).
 - LLM-бэкенды: `get_llm()` = ключ → **мост подписки** (прод сейчас; `bin/coach_llm_bridge.py`,
   ограничение — tool-цикл неактивен) → NullLLM/fallback. Решения и причины — `docs/coach/ARCHITECTURE.md`.
-- **Следующий шаг — первый ⬜ в чек-листах `docs/coach/DEV_PLAN.md` §9 (сейчас — C8).**
+- **Чек-листы C0–C9 в `docs/coach/DEV_PLAN.md` §9 закрыты (C8 — 24.08.2026); дальнейшая
+  работа по коучу — из `BACKLOG.md` (#241 ключ, #242 search_guides, #247 numeric-checker и др.).**
 
 ## Документация
 | Тема | Файл |
