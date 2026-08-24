@@ -107,7 +107,8 @@ def test_review_use_llm_false_skips_llm(athlete_with_history, db_session):
 
 def test_sync_reviews_initiative_off_is_silent(athlete_with_history, db_session,
                                                monkeypatch):
-    """initiative=off → _coach_reviews не шлёт ничего (критерий C8 «тишина»)."""
+    """initiative=off → тишина, но insight с метриками записан молча (D5)."""
+    from src.services.repositories_insights import InsightRepository
     orchestrator.set_initiative(athlete_with_history.id, "off", db=db_session)
     sid = _latest_session_id(athlete_with_history.id, db_session)
     sent = []
@@ -117,18 +118,23 @@ def test_sync_reviews_initiative_off_is_silent(athlete_with_history, db_session,
     activities._coach_reviews(athlete_with_history.id,
                               [{"session_id": sid, "begin_ts": None}])
     assert sent == []
+    row = InsightRepository.for_session(athlete_with_history.id, sid, db=db_session)
+    assert row.status == "none"          # сырьё для отчётов при включении
+    assert row.computed_json is not None
 
 
-def test_sync_reviews_llm_only_for_latest(athlete_with_history, db_session,
-                                          monkeypatch):
-    """Батч из синка: use_llm=True ровно у самой свежей тренировки."""
+def test_sync_batch_latest_pending_older_deterministic(athlete_with_history,
+                                                       db_session, monkeypatch):
+    """Батч (D5): свежая → pending (молчит, ждёт тапа), старая → карточка сразу."""
+    from src.services.repositories_insights import InsightRepository
+    orchestrator.set_initiative(athlete_with_history.id, "high", db=db_session)
     sessions = db_session.query(TrainingSession).filter_by(
         user_id=athlete_with_history.id).order_by(
         TrainingSession.begin_ts.desc()).limit(2).all()
     latest, older = sessions[0], sessions[1]
     calls = []
 
-    def fake_review(user_id, session_id, *, db, use_llm=True):
+    def fake_review(user_id, session_id, *, db, llm=None, use_llm=True):
         calls.append((session_id, use_llm))
         return "разбор"
 
@@ -142,9 +148,11 @@ def test_sync_reviews_llm_only_for_latest(athlete_with_history, db_session,
     ]
     db_session.commit()  # вернуть соединение в пул: хелпер откроет свою сессию
     activities._coach_reviews(athlete_with_history.id, trainings)
-    assert dict(calls) == {latest.id: True, older.id: False}
-    assert calls[0][0] == older.id  # разборы в хронологическом порядке
-    assert len(sent) == 2
+    assert calls == [(older.id, False)]  # свежая НЕ разобрана — ждёт тапа/таймаута
+    assert len(sent) == 1
+    fresh_row = InsightRepository.for_session(athlete_with_history.id, latest.id,
+                                              db=db_session)
+    assert fresh_row.status == "pending"
 
 
 def test_weekly_report_via_llm(athlete_with_history, db_session):

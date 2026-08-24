@@ -19,13 +19,14 @@ logger = get_logger("app")
 
 
 def _coach_reviews(user_id: int, trainings: list[dict]) -> None:
-    """Разборы коуча после синка (post-sync coach reviews) — DEV_PLAN §9 C8.
+    """Пост-синк конвейер разбора (post-sync review pipeline) — DEV_PLAN §9 D5.
 
     Живёт в daemon-треде: своя сессия (композиционный корень, гвард
-    test_session_ownership). Гейт initiative: off → тишина; low →
-    детерминированные карточки; normal/high → LLM-разбор, но только для
-    самой свежей тренировки батча (батч ≈ бэкфилл: LLM по старым тратит
-    бюджет и путает относительные даты).
+    test_session_ownership). Только СОЗДАЁТ insight-строки (физио-метрики D2
+    считаются внутри upsert) — LLM-разбор свежайшей тренировки исполняет бот
+    отложенно (тап RPE/боли или таймаут). Гейт initiative: off → тишина;
+    low → детерминированные карточки сразу; normal/high → свежая ждёт (pending),
+    остальные из батча — детерминированные карточки в хронологическом порядке.
     """
     def _ts(nt: dict) -> float:
         return nt["begin_ts"].timestamp() if nt.get("begin_ts") else float("-inf")
@@ -33,24 +34,17 @@ def _coach_reviews(user_id: int, trainings: list[dict]) -> None:
     db = SessionLocal()
     try:
         from src.coach import orchestrator as coach
-        # Физио-метрики (D2): считаем до разборов, чтобы контекст LLM их видел
-        # (physio metrics first, so the review context can include them)
-        from src.services.workout_insights import upsert_workout_insights
-        for nt in trainings:
-            try:
-                upsert_workout_insights(user_id, nt["session_id"], db=db)
-            except Exception as e:  # метрики не должны блокировать разбор
-                logger.error("Workout insights failed for session=%s: %s",
-                             nt["session_id"], e)
+        from src.coach import review_flow
         initiative = coach.get_initiative(user_id, db=db)
+        pending_sid = review_flow.ensure_insights_for_batch(
+            user_id, trainings, db=db, initiative=initiative)
         if initiative == "off":
-            return
-        llm_allowed = initiative in ("normal", "high")
-        latest_sid = max(trainings, key=_ts)["session_id"]
+            return  # метрики записаны молча — сырьё для отчётов при включении
         for nt in sorted(trainings, key=_ts):
+            if nt["session_id"] == pending_sid:
+                continue  # ждёт тапа/таймаута — исполнит бот (D5)
             review = coach.on_workout_completed(
-                user_id, nt["session_id"], db=db,
-                use_llm=llm_allowed and nt["session_id"] == latest_sid)
+                user_id, nt["session_id"], db=db, use_llm=False)
             telegram_notify(user_id=user_id, text=review)
     except CoachError as e:
         logger.error("Coach review failed (sync unaffected): %s", e)

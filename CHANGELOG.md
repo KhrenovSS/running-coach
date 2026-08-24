@@ -2,6 +2,25 @@
 
 All notable changes to this project are tracked here.
 
+## [24.08.2026] — D5: разбор ждёт фидбека — отложенный механизм
+
+### Changed
+- Разбор больше не стартует сразу после синка: `_coach_reviews` только создаёт
+  insight-строки (свежайшая при normal/high → `pending`; `low` — карточка сразу;
+  `off` — тишина, метрики пишутся молча). Исполняет разбор только бот:
+  тап боли → сразу; RPE-тап → через грейс 120 с (страховка, если тапа боли
+  не будет); джоба каждые 10 мин → pending старше 30 мин (синк из
+  app-контейнера, рестарты) + re-claim зависших running + expire старше 24 ч.
+  Дедуп триггеров — атомарный claim в БД. В разбор теперь попадают RPE и боль.
+
+### Added
+- `src/coach/review_flow.py` (ensure_insights_for_batch, run_pending_review —
+  перечитывает initiative на момент исполнения, release при сбое; due_review_sessions),
+  `src/telegram/jobs/coach_review.py` (trigger_review/single_review_job/
+  pending_reviews_job), триггеры в `handlers/pain.py`/`handlers/feedback.py`,
+  регистрация в main.py, константы REVIEW_* в config/constants.py.
+- +7 тестов `test_review_flow.py`, переработаны 2 синк-теста C8 (387 зелёных).
+
 ## [24.08.2026] — D3+D4: структурированная оценка разбора + обогащённый контекст
 
 ### Added

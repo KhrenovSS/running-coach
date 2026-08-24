@@ -22,6 +22,7 @@ from src.telegram.jobs.weight import daily_weight_job
 from src.telegram.jobs.recovery import daily_recovery_check_job
 from src.telegram.jobs.coach_evening import evening_wellness_job
 from src.telegram.jobs.coach_morning import morning_verdict_job
+from src.telegram.jobs.coach_review import pending_reviews_job
 from src.telegram.jobs.coach_weekly import coach_weekly_job
 from src.telegram.jobs.hr_max import weekly_max_hr_check_job
 from src.utils.logger import get_logger
@@ -118,6 +119,13 @@ def run_bot():
     # (Sunday 19:00 weekly coach report; PTB days: 0 = Sunday)
     application.job_queue.run_daily(coach_weekly_job, time=dt_time(hour=19, minute=0), days=(0,))
     logger.info("Недельный отчёт коуча запланирован на воскресенье 19:00")
+
+    # Каждые 10 мин — отложенные разборы (таймаут тапа, синк из app, рестарты)
+    # (deferred reviews sweeper: tap timeout, app-container syncs, restarts)
+    from src.config.constants import REVIEW_JOB_INTERVAL_MIN
+    application.job_queue.run_repeating(pending_reviews_job,
+                                        interval=REVIEW_JOB_INTERVAL_MIN * 60, first=60)
+    logger.info("Сборщик отложенных разборов запущен (каждые %d мин)", REVIEW_JOB_INTERVAL_MIN)
 
     logger.info("Telegram bot polling started")
     application.run_polling(allowed_updates=Update.ALL_TYPES)

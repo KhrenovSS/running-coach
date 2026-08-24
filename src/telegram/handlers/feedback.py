@@ -65,6 +65,16 @@ async def feedback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Колено?",
             reply_markup=pain_keyboard(session_id),
         )
+        # Страховка (D5): если тапа боли не будет — разбор через грейс
+        # (backstop: review fires after the grace even without a pain tap;
+        # тап боли сработает раньше, дедуп — атомарный claim в БД)
+        from src.config.constants import REVIEW_AFTER_RPE_DELAY_SEC
+        from src.telegram.jobs.coach_review import single_review_job
+        if context.job_queue is not None:
+            context.job_queue.run_once(
+                single_review_job, when=REVIEW_AFTER_RPE_DELAY_SEC,
+                data={"chat_id": chat_id, "user_id": user.id,
+                      "session_id": session_id})
     except Exception as e:
         db.rollback()
         logger.error("Feedback save error: %s", e)

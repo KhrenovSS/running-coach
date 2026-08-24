@@ -314,7 +314,7 @@ carry_forward в утреннем контексте — 3 записи / 7 дн
   avg_cadence, elevation_gain/loss; temperature/weather_code дельтой; глобально
   elevation_loss/weather_code/avg_cadence; блок `daily_metrics_morning` через
   `CoachRepository.metrics_for_date`), extras += `workout_computed`.
-- ⬜ **D5 — отложенный механизм**: `src/coach/review_flow.py` (ensure_insights_for_batch,
+- ✅ **D5 — отложенный механизм (24.08.2026)**: `src/coach/review_flow.py` (ensure_insights_for_batch,
   run_pending_review c атомарным claim, due_review_sessions), рефакторинг `_coach_reviews`
   (только создаёт строки), `jobs/coach_review.py` (каждые 10 мин: pending>30 мин, re-claim
   running>15 мин, expire>24 ч), триггеры: терминальный тап боли (сразу), RPE-тап

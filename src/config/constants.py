@@ -125,3 +125,10 @@ BASELINE_TYPES: Final[tuple] = ("easy", "long", "recovery")  # steady-типы �
 
 # Жара (heat)
 HEAT_TEMP_THRESHOLD_C: Final[int] = 20       # температура старта выше → heat_flag (heat threshold)
+
+# Отложенный разбор тренировки (Deferred workout review — DEV_PLAN §9 D5)
+REVIEW_JOB_INTERVAL_MIN: Final[int] = 10     # период джобы pending-разборов (job interval)
+REVIEW_WAIT_MAX_MIN: Final[int] = 30         # таймаут ожидания тапа RPE/боли (tap-wait timeout)
+REVIEW_AFTER_RPE_DELAY_SEC: Final[int] = 120  # грейс после RPE-тапа на тап боли (post-RPE grace)
+REVIEW_PENDING_TTL_H: Final[int] = 24        # старше → expired молча (pending TTL)
+REVIEW_STALE_RUNNING_MIN: Final[int] = 15    # зависший running → re-claim (stale running)

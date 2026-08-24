@@ -97,6 +97,11 @@ async def pain_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_reply_markup(reply_markup=None)
             await context.bot.send_message(update.effective_chat.id,
                                            "✅ Отлично, колено не беспокоило!")
+            # Фидбек полный (2 тапа) → отложенный разбор сейчас (D5)
+            # (feedback complete — fire the deferred review now)
+            from src.telegram.jobs.coach_review import trigger_review
+            context.application.create_task(trigger_review(
+                context, update.effective_chat.id, user.id, session_id))
         else:
             # Уточняем фазу — прямо про «первые 400–800 м» (ask the phase)
             await query.edit_message_reply_markup(reply_markup=_phase_keyboard(session_id))
@@ -135,6 +140,10 @@ async def pain_phase_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await context.bot.send_message(
             update.effective_chat.id,
             f"✅ Записал: дискомфорт {fb.pain_level}/10 ({phase_label}). Слежу за динамикой.")
+        # Фидбек полный (3 тапа) → отложенный разбор сейчас (D5)
+        from src.telegram.jobs.coach_review import trigger_review
+        context.application.create_task(trigger_review(
+            context, update.effective_chat.id, user.id, session_id))
     except (ValueError, TypeError):
         return
     except Exception as e:
