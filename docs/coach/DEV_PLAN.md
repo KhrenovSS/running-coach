@@ -279,6 +279,59 @@ headless `claude -p` под подпиской владельца, модель 
 
 Зависимости: C0 первым; C1–C2 и seed-guides независимы; C3→C4; C5→C6→C7 последовательны.
 
+### Разбор тренировки v2 (D0–D8, утверждён владельцем 24.08.2026)
+
+Цель: разбор видит фидбек (RPE/боль), рельеф/погоду/дрейф пульса/сон; итог персистится
+(`workout_insights`) и влияет на будущее (carry_forward → утренний вердикт; proposal в
+разборе снова разрешён — через clamp). Решения владельца: разбор ждёт тапа RPE/боли или
+~30 мин; итоги — новая таблица; влияние — оба канала; сон — разведать Coros API.
+Дефолты (правятся словом владельца): грейс 120 с после RPE-тапа; TTL pending 24 ч →
+expired молча; `low` — детерминированная карточка сразу; `off` — insights пишутся молча;
+carry_forward в утреннем контексте — 3 записи / 7 дней.
+
+- ✅ **D0 — этот чек-лист + ADR** «отложенный разбор через статус в БД» в
+  `docs/coach/ARCHITECTURE.md`; CHANGELOG.
+- ⬜ **D1 🛑 — таблица `workout_insights`** (модель + аддитивная миграция `q0r1s2t3u4v5` +
+  `src/services/repositories_insights.py::InsightRepository`: upsert/claim(атомарный)/
+  reclaim_stale_running/finish/pending_older_than/expire_older_than/recent/for_session).
+  Колонки: session_id UNIQUE, status(pending|running|done|none|expired|error), source,
+  attempts, claimed_at, reviewed_at, schema_version, computed_json, assessment_json,
+  effort_match, carry_forward String(300), coach_message_id. Стоп-поинт data-safety §5 +
+  db-safety-reviewer; накат на прод — отдельно (backup → stop bot → up -d app → up -d bot).
+- ⬜ **D2 — вычислительный слой**: константы в `src/config/constants.py`;
+  `src/analysis/gap.py` (сглаживание высоты, Minetti-2002, GAP/уклон по км),
+  `src/analysis/effort.py` (moving-сэмплы, cardiac drift/decoupling Pa:HR, heat_flag),
+  `src/analysis/hr_baseline.py` (OLS HR↔GAP-темп, хранение в
+  `UserModel.params_json['hr_pace_baseline']`), `src/services/workout_insights.py`
+  (compute_workout_metrics/upsert/get_or_compute/refresh_baseline, INSIGHTS_SCHEMA_VERSION);
+  хуки: `_coach_reviews` (computed при создании строк), `reanalyze` (инвалидация).
+  Все ветки деградируют в applicable/available=false без исключений.
+- ⬜ **D3 — CoachTurn.assessment**: `ReviewAssessment{effort_match, causes[], flags[],
+  carry_forward}` (enum-списки — финализировать до мержа), `ChatReply.assessment/
+  assistant_message_id`, `InsightRepository.finish` из оркестратора (LLM в БД не пишет),
+  OUTPUT_CONTRACT+.
+- ⬜ **D4 — контекст разбора**: `get_workout_detail` v2 (полные сегменты: duration_min,
+  avg_cadence, elevation_gain/loss; temperature/weather_code дельтой; глобально
+  elevation_loss/weather_code/avg_cadence; блок `daily_metrics_morning` через
+  `CoachRepository.metrics_for_date`), extras += `workout_computed`.
+- ⬜ **D5 — отложенный механизм**: `src/coach/review_flow.py` (ensure_insights_for_batch,
+  run_pending_review c атомарным claim, due_review_sessions), рефакторинг `_coach_reviews`
+  (только создаёт строки), `jobs/coach_review.py` (каждые 10 мин: pending>30 мин, re-claim
+  running>15 мин, expire>24 ч), триггеры: терминальный тап боли (сразу), RPE-тап
+  (run_once 120 с). Исполняет разбор только бот.
+- ⬜ **D6 — proposal в разборе**: `allow_proposal=True` (отмена C8-отброса; weekly-drop
+  остаётся), REVIEW_PROMPT v2 (workout_computed + daily_metrics_morning + assessment
+  обязателен + proposal при необходимости коррекции).
+- ⬜ **D7 — каналы влияния**: extras morning/chat/weekly/review += `recent_reviews`
+  (3 итога / 7 дней: effort_match/flags/carry_forward) + последняя Recommendation
+  (for_date>=today) в утренний контекст; weekly читает insights.
+- ⬜ **D8 🛑 — сон**: разведка на живом токене (`bin/coros_probe_sleep.py`, read-only,
+  стоп-поинт) → аддитивные поля DailyMetrics (по факту API; ALTER → stop bot) →
+  `sync/health.py` → METRIC_FIELDS/registry enum → `state._missing` без хардкода 'sleep' →
+  `daily_metrics_morning`. В signals/P1 сон не добавляем (BACKLOG).
+
+Зависимости: D0→D1→(D2 ∥ D3 ∥ D4)→D5→D6→D7; D8 — параллелен после разведки.
+
 ## 10. Тесты (`tests/coach/`)
 
 Фикстуры — `tests/coach/conftest.py` (сознательный дубль `athlete_with_history` с
