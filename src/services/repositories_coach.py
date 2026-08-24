@@ -46,6 +46,14 @@ class CoachRepository:
         ).order_by(DailyMetrics.date.desc()).first()
 
     @staticmethod
+    def metrics_for_date(user_id: int, day: date, *, db: Session) -> DailyMetrics | None:
+        """Метрики конкретного дня — «утро дня тренировки» для разбора (D4)."""
+        return db.query(DailyMetrics).filter(
+            DailyMetrics.user_id == user_id,
+            DailyMetrics.date == day,
+        ).first()
+
+    @staticmethod
     def metrics_series(user_id: int, field: str, days: int, *, db: Session,
                        ) -> list[tuple[date, float | None]]:
         """Ряд (date, value) по whitelist-полю за N дней (metric series over N days)."""

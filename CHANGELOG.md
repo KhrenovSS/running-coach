@@ -2,6 +2,23 @@
 
 All notable changes to this project are tracked here.
 
+## [24.08.2026] — D3+D4: структурированная оценка разбора + обогащённый контекст
+
+### Added
+- **D3**: `ReviewAssessment{effort_match, causes[], flags[], carry_forward}` в
+  `CoachTurn` (enum-списки — append-only, по ним агрегации); OUTPUT_CONTRACT+;
+  оркестратор пишет итог в `workout_insights` из провалидированного output
+  (LLM в БД не пишет): LLM-путь — assessment+колонки+link на сообщение,
+  детерминированный — source=fallback. Вне kind=review assessment отбрасывается
+  с WARNING. +5 тестов (`test_assessment.py`).
+- **D4**: `get_workout_detail` v2 — сегменты с рельефом/каденсом/длительностью
+  (`elevation_gain/loss`, `avg_cadence`, `duration_min`), погода в сегментах
+  дельта-кодированием (только при изменении), глобальные `elevation_loss`/
+  `weather_code`/`avg_cadence`, блок `daily_metrics_morning` (HRV/RHR/recovery/
+  tired на дату тренировки — `CoachRepository.metrics_for_date`); extras разбора
+  += `workout_computed` (физио-метрики D2, lazy). +5 тестов
+  (`test_workout_detail_v2.py`). Всего 380 зелёных.
+
 ## [24.08.2026] — D2: детерминированные физио-метрики тренировки
 
 ### Added

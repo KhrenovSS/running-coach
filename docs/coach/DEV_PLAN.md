@@ -306,11 +306,11 @@ carry_forward в утреннем контексте — 3 записи / 7 дн
   (compute_workout_metrics/upsert/get_or_compute/refresh_baseline, INSIGHTS_SCHEMA_VERSION);
   хуки: `_coach_reviews` (computed при создании строк), `reanalyze` (инвалидация).
   Все ветки деградируют в applicable/available=false без исключений.
-- ⬜ **D3 — CoachTurn.assessment**: `ReviewAssessment{effort_match, causes[], flags[],
+- ✅ **D3 — CoachTurn.assessment (24.08.2026)**: `ReviewAssessment{effort_match, causes[], flags[],
   carry_forward}` (enum-списки — финализировать до мержа), `ChatReply.assessment/
   assistant_message_id`, `InsightRepository.finish` из оркестратора (LLM в БД не пишет),
   OUTPUT_CONTRACT+.
-- ⬜ **D4 — контекст разбора**: `get_workout_detail` v2 (полные сегменты: duration_min,
+- ✅ **D4 — контекст разбора (24.08.2026)**: `get_workout_detail` v2 (полные сегменты: duration_min,
   avg_cadence, elevation_gain/loss; temperature/weather_code дельтой; глобально
   elevation_loss/weather_code/avg_cadence; блок `daily_metrics_morning` через
   `CoachRepository.metrics_for_date`), extras += `workout_computed`.

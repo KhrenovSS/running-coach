@@ -44,12 +44,33 @@ class LogSuggestion(BaseModel):
     value: int = Field(ge=0, le=10)
 
 
+# Enum'ы оценки (D3): фиксированные значения — по ним считаются агрегации в
+# weekly/monthly; менять значения задним числом нельзя, расширять — можно.
+# (Fixed enums: aggregations depend on them; append-only.)
+CauseValue = Literal["heat", "cold", "wind", "elevation", "terrain", "poor_sleep",
+                     "fatigue", "pace_too_fast", "illness", "recovery_good", "other"]
+FlagValue = Literal["hr_drift_high", "pain", "pace_hr_mismatch", "suspect_data",
+                    "overreaching_sign", "great_session"]
+
+
+class ReviewAssessment(BaseModel):
+    """Структурированная оценка разбора (structured review outcome) — только kind=review.
+
+    carry_forward — одна фраза «себе на завтра»: её читает утренний вердикт.
+    """
+    effort_match: Literal["ok", "harder", "easier", "unknown"] = "unknown"
+    causes: list[CauseValue] = Field(default_factory=list, max_length=4)
+    flags: list[FlagValue] = Field(default_factory=list, max_length=4)
+    carry_forward: str | None = Field(default=None, max_length=300)
+
+
 class CoachTurn(BaseModel):
     """Полный ход коуча: проза + опциональное предложение (full coach turn)."""
     message: str = Field(max_length=1500)
     proposal: WorkoutProposalIn | None = None
     followup_question: str | None = Field(default=None, max_length=200)
     log_suggestion: LogSuggestion | None = None
+    assessment: ReviewAssessment | None = None   # D3: заполняется только в разборе
 
 
 def _strictify(schema: dict) -> dict:

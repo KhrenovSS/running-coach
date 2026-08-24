@@ -24,7 +24,7 @@ from src.coach.llm.config import (
     COACH_WEEKLY_REPORT_WEEKS,
 )
 from src.coach.llm.prompts import build_messages, build_system_blocks, build_today_block
-from src.coach.llm.schemas import LogSuggestion
+from src.coach.llm.schemas import LogSuggestion, ReviewAssessment
 from src.coach.prescriber import finalize
 from src.coach.render import (
     render_prescription,
@@ -52,6 +52,8 @@ class ChatReply:
     text: str
     log_suggestion: LogSuggestion | None = None
     source: str = "fallback"          # llm | fallback
+    assessment: ReviewAssessment | None = None   # D3: только kind=review
+    assistant_message_id: int | None = None      # D3: link в workout_insights
 
 INITIATIVE_LEVELS = ("off", "low", "normal", "high")
 INITIATIVE_DEFAULT = "high"  # решение владельца 23.08.2026: старт на максимуме
@@ -122,6 +124,12 @@ def _build_extras(user_id: int, *, db: Session,
     if session_id is not None:
         extras["workout_detail (get_workout_detail)"] = run_tool(
             "get_workout_detail", {"session_id": session_id}, user_id=user_id, db=db)
+        # D4: детерминированные физио-метрики (drift/GAP/baseline/heat) — в контекст
+        # разбора; lazy-пересчёт покрывает старые тренировки (computed metrics).
+        from src.services.workout_insights import get_or_compute
+        computed = get_or_compute(user_id, session_id, db=db)
+        if computed is not None:
+            extras["workout_computed (workout_insights)"] = computed
     return extras
 
 
@@ -166,16 +174,23 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
     if turn.followup_question:
         text += "\n\n" + turn.followup_question
 
+    assessment = turn.assessment
+    if assessment is not None and kind != "review":
+        # Оценка уместна только в разборе — в чате/утре игнорируем (D3)
+        logger.warning("Unexpected assessment for kind=%s user=%s — dropped", kind, user_id)
+        assessment = None
+
     from src.coach.llm.anthropic_client import estimate_cost_usd
     CoachRepository.save_message(user_id, "user", message, db=db, kind=kind)
-    CoachRepository.save_message(
+    assistant_msg = CoachRepository.save_message(
         user_id, "assistant", text, db=db, kind=kind,
         meta={"stop_reason": "end_turn", "tool_calls": usage.get("tool_calls", []),
               "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0),
               "cache_creation_input_tokens": usage.get("cache_creation_input_tokens", 0)},
         tokens_in=usage.get("input_tokens"), tokens_out=usage.get("output_tokens"),
         cost_usd=estimate_cost_usd(usage))
-    return ChatReply(text=text, log_suggestion=turn.log_suggestion, source="llm")
+    return ChatReply(text=text, log_suggestion=turn.log_suggestion, source="llm",
+                     assessment=assessment, assistant_message_id=assistant_msg.id)
 
 
 def handle_chat(user_id: int, message: str, *, db: Session,
@@ -219,10 +234,13 @@ WEEKLY_PROMPT = (
 
 
 def _deterministic_review(user_id: int, session_id: int, *, db: Session) -> str:
-    """Детерминированный разбор + персист в историю (deterministic review path)."""
+    """Детерминированный разбор + персист в историю и итог (deterministic review path)."""
+    from src.services.repositories_insights import InsightRepository
     text = render_review(workout.evaluate_session(user_id, session_id, db=db))
-    CoachRepository.save_message(user_id, "assistant", text, db=db,
-                                 kind="review", meta={"fallback": True})
+    msg = CoachRepository.save_message(user_id, "assistant", text, db=db,
+                                       kind="review", meta={"fallback": True})
+    InsightRepository.finish(session_id, db=db, source="fallback",
+                             coach_message_id=msg.id)
     return text
 
 
@@ -241,6 +259,16 @@ def on_workout_completed(user_id: int, session_id: int, *, db: Session,
             user_id, REVIEW_PROMPT, db=db, llm=llm, kind="review",
             extras=_build_extras(user_id, db=db, session_id=session_id),
             allow_proposal=False)
+        # Итог разбора → workout_insights (пишет оркестратор из провалидированного
+        # output — LLM в БД не пишет, инвариант §1.4). (Persist the review outcome.)
+        from src.services.repositories_insights import InsightRepository
+        a = reply.assessment
+        InsightRepository.finish(
+            session_id, db=db, source="llm",
+            assessment=a.model_dump() if a else None,
+            effort_match=a.effort_match if a else None,
+            carry_forward=a.carry_forward if a else None,
+            coach_message_id=reply.assistant_message_id)
         return reply.text
     except (LLMUnavailableError, CoachError) as e:
         logger.info("LLM review fallback for user=%s: %s", user_id, e)

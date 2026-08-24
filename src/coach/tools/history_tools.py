@@ -67,19 +67,39 @@ def get_workout_detail(ctx: ToolContext, args: dict) -> dict:
     zone_minutes = {f"z{i}": 0.0 for i in range(1, 6)}
     band_minutes = {"easy": 0.0, "moderate": 0.0, "hard": 0.0}
     segments = []
+    prev_temp = prev_code = None
     for i, seg in enumerate(session.segments_json or [], 1):
         avg_hr = seg.get("avg_hr") or 0
         dur = seg.get("duration_min", 0) or 0
         zone_minutes[f"z{get_zone(avg_hr, max_hr)}"] += dur
         band_minutes[get_band(avg_hr, max_hr)] += dur
         if len(segments) < MAX_SEGMENTS:
-            segments.append({"n": i, "km": seg.get("distance_km"),
-                             "pace": seg.get("pace_min_km") or seg.get("pace"),
-                             "avg_hr": avg_hr or None,
-                             "zone": seg.get("zone"), "band": seg.get("band")})
+            # D4: полный сегмент — рельеф/каденс/длительность; погода дельтой
+            # (full segment; weather delta-encoded — it rarely changes mid-run)
+            row = {"n": i, "km": seg.get("distance_km"),
+                   "duration_min": dur or None,
+                   "pace": seg.get("pace_min_km") or seg.get("pace"),
+                   "avg_hr": avg_hr or None,
+                   "zone": seg.get("zone"), "band": seg.get("band"),
+                   "elevation_gain": seg.get("elevation_gain"),
+                   "elevation_loss": seg.get("elevation_loss"),
+                   "avg_cadence": seg.get("avg_cadence")}
+            temp, code = seg.get("temperature"), seg.get("weather_code")
+            if temp is not None and temp != prev_temp:
+                row["temperature"] = temp
+                prev_temp = temp
+            if code is not None and code != prev_code:
+                row["weather_code"] = code
+                prev_code = code
+            segments.append({k: v for k, v in row.items() if v is not None})
 
     brief = _session_brief(session, fb.rating if fb else None,
                            fb.pain_level if fb else None)
+    # D4: метрики утра дня тренировки — состояние «на тот день», не «сегодня»
+    # (day-of-workout morning metrics, not today's)
+    dm = (CoachRepository.metrics_for_date(ctx.user_id, session.begin_ts.date(),
+                                           db=ctx.db)
+          if session.begin_ts else None)
     brief.update({
         "zone_minutes": zone_minutes,
         "band_minutes": band_minutes,
@@ -88,8 +108,16 @@ def get_workout_detail(ctx: ToolContext, args: dict) -> dict:
         "pain_location": fb.pain_location if fb else None,
         "pain_phase": fb.pain_phase if fb else None,
         "notes": fb.notes if fb else None,
-        "weather": {"temp_c": session.avg_temperature},
+        "weather": {"temp_c": session.avg_temperature,
+                    "weather_code": session.weather_code},
         "elevation_gain": session.elevation_gain,
+        "elevation_loss": session.elevation_loss,
+        "avg_cadence": session.avg_cadence,
+        "daily_metrics_morning": ({
+            "hrv": dm.avg_sleep_hrv, "hrv_baseline": dm.sleep_hrv_baseline,
+            "rhr": dm.rhr, "recovery_pct": dm.recovery_pct,
+            "tired_rate": dm.tired_rate,
+        } if dm else None),
         "suspect_flags": session.suspect_flags or [],
     })
     return brief

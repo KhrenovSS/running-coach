@@ -49,7 +49,13 @@ OUTPUT_CONTRACT = """ФОРМАТ ОТВЕТА — ровно один JSON-об
     "rationale": ["короткие причины строками"]
   },
   "followup_question": "один короткий вопрос или null",
-  "log_suggestion": {"kind": "pain", "value": 2}
+  "log_suggestion": {"kind": "pain", "value": 2},
+  "assessment": {
+    "effort_match": "ok|harder|easier|unknown",
+    "causes": ["heat|cold|wind|elevation|terrain|poor_sleep|fatigue|pace_too_fast|illness|recovery_good|other"],
+    "flags": ["hr_drift_high|pain|pace_hr_mismatch|suspect_data|overreaching_sign|great_session"],
+    "carry_forward": "короткая заметка себе на завтра или null"
+  }
 }
 Правила:
 - message: НЕ называй в прозе чисел тренировки (зоны, км, минуты, темп) — числа
@@ -62,7 +68,12 @@ OUTPUT_CONTRACT = """ФОРМАТ ОТВЕТА — ровно один JSON-об
 - followup_question: один короткий вопрос (самочувствие, колено, сон) — твой
   главный инструмент сбора обратной связи; или null.
 - log_suggestion: объект ИЛИ null. Если пользователь упомянул боль/дискомфорт —
-  предложи записать (kind="pain", value 0-10); запись только после его тапа."""
+  предложи записать (kind="pain", value 0-10); запись только после его тапа.
+- assessment: объект ТОЛЬКО когда тебя просят разобрать завершённую тренировку;
+  во всех остальных разговорах — null. effort_match — сошлись ли ощущения/пульс
+  с типом тренировки (ok/harder/easier/unknown); causes — до 4 причин из списка;
+  flags — до 4 наблюдений из списка; carry_forward — одна фраза, которую твой
+  завтрашний утренний вердикт должен учесть (без чисел тренировки), или null."""
 
 
 def _digest_block() -> str:
