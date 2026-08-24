@@ -2,6 +2,22 @@
 
 All notable changes to this project are tracked here.
 
+## [24.08.2026] — D6+D7: разбор может корректировать будущее
+
+### Changed
+- **D6**: proposal в разборе снова разрешён (решение владельца — «оба канала»,
+  отмена C8-отброса): если LLM считает нужным скорректировать следующую
+  тренировку — карточка через обычный `finalize`/`clamp` (safety-граница
+  безусловна). REVIEW_PROMPT v2: разбор опирается на workout_computed
+  (дрейф/GAP/baseline/heat), daily_metrics_morning и фидбек; assessment
+  обязателен. Weekly: proposal по-прежнему отбрасывается (план — прозой).
+- **D7**: контекст morning/chat/weekly/review += `recent_reviews` (3 итога за
+  7 дней: effort_match/flags/carry_forward; weekly — 7) и `planned_workout`
+  (действующая Recommendation for_date>=today — модель наутро видит, что уже
+  назначала: митигация конфликта карточек). MORNING/WEEKLY-промпты учитывают
+  carry_forward. +5 тестов (`test_influence.py` + переработка proposal-тестов);
+  392 зелёных.
+
 ## [24.08.2026] — D5: разбор ждёт фидбека — отложенный механизм
 
 ### Changed

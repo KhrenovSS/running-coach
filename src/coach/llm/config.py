@@ -12,6 +12,8 @@ COACH_ENRICH_RECENT_LIMIT = 5    # последних тренировок в к
 COACH_ENRICH_WEEKS = 4           # недель сводки в контексте хода
 COACH_WEEKLY_REPORT_WEEKS = 8    # горизонт недельного отчёта (C8)
 COACH_WEEKLY_REPORT_RECENT = 10  # тренировок в контексте недельного отчёта (C8)
+COACH_RECENT_REVIEWS_LIMIT = 3   # итогов разборов в утреннем/чат-контексте (D7)
+COACH_WEEKLY_REVIEWS_LIMIT = 7   # итогов разборов в недельном отчёте (D7)
 
 # Цены claude-opus-5 за 1M токенов (prices per 1M tokens, USD)
 PRICE_INPUT_PER_M = 5.0

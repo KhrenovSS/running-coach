@@ -54,16 +54,37 @@ def test_review_via_llm(athlete_with_history, db_session):
     assert {m.role for m in msgs} == {"user", "assistant"}
 
 
-def test_review_proposal_dropped(athlete_with_history, db_session):
-    """Proposal в разборе отбрасывается: без карточки, clamp и Recommendation."""
+def test_review_proposal_clamped(athlete_with_history, db_session):
+    """D6: proposal в разборе идёт через clamp — карточка + Recommendation.
+
+    Фикстура: свежая тренировка → recovery_hours_left > 0 → «interval Z5»
+    урезается границей, в тексте — блок ограничения.
+    """
     sid = _latest_session_id(athlete_with_history.id, db_session)
     recs_before = db_session.query(Recommendation).filter_by(
         user_id=athlete_with_history.id).count()
     llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=TURN_WITH_PROPOSAL)])
     text = orchestrator.on_workout_completed(athlete_with_history.id, sid,
                                              db=db_session, llm=llm)
-    assert "Ограничение по безопасности" not in text
-    assert "Интервалы" not in text  # карточка не рендерится вовсе
+    assert "Интервалы" not in text                    # урезано safety-границей
+    assert "Ограничение по безопасности" in text
+    recs_after = db_session.query(Recommendation).filter_by(
+        user_id=athlete_with_history.id).count()
+    assert recs_after == recs_before + 1              # назначение записано
+    rec = db_session.query(Recommendation).filter_by(
+        user_id=athlete_with_history.id).order_by(Recommendation.id.desc()).first()
+    assert rec.source == "llm"
+    assert rec.workout_type != "interval"
+
+
+def test_weekly_proposal_still_dropped(athlete_with_history, db_session):
+    """Weekly: proposal по-прежнему отбрасывается (план недели — прозой)."""
+    turn = dict(TURN_WITH_PROPOSAL)
+    recs_before = db_session.query(Recommendation).filter_by(
+        user_id=athlete_with_history.id).count()
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
+    reply = orchestrator.weekly_report(athlete_with_history.id, db=db_session, llm=llm)
+    assert "Ограничение по безопасности" not in reply.text
     recs_after = db_session.query(Recommendation).filter_by(
         user_id=athlete_with_history.id).count()
     assert recs_after == recs_before

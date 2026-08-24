@@ -16,7 +16,9 @@ from src.utils.logger import get_logger
 logger = get_logger("telegram.jobs.coach_morning")
 
 MORNING_PROMPT = ("Утренний вердикт: что мне сегодня делать — тренироваться или "
-                  "отдыхать, и если бежать, то как?")
+                  "отдыхать, и если бежать, то как? Учти carry_forward из "
+                  "recent_reviews (выводы твоих недавних разборов) и planned_workout, "
+                  "если они есть в контексте.")
 
 
 def _morning_turn_blocking(user_id: int) -> str | None:

@@ -1,0 +1,63 @@
+# Тесты D7: каналы влияния разбора на будущие тренировки
+# (D7 tests: review → future workouts influence channels) — DEV_PLAN §9 D-серия
+
+from src.coach import orchestrator
+from src.coach.llm.client import LLMResponse
+from src.coach.prescriber import finalize
+from src.coach.state import assess_state
+from src.models import TrainingSession
+from src.services.repositories_insights import InsightRepository
+from tests.coach.fakes import ScriptedLLM
+
+PLAIN_TURN = {"message": "Доброе утро! План простой.", "proposal": None,
+              "followup_question": None, "log_suggestion": None}
+
+
+def _finish_review(user_id, db, carry: str):
+    sid = db.query(TrainingSession).filter_by(user_id=user_id).order_by(
+        TrainingSession.begin_ts.desc()).first().id
+    InsightRepository.upsert(user_id, sid, db=db)
+    InsightRepository.finish(sid, db=db, source="llm", effort_match="harder",
+                             assessment={"flags": ["hr_drift_high"]},
+                             carry_forward=carry)
+    return sid
+
+
+def test_carry_forward_reaches_morning_context(athlete_with_history, db_session):
+    """carry_forward вчерашнего разбора инлайнится в контекст утреннего хода."""
+    _finish_review(athlete_with_history.id, db_session,
+                   "жара выбила — завтра только лёгкий")
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=PLAIN_TURN)])
+    orchestrator.handle_chat(athlete_with_history.id, "что сегодня делать?",
+                             db=db_session, llm=llm, kind="morning")
+    last_user = llm.calls[0]["messages"][-1]["content"]
+    assert "recent_reviews" in last_user
+    assert "жара выбила" in last_user
+    assert "hr_drift_high" in last_user
+
+
+def test_planned_workout_reaches_context(athlete_with_history, db_session):
+    """Действующее назначение (for_date>=today) видно модели наутро."""
+    state = assess_state(athlete_with_history.id, db=db_session)
+    finalize(None, state, db=db_session, persist=True)  # Recommendation на сегодня
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=PLAIN_TURN)])
+    orchestrator.handle_chat(athlete_with_history.id, "привет",
+                             db=db_session, llm=llm)
+    last_user = llm.calls[0]["messages"][-1]["content"]
+    assert "planned_workout" in last_user
+
+
+def test_weekly_sees_review_outcomes(athlete_with_history, db_session):
+    """Недельный отчёт получает итоги разборов недели."""
+    _finish_review(athlete_with_history.id, db_session, "колено стабильно")
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=PLAIN_TURN)])
+    orchestrator.weekly_report(athlete_with_history.id, db=db_session, llm=llm)
+    last_user = llm.calls[0]["messages"][-1]["content"]
+    assert "recent_reviews" in last_user
+    assert "колено стабильно" in last_user
+
+
+def test_no_reviews_no_block(athlete_with_history, db_session):
+    """Без завершённых разборов блок recent_reviews не инлайнится (нет шума)."""
+    extras = orchestrator._build_extras(athlete_with_history.id, db=db_session)
+    assert "recent_reviews (workout_insights)" not in extras

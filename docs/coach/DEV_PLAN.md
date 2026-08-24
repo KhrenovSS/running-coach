@@ -319,10 +319,10 @@ carry_forward в утреннем контексте — 3 записи / 7 дн
   (только создаёт строки), `jobs/coach_review.py` (каждые 10 мин: pending>30 мин, re-claim
   running>15 мин, expire>24 ч), триггеры: терминальный тап боли (сразу), RPE-тап
   (run_once 120 с). Исполняет разбор только бот.
-- ⬜ **D6 — proposal в разборе**: `allow_proposal=True` (отмена C8-отброса; weekly-drop
+- ✅ **D6 — proposal в разборе (24.08.2026)**: `allow_proposal=True` (отмена C8-отброса; weekly-drop
   остаётся), REVIEW_PROMPT v2 (workout_computed + daily_metrics_morning + assessment
   обязателен + proposal при необходимости коррекции).
-- ⬜ **D7 — каналы влияния**: extras morning/chat/weekly/review += `recent_reviews`
+- ✅ **D7 — каналы влияния (24.08.2026)**: extras morning/chat/weekly/review += `recent_reviews`
   (3 итога / 7 дней: effort_match/flags/carry_forward) + последняя Recommendation
   (for_date>=today) в утренний контекст; weekly читает insights.
 - ⬜ **D8 🛑 — сон**: разведка на живом токене (`bin/coros_probe_sleep.py`, read-only,

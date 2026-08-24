@@ -20,8 +20,10 @@ from src.coach.llm.config import (
     COACH_ENRICH_WEEKS,
     COACH_HISTORY_TURNS,
     COACH_MAX_TURNS_PER_DAY,
+    COACH_RECENT_REVIEWS_LIMIT,
     COACH_WEEKLY_REPORT_RECENT,
     COACH_WEEKLY_REPORT_WEEKS,
+    COACH_WEEKLY_REVIEWS_LIMIT,
 )
 from src.coach.llm.prompts import build_messages, build_system_blocks, build_today_block
 from src.coach.llm.schemas import LogSuggestion, ReviewAssessment
@@ -38,7 +40,7 @@ from src.coach.state import assess_state
 from src.coach.tools.registry import run_tool
 from src.coach.tools.serialize import jsonable
 from src.exceptions import CoachError, LLMUnavailableError
-from src.models import TrainingFeedback, User, UserModel, WellnessReport
+from src.models import Recommendation, TrainingFeedback, User, UserModel, WellnessReport
 from src.services.repositories_coach import CoachRepository
 from src.utils.logger import get_logger
 from dataclasses import dataclass, field
@@ -109,18 +111,45 @@ def _history(user_id: int, *, db: Session) -> list[dict]:
 def _build_extras(user_id: int, *, db: Session,
                   weeks: int = COACH_ENRICH_WEEKS,
                   limit: int = COACH_ENRICH_RECENT_LIMIT,
-                  session_id: int | None = None) -> dict:
+                  session_id: int | None = None,
+                  insights_limit: int = COACH_RECENT_REVIEWS_LIMIT) -> dict:
     """Обогащение today-блока: меньше tool round-trip'ов в API-режиме; в режиме
     моста tool-цикл неактивен — это его основной источник фактов (enrichment).
 
     session_id — добавить детали конкретной тренировки (для разбора, C8).
+    D7: итоги последних разборов (carry_forward → утренний вердикт) и
+    действующее назначение — каналы влияния разбора на будущее.
     """
+    from datetime import date as _date
+
+    from src.services.repositories_insights import InsightRepository
     extras = {
         "recent_workouts (get_recent_workouts)": run_tool(
             "get_recent_workouts", {"limit": limit}, user_id=user_id, db=db),
         "weekly_summary (get_weekly_summary)": run_tool(
             "get_weekly_summary", {"weeks": weeks}, user_id=user_id, db=db),
     }
+    reviews = InsightRepository.recent(user_id, db=db, days=7, limit=insights_limit)
+    if reviews:
+        today = _date.today()
+        extras["recent_reviews (workout_insights)"] = [{
+            "days_ago": (today - r.created_at.date()).days if r.created_at else None,
+            "session_id": r.session_id,
+            "effort_match": r.effort_match,
+            "flags": (r.assessment_json or {}).get("flags"),
+            "carry_forward": r.carry_forward,
+        } for r in reviews]
+    rec = db.query(Recommendation).filter(
+        Recommendation.user_id == user_id,
+        Recommendation.for_date >= _date.today(),
+    ).order_by(Recommendation.id.desc()).first()
+    if rec is not None:
+        # Действующее назначение: наутро модель видит, что уже назначала
+        # (митигация конфликта «карточка разбора vs утренний вердикт», D7)
+        extras["planned_workout (recommendations)"] = {
+            "for_date": rec.for_date.isoformat(), "type": rec.workout_type,
+            "source": rec.source, "clamped": rec.clamped,
+        }
     if session_id is not None:
         extras["workout_detail (get_workout_detail)"] = run_tool(
             "get_workout_detail", {"session_id": session_id}, user_id=user_id, db=db)
@@ -218,15 +247,22 @@ def handle_chat(user_id: int, message: str, *, db: Session,
 
 
 REVIEW_PROMPT = (
-    "Только что синхронизировалась новая тренировка — её детали в блоке "
-    "workout_detail. Разбери её: как она легла на моё текущее состояние и "
-    "неделю, что получилось, на что обратить внимание (пульс относительно "
-    "зон, темп, колено, восстановление). Новую тренировку НЕ предлагай "
-    "(proposal=null). Закончи одним коротким вопросом о самочувствии.")
+    "Синхронизировалась новая тренировка: детали — в workout_detail, вычисленные "
+    "метрики (кардиодрейф, GAP с поправкой на рельеф, отклонение пульса от моей "
+    "нормы, жара) — в workout_computed, состояние утра того дня — в "
+    "daily_metrics_morning; мои оценки (rpe, боль) уже внутри workout_detail, "
+    "если я успел ответить. Разбери тренировку: как легла на состояние и неделю, "
+    "что получилось, что настораживает — пульс к зонам и дрейф, темп с поправкой "
+    "на рельеф/погоду, колено, RPE против ожидаемого. Обязательно заполни "
+    "assessment (effort_match, causes, flags, carry_forward). Если по итогам "
+    "стоит скорректировать следующую тренировку — заполни proposal (он пройдёт "
+    "через ограничитель безопасности); если менять нечего — proposal=null. "
+    "Закончи одним коротким вопросом о самочувствии.")
 
 WEEKLY_PROMPT = (
-    "Недельный отчёт. Подведи итог прошедшей недели по weekly_summary и "
-    "recent_workouts: объём и его динамика, доля лёгкого бега (80/20), "
+    "Недельный отчёт. Подведи итог прошедшей недели по weekly_summary, "
+    "recent_workouts и итогам разборов в recent_reviews (effort_match/flags/"
+    "carry_forward): объём и его динамика, доля лёгкого бега (80/20), "
     "что удалось, что настораживает. Затем — план на следующую неделю "
     "прозой: сколько тренировок, какие акценты, ориентиры объёма "
     "диапазонами. Конкретную тренировку не назначай (proposal=null) — "
@@ -255,10 +291,12 @@ def on_workout_completed(user_id: int, session_id: int, *, db: Session,
         return _deterministic_review(user_id, session_id, db=db)
     llm = llm if llm is not None else get_llm()
     try:
+        # D6: proposal в разборе разрешён (решение владельца 24.08 — «оба канала»);
+        # коррекция следующей тренировки идёт через обычный finalize/clamp.
         reply = _llm_chat_turn(
             user_id, REVIEW_PROMPT, db=db, llm=llm, kind="review",
             extras=_build_extras(user_id, db=db, session_id=session_id),
-            allow_proposal=False)
+            allow_proposal=True)
         # Итог разбора → workout_insights (пишет оркестратор из провалидированного
         # output — LLM в БД не пишет, инвариант §1.4). (Persist the review outcome.)
         from src.services.repositories_insights import InsightRepository
@@ -288,7 +326,8 @@ def weekly_report(user_id: int, *, db: Session,
         return _llm_chat_turn(
             user_id, WEEKLY_PROMPT, db=db, llm=llm, kind="weekly",
             extras=_build_extras(user_id, db=db, weeks=COACH_WEEKLY_REPORT_WEEKS,
-                                 limit=COACH_WEEKLY_REPORT_RECENT),
+                                 limit=COACH_WEEKLY_REPORT_RECENT,
+                                 insights_limit=COACH_WEEKLY_REVIEWS_LIMIT),
             allow_proposal=False, effort=COACH_EFFORT_PLAN)
     except (LLMUnavailableError, CoachError) as e:
         logger.info("LLM weekly fallback for user=%s: %s", user_id, e)
