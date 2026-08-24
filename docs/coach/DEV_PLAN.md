@@ -298,7 +298,7 @@ carry_forward в утреннем контексте — 3 записи / 7 дн
   attempts, claimed_at, reviewed_at, schema_version, computed_json, assessment_json,
   effort_match, carry_forward String(300), coach_message_id. Стоп-поинт data-safety §5 +
   db-safety-reviewer; накат на прод — отдельно (backup → stop bot → up -d app → up -d bot).
-- ⬜ **D2 — вычислительный слой**: константы в `src/config/constants.py`;
+- ✅ **D2 — вычислительный слой (24.08.2026)**: константы в `src/config/constants.py`;
   `src/analysis/gap.py` (сглаживание высоты, Minetti-2002, GAP/уклон по км),
   `src/analysis/effort.py` (moving-сэмплы, cardiac drift/decoupling Pa:HR, heat_flag),
   `src/analysis/hr_baseline.py` (OLS HR↔GAP-темп, хранение в

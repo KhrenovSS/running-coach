@@ -84,7 +84,10 @@ coach/
 ```
 
 Смежное: `src/services/repositories_coach.py` (CoachRepository — выборки для скиллов/state,
-честный ACWR), `src/telegram/handlers/{coach,pain}.py`,
+честный ACWR), `src/services/repositories_insights.py` + `src/services/workout_insights.py`
+(D1/D2: очередь+итог разбора; композиция чистой математики `src/analysis/{gap,effort,
+hr_baseline}.py` — Minetti-GAP, decoupling Pa:HR, базовая линия HR↔темп),
+`src/telegram/handlers/{coach,pain}.py`,
 `src/telegram/jobs/coach_{morning,evening,weekly}.py` (09:30 / 21:00 / вс 19:00),
 `src/services/sync/activities.py::_coach_reviews` (post-sync разборы в daemon-треде:
 гейт initiative, LLM только для самой свежей тренировки батча),

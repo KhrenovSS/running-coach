@@ -92,3 +92,36 @@ SYNC_FAILURE_NOTIFY_THRESHOLD: Final[int] = 3    # подряд сбоев до 
 SYNC_BACKOFF_MAX_EXP: Final[int] = 5             # cap экспоненты backoff: 2^5 = 32× интервала (backoff exponent cap)
 WATCH_API_PAGE_THROTTLE_SEC: Final[float] = 0.5  # пауза между страницами list_activities (page throttle, unofficial API)
 WATCH_TOKEN_TTL_HOURS: Final[int] = 24           # консервативный TTL кэша токена (conservative token cache TTL)
+
+# --- Физиологические метрики тренировки (Workout physio metrics — DEV_PLAN §9 D2) ---
+# Потребитель — коуч (workout_insights.computed_json); интерпретация — за LLM.
+
+# Кардиодрейф / decoupling Pa:HR (cardiac drift)
+DRIFT_WARMUP_MIN: Final[int] = 5             # отброс разогрева перед расчётом (warmup discard)
+DRIFT_MIN_STEADY_MIN: Final[int] = 25        # минимум steady-времени для применимости (min steady window)
+DRIFT_MAX_SAMPLE_GAP_SEC: Final[int] = 10    # разрыв больше → автопауза, интервал выброшен (auto-pause gap)
+DRIFT_MIN_MOVING_SPEED_MS: Final[float] = 0.5  # медленнее → стоим (standing threshold)
+DRIFT_MIN_HR_COVERAGE: Final[float] = 0.8    # доля moving-сэмплов с HR (min HR coverage)
+DRIFT_MAX_PACE_CV: Final[float] = 0.10       # CV по-км GAP-темпов выше → variable_pace (steady-pace gate)
+DRIFT_MODERATE_PCT: Final[float] = 3.0       # drift выше → flag=moderate
+DRIFT_HIGH_PCT: Final[float] = 5.0           # drift выше → flag=high (маркер детренированности/жары)
+
+# Высота и grade-adjusted pace (elevation smoothing + GAP, Minetti 2002)
+ALT_SMOOTH_MEDIAN_WINDOW: Final[int] = 5     # скользящая медиана — выбросы барометра/GPS (median window)
+ALT_SMOOTH_MEAN_WINDOW: Final[int] = 5       # скользящее среднее — ступеньки квантования (mean window)
+ELEV_MIN_DELTA_M: Final[float] = 1.0         # гистерезис набора/спуска (gain/loss hysteresis)
+GAP_MAX_GRADE: Final[float] = 0.30           # клип уклона — граница валидности полинома Minetti (grade clip)
+GAP_GRADE_WINDOW_M: Final[float] = 60.0      # окно локального уклона для посэмплового фактора (local grade window)
+GAP_MIN_ALT_COVERAGE: Final[float] = 0.8     # доля точек с высотой, ниже → GAP недоступен (min alt coverage)
+HILLY_GAIN_M_PER_KM: Final[float] = 10.0     # набор на км выше → «холмистая» (hilly threshold)
+
+# Персональная базовая линия HR↔GAP-темп (personal HR↔pace baseline, OLS)
+BASELINE_WINDOW_DAYS: Final[int] = 120       # окно истории (history window)
+BASELINE_MIN_POINTS: Final[int] = 30         # минимум км-точек для регрессии (min km-points)
+BASELINE_MIN_SESSIONS: Final[int] = 5        # минимум сессий (min sessions)
+BASELINE_SKIP_FIRST_KM: Final[int] = 1       # первый км исключён: разогрев + колено (skip warmup km)
+BASELINE_Z_FLAG: Final[float] = 1.5          # |z| выше → флаг hr_above/below_baseline (z-flag threshold)
+BASELINE_TYPES: Final[tuple] = ("easy", "long", "recovery")  # steady-типы для регрессии (steady types)
+
+# Жара (heat)
+HEAT_TEMP_THRESHOLD_C: Final[int] = 20       # температура старта выше → heat_flag (heat threshold)

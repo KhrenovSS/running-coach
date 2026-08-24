@@ -40,6 +40,8 @@ def build_trackpoints(
     warmup_km: float = 1.0,
     cooldown_km: float = 1.0,
     error_indices: list[int] | None = None,
+    hr_drift_bpm: float = 0.0,
+    grade_pct: float = 0.0,
     **kwargs,
 ) -> list[dict]:
     """
@@ -66,21 +68,34 @@ def build_trackpoints(
         start_time = datetime(2026, 7, 1, 8, 0, 0, tzinfo=timezone.utc)
 
     if training_type == 'interval':
-        return _build_interval(start_time, base_pace, work_pace, warmup_km, cooldown_km,
-                                intervals, work_dist_m, recovery_dist_m, hr, max_hr)
+        tps = _build_interval(start_time, base_pace, work_pace, warmup_km, cooldown_km,
+                              intervals, work_dist_m, recovery_dist_m, hr, max_hr)
     elif training_type == 'tempo':
         dist_km = distance_km or 10.0
-        return _build_tempo(start_time, base_pace, dist_km, hr)
+        tps = _build_tempo(start_time, base_pace, dist_km, hr)
     elif training_type == 'long':
         dur = duration_min or 100.0
-        return _build_long(start_time, base_pace, dur, hr)
+        tps = _build_long(start_time, base_pace, dur, hr)
     elif training_type == 'recovery':
         dur = duration_min or 25.0
-        return _build_recovery(start_time, base_pace, dur, hr, max_hr)
+        tps = _build_recovery(start_time, base_pace, dur, hr, max_hr)
     elif training_type == 'gps_errors':
         dist_km = distance_km or 3.0
-        return _build_gps_errors(start_time, base_pace, dist_km, error_indices)
-    raise ValueError(f"Unknown training_type: {training_type}")
+        tps = _build_gps_errors(start_time, base_pace, dist_km, error_indices)
+    else:
+        raise ValueError(f"Unknown training_type: {training_type}")
+
+    # Пост-обработка для физио-тестов (D2): линейный дрейф HR и/или уклон
+    # (post-pass for physio tests: linear HR drift and/or constant grade)
+    if hr_drift_bpm and len(tps) > 1:
+        n = len(tps) - 1
+        for i, tp in enumerate(tps):
+            if tp.get('hr') is not None:
+                tp['hr'] = round(tp['hr'] + hr_drift_bpm * i / n)
+    if grade_pct:
+        for tp in tps:
+            tp['alt'] = 150.0 + (tp['dist'] or 0.0) * grade_pct / 100.0
+    return tps
 
 
 def _build_interval(start_time, base_pace, work_pace, warmup_km, cooldown_km,

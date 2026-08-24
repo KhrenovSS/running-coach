@@ -139,6 +139,14 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
     evaluate_max_hr_raise(db, user_id,
                           result.get('hr_peak_smoothed') or result.get('max_heart_rate'),
                           source="reanalyze")
+    # Физио-метрики (D2): трекпоинты изменились — пересчитать computed_json
+    # (physio metrics: trackpoints changed — recompute the stored insight)
+    try:
+        from src.services.workout_insights import upsert_workout_insights
+        upsert_workout_insights(user_id, session_id, db=db)
+    except Exception as e:  # метрики не должны ронять reanalyze (never break reanalyze)
+        logger.error("Workout insights recompute failed for session=%d: %s",
+                     session_id, e)
     return result
 
 

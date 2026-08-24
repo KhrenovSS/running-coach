@@ -2,6 +2,27 @@
 
 All notable changes to this project are tracked here.
 
+## [24.08.2026] — D2: детерминированные физио-метрики тренировки
+
+### Added
+- `src/analysis/gap.py` — сглаживание высоты (медиана+среднее), энергостоимость
+  уклона по Minetti 2002, GAP и уклон по километрам, сглаженный набор/спуск
+  с гистерезисом (legacy `calc_elevation` не тронут — BACKLOG #253).
+- `src/analysis/effort.py` — кардиодрейф/decoupling Pa:HR (moving-сэмплы с
+  автопаузами, отброс разогрева, EF по половинам, гейты применимости:
+  interval/too_short/low_hr_coverage/variable_pace), heat-флаг.
+- `src/analysis/hr_baseline.py` — персональная базовая линия HR↔GAP-темп
+  (OLS, минимум 30 точек/5 сессий, вырожденный фит отвергается), отклонение
+  сегодняшней тренировки (delta_bpm, z).
+- `src/services/workout_insights.py` — сборка `computed_json` (schema v1),
+  upsert/get_or_compute (lazy покрывает старые тренировки), пересчёт baseline
+  в `UserModel.params_json['hr_pace_baseline']` (merge, initiative не затирается).
+- Хуки: `_coach_reviews` считает метрики до разборов; `reanalyze` пересчитывает.
+- Константы — блок в `src/config/constants.py`; +27 тестов (test_gap/test_effort/
+  test_hr_baseline/test_workout_insights), фабрика trackpoints += hr_drift_bpm/grade_pct.
+- Проверка на реальных данных прода (read-only): ровная темповая → drift 0.3%,
+  прогрессивная лёгкая → −7.2%, GAP согласован с уклоном, heat при 21 °C.
+
 ## [24.08.2026] — D1: таблица workout_insights (итог разбора + очередь)
 
 ### Added

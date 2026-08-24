@@ -33,6 +33,15 @@ def _coach_reviews(user_id: int, trainings: list[dict]) -> None:
     db = SessionLocal()
     try:
         from src.coach import orchestrator as coach
+        # Физио-метрики (D2): считаем до разборов, чтобы контекст LLM их видел
+        # (physio metrics first, so the review context can include them)
+        from src.services.workout_insights import upsert_workout_insights
+        for nt in trainings:
+            try:
+                upsert_workout_insights(user_id, nt["session_id"], db=db)
+            except Exception as e:  # метрики не должны блокировать разбор
+                logger.error("Workout insights failed for session=%s: %s",
+                             nt["session_id"], e)
         initiative = coach.get_initiative(user_id, db=db)
         if initiative == "off":
             return
