@@ -81,6 +81,37 @@ class Lesson(Base):
     active = Column(Boolean, default=True)
 
 
+class WorkoutInsight(Base):
+    """Итог разбора тренировки + очередь отложенного разбора (review v2, DEV_PLAN D1).
+
+    Строка создаётся синком (любой контейнер), исполняется разбор только ботом
+    через атомарный claim по status — ADR «Решение 4» в docs/coach/ARCHITECTURE.md.
+    (Persistent review outcome AND the deferred-review queue in one row.)
+    """
+    __tablename__ = 'workout_insights'
+    __table_args__ = (
+        UniqueConstraint('session_id', name='uq_workout_insight_session'),
+        Index('ix_workout_insights_user_created', 'user_id', 'created_at'),
+        Index('ix_workout_insights_status', 'status'),  # выборка pending джобой
+    )
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    session_id = Column(Integer, ForeignKey('training_sessions.id', ondelete='CASCADE'), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    status = Column(String(16), nullable=False, default='pending', server_default='pending')
+        # pending | running | done | none | expired | error
+    source = Column(String(16), nullable=True)              # llm | fallback (NULL пока не done)
+    attempts = Column(Integer, nullable=False, default=0, server_default='0')
+    claimed_at = Column(DateTime(timezone=True), nullable=True)   # re-claim зависших running
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    schema_version = Column(Integer, nullable=True)         # версия computed_json (D2)
+    computed_json = Column(JSON, nullable=True)             # детерминированные метрики (drift/GAP/baseline/heat)
+    assessment_json = Column(JSON, nullable=True)           # провалидированный ReviewAssessment (D3)
+    effort_match = Column(String(10), nullable=True)        # ok|harder|easier|unknown — дубль для агрегаций
+    carry_forward = Column(String(300), nullable=True)      # заметка «на завтра» — читает утренний вердикт
+    coach_message_id = Column(Integer, ForeignKey('coach_messages.id', ondelete='SET NULL'), nullable=True)
+
+
 class CoachMessage(Base):
     """История диалога с коучем + учёт стоимости LLM (chat history + cost accounting)."""
     __tablename__ = 'coach_messages'

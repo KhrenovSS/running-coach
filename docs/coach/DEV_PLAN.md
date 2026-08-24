@@ -291,7 +291,7 @@ carry_forward в утреннем контексте — 3 записи / 7 дн
 
 - ✅ **D0 — этот чек-лист + ADR** «отложенный разбор через статус в БД» в
   `docs/coach/ARCHITECTURE.md`; CHANGELOG.
-- ⬜ **D1 🛑 — таблица `workout_insights`** (модель + аддитивная миграция `q0r1s2t3u4v5` +
+- ✅ **D1 🛑 — таблица `workout_insights` (код 24.08.2026; накат на прод — отдельно)** (модель + аддитивная миграция `q0r1s2t3u4v5` +
   `src/services/repositories_insights.py::InsightRepository`: upsert/claim(атомарный)/
   reclaim_stale_running/finish/pending_older_than/expire_older_than/recent/for_session).
   Колонки: session_id UNIQUE, status(pending|running|done|none|expired|error), source,

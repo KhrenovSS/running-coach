@@ -2,6 +2,22 @@
 
 All notable changes to this project are tracked here.
 
+## [24.08.2026] — D1: таблица workout_insights (итог разбора + очередь)
+
+### Added
+- Модель/таблица `workout_insights` (миграция `q0r1s2t3u4v5`, чисто аддитивная):
+  строка на тренировку — персистентный итог разбора (`computed_json` метрики,
+  `assessment_json`/`carry_forward` от LLM) и одновременно очередь отложенного
+  разбора (`status` pending→running→done/none/expired/error, атомарный claim).
+- `src/services/repositories_insights.py::InsightRepository`: upsert (идемпотентный,
+  статус не понижается, гонка INSERT'ов гасится IntegrityError→rollback→reread),
+  claim/release/reclaim_stale_running, finish, pending_older_than, expire_older_than,
+  recent, for_session. +9 тестов (`tests/coach/test_insights_repo.py`).
+- db-safety-ревью: **GO** (аддитивно, каскады не задевают тренировки; minor-находки
+  → BACKLOG #256). Тесты: 343 зелёные в SQLite и PostgreSQL/alembic.
+- BACKLOG #251–#256 (турникет бюджета, потеря погоды при merge сегментов,
+  сглаживание elevation, пороги сна, precipitation, гонка reclaim).
+
 ## [24.08.2026] — D0: план «Разбор тренировки v2» (нормативно в DEV_PLAN §9)
 
 ### Added

@@ -434,6 +434,12 @@
 | 248 | [Arch] | `training_type_override` не слит с `training_type` в web/`/stats` (коуч решает сам через `effective_training_type`). Слить в остальном приложении. | `src/web/`, `src/telegram/handlers/stats.py` | ⬜ |
 | 249 | [Config] | Привести recovery-шкалу к Coros §12 (20/70/90): сейчас `RECOVERY_PCT_MODERATE=30` — исторический порог display-слоя. | `src/coach/config.py`, `src/services/recovery_view.py` | ⬜ |
 | 250 | [Docs] | В BACKLOG дублируется номер 139 (две разные записи). Не перенумеровывать (ссылки в коммитах); при следующей чистке пометить вторую как 139-bis. | `BACKLOG.md` | ⬜ |
+| 251 | [Coach] | `turns_today` считает ВСЕ assistant-строки, включая fallback-карточки (`meta.fallback`) — детерминированные разборы бэкфилла жгут дневной LLM-бюджет 40 и могут заблокировать утренний вердикт. Не считать fallback-строки. | `src/services/repositories_coach.py` | ⬜ |
+| 252 | [Bug] | `_merge_similar_segments` теряет `temperature`/`weather_code` сегментов при слиянии (ключи есть до merge, после — нет). | `src/analysis/segment.py` | ⬜ |
+| 253 | [Идея] | Переключить `TrainingSession.elevation_gain/loss` на сглаженный расчёт: `calc_elevation` — naive-сумма дельт, завышает набор на GPS/баро-шуме. Сглаженный расчёт появится в D2 (`analysis/gap.py`) — переиспользовать. **Требует решения владельца** (изменит числа в UI). | `src/analysis/utils.py` | ⬜ |
+| 254 | [Coach] | Пороги сна в `signals`/P1 (safety-граница «недосып → осторожнее») — после накопления данных сна из D8. | `src/coach/config.py`, `src/coach/rules/p1_safety.py` | ⬜ |
+| 255 | [Data] | `precipitation` скачивается из Open-Meteo и выбрасывается (`weather.py` использует только temps/codes). Сохранять и отдавать в разбор (дождь/снег — фактор темпа/пульса). | `src/parsers/weather.py`, `src/analysis/__init__.py` | ⬜ |
+| 256 | [Coach] | `InsightRepository.release/reclaim_stale_running` — read-modify-write без атомарного предиката: теоретическая гонка reclaim-джобы с живым исполнителем (двойной перевод в pending → лишний повторный разбор, не потеря данных). Находка db-safety-ревью D1. | `src/services/repositories_insights.py` | ⬜ |
 
 ## 🟠 Отложенные находки ревью (03.08.2026 — подготовка к аналитике)
 

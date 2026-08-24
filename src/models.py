@@ -6,7 +6,7 @@ from src.domain.models import (  # noqa: F401
     User, TrainingSession, TrainingFeedback, DeletedTraining,
     WatchCredential, DailyMetrics, WeightMeasurement, WellnessReport,
     AuthToken, AuditEvent,
-    Recommendation, PredictionLog, UserModel, Lesson, CoachMessage,
+    Recommendation, PredictionLog, UserModel, Lesson, CoachMessage, WorkoutInsight,
 )
 
 # Deprecated: использовать src.services.user_service
