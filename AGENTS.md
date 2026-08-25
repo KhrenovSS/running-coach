@@ -207,6 +207,18 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 
 ## Текущее состояние
 
+**Session 24–25.08.2026 — «Разбор тренировки v2» (D0–D8) ✅, задеплоено в прод 25.08:**
+- Отложенный разбор: синк создаёт `workout_insights` (статус-очередь, атомарный claim),
+  исполняет бот — тап боли сразу / RPE-тап +120 с / джоба 10 мин (таймаут 30 мин, re-claim,
+  expire 24 ч). RPE/боль попадают в разбор. Детерминированные метрики (`analysis/{gap,effort,
+  hr_baseline}.py` + `services/workout_insights.py`): GAP по Minetti, decoupling Pa:HR,
+  базовая линия HR↔темп (UserModel.params_json), heat — проверены на реальных данных.
+  `CoachTurn.assessment` (+carry_forward) персистится; контексты morning/chat/weekly читают
+  `recent_reviews` + `planned_workout`; proposal в разборе снова разрешён (через clamp).
+  Сон: разведка D8 — Coros API отдаёт только sleep-HRV → поля не добавлены (#257).
+  Деплой: backup → stop bot → миграция `q0r1s2t3u4v5` → up -d, данные целы. 392 теста.
+  BACKLOG: +#251–#257. Следующее: live-проверка на реальной тренировке; #241/#242/#247.
+
 **Session 24.08.2026 — C8: LLM-разбор тренировки + недельный отчёт + гейт инициативы ✅ (код; деплой — отдельно):**
 - `on_workout_completed` через LLM (kind=review, `workout_detail` в extras; proposal
   отбрасывается — назначает утренний вердикт/чат); `weekly_report` + `jobs/coach_weekly.py`
