@@ -325,10 +325,14 @@ carry_forward в утреннем контексте — 3 записи / 7 дн
 - ✅ **D7 — каналы влияния (24.08.2026)**: extras morning/chat/weekly/review += `recent_reviews`
   (3 итога / 7 дней: effort_match/flags/carry_forward) + последняя Recommendation
   (for_date>=today) в утренний контекст; weekly читает insights.
-- ⬜ **D8 🛑 — сон**: разведка на живом токене (`bin/coros_probe_sleep.py`, read-only,
-  стоп-поинт) → аддитивные поля DailyMetrics (по факту API; ALTER → stop bot) →
-  `sync/health.py` → METRIC_FIELDS/registry enum → `state._missing` без хардкода 'sleep' →
-  `daily_metrics_morning`. В signals/P1 сон не добавляем (BACKLOG).
+- ✅ **D8 🛑 — сон: разведка выполнена 25.08.2026, СОН НЕДОСТУПЕН.** Read-only
+  разведка (`bin/coros_probe_sleep.py`, одобрена владельцем) по всем трём штатным
+  endpoint'ам (`dashboard/query`, `analyse/dayDetail/query`, `analyse/query`):
+  API отдаёт только HRV во сне (`avgSleepHrv`/`sleepHrvBase`/`sleepHrvIntervalList` —
+  уже синкается). Длительности/фаз/оценки сна нет → поля не добавляем, разбор
+  опирается на HRV/RHR/recovery утра дня тренировки (`daily_metrics_morning`, D4);
+  `'sleep'` в `state.missing` остаётся честным. Отдельный sleep-endpoint
+  неофициального API — BACKLOG #257.
 
 Зависимости: D0→D1→(D2 ∥ D3 ∥ D4)→D5→D6→D7; D8 — параллелен после разведки.
 

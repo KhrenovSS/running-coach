@@ -440,6 +440,7 @@
 | 254 | [Coach] | Пороги сна в `signals`/P1 (safety-граница «недосып → осторожнее») — после накопления данных сна из D8. | `src/coach/config.py`, `src/coach/rules/p1_safety.py` | ⬜ |
 | 255 | [Data] | `precipitation` скачивается из Open-Meteo и выбрасывается (`weather.py` использует только temps/codes). Сохранять и отдавать в разбор (дождь/снег — фактор темпа/пульса). | `src/parsers/weather.py`, `src/analysis/__init__.py` | ⬜ |
 | 256 | [Coach] | `InsightRepository.release/reclaim_stale_running` — read-modify-write без атомарного предиката: теоретическая гонка reclaim-джобы с живым исполнителем (двойной перевод в pending → лишний повторный разбор, не потеря данных). Находка db-safety-ревью D1. | `src/services/repositories_insights.py` | ⬜ |
+| 257 | [Идея] | **Сон из Coros**: три штатных endpoint'а отдают только sleep-HRV (разведка D8, 25.08.2026). У приложения Coros наверняка есть отдельный sleep-endpoint (неофициальный API) — найти (сниффинг трафика приложения) и добавить длительность/фазы/оценку сна в DailyMetrics. До тех пор разбор опирается на HRV/RHR/recovery. | `src/watch/coros.py`, `src/services/sync/health.py` | ⬜ |
 
 ## 🟠 Отложенные находки ревью (03.08.2026 — подготовка к аналитике)
 

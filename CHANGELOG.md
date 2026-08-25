@@ -2,6 +2,17 @@
 
 All notable changes to this project are tracked here.
 
+## [25.08.2026] — D8: разведка сна в Coros API — сон недоступен
+
+### Decided
+- Read-only разведка на живом токене (одобрена владельцем) по всем трём штатным
+  endpoint'ам (`dashboard/query`, `analyse/dayDetail/query`, `analyse/query`):
+  API отдаёт только HRV во сне (уже синкается). Длительности/фаз/оценки сна нет →
+  поля в DailyMetrics не добавляем; разбор опирается на HRV/RHR/recovery утра дня
+  тренировки (`daily_metrics_morning`); `'sleep'` в `state.missing` остаётся честным.
+  Поиск отдельного sleep-endpoint'а — BACKLOG #257. Чек-лист D0–D8 закрыт полностью;
+  остался накат на прод (стоп-поинт data-safety).
+
 ## [24.08.2026] — D6+D7: разбор может корректировать будущее
 
 ### Changed
