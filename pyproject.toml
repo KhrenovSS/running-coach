@@ -29,3 +29,9 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+# Дистилляция книг в гайды (offline, bin/distill_books.py) — не в прод-образ
+distill = [
+    "ebooklib>=0.18",
+    "pypdf>=4.0",
+    "beautifulsoup4>=4.12",
+]

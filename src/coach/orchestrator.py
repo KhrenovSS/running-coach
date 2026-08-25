@@ -25,7 +25,13 @@ from src.coach.llm.config import (
     COACH_WEEKLY_REPORT_WEEKS,
     COACH_WEEKLY_REVIEWS_LIMIT,
 )
-from src.coach.llm.prompts import build_messages, build_system_blocks, build_today_block
+from src.coach.llm.prompts import (
+    REVIEW_PROMPT,
+    WEEKLY_PROMPT,
+    build_messages,
+    build_system_blocks,
+    build_today_block,
+)
 from src.coach.llm.schemas import LogSuggestion, ReviewAssessment
 from src.coach.prescriber import finalize
 from src.coach.render import (
@@ -37,6 +43,8 @@ from src.coach.render import (
 from src.coach.rules.p1_safety import evaluate_safety
 from src.coach.skills import workout
 from src.coach.state import assess_state
+from src.coach.knowledge.loader import review_guides_queries
+from src.coach.knowledge.loader import search as guide_search
 from src.coach.tools.registry import run_tool
 from src.coach.tools.serialize import jsonable
 from src.exceptions import CoachError, LLMUnavailableError
@@ -112,7 +120,8 @@ def _build_extras(user_id: int, *, db: Session,
                   weeks: int = COACH_ENRICH_WEEKS,
                   limit: int = COACH_ENRICH_RECENT_LIMIT,
                   session_id: int | None = None,
-                  insights_limit: int = COACH_RECENT_REVIEWS_LIMIT) -> dict:
+                  insights_limit: int = COACH_RECENT_REVIEWS_LIMIT,
+                  guides_query: str | None = None) -> dict:
     """Обогащение today-блока: меньше tool round-trip'ов в API-режиме; в режиме
     моста tool-цикл неактивен — это его основной источник фактов (enrichment).
 
@@ -151,14 +160,35 @@ def _build_extras(user_id: int, *, db: Session,
             "source": rec.source, "clamped": rec.clamped,
         }
     if session_id is not None:
-        extras["workout_detail (get_workout_detail)"] = run_tool(
+        detail = run_tool(
             "get_workout_detail", {"session_id": session_id}, user_id=user_id, db=db)
+        extras["workout_detail (get_workout_detail)"] = detail
         # D4: детерминированные физио-метрики (drift/GAP/baseline/heat) — в контекст
         # разбора; lazy-пересчёт покрывает старые тренировки (computed metrics).
         from src.services.workout_insights import get_or_compute
         computed = get_or_compute(user_id, session_id, db=db)
         if computed is not None:
             extras["workout_computed (workout_insights)"] = computed
+        # E3 (#242): в мосте search_guides простаивает — чанки методики инлайном
+        # (bridge mode: inline the methodology chunks the tool would have fetched)
+        if guides_query is None:
+            queries = review_guides_queries(detail, computed)
+        else:
+            queries = [guides_query]
+    else:
+        queries = [guides_query] if guides_query else []
+    chunks: list = []
+    seen: set[tuple[str, str]] = set()
+    for q in queries:
+        # по одному лучшему чанку на запрос — боль не вытесняется типом тренировки
+        for c in guide_search(q, top_k=1):
+            if (c.guide, c.heading) not in seen:
+                seen.add((c.guide, c.heading))
+                chunks.append(c)
+    if chunks:
+        extras["method_guides (search_guides)"] = [
+            {"guide": c.guide, "heading": c.heading, "text": c.text}
+            for c in chunks[:2]]
     return extras
 
 
@@ -246,29 +276,6 @@ def handle_chat(user_id: int, message: str, *, db: Session,
         return ChatReply(text=text, source="fallback")
 
 
-REVIEW_PROMPT = (
-    "Синхронизировалась новая тренировка: детали — в workout_detail, вычисленные "
-    "метрики (кардиодрейф, GAP с поправкой на рельеф, отклонение пульса от моей "
-    "нормы, жара) — в workout_computed, состояние утра того дня — в "
-    "daily_metrics_morning; мои оценки (rpe, боль) уже внутри workout_detail, "
-    "если я успел ответить. Разбери тренировку: как легла на состояние и неделю, "
-    "что получилось, что настораживает — пульс к зонам и дрейф, темп с поправкой "
-    "на рельеф/погоду, колено, RPE против ожидаемого. Обязательно заполни "
-    "assessment (effort_match, causes, flags, carry_forward). Если по итогам "
-    "стоит скорректировать следующую тренировку — заполни proposal (он пройдёт "
-    "через ограничитель безопасности); если менять нечего — proposal=null. "
-    "Закончи одним коротким вопросом о самочувствии.")
-
-WEEKLY_PROMPT = (
-    "Недельный отчёт. Подведи итог прошедшей недели по weekly_summary, "
-    "recent_workouts и итогам разборов в recent_reviews (effort_match/flags/"
-    "carry_forward): объём и его динамика, доля лёгкого бега (80/20), "
-    "что удалось, что настораживает. Затем — план на следующую неделю "
-    "прозой: сколько тренировок, какие акценты, ориентиры объёма "
-    "диапазонами. Конкретную тренировку не назначай (proposal=null) — "
-    "её даст утренний вердикт. В конце — один короткий вопрос о целях недели.")
-
-
 def _deterministic_review(user_id: int, session_id: int, *, db: Session) -> str:
     """Детерминированный разбор + персист в историю и итог (deterministic review path)."""
     from src.services.repositories_insights import InsightRepository
@@ -327,7 +334,8 @@ def weekly_report(user_id: int, *, db: Session,
             user_id, WEEKLY_PROMPT, db=db, llm=llm, kind="weekly",
             extras=_build_extras(user_id, db=db, weeks=COACH_WEEKLY_REPORT_WEEKS,
                                  limit=COACH_WEEKLY_REPORT_RECENT,
-                                 insights_limit=COACH_WEEKLY_REVIEWS_LIMIT),
+                                 insights_limit=COACH_WEEKLY_REVIEWS_LIMIT,
+                                 guides_query="объём прогрессия неделя план база"),
             allow_proposal=False, effort=COACH_EFFORT_PLAN)
     except (LLMUnavailableError, CoachError) as e:
         logger.info("LLM weekly fallback for user=%s: %s", user_id, e)

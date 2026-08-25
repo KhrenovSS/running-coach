@@ -2,6 +2,26 @@
 
 All notable changes to this project are tracked here.
 
+## [25.08.2026] — E0/E1/E3: конвейер дистилляции книг + методика в контексте
+
+### Added
+- **E0**: каталог `books/` (gitignored — копирайт: исходники книг не версионируются,
+  в git только конспекты) + README-инструкция; extras-группа `distill` в pyproject.
+- **E1**: `bin/distill_books.py` — книга (epub/fb2/pdf/txt/md) → map-конспекты →
+  reduce в guide-файлы формата loader (front-matter + key_rules + чанки; готовые
+  планы → `60_plans_*` с объёмами в % от недельного объёма) через LLM-мост.
+  Черновики в `books/_distilled/` — ручное ревью перед переносом в guides/.
+  E2E проверен на синтетической книге: 3 корректных черновика, loader парсит.
+- **E3 (#242)**: разбор и недельный отчёт получают чанки методики инлайном
+  (`method_guides` в extras; в мосте search_guides простаивает): для разбора —
+  запросы из фактов (боль → гайд про колено отдельным запросом + тип тренировки),
+  для weekly — объём/прогрессия. +3 теста (394 зелёных).
+
+### Changed
+- REVIEW_PROMPT/WEEKLY_PROMPT вынесены в `llm/prompts.py`, query-билдер гайдов —
+  в `knowledge/loader.py` (лимит ~400 строк orchestrator.py).
+- E2 (дистилляция реальных книг) ждёт файлов от владельца в `books/`.
+
 ## [25.08.2026] — Decided: мост — постоянный LLM-режим + дорожная карта после v2
 
 ### Decided

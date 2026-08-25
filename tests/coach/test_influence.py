@@ -61,3 +61,31 @@ def test_no_reviews_no_block(athlete_with_history, db_session):
     """Без завершённых разборов блок recent_reviews не инлайнится (нет шума)."""
     extras = orchestrator._build_extras(athlete_with_history.id, db=db_session)
     assert "recent_reviews (workout_insights)" not in extras
+    assert "method_guides (search_guides)" not in extras  # без запроса — нет чанков
+
+
+def test_review_extras_include_method_guides(athlete_with_history, db_session):
+    """E3 (#242): разбор получает чанки методики по типу тренировки/боли."""
+    from src.models import TrainingFeedback, TrainingSession
+    sess = db_session.query(TrainingSession).filter_by(
+        user_id=athlete_with_history.id).order_by(
+        TrainingSession.begin_ts.desc()).first()
+    db_session.add(TrainingFeedback(session_id=sess.id,
+                                    user_id=athlete_with_history.id,
+                                    rating=5, pain_level=2, pain_location="knee"))
+    db_session.commit()
+    extras = orchestrator._build_extras(athlete_with_history.id, db=db_session,
+                                        session_id=sess.id)
+    chunks = extras["method_guides (search_guides)"]
+    assert 1 <= len(chunks) <= 2
+    assert all({"guide", "heading", "text"} <= set(c) for c in chunks)
+    # боль в фидбеке → чанк про колено в выдаче (pain → knee guide chunk)
+    assert any("knee" in c["guide"] or "колен" in c["text"].lower() for c in chunks)
+
+
+def test_weekly_extras_include_method_guides(athlete_with_history, db_session):
+    """E3: недельный отчёт получает чанки про объём/прогрессию."""
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=PLAIN_TURN)])
+    orchestrator.weekly_report(athlete_with_history.id, db=db_session, llm=llm)
+    last_user = llm.calls[0]["messages"][-1]["content"]
+    assert "method_guides" in last_user

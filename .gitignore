@@ -51,3 +51,8 @@ logs/
 
 # DB backup dumps (bin/backup_db.sh) — не версионируем
 backups/
+
+# Исходники книг для дистилляции (bin/distill_books.py) — копирайт, не версионируем.
+# В git попадают только конспекты-выжимки в src/coach/knowledge/guides/.
+books/*
+!books/README.md

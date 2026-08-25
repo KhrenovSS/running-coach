@@ -106,6 +106,30 @@ def key_rules_digest() -> str:
     return "\n".join(lines)
 
 
+_TYPE_GUIDE_TERMS = {
+    "easy": "лёгкий бег база разговорный",
+    "recovery": "восстановительный лёгкий база",
+    "long": "длительный база объём",
+    "tempo": "темповая интенсивность прогрессия",
+    "interval": "интервалы интенсивность прогрессия",
+    "race": "соревнование интенсивность",
+}
+
+
+def review_guides_queries(detail: dict, computed: dict | None) -> list[str]:
+    """Запросы к базе знаний из фактов тренировки (guides queries from facts) — E3.
+
+    Боль — отдельным запросом: гайд про колено не должен вытесняться типом.
+    """
+    queries = []
+    if detail.get("pain_level") or "pain" in ((computed or {}).get("flags") or []):
+        queries.append("боль колено дискомфорт")
+    type_terms = _TYPE_GUIDE_TERMS.get(detail.get("type") or "")
+    if type_terms:
+        queries.append(type_terms)
+    return queries
+
+
 def search(query: str, top_k: int = 3) -> list[GuideChunk]:
     """Keyword-поиск по чанкам: заголовок ×3, теги ×2, текст ×1 (keyword search)."""
     terms = [t for t in query.lower().split() if len(t) > 2]
