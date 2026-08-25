@@ -16,6 +16,7 @@ import argparse
 import json
 import re
 import sys
+import time
 from pathlib import Path
 
 import httpx
@@ -106,7 +107,16 @@ def _extract_text(path: Path) -> str:
     if suffix == ".fb2":
         import xml.etree.ElementTree as ET
         root = ET.parse(str(path)).getroot()
-        return " ".join(root.itertext())
+        # FB2 хранит картинки как base64 в <binary> (до ~90% «объёма»!).
+        # Берём текст ТОЛЬКО из <body>; <binary>/<description> исключаем —
+        # иначе окна забиваются мусором, и модель отклоняет их по AUP ([bio]).
+        # (FB2 keeps images as base64 in <binary>; extract <body> text only.)
+        def _localname(tag: str) -> str:
+            return tag.rsplit("}", 1)[-1]
+        bodies = [el for el in root if _localname(el.tag) == "body"]
+        if not bodies:
+            sys.exit("FB2 без <body> — структура не распознана")
+        return "\n".join(" ".join(b.itertext()) for b in bodies)
     sys.exit(f"Неизвестный формат: {suffix} (поддержаны: epub, fb2, pdf, txt, md)")
 
 
@@ -123,15 +133,45 @@ def _load_bridge_token() -> str:
     sys.exit("Нет COACH_LLM_BRIDGE_TOKEN (env или .env.bridge)")
 
 
+# Транзиентные сбои моста (мост шеллит headless Claude Code — редкие 502/таймауты).
+# Retry с бэкоффом, чтобы одиночный сбой не ронял многочасовой прогон.
+# (Transient bridge failures — retry with backoff so one blip won't kill a long run.)
+_RETRYABLE_STATUS = {429, 502, 503, 504}
+# Подписка троттлит бёрст тяжёлых вызовов. КЛЮЧЕВОЕ: повторять тяжёлый вызов
+# в горячем окне бесполезно — это ПРОДЛЕВАЕТ троттлинг; окну нужна ТИШИНА.
+# Поэтому в скрипте — один короткий ретрай (на редкий сетевой блип), а реальное
+# восстановление даёт ТИХИЙ кулдаун во внешнем драйвере + чекпойнт _notes/.
+# (Retrying a heavy call in a hot window keeps the throttle alive — the window
+#  needs quiet. One short in-script retry; the driver's quiet cooldown recovers.)
+_RETRY_BACKOFFS = (20,)  # секунды (seconds)
+MAP_PACE_SECONDS = 12    # пауза между map-вызовами, сглаживает бёрст (inter-call pacing)
+
+
 def _bridge_complete(token: str, system_text: str, user_text: str,
                      max_tokens: int) -> str:
-    resp = httpx.post(f"{BRIDGE_URL}/complete",
-                      json={"system_text": system_text,
-                            "messages": [{"role": "user", "content": user_text}],
-                            "effort": "medium", "max_tokens": max_tokens},
-                      headers={"X-Bridge-Token": token}, timeout=300)
-    resp.raise_for_status()
-    return resp.json().get("text", "")
+    last_err: Exception | None = None
+    for attempt in range(len(_RETRY_BACKOFFS) + 1):
+        try:
+            resp = httpx.post(f"{BRIDGE_URL}/complete",
+                              json={"system_text": system_text,
+                                    "messages": [{"role": "user", "content": user_text}],
+                                    "effort": "medium", "max_tokens": max_tokens},
+                              headers={"X-Bridge-Token": token}, timeout=300)
+            resp.raise_for_status()
+            return resp.json().get("text", "")
+        except (httpx.HTTPStatusError, httpx.TransportError) as e:
+            # Не ретраим неретраибельные HTTP-статусы (напр. 401/400).
+            # (Do not retry non-retryable statuses like 401/400.)
+            if (isinstance(e, httpx.HTTPStatusError)
+                    and e.response.status_code not in _RETRYABLE_STATUS):
+                raise
+            last_err = e
+            if attempt < len(_RETRY_BACKOFFS):
+                delay = _RETRY_BACKOFFS[attempt]
+                print(f"    ⏳ мост: {type(e).__name__}, повтор через {delay}s "
+                      f"(попытка {attempt + 1}/{len(_RETRY_BACKOFFS)})...")
+                time.sleep(delay)
+    raise RuntimeError(f"Мост недоступен после ретраев: {last_err}")
 
 
 def main() -> None:
@@ -146,17 +186,32 @@ def main() -> None:
     token = _load_bridge_token()
     book_name = args.book.stem
 
-    # Map: окна → конспект-заметки (map pass: windows → notes)
+    out_dir = ROOT / "books" / "_distilled" / book_name
+    notes_dir = out_dir / "_notes"
+    notes_dir.mkdir(parents=True, exist_ok=True)
+
+    # Map: окна → конспект-заметки, с чекпойнтом на диск (map pass w/ checkpoint).
+    # Каждое окно кэшируется в _notes/NNN.md → повторный прогон возобновляет
+    # с места обрыва, а не теряет часы работы при троттлинге подписки.
     windows = [words[i:i + args.window_words]
                for i in range(0, len(words), args.window_words)]
     notes: list[str] = []
     for i, win in enumerate(windows, 1):
+        cache = notes_dir / f"{i:03d}.md"
+        if cache.exists() and cache.read_text(encoding="utf-8").strip():
+            print(f"  map {i}/{len(windows)} — из кэша (cached)")
+            notes.append(cache.read_text(encoding="utf-8"))
+            continue
         print(f"  map {i}/{len(windows)} ({len(win)} слов)...")
-        notes.append(_bridge_complete(
+        note = _bridge_complete(
             token, "Ты аккуратный конспектист спортивной литературы.",
             MAP_PROMPT.format(book=book_name, idx=i, total=len(windows),
                               text=" ".join(win)),
-            MAX_TOKENS_MAP))
+            MAX_TOKENS_MAP)
+        cache.write_text(note, encoding="utf-8")
+        notes.append(note)
+        if i < len(windows):
+            time.sleep(MAP_PACE_SECONDS)
 
     # Reduce: заметки → guide-файлы (reduce pass: notes → guide files)
     print("  reduce → guide-файлы...")
@@ -166,8 +221,6 @@ def main() -> None:
                              format=GUIDE_FORMAT.format(book=book_name)),
         MAX_TOKENS_REDUCE)
 
-    out_dir = ROOT / "books" / "_distilled" / book_name
-    out_dir.mkdir(parents=True, exist_ok=True)
     parts = FILE_MARKER.split(result)
     # parts: [преамбула, имя1, тело1, имя2, тело2, ...]
     written = []
