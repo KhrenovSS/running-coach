@@ -8,6 +8,7 @@ from src.models import SessionLocal
 from src.models import User, TrainingSession
 from src.telegram.utils import get_user
 from src.utils.logger import get_logger
+from src.utils.timeutils import local_dt
 from src.config import settings
 
 logger = get_logger("telegram.handlers.trainings")
@@ -80,7 +81,7 @@ async def trainings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         label = {7: "7 дней", 14: "14 дней", 30: "30 дней"}[days]
         text = f"📋 *Тренировки за {label}*\n\n"
         for s in sessions:
-            d = s.begin_ts
+            d = local_dt(s.begin_ts, user, s)
             date_str = d.strftime("%d.%m %H:%M") if d else "N/A"
             dur_str = f"{int(s.duration_minutes // 60)} мин" if s.duration_minutes else "N/A"
             dist_str = f"{float(s.total_distance_km or 0):.1f} км"

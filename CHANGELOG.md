@@ -2,6 +2,34 @@
 
 All notable changes to this project are tracked here.
 
+## [26.08.2026] — Telegram-бот: время тренировок в локальном поясе, не в UTC
+
+Инцидент: уведомление о синхронизации показало «26.08.2026 в 15:12» для пробежки,
+которая по FIT/GPS была в 18:12 MSK — telegram-слой печатал `begin_ts` (UTC) через
+`strftime` без `astimezone()`. В БД всё хранилось верно (aware UTC + IANA-зона).
+
+### Added
+- `src/utils/timeutils.py` — `local_dt(dt, user, session, session_tz)`: UTC → локальный
+  пояс с приоритетом `user.timezone` → `session.timezone`/`session_tz` → `settings.timezone`
+  (перенос мёртвого хелпера из `src/deps.py`, там остался re-export; наивные datetime
+  трактуются как UTC).
+- `tests/test_timeutils.py` — 8 unit-тестов: приоритеты зон, naive→UTC, кейс инцидента
+  (15:12:26 UTC + Europe/Moscow → 18:12).
+
+### Fixed
+- Уведомление «Новая тренировка синхронизирована … в HH:MM» — теперь локальное время;
+  в `new_trainings` добавлено поле `tz` (зона тренировки из парсера)
+  (`src/services/sync/activities.py`).
+- Дата pending-deleted тренировки при ре-синке (`src/services/sync/activities.py`).
+- `/stats`: «Последняя тренировка» и список за период (`src/telegram/handlers/stats.py`).
+- Список тренировок за 7/14/30 дней (`src/telegram/handlers/trainings.py`).
+- Даты записей веса; `_get_weight_stats_text` принимает `User` вместо `user_id`
+  (`src/telegram/handlers/weight.py`).
+
+### Notes
+- BACKLOG: +#260 (`coach/render.py` игнорирует `user.timezone`), +#261 (`Defaults(tzinfo=...)`
+  не per-user); родственные открытые — #124, #220. Веб-слой уже конвертировал корректно.
+
 ## [25.08.2026] — E2: дистилляция реальных книг в базу знаний коуча (#245, #242)
 
 ### Added

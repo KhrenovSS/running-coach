@@ -11,6 +11,7 @@ from src.models import User, TrainingSession, DailyMetrics, WeightMeasurement
 from src.telegram.utils import get_user
 from src.services.audit import AuditService
 from src.utils.logger import get_logger
+from src.utils.timeutils import local_dt
 from src.config import settings
 
 logger = get_logger("telegram.handlers.stats")
@@ -63,7 +64,7 @@ class StatsPages:
                 f"\n*Последняя тренировка:*\n"
                 f"  {last_session.training_type or 'N/A'}: {float(last_session.total_distance_km or 0):.1f} км, "
                 f"{self._format_duration(last_session.duration_minutes or 0)}\n"
-                f"  📅 {last_session.begin_ts.strftime('%d.%m.%Y %H:%M') if last_session.begin_ts else 'N/A'}"
+                f"  📅 {local_dt(last_session.begin_ts, self.user, last_session).strftime('%d.%m.%Y %H:%M') if last_session.begin_ts else 'N/A'}"
             )
         return text
 
@@ -93,7 +94,7 @@ class StatsPages:
         )
 
         for s in sessions[:5]:
-            d = s.begin_ts
+            d = local_dt(s.begin_ts, self.user, s)
             date_str = d.strftime("%d.%m") if d else "N/A"
             text += f"• {date_str} {s.training_type or 'N/A'}: {float(s.total_distance_km or 0):.1f} км, {self._format_duration(s.duration_minutes or 0)}\n"
 

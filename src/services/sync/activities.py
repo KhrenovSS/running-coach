@@ -13,6 +13,7 @@ from src.services.sync.dedup import load_dedup_state, is_duplicate, find_deleted
 from src.services.raw_files import save_raw_file, sha256_hex
 from src.services.telegram_notify import telegram_notify
 from src.services.hr_max import evaluate_max_hr_raise
+from src.utils.timeutils import local_dt
 from src.exceptions import CoachError
 
 logger = get_logger("app")
@@ -161,7 +162,7 @@ async def sync_activities_for_user(cred, brand: str, db,
                             progress['has_pending_deleted'] = True
                         progress['pending_deleted'].append({
                             'temp_id': tid,
-                            'date': deleted_match.begin_ts.strftime('%d.%m.%Y %H:%M'),
+                            'date': local_dt(deleted_match.begin_ts, us).strftime('%d.%m.%Y %H:%M'),
                             'distance': round(deleted_match.total_distance_km, 1) if deleted_match.total_distance_km else '—',
                             'distance_display': f'{deleted_match.total_distance_km:.1f} км' if deleted_match.total_distance_km else '—',
                             'pace': format_pace(deleted_match.avg_pace) if deleted_match.avg_pace else '—',
@@ -231,6 +232,7 @@ async def sync_activities_for_user(cred, brand: str, db,
                 'distance': data.get('total_distance_km', 0),
                 'training_type': data.get('training_type', ''),
                 'begin_ts': data.get('begin_ts', datetime.now(timezone.utc)),
+                'tz': data.get('timezone'),
                 'hr_peak': session.hr_peak_smoothed or session.max_heart_rate or 0,
             })
             synced += 1
@@ -249,7 +251,8 @@ async def sync_activities_for_user(cred, brand: str, db,
                 sid = nt['session_id']
                 dist = nt['distance']
                 ttype = nt['training_type']
-                begin = nt['begin_ts']
+                # UTC → локальный пояс пользователя/тренировки (UTC → user/workout local time)
+                begin = local_dt(nt['begin_ts'], us, session_tz=nt.get('tz'))
                 date_str = begin.strftime("%d.%m.%Y") if begin else ""
                 time_str = begin.strftime("%H:%M") if begin else ""
                 row1 = [{"text": str(i), "callback_data": f"feedback:{sid}:{i}"} for i in range(0, 6)]

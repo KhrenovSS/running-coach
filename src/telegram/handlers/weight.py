@@ -10,18 +10,19 @@ from src.telegram.utils import get_user
 from src.telegram.state import _awaiting_weight, _awaiting_weight_lock
 from src.services.audit import AuditService
 from src.utils.logger import get_logger
+from src.utils.timeutils import local_dt
 from src.config import settings
 
 logger = get_logger("telegram.handlers.weight")
 
 
-def _get_weight_stats_text(user_id: int) -> str:
+def _get_weight_stats_text(user: User) -> str:
     db = SessionLocal()
     try:
         now = datetime.now(ZoneInfo(settings.timezone))
         month_ago = now - timedelta(days=30)
         measurements = db.query(WeightMeasurement).filter(
-            WeightMeasurement.user_id == user_id,
+            WeightMeasurement.user_id == user.id,
             WeightMeasurement.measured_at >= month_ago,
         ).order_by(WeightMeasurement.measured_at.desc()).all()
 
@@ -41,7 +42,8 @@ def _get_weight_stats_text(user_id: int) -> str:
 
         text += f"\n*Последние записи:*\n"
         for m in measurements[:7]:
-            date_str = m.measured_at.strftime("%d.%m") if m.measured_at else "N/A"
+            d = local_dt(m.measured_at, user)
+            date_str = d.strftime("%d.%m") if d else "N/A"
             text += f"• {date_str}: {float(m.weight_kg):.1f} кг\n"
 
         return text
@@ -56,7 +58,7 @@ async def cmd_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Сначала используй /start чтобы зарегистрироваться.")
         return
 
-    text = _get_weight_stats_text(user.id)
+    text = _get_weight_stats_text(user)
     await update.message.reply_text(text, parse_mode="Markdown")
 
 
