@@ -202,7 +202,10 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 ## GitHub
 Репозиторий: https://github.com/KhrenovSS/running-coach · ветка: `main`.
 **Trunk-based: ведём всё в `main`, без лишних веток.** Коммит/пуш — только по запросу пользователя
-(не автоматически). `GITHUB_TOKEN` для push лежит в `.env` (отдельно не спрашивать).
+(не автоматически). Push работает напрямую (`git push`): настроен `credential.helper store`
+(27.08.2026), токен сохранён в `~/.git-credentials` (600). Первоисточник — `GITHUB_TOKEN`
+в `.env` (отдельно не спрашивать); при ротации токена обновить ОБЕ точки. Токен НИКОГДА
+не вставлять в remote-URL или командную строку — светится в `.git/config`/истории shell.
 См. также `CLAUDE.md` → «Git / коммиты».
 
 ## Текущее состояние
