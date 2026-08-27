@@ -6,11 +6,13 @@
 
 from __future__ import annotations
 
-from datetime import timezone as _tz
-from zoneinfo import ZoneInfo
+from typing import Any
 
+from src.analysis.hr_zones import zone_ceiling_hr
+from src.analysis.utils import format_pace
 from src.coach.contracts import AthleteState, Prescription, SafetyVerdict, SkillResult
-from src.config import settings
+from src.config.constants import HR_DISPLAY_UNIT
+from src.utils.timeutils import local_dt
 
 _TYPE_LABEL = {
     "rest": "🛌 Отдых",
@@ -24,27 +26,120 @@ _TYPE_LABEL = {
 _STATUS_ICON = {"ok": "🟢", "warning": "🟡", "danger": "🔴", "unknown": "⚪"}
 
 
-def render_prescription(p: Prescription) -> str:
-    """Карточка назначения — все числа только из заклэмпленного Prescription."""
+def _hr_ceiling(p: Prescription, max_hr: int | None) -> int | None:
+    """Потолок пульса назначения в уд/мин или None (prescription bpm ceiling)."""
+    if max_hr is None or p.target.get("max_zone") is None:
+        return None
+    return zone_ceiling_hr(p.target["max_zone"], max_hr)
+
+
+def _predicted_estimate(p: Prescription) -> tuple[float, float] | None:
+    """(темп, дистанция) из прогноза по данным пользователя или None (estimate)."""
+    predicted = p.predicted or {}
+    pace, km = predicted.get("pace_min_km"), predicted.get("distance_km")
+    if pace and km:
+        return pace, km
+    return None
+
+
+def _pace_lead_lines(p: Prescription) -> list[str]:
+    """Строки pace-режима: цель — темп+время, пульс — справочный прогноз.
+
+    (Pace-lead card lines: pace+time are the goal, HR is a reference estimate.)
+    """
+    pace = p.target["pace_min_km"]
+    parts = [f"Темп {format_pace(pace)}/км"]
+    if p.volume.get("duration_min") is not None:
+        parts.append(f"{p.volume['duration_min']:.0f} мин")
+    if p.volume.get("distance_km") is not None:
+        parts.append(f"≈{p.volume['distance_km']:.1f} км")
+    if p.target.get("structure"):
+        parts.append(p.target["structure"])
+    lines = [" · ".join(parts), "Ведём по темпу — на пульс сегодня не смотрим."]
+    if p.predicted.get("expected_hr") is not None:
+        lines.append(f"Пульс будет в районе ~{p.predicted['expected_hr']} "
+                     f"{HR_DISPLAY_UNIT} (ориентировочно, по твоим пробежкам)")
+    else:
+        lines.append("Пульс не прогнозирую — мало данных на этом темпе.")
+    return lines
+
+
+def _hr_lead_lines(p: Prescription, max_hr: int | None) -> list[str]:
+    """Строки HR-режима: цель — зона/пульс+время, темп и км — ориентир.
+
+    (HR-lead card lines: zone/HR+time are the goal, pace and km are estimates.)
+    """
+    estimate = _predicted_estimate(p)
+    parts = [f"Z{p.target['max_zone']} и ниже"]
+    ceiling = _hr_ceiling(p, max_hr)
+    if ceiling is not None:
+        parts.append(f"пульс до {ceiling} {HR_DISPLAY_UNIT}")
+    if p.volume.get("duration_min") is not None:
+        parts.append(f"{p.volume['duration_min']:.0f} мин")
+    if p.volume.get("distance_km") is not None and estimate is None:
+        parts.append(f"~{p.volume['distance_km']:.1f} км")
+    if p.target.get("structure"):
+        parts.append(p.target["structure"])
+    lines = [" · ".join(parts)]
+    if estimate is not None:
+        pace, km = estimate
+        lines.append(f"Ориентир по твоим пробежкам: "
+                     f"~{format_pace(pace)}/км → ≈{km:.1f} км")
+    return lines
+
+
+def render_prescription(p: Prescription, max_hr: int | None = None,
+                        user: Any = None) -> str:
+    """Карточка назначения — все числа только из заклэмпленного Prescription.
+
+    max_hr — для потолка пульса зоны в уд/мин; None → без строки пульса.
+    user — для локального пояса времени (user timezone); None → settings.timezone.
+    Режим по target["pace_min_km"]: задан → ведём по темпу (цель — темп+время,
+    пульс справочно); нет → по пульсу (цель — зона+время, темп/км — ориентир).
+    """
     lines = [f"*{_TYPE_LABEL.get(p.workout_type, p.workout_type)}*"]
     if p.workout_type != "rest":
-        parts = [f"Z{p.target['max_zone']} и ниже"]
-        if p.volume.get("duration_min") is not None:
-            parts.append(f"{p.volume['duration_min']:.0f} мин")
-        if p.volume.get("distance_km") is not None:
-            parts.append(f"~{p.volume['distance_km']:.1f} км")
-        if p.target.get("structure"):
-            parts.append(p.target["structure"])
-        lines.append(" · ".join(parts))
+        if p.target.get("pace_min_km") is not None:
+            lines += _pace_lead_lines(p)
+        else:
+            lines += _hr_lead_lines(p, max_hr)
     if p.earliest is not None and p.workout_type != "rest":
-        # naive-UTC → часовой пояс пользователя (инцидент 23.08: показывали UTC)
-        earliest = p.earliest if p.earliest.tzinfo else p.earliest.replace(tzinfo=_tz.utc)
-        earliest = earliest.astimezone(ZoneInfo(settings.timezone))
+        # naive-UTC → пояс пользователя (BACKLOG #260; инциденты 23.08 и 26.08: UTC)
+        earliest = local_dt(p.earliest, user)
         lines.append(f"Интенсив — не раньше {earliest:%d.%m %H:%M}")
     if p.clamped:
         lines.append("")
         lines.append(render_safety_note(p.safety))
     return "\n".join(lines)
+
+
+def render_prescription_short(p: Prescription, max_hr: int | None = None) -> str:
+    """Строка-напоминание: назначение на сегодня не изменилось (unchanged-plan line).
+
+    Решение владельца 26.08.2026: в дневном чате при неизменном назначении
+    вместо повторной полной карточки — одна короткая строка.
+    """
+    parts = [_TYPE_LABEL.get(p.workout_type, p.workout_type)]
+    if p.workout_type != "rest":
+        if p.target.get("pace_min_km") is not None:
+            parts.append(f"темп {format_pace(p.target['pace_min_km'])}/км")
+            if p.volume.get("duration_min") is not None:
+                parts.append(f"{p.volume['duration_min']:.0f} мин")
+            if p.volume.get("distance_km") is not None:
+                parts.append(f"≈{p.volume['distance_km']:.1f} км")
+            return "План на сегодня без изменений:\n" + " · ".join(parts)
+        ceiling = _hr_ceiling(p, max_hr)
+        if ceiling is not None:
+            parts.append(f"пульс до {ceiling}")
+        elif p.target.get("max_zone") is not None:
+            parts.append(f"Z{p.target['max_zone']} и ниже")
+        if p.volume.get("duration_min") is not None:
+            parts.append(f"{p.volume['duration_min']:.0f} мин")
+        estimate = _predicted_estimate(p)
+        if estimate is not None:
+            pace, km = estimate
+            parts.append(f"~{format_pace(pace)}/км ≈ {km:.1f} км")
+    return "План на сегодня без изменений:\n" + " · ".join(parts)
 
 
 def render_safety_note(verdict: SafetyVerdict) -> str:

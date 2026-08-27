@@ -65,6 +65,81 @@ def test_budget_exhausted_no_llm_call(athlete_with_history, db_session):
     assert len(llm.calls) == 0
 
 
+EASY_TURN = {
+    "message": "Сегодня лёгкий бег — восстанавливаемся.",
+    "proposal": {"workout_type": "easy", "target_zone": 2,
+                 "duration_min": 40, "distance_km": 5.5,
+                 "structure": None, "rationale": ["восстановление"]},
+    "followup_question": None,
+    "log_suggestion": None,
+}
+
+
+def test_chat_unchanged_proposal_renders_reminder_not_card(athlete_with_history,
+                                                           db_session):
+    """Инцидент 26.08: повтор того же proposal в чате дублировал карточку и
+    плодил строки recommendations. Теперь — строка-напоминание без новой записи."""
+    resp = LLMResponse(stop_reason="end_turn", parsed=EASY_TURN)
+    llm = ScriptedLLM([resp, resp])
+    uid = athlete_with_history.id
+
+    first = orchestrator.handle_chat(uid, "что сегодня?", db=db_session, llm=llm)
+    assert "Лёгкий бег" in first.text
+    n_recs = db_session.query(Recommendation).filter_by(user_id=uid).count()
+    assert n_recs >= 1
+
+    second = orchestrator.handle_chat(uid, "какой пульс допустим?",
+                                      db=db_session, llm=llm)
+    assert "План на сегодня без изменений" in second.text
+    assert "пульс до 141" in second.text          # max_hr=177 → потолок Z2
+    assert "и ниже" not in second.text            # полная карточка не повторяется
+    assert db_session.query(Recommendation).filter_by(
+        user_id=uid).count() == n_recs            # дубль-записи нет
+
+
+def test_chat_changed_proposal_gets_full_card(athlete_with_history, db_session):
+    """Изменённое назначение → полная карточка и новая запись recommendations."""
+    changed = dict(EASY_TURN)
+    changed["proposal"] = dict(EASY_TURN["proposal"], duration_min=30,
+                               distance_km=4.0)
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=EASY_TURN),
+                       LLMResponse(stop_reason="end_turn", parsed=changed)])
+    uid = athlete_with_history.id
+
+    orchestrator.handle_chat(uid, "что сегодня?", db=db_session, llm=llm)
+    n_recs = db_session.query(Recommendation).filter_by(user_id=uid).count()
+    second = orchestrator.handle_chat(uid, "давай покороче",
+                                      db=db_session, llm=llm)
+    assert "30 мин" in second.text
+    assert "План на сегодня без изменений" not in second.text
+    assert db_session.query(Recommendation).filter_by(
+        user_id=uid).count() == n_recs + 1
+
+
+def test_morning_kind_not_deduped(athlete_with_history, db_session):
+    """Дедуп — только для kind=chat: утренний вердикт всегда с полной карточкой."""
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=EASY_TURN),
+                       LLMResponse(stop_reason="end_turn", parsed=EASY_TURN)])
+    uid = athlete_with_history.id
+
+    orchestrator.handle_chat(uid, "что сегодня?", db=db_session, llm=llm)
+    n_recs = db_session.query(Recommendation).filter_by(user_id=uid).count()
+    morning = orchestrator.handle_chat(uid, "утренний вердикт", db=db_session,
+                                       llm=llm, kind="morning")
+    assert "Лёгкий бег" in morning.text
+    assert "План на сегодня без изменений" not in morning.text
+    assert db_session.query(Recommendation).filter_by(
+        user_id=uid).count() == n_recs + 1
+
+
+def test_llm_card_contains_bpm_ceiling(athlete_with_history, db_session):
+    """Карточка LLM-хода содержит потолок пульса зоны в уд/мин (инцидент 26.08)."""
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=EASY_TURN)])
+    reply = orchestrator.handle_chat(athlete_with_history.id, "что сегодня?",
+                                     db=db_session, llm=llm)
+    assert "пульс до 141 уд/мин" in reply.text    # max_hr=177, Z2 → 141
+
+
 def test_log_suggestion_passthrough(athlete_with_history, db_session):
     """log_suggestion от LLM доезжает до ChatReply (кнопку строит хендлер)."""
     turn = {"message": "Понял, колено потягивало.", "proposal": None,

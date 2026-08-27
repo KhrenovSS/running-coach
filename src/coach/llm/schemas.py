@@ -10,6 +10,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from src.coach.config import PACE_TARGET_MAX_PER_KM, PACE_TARGET_MIN_PER_KM
+
 
 class WorkoutProposalIn(BaseModel):
     """Предложение тренировки от LLM — до границы safety (LLM proposal, pre-clamp)."""
@@ -17,6 +19,8 @@ class WorkoutProposalIn(BaseModel):
     target_zone: int = Field(default=1, ge=1, le=5)
     duration_min: int | None = Field(default=None, ge=10, le=240)
     distance_km: float | None = Field(default=None, ge=1, le=60)
+    target_pace_min_km: float | None = Field(default=None, ge=PACE_TARGET_MIN_PER_KM,
+                                             le=PACE_TARGET_MAX_PER_KM)
     structure: str | None = Field(default=None, max_length=200)
     rationale: list[str] = Field(default_factory=list, max_length=5)
 
@@ -26,7 +30,7 @@ class WorkoutProposalIn(BaseModel):
         """null/0 → 1: для rest модели шлют null-зону — семантически Z1 (инцидент 23.08)."""
         return 1 if v in (None, 0, "0") else v
 
-    @field_validator("duration_min", "distance_km", mode="before")
+    @field_validator("duration_min", "distance_km", "target_pace_min_km", mode="before")
     @classmethod
     def _zero_is_none(cls, v):
         """0 → None: модели заполняют нули для rest — семантически «нет объёма».

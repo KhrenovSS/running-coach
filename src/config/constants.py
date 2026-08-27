@@ -122,6 +122,13 @@ BASELINE_MIN_SESSIONS: Final[int] = 5        # минимум сессий (min 
 BASELINE_SKIP_FIRST_KM: Final[int] = 1       # первый км исключён: разогрев + колено (skip warmup km)
 BASELINE_Z_FLAG: Final[float] = 1.5          # |z| выше → флаг hr_above/below_baseline (z-flag threshold)
 BASELINE_TYPES: Final[tuple] = ("easy", "long", "recovery")  # steady-типы для регрессии (steady types)
+BASELINE_PACE_PREDICT_MIN: Final[float] = 3.5   # прогноз темпа быстрее → None (prediction sanity floor, min/km)
+BASELINE_PACE_PREDICT_MAX: Final[float] = 12.0  # прогноз темпа медленнее → None (prediction sanity ceiling)
+BASELINE_PACE_HR_BAND_BPM: Final[int] = 10      # полоса пульса под потолком для медианы темпа (HR band below ceiling)
+BASELINE_PACE_BAND_MIN_POINTS: Final[int] = 5   # минимум км-точек в полосе (min km-points in band)
+BASELINE_HR_AT_PACE_BAND_MIN_KM: Final[float] = 0.25  # полоса темпа ±15 с/км для медианы HR (pace band for HR median)
+BASELINE_HR_PREDICT_MIN: Final[int] = 90        # прогноз пульса ниже → None (HR prediction sanity floor, bpm)
+BASELINE_HR_PREDICT_MAX: Final[int] = 200       # прогноз пульса выше → None (HR prediction sanity ceiling, bpm)
 
 # Жара (heat)
 HEAT_TEMP_THRESHOLD_C: Final[int] = 20       # температура старта выше → heat_flag (heat threshold)

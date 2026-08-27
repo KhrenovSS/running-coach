@@ -181,3 +181,89 @@ def test_finalize_persists_observability_columns(athlete_with_history, db_sessio
     assert rec.clamped is not None
     assert rec.safety_json is not None
     assert rec.proposal_json["workout_type"] == "interval"  # ДО урезания
+
+
+# --- Ветка целевого темпа (pace-lead clamp branch) — решение владельца 26.08.2026 ---
+
+def _pace_proposal(pace: float = 5.5, wtype: str = "easy", zone: int = 2,
+                   duration: int = 40) -> WorkoutProposal:
+    return WorkoutProposal(workout_type=wtype, target_zone=zone,
+                           duration_min=duration, distance_km=99.0,
+                           target_pace_min_km=pace)
+
+
+def test_pace_kept_without_ctx_distance_deterministic():
+    """Валидный темп без оценок → сохранён; дистанция = duration/pace, не догадка LLM."""
+    state = _state()
+    verdict = evaluate_safety(state)
+    p, clamped = clamp(_pace_proposal(pace=5.5, duration=40), verdict, state)
+    assert clamped is False
+    assert p.target["pace_min_km"] == 5.5
+    assert p.volume["distance_km"] == round(40 / 5.5, 1)   # 7.3, а не 99.0
+
+
+def test_pace_slowed_when_expected_hr_above_ceiling():
+    """Расчётный пульс выше потолка зоны → темп замедлен до безопасного, clamped."""
+    from src.coach.contracts import PaceClampContext
+
+    state = _state()
+    verdict = evaluate_safety(state)
+    ctx = PaceClampContext(expected_hr=160, safe_pace_min_km=6.2, zone_ceiling_bpm=141)
+    p, clamped = clamp(_pace_proposal(pace=5.0), verdict, state, pace_ctx=ctx)
+    assert clamped is True
+    assert p.target["pace_min_km"] == 6.2
+    assert p.volume["distance_km"] == round(40 / 6.2, 1)   # дистанция от итогового темпа
+    assert any("расчётный пульс" in r.reason for r in p.rationale)
+
+
+def test_pace_dropped_when_no_safe_pace():
+    """Пульс выше потолка, безопасный темп неизвестен → темп отброшен (HR-режим)."""
+    from src.coach.contracts import PaceClampContext
+
+    state = _state()
+    verdict = evaluate_safety(state)
+    ctx = PaceClampContext(expected_hr=160, safe_pace_min_km=None, zone_ceiling_bpm=141)
+    p, clamped = clamp(_pace_proposal(pace=5.0), verdict, state, pace_ctx=ctx)
+    assert clamped is True
+    assert "pace_min_km" not in p.target
+
+
+def test_pace_never_speeds_up():
+    """safe_pace быстрее предложенного → темп НЕ ускоряется (clamp только сужает)."""
+    from src.coach.contracts import PaceClampContext
+
+    state = _state()
+    verdict = evaluate_safety(state)
+    ctx = PaceClampContext(expected_hr=160, safe_pace_min_km=4.5, zone_ceiling_bpm=141)
+    p, _ = clamp(_pace_proposal(pace=5.5), verdict, state, pace_ctx=ctx)
+    assert p.target["pace_min_km"] == 5.5              # max(5.5, 4.5)
+
+
+def test_pace_dropped_on_structural_clamp():
+    """Тип/зона урезаны безопасностью → ведущий темп отброшен (числа невалидны)."""
+    state = _state(hrv_status="very_low")              # → max_zone 2, tempo даунгрейд
+    verdict = evaluate_safety(state)
+    p, clamped = clamp(_pace_proposal(pace=4.5, wtype="tempo", zone=4),
+                       verdict, state)
+    assert clamped is True
+    assert "pace_min_km" not in p.target
+
+
+def test_pace_sanity_bounds():
+    """Темп вне абсолютных границ → отброшен (схема LLM — не гарантия)."""
+    state = _state()
+    verdict = evaluate_safety(state)
+    for bad in (1.5, 15.0):
+        p, clamped = clamp(_pace_proposal(pace=bad), verdict, state)
+        assert clamped is True
+        assert "pace_min_km" not in p.target
+
+
+def test_pace_absent_for_rest():
+    """rest → темп отсутствует вместе с остальным объёмом."""
+    state = _state(pain_level=PAIN_STOP_LEVEL)
+    verdict = evaluate_safety(state)
+    p, _ = clamp(_pace_proposal(pace=5.5), verdict, state)
+    assert p.workout_type == "rest"
+    assert "pace_min_km" not in p.target
+    assert p.volume == {}

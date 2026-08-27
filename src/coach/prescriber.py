@@ -10,14 +10,89 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from src.coach.contracts import AthleteState, Prescription, WorkoutProposal
+from src.analysis.hr_zones import zone_ceiling_hr
+from src.coach.contracts import (
+    AthleteState,
+    PaceClampContext,
+    Prescription,
+    WorkoutProposal,
+)
 from src.coach.fallback import fallback_proposal
 from src.coach.rules.p1_safety import evaluate_safety
 from src.coach.safety import clamp
-from src.models import Recommendation
+from src.config import settings
+from src.config.constants import BASELINE_WINDOW_DAYS
+from src.models import Recommendation, User
 from src.utils.logger import get_logger
 
 logger = get_logger("coach.prescriber")
+
+
+def user_max_hr(user: User | None) -> int:
+    """max_hr пользователя с дефолтом настроек (user max HR with settings default)."""
+    return user.max_hr if user and user.max_hr else settings.default_max_hr
+
+
+def predict_volume(p: Prescription, state: AthleteState, *, db: Session) -> dict:
+    """Справочные ориентиры по км-точкам прошлых пробежек (data-driven estimate).
+
+    Пожелание владельца 26.08.2026: карточка представляет все параметры —
+    ведущие как цель, производные ориентировочно. HR-режим: цель — пульс+время,
+    ориентир — темп и дистанция. Pace-режим: цель — темп+время (дистанция
+    детерминирована в clamp), ориентир — ожидаемый пульс. Эмпирические медианы,
+    не экстраполяция. Нет данных → {}.
+    """
+    from src.services.workout_insights import expected_hr_at_pace, expected_pace_at_hr
+
+    if p.workout_type == "rest":
+        return {}
+    target_pace = p.target.get("pace_min_km")
+    if target_pace is not None:
+        estimate = expected_hr_at_pace(state.user_id, target_pace, db=db)
+        if estimate is None:
+            return {}
+        return {"expected_hr": estimate["hr_bpm"],
+                "pace_min_km": target_pace,
+                "based_on": {"n_points": estimate["n_points"],
+                             "window_days": BASELINE_WINDOW_DAYS}}
+    zone, duration = p.target.get("max_zone"), p.volume.get("duration_min")
+    if zone is None or duration is None:
+        return {}
+    user = db.query(User).filter(User.id == state.user_id).first()
+    ceiling = zone_ceiling_hr(zone, user_max_hr(user))
+    if ceiling is None:
+        return {}
+    estimate = expected_pace_at_hr(state.user_id, ceiling, db=db)
+    if estimate is None:
+        return {}
+    pace = estimate["pace_min_km"]
+    return {"pace_min_km": pace,
+            "distance_km": round(duration / pace, 1),
+            "hr_ceiling": ceiling,
+            "based_on": {"n_points": estimate["n_points"],
+                         "window_days": BASELINE_WINDOW_DAYS}}
+
+
+def _pace_clamp_context(proposal: WorkoutProposal, verdict, state: AthleteState,
+                        *, db: Session) -> PaceClampContext:
+    """Прекомпьют оценок для safety-ветки темпа (clamp остаётся без БД).
+
+    Потолок зоны считается по УЖЕ урезанной safety зоне — clamp сверяет
+    расчётный пульс с тем, что реально будет разрешено. (Precompute for clamp.)
+    """
+    from src.services.workout_insights import expected_hr_at_pace, expected_pace_at_hr
+
+    user = db.query(User).filter(User.id == state.user_id).first()
+    zone = min(proposal.target_zone, verdict.max_zone)
+    ceiling = zone_ceiling_hr(zone, user_max_hr(user))  # Z5 → None
+    est_hr = expected_hr_at_pace(state.user_id, proposal.target_pace_min_km, db=db)
+    est_pace = (expected_pace_at_hr(state.user_id, ceiling, db=db)
+                if ceiling is not None else None)
+    return PaceClampContext(
+        expected_hr=est_hr["hr_bpm"] if est_hr else None,
+        safe_pace_min_km=est_pace["pace_min_km"] if est_pace else None,
+        zone_ceiling_bpm=ceiling,
+    )
 
 
 def finalize(proposal: WorkoutProposal | None, state: AthleteState, *,
@@ -32,17 +107,23 @@ def finalize(proposal: WorkoutProposal | None, state: AthleteState, *,
     if proposal is None:
         proposal = fallback_proposal(state)
         source = "fallback"
-    prescription, clamped = clamp(proposal, verdict, state, now=now, source=source)
+    pace_ctx = None
+    if db is not None and proposal.target_pace_min_km is not None:
+        pace_ctx = _pace_clamp_context(proposal, verdict, state, db=db)
+    prescription, clamped = clamp(proposal, verdict, state, now=now, source=source,
+                                  pace_ctx=pace_ctx)
     if clamped:
         logger.info("Prescription clamped for user=%s: %s -> %s (%s)",
                     state.user_id, proposal.workout_type,
                     prescription.workout_type, ",".join(verdict.triggered))
+    if db is not None:
+        prescription.predicted = predict_volume(prescription, state, db=db)
     if persist and db is not None:
-        _save(prescription, state, db=db)
+        save_prescription(prescription, state, db=db)
     return prescription
 
 
-def _save(p: Prescription, state: AthleteState, *, db: Session) -> Recommendation:
+def save_prescription(p: Prescription, state: AthleteState, *, db: Session) -> Recommendation:
     """Записать назначение в recommendations (persist prescription).
 
     proposal_json — предложение ДО урезания, safety_json — вердикт: метрика

@@ -10,6 +10,8 @@ from src.models import UserModel
 from src.services.repositories_insights import InsightRepository
 from src.services.workout_insights import (
     INSIGHTS_SCHEMA_VERSION,
+    ensure_baseline,
+    expected_pace_at_hr,
     get_or_compute,
     refresh_hr_pace_baseline,
     upsert_workout_insights,
@@ -113,6 +115,56 @@ def test_baseline_accumulates_and_preserves_initiative(db_session):
     assert baseline["b"] < 0
     assert baseline["n_sessions"] >= 5
     assert um.params_json["initiative"] == "low"  # merge, не перезапись
+
+
+def test_ensure_baseline_bootstraps_missing_insights(db_session):
+    """Прод-кейс 26.08: insights пусты → ensure_baseline досчитывает их по
+    steady-сессиям окна и строит линию; повторный вызов — из хранилища."""
+    user = _user(db_session)
+    for i in range(6):
+        pace = 5.5 + i * 0.2
+        _session_with_track(db_session, user.id, duration_min=50.0,
+                            base_pace=pace, hr=round(190 - 8 * pace),
+                            ttype='easy',
+                            begin_ts=utcnow() - timedelta(days=i * 3))
+    from src.models import WorkoutInsight
+    assert db_session.query(WorkoutInsight).filter_by(
+        user_id=user.id).count() == 0
+    baseline = ensure_baseline(user.id, db=db_session)
+    assert baseline is not None
+    assert baseline["b"] < 0
+    assert baseline["n_sessions"] >= 5
+    # идемпотентность: второй вызов возвращает сохранённое, не пересчитывает
+    assert ensure_baseline(user.id, db=db_session) == baseline
+
+
+def test_expected_pace_at_hr_from_band_median(db_session):
+    """Эмпирический темп на пульсе: медиана км-точек полосы, без экстраполяции.
+
+    Сессии по закону HR = 190 − 8·pace (темпы 5.5..6.5 → HR 138..146).
+    Потолок 144 → полоса HR 134..144 → темпы ≈5.75..6.5, медиана внутри.
+    Инцидент смоука 26.08: инверсия OLS давала 3:49/км бегуну с лёгким 8:00.
+    """
+    user = _user(db_session)
+    for i in range(6):
+        pace = 5.5 + i * 0.2
+        _session_with_track(db_session, user.id, duration_min=50.0,
+                            base_pace=pace, hr=round(190 - 8 * pace),
+                            ttype='easy',
+                            begin_ts=utcnow() - timedelta(days=i * 3))
+    est = expected_pace_at_hr(user.id, 144, db=db_session)   # бутстрап внутри
+    assert est is not None
+    assert 5.5 <= est["pace_min_km"] <= 6.6   # в диапазоне реальных темпов полосы
+    assert est["n_points"] >= 5
+    # пульс, на котором пользователь не бегал → честный None
+    assert expected_pace_at_hr(user.id, 110, db=db_session) is None
+
+
+def test_ensure_baseline_few_data_returns_none(db_session):
+    """Одна сессия → бутстрап не выдаёт ложную точность (None, без исключений)."""
+    user = _user(db_session)
+    _session_with_track(db_session, user.id, ttype='easy', begin_ts=utcnow())
+    assert ensure_baseline(user.id, db=db_session) is None
 
 
 def test_baseline_absent_with_few_sessions(db_session):

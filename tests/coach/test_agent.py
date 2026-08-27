@@ -99,3 +99,22 @@ def test_rest_proposal_with_zero_volumes_validates():
         "followup_question": None, "log_suggestion": None,
     })
     assert turn2.proposal.target_zone == 1
+
+
+def test_target_pace_validation():
+    """target_pace_min_km: 0 → None (нет темпа), вне границ → ValidationError."""
+    import pytest
+    from pydantic import ValidationError
+
+    from src.coach.llm.schemas import WorkoutProposalIn
+
+    p = WorkoutProposalIn.model_validate(
+        {"workout_type": "easy", "target_zone": 2, "target_pace_min_km": 0})
+    assert p.target_pace_min_km is None
+    ok = WorkoutProposalIn.model_validate(
+        {"workout_type": "tempo", "target_zone": 4, "target_pace_min_km": 5.5})
+    assert ok.target_pace_min_km == 5.5
+    for bad in (1.0, 20.0):
+        with pytest.raises(ValidationError):
+            WorkoutProposalIn.model_validate(
+                {"workout_type": "tempo", "target_zone": 4, "target_pace_min_km": bad})

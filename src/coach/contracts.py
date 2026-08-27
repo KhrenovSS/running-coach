@@ -97,8 +97,22 @@ class WorkoutProposal:
     target_zone: int = 2
     duration_min: int | None = None
     distance_km: float | None = None
+    target_pace_min_km: float | None = None    # задан → ведём по темпу (pace-lead mode)
     structure: str | None = None               # «10×400/400» и т.п.
     rationale: list[str] = field(default_factory=list)
+
+
+@dataclass
+class PaceClampContext:
+    """Прекомпьют оценок для safety-ветки темпа (pace clamp precompute).
+
+    clamp() — чистая функция без БД; оценки «пульс на темпе» и «безопасный темп
+    на потолке зоны» считает finalize() и передаёт сюда. Все поля могут быть
+    None — мало данных. (Computed in finalize(); clamp stays DB-free.)
+    """
+    expected_hr: int | None = None             # прогноз пульса на целевом темпе
+    safe_pace_min_km: float | None = None      # эмпирический темп на потолке зоны
+    zone_ceiling_bpm: int | None = None        # потолок разрешённой зоны, уд/мин
 
 
 @dataclass(kw_only=True)

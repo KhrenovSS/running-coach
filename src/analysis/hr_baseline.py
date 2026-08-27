@@ -8,8 +8,15 @@
 from __future__ import annotations
 
 from src.config.constants import (
+    BASELINE_HR_AT_PACE_BAND_MIN_KM,
+    BASELINE_HR_PREDICT_MAX,
+    BASELINE_HR_PREDICT_MIN,
     BASELINE_MIN_POINTS,
     BASELINE_MIN_SESSIONS,
+    BASELINE_PACE_BAND_MIN_POINTS,
+    BASELINE_PACE_HR_BAND_BPM,
+    BASELINE_PACE_PREDICT_MAX,
+    BASELINE_PACE_PREDICT_MIN,
     BASELINE_SKIP_FIRST_KM,
     BASELINE_Z_FLAG,
 )
@@ -50,6 +57,47 @@ def fit_hr_pace_baseline(points: list[tuple[float, float]],
     rmse = (sum((h - (a + b * p)) ** 2 for p, h in points) / n) ** 0.5
     return {"a": round(a, 2), "b": round(b, 3), "rmse_bpm": round(rmse, 1),
             "n_points": n, "n_sessions": n_sessions, "version": BASELINE_VERSION}
+
+
+def pace_at_hr_band(points: list[tuple[float, float]],
+                    hr_ceiling: int) -> dict | None:
+    """Эмпирический темп на пульсе: медиана км-точек с HR в полосе под потолком.
+
+    (Empirical pace at HR: median pace of km-points whose HR falls in
+    [ceiling − band, ceiling].) Без экстраполяции — инверсия OLS-линии занижает
+    наклон (шум км-точек, межсессионные условия) и на потолке зоны даёт
+    нереальный темп (инцидент смоука 26.08.2026). Мало точек в полосе или
+    медиана вне санити-границ → None (нет ложной точности).
+    """
+    band = sorted(p for p, h in points
+                  if hr_ceiling - BASELINE_PACE_HR_BAND_BPM <= h <= hr_ceiling)
+    if len(band) < BASELINE_PACE_BAND_MIN_POINTS:
+        return None
+    mid = len(band) // 2
+    pace = band[mid] if len(band) % 2 else (band[mid - 1] + band[mid]) / 2
+    if not (BASELINE_PACE_PREDICT_MIN <= pace <= BASELINE_PACE_PREDICT_MAX):
+        return None
+    return {"pace_min_km": round(pace, 2), "n_points": len(band)}
+
+
+def hr_at_pace_band(points: list[tuple[float, float]],
+                    pace_min_km: float) -> dict | None:
+    """Эмпирический пульс на темпе: медиана HR км-точек в полосе вокруг темпа.
+
+    (Empirical HR at pace: median HR of km-points whose pace falls within
+    ±band of the target.) Зеркало pace_at_hr_band — та же эмпирика вместо
+    OLS-линии: её наклон занижен (BACKLOG #259), «ожидаемый пульс» по линии
+    был бы смещён. Мало точек в полосе или медиана вне санити-границ → None.
+    """
+    band = sorted(h for p, h in points
+                  if abs(p - pace_min_km) <= BASELINE_HR_AT_PACE_BAND_MIN_KM)
+    if len(band) < BASELINE_PACE_BAND_MIN_POINTS:
+        return None
+    mid = len(band) // 2
+    hr = band[mid] if len(band) % 2 else (band[mid - 1] + band[mid]) / 2
+    if not (BASELINE_HR_PREDICT_MIN <= hr <= BASELINE_HR_PREDICT_MAX):
+        return None
+    return {"hr_bpm": int(round(hr)), "n_points": len(band)}
 
 
 def baseline_deviation(baseline: dict | None, per_km: list[dict]) -> dict:

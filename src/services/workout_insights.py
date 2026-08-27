@@ -17,7 +17,9 @@ from src.analysis.hr_baseline import (
     baseline_deviation,
     deviation_flag,
     fit_hr_pace_baseline,
+    hr_at_pace_band,
     km_points,
+    pace_at_hr_band,
 )
 from src.coach.util import effective_training_type
 from src.config.constants import BASELINE_TYPES, BASELINE_WINDOW_DAYS
@@ -157,11 +159,77 @@ def _stored_baseline(user_id: int, *, db: Session) -> dict | None:
     return None
 
 
-def refresh_hr_pace_baseline(user_id: int, *, db: Session) -> dict | None:
-    """Пересчитать базовую линию HR↔GAP-темп по insights steady-тренировок окна.
+def _bootstrap_window_insights(user_id: int, *, db: Session) -> list[int]:
+    """Досчитать insights steady-тренировок окна, у которых их ещё нет.
 
-    Хранение — UserModel.params_json['hr_pace_baseline'] (merge: initiative и
-    прочие ключи не затираются). Мало данных → ключ удаляется (нет ложной точности).
+    (Compute missing insights for steady sessions of the window.) Возвращает
+    id досчитанных сессий; повторные вызовы дёшевы (две лёгкие выборки id).
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=BASELINE_WINDOW_DAYS)
+    # только id/типы — trackpoints_json тяжёлый, тянем его лишь в upsert по одной
+    rows = db.query(TrainingSession.id, TrainingSession.training_type,
+                    TrainingSession.training_type_override).filter(
+        TrainingSession.user_id == user_id,
+        TrainingSession.begin_ts >= cutoff,
+        TrainingSession.trackpoints_json.isnot(None),
+    ).all()
+    have = {sid for (sid,) in db.query(WorkoutInsight.session_id).filter(
+        WorkoutInsight.user_id == user_id)}
+    missing = [r.id for r in rows
+               if (r.training_type_override or r.training_type) in BASELINE_TYPES
+               and r.id not in have]
+    if missing:
+        logger.info("Insights bootstrap for user=%s: computing %s sessions",
+                    user_id, len(missing))
+    for session_id in missing:
+        upsert_workout_insights(user_id, session_id, db=db)
+    return missing
+
+
+def ensure_baseline(user_id: int, *, db: Session) -> dict | None:
+    """Базовая линия с ленивым бутстрапом (lazy-bootstrap the HR↔pace baseline).
+
+    Сохранённая есть → вернуть. Иначе досчитать недостающие insights окна и
+    пересчитать линию. Данных мало → None.
+    """
+    baseline = _stored_baseline(user_id, db=db)
+    if baseline is not None:
+        return baseline
+    if not _bootstrap_window_insights(user_id, db=db):
+        return refresh_hr_pace_baseline(user_id, db=db)
+    # upsert steady-типа сам вызывает refresh после каждой сессии
+    return _stored_baseline(user_id, db=db)
+
+
+def expected_pace_at_hr(user_id: int, hr_ceiling: int, *, db: Session) -> dict | None:
+    """Эмпирический темп на пульсе: медиана км-точек insights окна в полосе
+    под потолком (+ ленивый бутстрап недостающих insights).
+
+    (Empirical pace at HR from window km-points; lazy insights bootstrap.)
+    Мало точек в полосе → None. Возвращает {"pace_min_km", "n_points"}.
+    """
+    _bootstrap_window_insights(user_id, db=db)
+    points, _ = _collect_window_points(user_id, db=db)
+    return pace_at_hr_band(points, hr_ceiling)
+
+
+def expected_hr_at_pace(user_id: int, pace_min_km: float, *, db: Session) -> dict | None:
+    """Эмпирический пульс на темпе: медиана HR км-точек insights окна в полосе
+    вокруг темпа (+ ленивый бутстрап недостающих insights).
+
+    (Empirical HR at pace from window km-points; lazy insights bootstrap.)
+    Мало точек в полосе → None. Возвращает {"hr_bpm", "n_points"}.
+    """
+    _bootstrap_window_insights(user_id, db=db)
+    points, _ = _collect_window_points(user_id, db=db)
+    return hr_at_pace_band(points, pace_min_km)
+
+
+def _collect_window_points(user_id: int, *, db: Session
+                           ) -> tuple[list[tuple[float, float]], int]:
+    """Км-точки (gap_pace, hr) steady-тренировок окна из готовых insights.
+
+    (Window km-points from stored insights.) Возвращает (points, n_sessions).
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=BASELINE_WINDOW_DAYS)
     rows = db.query(WorkoutInsight, TrainingSession).join(
@@ -182,6 +250,16 @@ def refresh_hr_pace_baseline(user_id: int, *, db: Session) -> dict | None:
         if session_points:
             n_sessions += 1
             points.extend(session_points)
+    return points, n_sessions
+
+
+def refresh_hr_pace_baseline(user_id: int, *, db: Session) -> dict | None:
+    """Пересчитать базовую линию HR↔GAP-темп по insights steady-тренировок окна.
+
+    Хранение — UserModel.params_json['hr_pace_baseline'] (merge: initiative и
+    прочие ключи не затираются). Мало данных → ключ удаляется (нет ложной точности).
+    """
+    points, n_sessions = _collect_window_points(user_id, db=db)
     baseline = fit_hr_pace_baseline(points, n_sessions)
     if baseline is not None:
         baseline["computed_at"] = datetime.now(timezone.utc).date().isoformat()

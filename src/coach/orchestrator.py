@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from src.coach.contracts import WorkoutProposal
+from src.coach.contracts import Prescription, WorkoutProposal
 from src.coach.llm.agent import run_turn
 from src.coach.llm.client import CoachLLM, get_llm
 from src.coach.llm.config import (
@@ -33,9 +33,10 @@ from src.coach.llm.prompts import (
     build_today_block,
 )
 from src.coach.llm.schemas import LogSuggestion, ReviewAssessment
-from src.coach.prescriber import finalize
+from src.coach.prescriber import finalize, save_prescription, user_max_hr
 from src.coach.render import (
     render_prescription,
+    render_prescription_short,
     render_review,
     render_state_card,
     render_weekly,
@@ -97,7 +98,9 @@ def morning_verdict(user_id: int, *, db: Session) -> str:
     """Утренний вердикт: состояние + назначение через safety (morning verdict)."""
     state = assess_state(user_id, db=db)
     prescription = finalize(None, state, db=db, persist=True)
-    return render_state_card(state) + "\n\n" + render_prescription(prescription)
+    user = db.query(User).filter(User.id == user_id).first()
+    return (render_state_card(state) + "\n\n"
+            + render_prescription(prescription, max_hr=user_max_hr(user), user=user))
 
 
 def _profile(user: User) -> dict:
@@ -154,10 +157,13 @@ def _build_extras(user_id: int, *, db: Session,
     ).order_by(Recommendation.id.desc()).first()
     if rec is not None:
         # Действующее назначение: наутро модель видит, что уже назначала
-        # (митигация конфликта «карточка разбора vs утренний вердикт», D7)
+        # (митигация конфликта «карточка разбора vs утренний вердикт», D7).
+        # target/volume — чтобы в чате модель видела зону/объём и не назначала
+        # заново без причины (proposal=null → карточка не дублируется).
         extras["planned_workout (recommendations)"] = {
             "for_date": rec.for_date.isoformat(), "type": rec.workout_type,
             "source": rec.source, "clamped": rec.clamped,
+            "target": rec.target_json, "volume": rec.volume_json,
         }
     if session_id is not None:
         detail = run_tool(
@@ -192,6 +198,35 @@ def _build_extras(user_id: int, *, db: Session,
     return extras
 
 
+def _unchanged_today(p: Prescription, user_id: int, *, db: Session) -> bool:
+    """Совпадает ли назначение с последним сегодняшним из recommendations.
+
+    Сравниваем тип, зону и объём: совпало → в чате карточку не дублируем.
+    (Does the prescription match today's latest recommendation?)
+    """
+    from datetime import date as _date
+
+    rec = db.query(Recommendation).filter(
+        Recommendation.user_id == user_id,
+        Recommendation.for_date >= _date.today(),
+    ).order_by(Recommendation.id.desc()).first()
+    if rec is None:
+        return False
+    target, volume = rec.target_json or {}, rec.volume_json or {}
+
+    def _close(a, b) -> bool:  # None-безопасное сравнение чисел (tolerant compare)
+        if a is None or b is None:
+            return a == b
+        return abs(float(a) - float(b)) < 0.05
+
+    return (rec.workout_type == p.workout_type
+            and target.get("max_zone") == p.target.get("max_zone")
+            and target.get("structure") == p.target.get("structure")
+            and _close(target.get("pace_min_km"), p.target.get("pace_min_km"))
+            and _close(volume.get("duration_min"), p.volume.get("duration_min"))
+            and _close(volume.get("distance_km"), p.volume.get("distance_km")))
+
+
 def _llm_chat_turn(user_id: int, message: str, *, db: Session,
                    llm: CoachLLM, kind: str, extras: dict | None = None,
                    allow_proposal: bool = True,
@@ -215,6 +250,7 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
                            system=system, messages=messages, effort=effort)
 
     text = turn.message
+    max_hr = user_max_hr(user)
     if turn.proposal is not None and not allow_proposal:
         # Разбор/отчёт — про прошлое: назначение даёт утренний вердикт/чат (C8).
         # (Reviews look backward: proposals are dropped, not clamped/persisted.)
@@ -225,11 +261,19 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
             target_zone=turn.proposal.target_zone,
             duration_min=turn.proposal.duration_min,
             distance_km=turn.proposal.distance_km,
+            target_pace_min_km=turn.proposal.target_pace_min_km,
             structure=turn.proposal.structure,
             rationale=list(turn.proposal.rationale),
         )
-        prescription = finalize(proposal, state, db=db, persist=True, source="llm")
-        text += "\n\n" + render_prescription(prescription)
+        prescription = finalize(proposal, state, db=db, persist=False, source="llm")
+        if kind == "chat" and _unchanged_today(prescription, user_id, db=db):
+            # Дедуп (решение владельца 26.08.2026): назначение не изменилось —
+            # одна строка-напоминание, без новой строки в recommendations.
+            # (Unchanged plan → one reminder line, no duplicate recommendation row.)
+            text += "\n\n" + render_prescription_short(prescription, max_hr=max_hr)
+        else:
+            save_prescription(prescription, state, db=db)
+            text += "\n\n" + render_prescription(prescription, max_hr=max_hr, user=user)
     if turn.followup_question:
         text += "\n\n" + turn.followup_question
 

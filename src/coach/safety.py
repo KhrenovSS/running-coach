@@ -1,9 +1,11 @@
 # Безусловный clamp — ЕДИНСТВЕННЫЙ конструктор Prescription (DEV_PLAN §1/§4)
 #
 # clamp() может только СУЖАТЬ предложение: даунгрейд типа по лестнице, усечение
-# зоны/длительности, сдвиг интенсива вперёд. Расширить предложение он не умеет —
-# в коде нет ни одной ветки, присваивающей значение больше входного.
-# (Unconditional clamp — the only Prescription constructor; it can only narrow.)
+# зоны/длительности, сдвиг интенсива вперёд; целевой темп может только
+# замедлиться или исчезнуть, никогда не ускориться. Расширить предложение он
+# не умеет — в коде нет ни одной ветки, присваивающей значение больше входного.
+# (Unconditional clamp — the only Prescription constructor; it can only narrow;
+# target pace may only slow down or be dropped.)
 
 from __future__ import annotations
 
@@ -11,11 +13,14 @@ from datetime import datetime, timezone
 
 from src.coach.config import (
     HARD_TYPES,
+    PACE_TARGET_MAX_PER_KM,
+    PACE_TARGET_MIN_PER_KM,
     TYPE_INTENSITY_ORDER,
     TYPE_MIN_ZONE,
 )
 from src.coach.contracts import (
     AthleteState,
+    PaceClampContext,
     Prescription,
     ReasoningStep,
     SafetyVerdict,
@@ -48,7 +53,8 @@ def _downgrade(workout_type: str, allowed: tuple[str, ...], max_zone: int) -> st
 
 def clamp(proposal: WorkoutProposal | None, verdict: SafetyVerdict,
           state: AthleteState, *, now: datetime | None = None,
-          source: str = "fallback") -> tuple[Prescription, bool]:
+          source: str = "fallback",
+          pace_ctx: PaceClampContext | None = None) -> tuple[Prescription, bool]:
     """Превратить предложение в назначение, применив границы (proposal → prescription).
 
     Тотальная функция: None/мусор на входе → консервативный выход, не исключение.
@@ -108,6 +114,43 @@ def clamp(proposal: WorkoutProposal | None, verdict: SafetyVerdict,
         zone = verdict.max_zone
     zone = max(1, min(zone, verdict.max_zone))
 
+    # 5b. Целевой темп (pace-lead) — может только замедлиться или исчезнуть.
+    # (Target pace may only slow down or be dropped, never speed up.)
+    pace = proposal.target_pace_min_km
+    if pace is not None:
+        if not (PACE_TARGET_MIN_PER_KM <= pace <= PACE_TARGET_MAX_PER_KM):
+            # Схема LLM — не гарантия: fallback/прямой proposal её обходит.
+            clamped = True
+            rationale.append(_step("темп отброшен",
+                                   f"целевой темп {pace:.2f} мин/км вне допустимых границ"))
+            pace = None
+        elif clamped:
+            # Структурные санкции (тип/интенсив/зона урезаны) — числа предложения
+            # уже невалидны; деградация в HR-режим с заклэмпленным потолком зоны.
+            rationale.append(_step("темп отброшен",
+                                   "ведущий темп отброшен: назначение урезано безопасностью"))
+            pace = None
+        elif (pace_ctx is not None and pace_ctx.expected_hr is not None
+                and pace_ctx.zone_ceiling_bpm is not None
+                and pace_ctx.expected_hr > pace_ctx.zone_ceiling_bpm):
+            clamped = True
+            if pace_ctx.safe_pace_min_km is not None:
+                # max(): темп только замедляется (медленнее = численно больше)
+                slowed = max(pace, pace_ctx.safe_pace_min_km)
+                rationale.append(_step(
+                    f"темп {pace:.2f} → {slowed:.2f} мин/км",
+                    f"расчётный пульс {pace_ctx.expected_hr} выше потолка "
+                    f"{pace_ctx.zone_ceiling_bpm} уд/мин"))
+                pace = slowed
+            else:
+                rationale.append(_step(
+                    "темп отброшен",
+                    f"расчётный пульс {pace_ctx.expected_hr} выше потолка "
+                    f"{pace_ctx.zone_ceiling_bpm} уд/мин, безопасный темп неизвестен"))
+                pace = None
+        # Оценки нет (мало данных / db=None) → темп как есть: защита — санити,
+        # структурные санкции и потолок зоны (решение владельца 26.08.2026).
+
     # 6. Длительность — усечение; дистанция пересчитывается вниз пропорционально
     duration = proposal.duration_min
     distance = proposal.distance_km
@@ -122,7 +165,12 @@ def clamp(proposal: WorkoutProposal | None, verdict: SafetyVerdict,
             distance = round(distance * scale, 1)
 
     if wtype == "rest":
-        zone, duration, distance = 1, None, None
+        zone, duration, distance, pace = 1, None, None, None
+
+    if pace is not None and duration is not None:
+        # Pace-режим: дистанция — детерминированная арифметика из итоговых
+        # темпа и длительности, а не догадка LLM. (Deterministic distance.)
+        distance = round(duration / pace, 1)
 
     if clamped:
         rationale = list(verdict.reasons) + rationale
@@ -135,6 +183,8 @@ def clamp(proposal: WorkoutProposal | None, verdict: SafetyVerdict,
     if distance is not None:
         volume["distance_km"] = distance
     target_d: dict = {"max_zone": zone}
+    if pace is not None:
+        target_d["pace_min_km"] = pace
     if proposal.structure and not clamped:
         # Структура интервалов при урезании отбрасывается — числа в ней уже неверны.
         # (Interval structure is dropped on clamp — its numbers are no longer valid.)

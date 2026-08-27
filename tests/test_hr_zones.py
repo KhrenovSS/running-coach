@@ -1,5 +1,5 @@
 # Тесты пульсовых зон (HR zones tests)
-from src.analysis.hr_zones import get_zone, get_band
+from src.analysis.hr_zones import get_zone, get_band, zone_ceiling_hr
 
 
 class TestGetZone:
@@ -78,3 +78,28 @@ class TestGetZoneEdgeCases:
         assert get_zone(174, 200) == 3  # 87% ≤ 87% → Z3
         assert get_zone(175, 200) == 4  # 87.5% > 87%, ≤ 93% → Z4
         assert get_zone(187, 200) == 5  # 93.5% > 93% → Z5
+
+
+class TestZoneCeilingHr:
+    def test_ceilings_for_max_hr_177(self):
+        """Табличные потолки зон для max_hr=177 (floor: значение внутри зоны)."""
+        assert zone_ceiling_hr(1, 177) == 123  # 177·0.70 = 123.9
+        assert zone_ceiling_hr(2, 177) == 141  # 177·0.80 = 141.6
+        assert zone_ceiling_hr(3, 177) == 153  # 177·0.87 = 153.99
+        assert zone_ceiling_hr(4, 177) == 164  # 177·0.93 = 164.61
+
+    def test_zone5_has_no_ceiling(self):
+        """Z5 — потолка нет (сам max_hr)."""
+        assert zone_ceiling_hr(5, 177) is None
+
+    def test_invalid_inputs(self):
+        """Невалидные max_hr/зона → None, не исключение."""
+        assert zone_ceiling_hr(2, 0) is None
+        assert zone_ceiling_hr(2, -5) is None
+        assert zone_ceiling_hr(0, 177) is None
+
+    def test_roundtrip_ceiling_stays_in_zone(self):
+        """Обратность: get_zone(потолок зоны) == сама зона."""
+        for max_hr in (160, 177, 200):
+            for zone in (1, 2, 3, 4):
+                assert get_zone(zone_ceiling_hr(zone, max_hr), max_hr) == zone

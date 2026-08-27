@@ -89,6 +89,10 @@ EASY_TYPES = ("recovery", "easy")
 # Минимальная зона, в которой тип имеет смысл: потолок зоны ниже → тип даунгрейдится.
 # (Minimal zone a type makes sense in; a lower zone cap downgrades the type.)
 TYPE_MIN_ZONE = {"rest": 1, "recovery": 1, "easy": 2, "long": 2, "tempo": 4, "interval": 5, "race": 4}
+# Абсолютные санити-границы целевого темпа назначения — единый источник для clamp
+# и pydantic-схемы LLM. (Target pace sanity bounds — shared by clamp and LLM schema.)
+PACE_TARGET_MIN_PER_KM = 2.5   # быстрее — нереально для любителя (faster is unrealistic)
+PACE_TARGET_MAX_PER_KM = 12.0  # медленнее — это уже ходьба (slower is walking)
 ATI_CTI_HIGH = 1.5             # §7 coros-дока: ATI/CTI > 1.5 → перекос в анаэробную нагрузку
 
 # --- ACWR / baseline RHR (skills/load, skills/fatigue) ---

@@ -35,3 +35,26 @@ def get_band(hr: int, max_hr: int) -> str:
     """
     zone = get_zone(hr, max_hr)
     return 'easy' if zone <= 2 else 'moderate' if zone == 3 else 'hard'
+
+
+_ZONE_MAX_PCT = {
+    1: HR_ZONE_1_MAX_PCT,
+    2: HR_ZONE_2_MAX_PCT,
+    3: HR_ZONE_3_MAX_PCT,
+    4: HR_ZONE_4_MAX_PCT,
+}
+
+
+def zone_ceiling_hr(zone: int, max_hr: int) -> int | None:
+    """
+    Потолок зоны в уд/мин — обратная к get_zone: floor, чтобы значение
+    гарантированно оставалось внутри зоны.
+    Zone ceiling in bpm — inverse of get_zone: floored so the value stays in-zone.
+    Z5 и невалидные входы → None (у Z5 потолок — сам max_hr).
+    """
+    if max_hr <= 0:
+        return None
+    pct = _ZONE_MAX_PCT.get(zone)
+    if pct is None:
+        return None
+    return int(max_hr * pct)
