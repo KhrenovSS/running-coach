@@ -23,12 +23,22 @@ class WorkoutProposalIn(BaseModel):
                                              le=PACE_TARGET_MAX_PER_KM)
     structure: str | None = Field(default=None, max_length=200)
     rationale: list[str] = Field(default_factory=list, max_length=5)
+    # На какой день назначение: 0 = сегодня, 1 = завтра, максимум неделя.
+    # Относительный день, не ISO-дата — симметрично days_ago (инцидент 29.08:
+    # воскресный план записался «на сегодня»). (Target day offset, not a date.)
+    for_days_ahead: int = Field(default=0, ge=0, le=7)
 
     @field_validator("target_zone", mode="before")
     @classmethod
     def _zone_null_is_one(cls, v):
         """null/0 → 1: для rest модели шлют null-зону — семантически Z1 (инцидент 23.08)."""
         return 1 if v in (None, 0, "0") else v
+
+    @field_validator("for_days_ahead", mode="before")
+    @classmethod
+    def _days_null_is_today(cls, v):
+        """null → 0: не указан день — назначение на сегодня (null means today)."""
+        return 0 if v is None else v
 
     @field_validator("duration_min", "distance_km", "target_pace_min_km", mode="before")
     @classmethod

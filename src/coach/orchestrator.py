@@ -161,6 +161,7 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
             target_pace_min_km=turn.proposal.target_pace_min_km,
             structure=turn.proposal.structure,
             rationale=list(turn.proposal.rationale),
+            for_days_ahead=turn.proposal.for_days_ahead,
         )
         prescription = finalize(proposal, state, db=db, persist=False, source="llm")
         if kind == "chat" and _unchanged_today(prescription, user_id, db=db):

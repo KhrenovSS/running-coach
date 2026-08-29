@@ -225,3 +225,36 @@ def test_render_pace_lead_short():
     assert "40 мин" in text
     assert "≈7.3 км" in text
     assert "пульс до" not in text
+
+
+def test_render_future_day_card_and_short():
+    """Инцидент 29.08: план на воскресенье подписывался «на сегодня».
+
+    Будущий день: заголовок с днём недели и датой + пометка «предварительно»;
+    short — «План на <день> (dd.mm) без изменений:». Сегодня — байт-в-байт прежнее.
+    """
+    from datetime import date, timedelta
+
+    from src.coach.render import _WEEKDAYS_RU
+
+    state = _state()
+    verdict = evaluate_safety(state)
+    p, _ = clamp(WorkoutProposal(workout_type="long", target_zone=2,
+                                 duration_min=60, for_days_ahead=2), verdict, state)
+    today = p.when - timedelta(days=2)
+    day_name = _WEEKDAYS_RU[p.when.weekday()]
+
+    card = render_prescription(p, max_hr=177, today=today)
+    assert f"*🟦 Длительный бег — {day_name} {p.when:%d.%m}*" in card
+    assert "Предварительно — утром сверимся по состоянию." in card
+
+    short = render_prescription_short(p, max_hr=177, today=today)
+    assert short.startswith(f"План на {day_name} ({p.when:%d.%m}) без изменений:")
+
+    # Сегодняшнее назначение — прежние строки без метки дня
+    p_today, _ = clamp(WorkoutProposal(workout_type="long", target_zone=2,
+                                       duration_min=60), verdict, state)
+    assert render_prescription(p_today, max_hr=177,
+                               today=p_today.when).startswith("*🟦 Длительный бег*")
+    assert render_prescription_short(p_today, max_hr=177, today=p_today.when
+                                     ).startswith("План на сегодня без изменений:")

@@ -55,20 +55,28 @@ def build_extras(user_id: int, *, db: Session,
             "flags": (r.assessment_json or {}).get("flags"),
             "carry_forward": r.carry_forward,
         } for r in reviews]
-    rec = db.query(Recommendation).filter(
+    recs = db.query(Recommendation).filter(
         Recommendation.user_id == user_id,
         Recommendation.for_date >= _date.today(),
-    ).order_by(Recommendation.id.desc()).first()
-    if rec is not None:
-        # Действующее назначение: наутро модель видит, что уже назначала
+    ).order_by(Recommendation.id.asc()).all()
+    if recs:
+        # Действующие назначения по дням: наутро модель видит, что уже назначала
         # (митигация конфликта «карточка разбора vs утренний вердикт», D7).
-        # target/volume — чтобы в чате модель видела зону/объём и не назначала
-        # заново без причины (proposal=null → карточка не дублируется).
-        extras["planned_workout (recommendations)"] = {
-            "for_date": rec.for_date.isoformat(), "type": rec.workout_type,
-            "source": rec.source, "clamped": rec.clamped,
-            "target": rec.target_json, "volume": rec.volume_json,
-        }
+        # Последняя строка на каждую дату (id.asc → перезапись поздней), список —
+        # чтобы пятничное и воскресное назначения не затеняли друг друга.
+        # days_ahead — сдвиг от локального «сегодня» пользователя, симметрично
+        # days_ago тренировок. (Latest row per date; days_ahead mirrors days_ago.)
+        user = db.query(User).filter(User.id == user_id).first()
+        today_local = user_now(user).date()
+        latest_by_date = {r.for_date: r for r in recs}
+        extras["planned_workouts (recommendations)"] = [{
+            "for_date": r.for_date.isoformat(),
+            "days_ahead": (r.for_date - today_local).days,
+            "type": r.workout_type,
+            "source": r.source, "clamped": r.clamped,
+            "target": r.target_json, "volume": r.volume_json,
+        } for r in sorted(latest_by_date.values(),
+                          key=lambda r: r.for_date)[:4]]
     if session_id is not None:
         detail = run_tool(
             "get_workout_detail", {"session_id": session_id}, user_id=user_id, db=db)
@@ -103,16 +111,16 @@ def build_extras(user_id: int, *, db: Session,
 
 
 def unchanged_today(p: Prescription, user_id: int, *, db: Session) -> bool:
-    """Совпадает ли назначение с последним сегодняшним из recommendations.
+    """Совпадает ли назначение с последним на ТУ ЖЕ дату из recommendations.
 
-    Сравниваем тип, зону и объём: совпало → в чате карточку не дублируем.
-    (Does the prescription match today's latest recommendation?)
+    Сравниваем дату (p.when), тип, зону и объём: совпало → в чате карточку
+    не дублируем. Назначения на разные дни не матчатся — воскресный план
+    не глушится сегодняшним и наоборот (инцидент 29.08).
+    (Match against the latest recommendation for the same target date.)
     """
-    from datetime import date as _date
-
     rec = db.query(Recommendation).filter(
         Recommendation.user_id == user_id,
-        Recommendation.for_date >= _date.today(),
+        Recommendation.for_date == p.when,
     ).order_by(Recommendation.id.desc()).first()
     if rec is None:
         return False

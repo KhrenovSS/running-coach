@@ -100,6 +100,7 @@ class WorkoutProposal:
     target_pace_min_km: float | None = None    # задан → ведём по темпу (pace-lead mode)
     structure: str | None = None               # «10×400/400» и т.п.
     rationale: list[str] = field(default_factory=list)
+    for_days_ahead: int = 0                    # 0 = сегодня, 1 = завтра (target day offset)
 
 
 @dataclass

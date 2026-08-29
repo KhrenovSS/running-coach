@@ -118,3 +118,23 @@ def test_target_pace_validation():
         with pytest.raises(ValidationError):
             WorkoutProposalIn.model_validate(
                 {"workout_type": "tempo", "target_zone": 4, "target_pace_min_km": bad})
+
+
+def test_for_days_ahead_validation():
+    """for_days_ahead: null → 0 (сегодня), 0..7 валидны, вне диапазона → ошибка."""
+    import pytest
+    from pydantic import ValidationError
+
+    from src.coach.llm.schemas import WorkoutProposalIn, coach_turn_json_schema
+
+    base = {"workout_type": "long", "target_zone": 2, "duration_min": 60}
+    assert WorkoutProposalIn.model_validate(base).for_days_ahead == 0
+    assert WorkoutProposalIn.model_validate(
+        {**base, "for_days_ahead": None}).for_days_ahead == 0
+    assert WorkoutProposalIn.model_validate(
+        {**base, "for_days_ahead": 2}).for_days_ahead == 2
+    for bad in (-1, 8):
+        with pytest.raises(ValidationError):
+            WorkoutProposalIn.model_validate({**base, "for_days_ahead": bad})
+    # Поле присутствует в strict-схеме для LLM (present in the strict schema)
+    assert "for_days_ahead" in str(coach_turn_json_schema())

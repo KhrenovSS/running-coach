@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 
 from src.coach.config import (
     HARD_TYPES,
@@ -81,6 +81,11 @@ def clamp(proposal: WorkoutProposal | None, verdict: SafetyVerdict,
             confidence=0.3, clamped=True, source=source, proposal=None,
         ), True
 
+    # Целевой день назначения: 0 = сегодня (штатно), N — будущий день недели.
+    # (Target day of the prescription; future days come from for_days_ahead.)
+    days_ahead = proposal.for_days_ahead or 0
+    when = now.date() + timedelta(days=days_ahead)
+
     wtype = proposal.workout_type
     if wtype not in TYPE_INTENSITY_ORDER:
         # Неизвестный тип трактуется как максимально опасный (unknown = dangerous)
@@ -97,8 +102,15 @@ def clamp(proposal: WorkoutProposal | None, verdict: SafetyVerdict,
         wtype = target
 
     # 4. Интенсив раньше восстановления → easy (hard before earliest_next_hard → easy)
+    # Для будущего дня сравниваем с КОНЦОМ целевого дня: субботний earliest не
+    # должен резать воскресный интенсив; внутри дня границу показывает карточка
+    # («Интенсив — не раньше …»), а утренний вердикт целевого дня пересчитает
+    # всё по свежим метрикам. (Future day → compare against the target day's end.)
+    gate_ref = (now if days_ahead == 0
+                else datetime.combine(when + timedelta(days=1), time(0),
+                                      tzinfo=timezone.utc))
     if (wtype in HARD_TYPES and verdict.earliest_next_hard is not None
-            and now < verdict.earliest_next_hard):
+            and gate_ref < verdict.earliest_next_hard):
         clamped = True
         rationale.append(_step(f"тип {wtype} → easy",
                                "интенсив не раньше "
@@ -193,7 +205,7 @@ def clamp(proposal: WorkoutProposal | None, verdict: SafetyVerdict,
     return Prescription(
         safety=verdict,
         workout_type=wtype,
-        when=now.date(),
+        when=when,
         earliest=verdict.earliest_next_hard,
         target=target_d,
         volume=volume,

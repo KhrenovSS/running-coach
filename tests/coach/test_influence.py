@@ -89,3 +89,20 @@ def test_weekly_extras_include_method_guides(athlete_with_history, db_session):
     orchestrator.weekly_report(athlete_with_history.id, db=db_session, llm=llm)
     last_user = llm.calls[0]["messages"][-1]["content"]
     assert "method_guides" in last_user
+
+
+def test_planned_workouts_list_all_days_with_days_ahead(athlete_with_history,
+                                                        db_session):
+    """Назначения на сегодня И на будущий день — оба в контексте, с days_ahead
+    (инцидент 29.08: одиночный planned_workout затенял один из планов)."""
+    from src.coach.contracts import WorkoutProposal
+
+    state = assess_state(athlete_with_history.id, db=db_session)
+    finalize(None, state, db=db_session, persist=True)   # rest на сегодня
+    finalize(WorkoutProposal(workout_type="long", target_zone=2, duration_min=60,
+                             for_days_ahead=2),
+             state, db=db_session, persist=True)          # длительная на +2
+    extras = orchestrator._build_extras(athlete_with_history.id, db=db_session)
+    planned = extras["planned_workouts (recommendations)"]
+    assert [p["days_ahead"] for p in planned] == [0, 2]
+    assert planned[1]["type"] == "long"

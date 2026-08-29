@@ -169,3 +169,49 @@ def test_log_suggestion_passthrough(athlete_with_history, db_session):
                                      db=db_session, llm=llm)
     assert reply.log_suggestion is not None
     assert reply.log_suggestion.value == 2
+
+
+def test_future_day_proposal_dated_card_and_dedup(athlete_with_history, db_session):
+    """Инцидент 29.08: воскресный план подписывался «на сегодня».
+
+    for_days_ahead=2 → Recommendation.for_date = сегодня+2, карточка с днём недели
+    и «Предварительно»; повтор → напоминание с днём, без новой записи; назначения
+    на разные дни не матчатся дедупом.
+    """
+    from datetime import date, timedelta
+
+    from src.coach.render import _WEEKDAYS_RU
+
+    sunday_turn = dict(EASY_TURN)
+    sunday_turn["proposal"] = dict(EASY_TURN["proposal"], workout_type="long",
+                                   duration_min=60, distance_km=None,
+                                   for_days_ahead=2)
+    resp = LLMResponse(stop_reason="end_turn", parsed=sunday_turn)
+    llm = ScriptedLLM([resp, resp,
+                       LLMResponse(stop_reason="end_turn", parsed=EASY_TURN)])
+    uid = athlete_with_history.id
+    target = date.today() + timedelta(days=2)
+    day_name = _WEEKDAYS_RU[target.weekday()]
+
+    first = orchestrator.handle_chat(uid, "давай длительную через два дня",
+                                     db=db_session, llm=llm)
+    assert f"Длительный бег — {day_name} {target:%d.%m}" in first.text
+    assert "Предварительно — утром сверимся по состоянию." in first.text
+    assert "План на сегодня" not in first.text
+    rec = db_session.query(Recommendation).filter_by(
+        user_id=uid).order_by(Recommendation.id.desc()).first()
+    assert rec.for_date == target
+    n_recs = db_session.query(Recommendation).filter_by(user_id=uid).count()
+
+    second = orchestrator.handle_chat(uid, "какой пульс на длительной?",
+                                      db=db_session, llm=llm)
+    assert f"План на {day_name} ({target:%d.%m}) без изменений" in second.text
+    assert db_session.query(Recommendation).filter_by(
+        user_id=uid).count() == n_recs                # дубль-записи нет
+
+    # Сегодняшний easy НЕ матчится с будущей строкой — полная карточка + запись
+    third = orchestrator.handle_chat(uid, "а что сегодня?",
+                                     db=db_session, llm=llm)
+    assert "без изменений" not in third.text
+    assert db_session.query(Recommendation).filter_by(
+        user_id=uid).count() == n_recs + 1

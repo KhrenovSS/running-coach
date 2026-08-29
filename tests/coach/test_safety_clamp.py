@@ -267,3 +267,50 @@ def test_pace_absent_for_rest():
     assert p.workout_type == "rest"
     assert "pace_min_km" not in p.target
     assert p.volume == {}
+
+
+def test_future_day_proposal_sets_when():
+    """for_days_ahead=2 → Prescription.when = сегодня+2 (инцидент 29.08:
+    воскресный план записывался «на сегодня»)."""
+    from dataclasses import replace
+    from datetime import datetime, timedelta, timezone
+
+    state = _state()
+    verdict = evaluate_safety(state)
+    p, _ = clamp(replace(AGGRESSIVE, for_days_ahead=2), verdict, state)
+    assert p.when == datetime.now(timezone.utc).date() + timedelta(days=2)
+
+
+def test_future_day_hard_not_gated_by_near_earliest():
+    """Интенсив на +2 дня при earliest через 12 часов — НЕ даунгрейдится."""
+    from dataclasses import replace
+
+    state = _state()
+    state.recovery_hours_left = 12.0
+    verdict = evaluate_safety(state)
+    assert verdict.earliest_next_hard is not None
+    p, clamped = clamp(replace(AGGRESSIVE, for_days_ahead=2), verdict, state)
+    assert p.workout_type == "interval"
+    assert clamped is False
+
+
+def test_future_day_hard_gated_when_earliest_beyond_target_day():
+    """Интенсив на +2 дня при earliest через 3 суток — даунгрейд в easy."""
+    from dataclasses import replace
+
+    state = _state()
+    state.recovery_hours_left = 72.0
+    verdict = evaluate_safety(state)
+    p, clamped = clamp(replace(AGGRESSIVE, for_days_ahead=2), verdict, state)
+    assert p.workout_type == "easy"
+    assert clamped is True
+
+
+def test_no_proposal_when_is_today():
+    """Без предложения (консервативный отдых) when остаётся сегодняшним."""
+    from datetime import datetime, timezone
+
+    state = _state()
+    verdict = evaluate_safety(state)
+    p, _ = clamp(None, verdict, state)
+    assert p.when == datetime.now(timezone.utc).date()

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from src.analysis.hr_zones import zone_ceiling_hr
@@ -24,6 +25,16 @@ _TYPE_LABEL = {
     "race": "🏁 Соревнование",
 }
 _STATUS_ICON = {"ok": "🟢", "warning": "🟡", "danger": "🔴", "unknown": "⚪"}
+_WEEKDAYS_RU = ("понедельник", "вторник", "среда", "четверг",
+                "пятница", "суббота", "воскресенье")
+
+
+def _day_label(when: date | None, today: date | None = None) -> str | None:
+    """«воскресенье 31.08» для будущего дня; None — сегодня/нет даты (day label)."""
+    today = today or date.today()
+    if when is None or when <= today:
+        return None
+    return f"{_WEEKDAYS_RU[when.weekday()]} {when:%d.%m}"
 
 
 def _hr_ceiling(p: Prescription, max_hr: int | None) -> int | None:
@@ -89,15 +100,19 @@ def _hr_lead_lines(p: Prescription, max_hr: int | None) -> list[str]:
 
 
 def render_prescription(p: Prescription, max_hr: int | None = None,
-                        user: Any = None) -> str:
+                        user: Any = None, today: date | None = None) -> str:
     """Карточка назначения — все числа только из заклэмпленного Prescription.
 
     max_hr — для потолка пульса зоны в уд/мин; None → без строки пульса.
     user — для локального пояса времени (user timezone); None → settings.timezone.
+    today — точка отсчёта метки дня (для тестов); None → date.today().
     Режим по target["pace_min_km"]: задан → ведём по темпу (цель — темп+время,
     пульс справочно); нет → по пульсу (цель — зона+время, темп/км — ориентир).
+    Будущий день (p.when > today) — день в заголовке + пометка «предварительно».
     """
-    lines = [f"*{_TYPE_LABEL.get(p.workout_type, p.workout_type)}*"]
+    day = _day_label(p.when, today)
+    title = _TYPE_LABEL.get(p.workout_type, p.workout_type)
+    lines = [f"*{title} — {day}*" if day else f"*{title}*"]
     if p.workout_type != "rest":
         if p.target.get("pace_min_km") is not None:
             lines += _pace_lead_lines(p)
@@ -107,18 +122,27 @@ def render_prescription(p: Prescription, max_hr: int | None = None,
         # naive-UTC → пояс пользователя (BACKLOG #260; инциденты 23.08 и 26.08: UTC)
         earliest = local_dt(p.earliest, user)
         lines.append(f"Интенсив — не раньше {earliest:%d.%m %H:%M}")
+    if day:
+        # План на будущий день строится по сегодняшним данным — утренний вердикт
+        # целевого дня перепроверит его по свежим метрикам (provisional plan note).
+        lines.append("Предварительно — утром сверимся по состоянию.")
     if p.clamped:
         lines.append("")
         lines.append(render_safety_note(p.safety))
     return "\n".join(lines)
 
 
-def render_prescription_short(p: Prescription, max_hr: int | None = None) -> str:
-    """Строка-напоминание: назначение на сегодня не изменилось (unchanged-plan line).
+def render_prescription_short(p: Prescription, max_hr: int | None = None,
+                              today: date | None = None) -> str:
+    """Строка-напоминание: назначение на день не изменилось (unchanged-plan line).
 
     Решение владельца 26.08.2026: в дневном чате при неизменном назначении
-    вместо повторной полной карточки — одна короткая строка.
+    вместо повторной полной карточки — одна короткая строка. Будущий день —
+    «План на воскресенье (31.08) …» вместо «на сегодня».
     """
+    day = _day_label(p.when, today)
+    prefix = (f"План на {day.split()[0]} ({p.when:%d.%m}) без изменений:\n" if day
+              else "План на сегодня без изменений:\n")
     parts = [_TYPE_LABEL.get(p.workout_type, p.workout_type)]
     if p.workout_type != "rest":
         if p.target.get("pace_min_km") is not None:
@@ -127,7 +151,7 @@ def render_prescription_short(p: Prescription, max_hr: int | None = None) -> str
                 parts.append(f"{p.volume['duration_min']:.0f} мин")
             if p.volume.get("distance_km") is not None:
                 parts.append(f"≈{p.volume['distance_km']:.1f} км")
-            return "План на сегодня без изменений:\n" + " · ".join(parts)
+            return prefix + " · ".join(parts)
         ceiling = _hr_ceiling(p, max_hr)
         if ceiling is not None:
             parts.append(f"пульс до {ceiling}")
@@ -139,7 +163,7 @@ def render_prescription_short(p: Prescription, max_hr: int | None = None) -> str
         if estimate is not None:
             pace, km = estimate
             parts.append(f"~{format_pace(pace)}/км ≈ {km:.1f} км")
-    return "План на сегодня без изменений:\n" + " · ".join(parts)
+    return prefix + " · ".join(parts)
 
 
 def render_safety_note(verdict: SafetyVerdict) -> str:
