@@ -208,4 +208,4 @@ def test_weekly_job_gate_below_normal(athlete_with_history, db_session):
     for level in ("off", "low"):
         orchestrator.set_initiative(athlete_with_history.id, level, db=db_session)
         db_session.commit()  # вернуть соединение в пул: хелпер откроет свою сессию
-        assert _weekly_turn_blocking(athlete_with_history.id) is None
+        assert _weekly_turn_blocking(athlete_with_history.id) == (None, None)

@@ -8,17 +8,13 @@ from __future__ import annotations
 import asyncio
 
 from src.coach import orchestrator
+from src.coach.llm.prompts import MORNING_PROMPT
 from src.config import settings
 from src.models import SessionLocal, User
 from src.telegram.utils import send_md_safe
 from src.utils.logger import get_logger
 
 logger = get_logger("telegram.jobs.coach_morning")
-
-MORNING_PROMPT = ("Утренний вердикт: что мне сегодня делать — тренироваться или "
-                  "отдыхать, и если бежать, то как? Учти carry_forward из "
-                  "recent_reviews (выводы твоих недавних разборов) и planned_workout, "
-                  "если они есть в контексте.")
 
 
 def _morning_turn_blocking(user_id: int) -> str | None:

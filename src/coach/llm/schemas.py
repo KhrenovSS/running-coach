@@ -96,6 +96,9 @@ class CoachTurn(BaseModel):
     followup_question: str | None = Field(default=None, max_length=200)
     log_suggestion: LogSuggestion | None = None
     assessment: ReviewAssessment | None = None   # D3: заполняется только в разборе
+    # Недельный план (решение владельца 29.08.2026): только для kind='plan',
+    # for_days_ahead элемента = день; дубли/rest/день-0 чистит weekly_plan.py
+    weekly_plan: list[WorkoutProposalIn] | None = Field(default=None, max_length=8)
 
 
 def _strictify(schema: dict) -> dict:

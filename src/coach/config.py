@@ -111,7 +111,9 @@ DISTRIBUTION_80_20 = {
 CYCLE_3_1 = {
     "build_weeks": 3,
     "deload_week": 1,
-    "deload_volume_pct": 0.60,
+    # 0.75 — выравнено по guide 60_plans_fitzgerald (mesocycle_recovery_volume_percent=75);
+    # key_rules digest уже показывает LLM 75% — конфиг не должен противоречить
+    "deload_volume_pct": 0.75,
 }
 
 LOAD_PROGRESSION = {
@@ -159,3 +161,8 @@ WARMUP_EASY_SHARE_MIN = 0.5        # меньше половины окна в Z
 # M2.2: план vs факт (METRICS_GUIDE §5) — соответствие назначению
 PLAN_VOLUME_TOLERANCE_PCT = 0.15   # объём выше плана более чем на 15% → флаг
 PLAN_INTENSITY_TOLERANCE_PCT = 0.10  # доля времени выше плановой зоны → флаг
+
+# --- Недельный план (Weekly plan) — решения владельца 29.08.2026 ---
+# Качественных дней в плане недели: возврат после травмы колена — один
+# (guide 41 допускает 3; потолок поднимает владелец осознанно)
+PLAN_QUALITY_DAYS_MAX = 1

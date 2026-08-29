@@ -123,11 +123,13 @@ def finalize(proposal: WorkoutProposal | None, state: AthleteState, *,
     return prescription
 
 
-def save_prescription(p: Prescription, state: AthleteState, *, db: Session) -> Recommendation:
+def save_prescription(p: Prescription, state: AthleteState, *, db: Session,
+                      status: str = "proposed") -> Recommendation:
     """Записать назначение в recommendations (persist prescription).
 
     proposal_json — предложение ДО урезания, safety_json — вердикт: метрика
-    дрейфа LLM (DEV_PLAN §1.6). (Pre-clamp proposal + verdict = drift metric.)
+    дрейфа LLM (DEV_PLAN §1.6). status: proposed (день) | planned (вс-план) |
+    adjusted (замена планового дня); confirmed ставится UPDATE'ом в planning.
     """
     from src.coach.tools.serialize import jsonable
 
@@ -141,7 +143,7 @@ def save_prescription(p: Prescription, state: AthleteState, *, db: Session) -> R
                         for r in p.rationale],
         predicted_json=p.predicted,
         confidence=p.confidence,
-        status="proposed",
+        status=status,
         proposal_json=jsonable(p.proposal) if p.proposal else None,
         safety_json=jsonable(p.safety),
         clamped=p.clamped,

@@ -13,8 +13,9 @@ from src.telegram.handlers.stats import cmd_stats, stats_callback
 from src.telegram.handlers.trainings import cmd_trainings, trainings_callback
 from src.telegram.handlers.weight import cmd_weight
 from src.telegram.handlers.account import cmd_delete_me, cmd_delete_me_confirm, cmd_login_info, cmd_reset_password, get_new_password, cancel_reset_password
-from src.telegram.handlers.coach import (cmd_coach_settings, cmd_verdict,
-                                          handle_text, initiative_callback)
+from src.telegram.handlers.coach import (cmd_coach_settings, cmd_plan,
+                                          cmd_verdict, handle_text,
+                                          initiative_callback)
 from src.telegram.handlers.feedback import feedback_callback
 from src.telegram.handlers.pain import pain_callback, pain_phase_callback, wellness_callback
 from src.telegram.handlers.hr_max import hr_max_callback
@@ -68,6 +69,7 @@ def run_bot():
     application.add_handler(CommandHandler("delete_me_confirm", cmd_delete_me_confirm))
     application.add_handler(CommandHandler("login_info", cmd_login_info))
     application.add_handler(CommandHandler("verdict", cmd_verdict))
+    application.add_handler(CommandHandler("plan", cmd_plan))
     application.add_handler(CommandHandler("coach_settings", cmd_coach_settings))
 
     reset_pw_handler = ConversationHandler(

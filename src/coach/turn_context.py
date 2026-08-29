@@ -12,6 +12,7 @@ from src.coach.knowledge.loader import search as guide_search
 from src.coach.llm.config import (
     COACH_ENRICH_RECENT_LIMIT,
     COACH_ENRICH_WEEKS,
+    COACH_PLANNED_DAYS,
     COACH_RECENT_REVIEWS_LIMIT,
 )
 from src.coach.tools.registry import run_tool
@@ -72,10 +73,11 @@ def build_extras(user_id: int, *, db: Session,
             "weekday": WEEKDAYS_RU[r.for_date.weekday()],
             "days_ahead": (r.for_date - today_local).days,
             "type": r.workout_type,
+            "status": r.status,
             "source": r.source, "clamped": r.clamped,
             "target": r.target_json, "volume": r.volume_json,
         } for r in sorted(latest_by_date.values(),
-                          key=lambda r: r.for_date)[:4]]
+                          key=lambda r: r.for_date)[:COACH_PLANNED_DAYS]]
     if session_id is not None:
         detail = run_tool(
             "get_workout_detail", {"session_id": session_id}, user_id=user_id, db=db)

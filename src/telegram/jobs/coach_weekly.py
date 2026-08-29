@@ -16,16 +16,26 @@ from src.utils.logger import get_logger
 logger = get_logger("telegram.jobs.coach_weekly")
 
 
-def _weekly_turn_blocking(user_id: int) -> str | None:
+def _weekly_turn_blocking(user_id: int) -> tuple[str | None, str | None]:
     """Sync-обёртка: сессия живёт только внутри треда (session never crosses threads).
 
-    None — инициатива пользователя ниже normal (отчёт не шлём).
+    (report, plan): отчёт + карточка плана следующей недели (второе сообщение,
+    решение владельца 29.08.2026). (None, None) — инициатива ниже normal.
     """
+    from src.coach.weekly_plan import generate_weekly_plan
+
     db = SessionLocal()
     try:
         if orchestrator.get_initiative(user_id, db=db) not in ("normal", "high"):
-            return None
-        return orchestrator.weekly_report(user_id, db=db).text
+            return None, None
+        report = orchestrator.weekly_report(user_id, db=db).text
+        try:
+            plan = generate_weekly_plan(user_id, db=db)
+        except Exception as e:  # план не должен ронять отчёт
+            logger.error("Weekly plan failed for user=%s: %s", user_id, e,
+                         exc_info=True)
+            plan = None
+        return report, plan
     finally:
         db.close()
 
@@ -46,14 +56,16 @@ async def coach_weekly_job(context) -> None:
 
     for user_id, chat_id in targets:
         try:
-            text = await asyncio.to_thread(_weekly_turn_blocking, user_id)
-            if text is None:
+            report, plan = await asyncio.to_thread(_weekly_turn_blocking, user_id)
+            if report is None:
                 continue
 
             async def _send(t, **kw):
                 return await context.bot.send_message(chat_id=chat_id, text=t, **kw)
 
-            await send_md_safe(_send, text)
+            await send_md_safe(_send, report)
+            if plan is not None:
+                await send_md_safe(_send, plan)
         except Exception as e:  # джоба не должна умирать на одном пользователе
             logger.error("Weekly report failed for user=%s: %s",
                          user_id, e, exc_info=True)

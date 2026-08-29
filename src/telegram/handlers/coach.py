@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 import telegram.error
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -102,6 +103,41 @@ async def initiative_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.edit_message_text(f"✅ Инициатива тренера: {label}")
 
 
+_REPLAN_RE = re.compile(r"перепланируй|нов\w+ план на неделю|план на следующую неделю",
+                        re.IGNORECASE)
+
+
+async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /plan — составить/пересоставить план недели (weekly plan on demand)."""
+    user = get_user(update.effective_chat.id)
+    if not user:
+        await update.message.reply_text(
+            "❌ Сначала используй /start чтобы зарегистрироваться.")
+        return
+    await update.message.reply_text("🗓 Составляю план недели…")
+    try:
+        text = await asyncio.to_thread(_plan_blocking, user.id)
+        if text is None:
+            await update.message.reply_text(
+                "😔 Не удалось составить план — попробуй позже.")
+            return
+        await send_md_safe(update.message.reply_text, text)
+    except (CoachError, telegram.error.TelegramError) as e:
+        logger.error("Plan error for user=%s: %s", user.id, e, exc_info=True)
+        await update.message.reply_text("😔 Не удалось составить план.")
+
+
+def _plan_blocking(user_id: int) -> str | None:
+    """Sync-обёртка плана: сессия живёт только внутри этого треда."""
+    from src.coach.weekly_plan import generate_weekly_plan
+
+    db = SessionLocal()
+    try:
+        return generate_weekly_plan(user_id, db=db)
+    finally:
+        db.close()
+
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Роутер свободного текста: вес (приоритет старого флоу) → коуч (text router)."""
     chat_id = update.effective_chat.id
@@ -112,6 +148,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(chat_id)
     if not user:
         return
+    if _REPLAN_RE.search(update.message.text or ""):
+        # Детерминированный триггер перепланирования — до LLM-хода (/plan-путь)
+        return await cmd_plan(update, context)
     try:
         # to_thread: синхронный LLM-вызов (до ~150с) не должен морозить event loop
         # всего бота (инцидент 23.08). Сессия БД живёт внутри треда целиком.

@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from src.analysis.hr_zones import zone_ceiling_hr
@@ -163,6 +163,39 @@ def render_prescription_short(p: Prescription, max_hr: int | None = None,
             pace, km = estimate
             parts.append(f"~{format_pace(pace)}/км ≈ {km:.1f} км")
     return prefix + " · ".join(parts)
+
+
+def render_week_plan(prescriptions: list[Prescription], targets: dict,
+                     max_hr: int | None = None) -> str:
+    """Сводная карточка недельного плана — числа только из клэмпленных
+    Prescription и детерминированных targets (weekly plan card).
+    """
+    start = date.fromisoformat(targets["week_start"])
+    end = start + timedelta(days=6)
+    lines = [f"*План на неделю ({start:%d.%m}–{end:%d.%m})*",
+             f"Неделя {targets['mesocycle_week']}/{targets['mesocycle_length']} "
+             f"мезоцикла ({'разгрузочная' if targets['phase'] == 'deload' else 'рост'}) "
+             f"· цель ~{targets['target_km']:.0f} км"]
+    for p in sorted(prescriptions, key=lambda x: x.when):
+        day = f"{_WEEKDAYS_RU[p.when.weekday()][:2]} {p.when:%d.%m}"
+        parts = [_TYPE_LABEL.get(p.workout_type, p.workout_type)]
+        if p.target.get("pace_min_km") is not None:
+            parts.append(f"темп {format_pace(p.target['pace_min_km'])}/км")
+        else:
+            ceiling = _hr_ceiling(p, max_hr)
+            if ceiling is not None:
+                parts.append(f"пульс до {ceiling}")
+            elif p.target.get("max_zone") is not None:
+                parts.append(f"Z{p.target['max_zone']} и ниже")
+        if p.volume.get("duration_min") is not None:
+            parts.append(f"{p.volume['duration_min']:.0f} мин")
+        if p.target.get("structure"):
+            parts.append(p.target["structure"])
+        lines.append(f"{day} — " + " · ".join(parts))
+    if any(p.clamped for p in prescriptions):
+        lines.append("⚠️ Часть дней урезана границами безопасности.")
+    lines.append("Остальные дни — отдых. Перепланировать: /plan")
+    return "\n".join(lines)
 
 
 def render_safety_note(verdict: SafetyVerdict) -> str:

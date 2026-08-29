@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
+from src.coach import planning
 from src.coach.contracts import Prescription, WorkoutProposal
 from src.coach.llm.agent import run_turn
 from src.coach.llm.client import CoachLLM, get_llm
@@ -149,11 +150,12 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
 
     text = turn.message
     max_hr = user_max_hr(user)
-    if turn.proposal is not None and not allow_proposal:
-        # Разбор/отчёт — про прошлое: назначение даёт утренний вердикт/чат (C8).
-        # (Reviews look backward: proposals are dropped, not clamped/persisted.)
-        logger.info("Proposal dropped for kind=%s user=%s", kind, user_id)
-    elif turn.proposal is not None:
+    if turn.weekly_plan is not None:
+        # Недельный план строится только отдельным ходом kind='plan' (weekly_plan.py)
+        logger.warning("Unexpected weekly_plan for kind=%s user=%s — dropped",
+                       kind, user_id)
+    proposal = None
+    if turn.proposal is not None:
         proposal = WorkoutProposal(
             workout_type=turn.proposal.workout_type,
             target_zone=turn.proposal.target_zone,
@@ -164,6 +166,20 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
             rationale=list(turn.proposal.rationale),
             for_days_ahead=turn.proposal.for_days_ahead,
         )
+    morning_result = (planning.confirm_or_adjust_morning(
+        proposal, user_id, state, db=db, now=user_now(user))
+        if kind == "morning" else None)
+    if morning_result is not None:
+        # План дня есть: подтверждение (UPDATE status) или осознанная замена
+        # (решение владельца 29.08.2026). (Confirm or consciously adjust the plan.)
+        prescription, mode = morning_result
+        logger.info("Morning plan %s for user=%s", mode, user_id)
+        text += "\n\n" + render_prescription(prescription, max_hr=max_hr, user=user)
+    elif proposal is not None and not allow_proposal:
+        # Разбор/отчёт — про прошлое: назначение даёт утренний вердикт/чат (C8).
+        # (Reviews look backward: proposals are dropped, not clamped/persisted.)
+        logger.info("Proposal dropped for kind=%s user=%s", kind, user_id)
+    elif proposal is not None:
         prescription = finalize(proposal, state, db=db, persist=False, source="llm",
                                 now=user_now(user))
         if kind == "chat" and _unchanged_today(prescription, user_id, db=db):
@@ -296,21 +312,26 @@ def on_workout_completed(user_id: int, session_id: int, *, db: Session,
 
 def weekly_report(user_id: int, *, db: Session,
                   llm: CoachLLM | None = None) -> ChatReply:
-    """Недельный отчёт (weekly report, C8): итоги недели + план прозой.
+    """Недельный отчёт (weekly report, C8): итоги недели + сверка с планом.
 
-    План недели живёт только строкой coach_messages kind='weekly' (DEV_PLAN §12).
+    Персистентный план следующей недели создаёт weekly_plan.generate_weekly_plan
+    (отдельный ход после отчёта — решение владельца 29.08.2026).
     """
     llm = llm if llm is not None else get_llm()
     try:
         if CoachRepository.turns_today(user_id, db=db) >= COACH_MAX_TURNS_PER_DAY:
             raise LLMUnavailableError("дневной бюджет ходов исчерпан")
+        extras = _build_extras(user_id, db=db, weeks=COACH_WEEKLY_REPORT_WEEKS,
+                               limit=COACH_WEEKLY_REPORT_RECENT,
+                               insights_limit=COACH_WEEKLY_REVIEWS_LIMIT,
+                               guides_query="объём прогрессия неделя план база")
+        review = planning.week_plan_review(user_id, db=db)
+        if review is not None:
+            # Детерминированная сверка недели с планом (числа — не от LLM)
+            extras["week_plan_review (planning)"] = review
         return _llm_chat_turn(
             user_id, WEEKLY_PROMPT, db=db, llm=llm, kind="weekly",
-            extras=_build_extras(user_id, db=db, weeks=COACH_WEEKLY_REPORT_WEEKS,
-                                 limit=COACH_WEEKLY_REPORT_RECENT,
-                                 insights_limit=COACH_WEEKLY_REVIEWS_LIMIT,
-                                 guides_query="объём прогрессия неделя план база"),
-            allow_proposal=False, effort=COACH_EFFORT_PLAN)
+            extras=extras, allow_proposal=False, effort=COACH_EFFORT_PLAN)
     except (LLMUnavailableError, CoachError) as e:
         logger.info("LLM weekly fallback for user=%s: %s", user_id, e)
         summary = run_tool("get_weekly_summary", {"weeks": COACH_ENRICH_WEEKS},
