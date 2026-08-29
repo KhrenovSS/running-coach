@@ -105,12 +105,15 @@ def test_session_brief_has_days_ago(athlete_with_history, db_session):
     assert newest["started_at_local"] == expected.strftime("%Y-%m-%d %H:%M")
     assert newest["tz"] == "Europe/Moscow"
     assert newest["date"] == expected.date().isoformat()
+    from src.utils.timeutils import WEEKDAYS_RU
+    assert newest["weekday"] == WEEKDAYS_RU[expected.weekday()]
 
     from src.coach.state import assess_state
     state = assess_state(athlete_with_history.id, db=db_session)
     assert state.last_workout["days_ago"] == 0
     assert state.last_workout["started_at_local"] == expected.strftime("%Y-%m-%d %H:%M")
     assert state.last_workout["tz"] == "Europe/Moscow"
+    assert state.last_workout["weekday"] == WEEKDAYS_RU[expected.weekday()]
 
 
 def test_session_brief_evening_workout_stays_evening(db_session):

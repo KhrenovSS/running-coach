@@ -22,7 +22,7 @@ from src.models import User
 from src.services.recovery_view import hrv_status, rhr_anomaly
 from src.services.repositories import FeedbackRepository, TrainingRepository
 from src.services.repositories_coach import CoachRepository
-from src.utils.timeutils import session_local_dt, user_now
+from src.utils.timeutils import WEEKDAYS_RU, session_local_dt, user_now
 
 # Маппинги компонент → скор 0..1 (component score maps; 1.0 = лучший для readiness)
 _HRV_SCORE = {"elevated": 1.0, "normal": 1.0, "low": 0.5, "very_low": 0.0}
@@ -179,6 +179,7 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
             "days_ago": ((user_now(user).date() - local.date()).days
                          if local else None),
             "started_at_local": local.strftime("%Y-%m-%d %H:%M") if local else None,
+            "weekday": WEEKDAYS_RU[local.weekday()] if local else None,
             "tz": local.tzinfo.key if local else None,
             "type": effective_training_type(s),
             "km": s.total_distance_km,

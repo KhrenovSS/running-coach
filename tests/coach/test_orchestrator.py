@@ -67,6 +67,11 @@ def test_today_block_has_local_now_and_no_utc_leak(athlete_with_history, db_sess
     assert "(Europe/Moscow)" in content        # make_user: timezone Moscow
     assert "started_at_local" in content
     assert "+00:00" not in content             # earliest_next_hard — локальное время
+    # День недели — готовым словом сразу после «Сейчас: » (weekday spelled out)
+    from src.utils.timeutils import WEEKDAYS_RU
+    now_part = content.split("Сейчас: ", 1)[1]
+    assert any(now_part.startswith(d) for d in WEEKDAYS_RU)
+    assert '"weekday"' in content              # поле у тренировок
 
 
 def test_budget_exhausted_no_llm_call(athlete_with_history, db_session):

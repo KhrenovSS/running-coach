@@ -106,3 +106,7 @@ def test_planned_workouts_list_all_days_with_days_ahead(athlete_with_history,
     planned = extras["planned_workouts (recommendations)"]
     assert [p["days_ahead"] for p in planned] == [0, 2]
     assert planned[1]["type"] == "long"
+    from datetime import date, timedelta
+    from src.utils.timeutils import WEEKDAYS_RU
+    assert planned[1]["weekday"] == WEEKDAYS_RU[
+        (date.today() + timedelta(days=2)).weekday()]

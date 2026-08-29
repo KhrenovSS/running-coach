@@ -15,7 +15,7 @@ from src.models import TrainingSession, User
 from src.services.analytics_helpers import compute_slope, compute_trend_direction
 from src.services.repositories import FeedbackRepository, TrainingRepository
 from src.services.repositories_coach import CoachRepository
-from src.utils.timeutils import session_local_dt, user_now
+from src.utils.timeutils import WEEKDAYS_RU, session_local_dt, user_now
 
 MAX_SEGMENTS = 20   # больше — только агрегат (above this, aggregate only)
 MAX_POINTS = 60     # даунсэмпл рядов (series downsampling cap)
@@ -34,6 +34,7 @@ def _session_brief(s: TrainingSession, rpe: int | None, pain: int | None,
         # (0 = сегодня, 1 = вчера; started_at_local — единственный источник времени суток)
         "days_ago": (today - local.date()).days if local else None,
         "started_at_local": local.strftime("%Y-%m-%d %H:%M") if local else None,
+        "weekday": WEEKDAYS_RU[local.weekday()] if local else None,
         "tz": local.tzinfo.key if local else None,
         "type": effective_training_type(s),
         "km": s.total_distance_km,

@@ -13,6 +13,7 @@ from src.analysis.hr_zones import zone_ceiling_hr
 from src.analysis.utils import format_pace
 from src.coach.contracts import AthleteState, Prescription, SafetyVerdict, SkillResult
 from src.config.constants import HR_DISPLAY_UNIT
+from src.utils.timeutils import WEEKDAYS_RU as _WEEKDAYS_RU
 from src.utils.timeutils import local_dt
 
 _TYPE_LABEL = {
@@ -25,8 +26,6 @@ _TYPE_LABEL = {
     "race": "🏁 Соревнование",
 }
 _STATUS_ICON = {"ok": "🟢", "warning": "🟡", "danger": "🔴", "unknown": "⚪"}
-_WEEKDAYS_RU = ("понедельник", "вторник", "среда", "четверг",
-                "пятница", "суббота", "воскресенье")
 
 
 def _day_label(when: date | None, today: date | None = None) -> str | None:

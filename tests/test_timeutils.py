@@ -83,5 +83,6 @@ def test_user_now_is_aware_in_user_zone():
 
 
 def test_fmt_local():
+    # 26.08.2026 — среда; день недели готовым словом, LLM не считает календарь
     local = local_dt(UTC_DT, _user("Europe/Moscow"))
-    assert fmt_local(local) == "2026-08-26 18:12 (Europe/Moscow)"
+    assert fmt_local(local) == "среда, 2026-08-26 18:12 (Europe/Moscow)"

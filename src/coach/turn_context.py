@@ -16,7 +16,7 @@ from src.coach.llm.config import (
 )
 from src.coach.tools.registry import run_tool
 from src.models import Recommendation, User
-from src.utils.timeutils import local_dt, user_now
+from src.utils.timeutils import WEEKDAYS_RU, local_dt, user_now
 
 
 def build_extras(user_id: int, *, db: Session,
@@ -71,6 +71,7 @@ def build_extras(user_id: int, *, db: Session,
         latest_by_date = {r.for_date: r for r in recs}
         extras["planned_workouts (recommendations)"] = [{
             "for_date": r.for_date.isoformat(),
+            "weekday": WEEKDAYS_RU[r.for_date.weekday()],
             "days_ahead": (r.for_date - today_local).days,
             "type": r.workout_type,
             "source": r.source, "clamped": r.clamped,

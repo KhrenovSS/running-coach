@@ -43,6 +43,16 @@ def user_now(user: Any) -> datetime:
     return local_dt(datetime.now(timezone.utc), user)
 
 
+# Русские названия дней недели — единый источник для промптов и карточек
+# (Russian weekday names — single source for prompts and cards)
+WEEKDAYS_RU = ("понедельник", "вторник", "среда", "четверг",
+               "пятница", "суббота", "воскресенье")
+
+
 def fmt_local(dt: datetime) -> str:
-    """'2026-08-28 21:40 (Europe/Moscow)' — формат даты-времени для LLM-контекста."""
-    return f"{dt:%Y-%m-%d %H:%M} ({dt.tzinfo.key})"
+    """'суббота, 2026-08-29 07:49 (Europe/Moscow)' — дата-время для LLM-контекста.
+
+    День недели — готовым словом: LLM не должна вычислять его из ISO-даты.
+    (Weekday spelled out — the LLM must not derive it from the ISO date.)
+    """
+    return f"{WEEKDAYS_RU[dt.weekday()]}, {dt:%Y-%m-%d %H:%M} ({dt.tzinfo.key})"
