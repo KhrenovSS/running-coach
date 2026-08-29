@@ -32,9 +32,11 @@ def build_extras(user_id: int, *, db: Session,
     D7: итоги последних разборов (carry_forward → утренний вердикт) и
     действующее назначение — каналы влияния разбора на будущее.
     """
-    from datetime import date as _date
-
     from src.services.repositories_insights import InsightRepository
+
+    # Все даты блока — по локальному «сегодня» пользователя (#262/#267)
+    user = db.query(User).filter(User.id == user_id).first()
+    today_local = user_now(user).date()
     extras = {
         "recent_workouts (get_recent_workouts)": run_tool(
             "get_recent_workouts", {"limit": limit}, user_id=user_id, db=db),
@@ -45,10 +47,8 @@ def build_extras(user_id: int, *, db: Session,
     if reviews:
         # days_ago — по локальной паре дат пользователя, как в _session_brief
         # (user-local dates on both sides, consistent with _session_brief)
-        user = db.query(User).filter(User.id == user_id).first()
-        today = user_now(user).date()
         extras["recent_reviews (workout_insights)"] = [{
-            "days_ago": ((today - local_dt(r.created_at, user).date()).days
+            "days_ago": ((today_local - local_dt(r.created_at, user).date()).days
                          if r.created_at else None),
             "session_id": r.session_id,
             "effort_match": r.effort_match,
@@ -57,7 +57,7 @@ def build_extras(user_id: int, *, db: Session,
         } for r in reviews]
     recs = db.query(Recommendation).filter(
         Recommendation.user_id == user_id,
-        Recommendation.for_date >= _date.today(),
+        Recommendation.for_date >= today_local,
     ).order_by(Recommendation.id.asc()).all()
     if recs:
         # Действующие назначения по дням: наутро модель видит, что уже назначала
@@ -66,8 +66,6 @@ def build_extras(user_id: int, *, db: Session,
         # чтобы пятничное и воскресное назначения не затеняли друг друга.
         # days_ahead — сдвиг от локального «сегодня» пользователя, симметрично
         # days_ago тренировок. (Latest row per date; days_ahead mirrors days_ago.)
-        user = db.query(User).filter(User.id == user_id).first()
-        today_local = user_now(user).date()
         latest_by_date = {r.for_date: r for r in recs}
         extras["planned_workouts (recommendations)"] = [{
             "for_date": r.for_date.isoformat(),

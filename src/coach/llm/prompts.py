@@ -62,7 +62,7 @@ OUTPUT_CONTRACT = """ФОРМАТ ОТВЕТА — ровно один JSON-об
   "assessment": {
     "effort_match": "ok|harder|easier|unknown",
     "causes": ["heat|cold|wind|elevation|terrain|poor_sleep|fatigue|pace_too_fast|illness|recovery_good|other"],
-    "flags": ["hr_drift_high|pain|pace_hr_mismatch|suspect_data|overreaching_sign|great_session|easy_run_too_hard|pace_unstable|quality_volume_exceeded|interval_segment_too_long|long_run_share_high|low_cadence|rpe_elevated|no_warmup"],
+    "flags": ["hr_drift_high|pain|pace_hr_mismatch|suspect_data|overreaching_sign|great_session|easy_run_too_hard|pace_unstable|quality_volume_exceeded|interval_segment_too_long|long_run_share_high|low_cadence|rpe_elevated|no_warmup|plan_intensity_exceeded|plan_volume_exceeded"],
     "carry_forward": "короткая заметка себе на завтра или null"
   }
 }
@@ -101,8 +101,10 @@ OUTPUT_CONTRACT = """ФОРМАТ ОТВЕТА — ровно один JSON-об
 - log_suggestion: объект ИЛИ null. Если пользователь упомянул боль/дискомфорт —
   предложи записать (kind="pain", value 0-10); запись только после его тапа.
 - assessment: объект ТОЛЬКО когда тебя просят разобрать завершённую тренировку;
-  во всех остальных разговорах — null. effort_match — сошлись ли ощущения/пульс
-  с типом тренировки (ok/harder/easier/unknown); causes — до 4 причин из списка;
+  во всех остальных разговорах — null. effort_match — сошёлся ли факт
+  с назначением (plan_vs_actual в workout_computed); если плана на день
+  не было — с типом тренировки (ok/harder/easier/unknown);
+  causes — до 4 причин из списка;
   flags — до 4 наблюдений из списка; carry_forward — одна фраза, которую твой
   завтрашний утренний вердикт должен учесть (без чисел тренировки), или null."""
 
@@ -114,7 +116,9 @@ REVIEW_PROMPT = (
     "(time_in_zones), дисциплина лёгкого дня (easy_discipline), стабильность "
     "темпа и пульса, баллы нагрузки (load_points), потолки качественного объёма "
     "(quality_volume), доля длительной (long_run), каденс, RPE против моей нормы "
-    "(rpe), разминка (warmup), жара. Состояние утра того дня — в "
+    "(rpe), разминка (warmup), соответствие назначению (plan_vs_actual: тип, "
+    "минуты выше плановой зоны, объём против плана), жара. "
+    "Состояние утра того дня — в "
     "daily_metrics_morning; мои оценки (rpe, боль) уже внутри workout_detail, "
     "если я успел ответить. Разбери тренировку: как легла на состояние и неделю, "
     "что получилось, что настораживает — опирайся на числа из workout_computed, "

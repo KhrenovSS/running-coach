@@ -208,3 +208,47 @@ def test_collect_flags_gathers_all_blocks():
                           "pace_unstable", FLAG_QUALITY_VOLUME,
                           FLAG_SEGMENT_TOO_LONG, "long_run_share_high",
                           "low_cadence", "rpe_elevated", "no_warmup"}
+
+
+# --- M2.2: plan_vs_actual ---
+
+def test_plan_vs_actual_no_plan_degrades():
+    from src.analysis.session_metrics import plan_vs_actual
+    r = plan_vs_actual(None, "easy", 8.0, 50.0, {"available": False},
+                       volume_tol=0.15, intensity_tol=0.10)
+    assert r["available"] is False and r["reason"] == "no_plan"
+
+
+def test_plan_vs_actual_intensity_exceeded():
+    """План Z2 60 мин, факт: 20% времени в Z3 → plan_intensity_exceeded."""
+    from src.analysis.session_metrics import FLAG_PLAN_INTENSITY, plan_vs_actual
+    times, hrs = _concat(_ramp(48, 130), _ramp(12, 150))     # 20% в Z3
+    zones = time_in_zones(times, hrs, MAX_HR)
+    plan = {"type": "long", "max_zone": 2, "duration_min": 60}
+    r = plan_vs_actual(plan, "long", 9.0, 60.0, zones,
+                       volume_tol=0.15, intensity_tol=0.10)
+    assert r["available"] is True and r["type_match"] is True
+    assert r["pct_above_planned_zone"] > 0.15
+    assert FLAG_PLAN_INTENSITY in r["flags"]
+
+
+def test_plan_vs_actual_volume_overshoot_flagged_undershoot_not():
+    from src.analysis.session_metrics import FLAG_PLAN_VOLUME, plan_vs_actual
+    times, hrs = _ramp(80, 130)
+    zones = time_in_zones(times, hrs, MAX_HR)
+    plan = {"type": "long", "max_zone": 2, "duration_min": 60}
+    over = plan_vs_actual(plan, "long", 12.0, 80.0, zones,
+                          volume_tol=0.15, intensity_tol=0.10)
+    assert FLAG_PLAN_VOLUME in over["flags"] and over["volume_ratio"] > 1.15
+    under = plan_vs_actual(plan, "long", 6.0, 45.0, zones,
+                           volume_tol=0.15, intensity_tol=0.10)
+    assert under["flags"] == [] and under["volume_ratio"] < 1.0  # недобор — не флаг
+
+
+def test_plan_vs_actual_type_mismatch_reported():
+    from src.analysis.session_metrics import plan_vs_actual
+    times, hrs = _ramp(40, 130)
+    zones = time_in_zones(times, hrs, MAX_HR)
+    r = plan_vs_actual({"type": "rest", "max_zone": 1}, "easy", 6.0, 40.0, zones,
+                       volume_tol=0.15, intensity_tol=0.10)
+    assert r["type_match"] is False

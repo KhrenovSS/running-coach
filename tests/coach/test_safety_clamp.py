@@ -314,3 +314,23 @@ def test_no_proposal_when_is_today():
     verdict = evaluate_safety(state)
     p, _ = clamp(None, verdict, state)
     assert p.when == datetime.now(timezone.utc).date()
+
+
+def test_local_now_anchors_when_to_local_date():
+    """Регрессия #262: aware-локальное now (01:00 MSK = 22:00 UTC вчера) →
+    p.when — московская дата, не вчерашняя UTC."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    msk = ZoneInfo("Europe/Moscow")
+    now_local = datetime(2026, 8, 30, 1, 0, tzinfo=msk)   # UTC: 29.08 22:00
+    state = _state()
+    verdict = evaluate_safety(state)
+    p, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2,
+                                 duration_min=40), verdict, state, now=now_local)
+    assert p.when == now_local.date()                      # 30.08, не 29.08
+
+    from dataclasses import replace
+    p2, _ = clamp(replace(AGGRESSIVE, for_days_ahead=1), verdict, state,
+                  now=now_local)
+    assert p2.when == now_local.date() + timedelta(days=1)

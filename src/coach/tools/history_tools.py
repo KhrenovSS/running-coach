@@ -105,10 +105,12 @@ def get_workout_detail(ctx: ToolContext, args: dict) -> dict:
 
     brief = _session_brief(session, fb.rating if fb else None,
                            fb.pain_level if fb else None, user=user)
-    # D4: метрики утра дня тренировки — состояние «на тот день», не «сегодня»
-    # (day-of-workout morning metrics, not today's)
-    dm = (CoachRepository.metrics_for_date(ctx.user_id, session.begin_ts.date(),
-                                           db=ctx.db)
+    # D4: метрики утра дня тренировки — состояние «на тот день», не «сегодня».
+    # Дата — локальная (#265: вечерняя пробежка после 00:00 UTC подтягивала
+    # утро не того дня). (Day-of-workout morning metrics by LOCAL date.)
+    dm = (CoachRepository.metrics_for_date(
+              ctx.user_id, session_local_dt(session.begin_ts, session, user).date(),
+              db=ctx.db)
           if session.begin_ts else None)
     brief.update({
         "zone_minutes": zone_minutes,

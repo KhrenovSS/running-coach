@@ -149,3 +149,25 @@ def test_session_brief_evening_workout_stays_evening(db_session):
     assert b2["started_at_local"] == local_late.strftime("%Y-%m-%d %H:%M")
     now_local = utcnow().replace(tzinfo=UTC).astimezone(ZoneInfo("Europe/Moscow"))
     assert b2["days_ago"] == (now_local.date() - local_late.date()).days
+
+
+def test_workout_detail_morning_metrics_by_local_date(db_session):
+    """Регрессия #265: вечерняя тренировка 22:00 UTC (01:00 MSK следующего дня) →
+    daily_metrics_morning берётся по ЛОКАЛЬНОЙ дате, не по UTC."""
+    from zoneinfo import ZoneInfo
+
+    from tests.helpers import build_daily_metrics, build_training_session
+
+    user = _unique_user(db_session)
+    late = utcnow().replace(hour=22, minute=0, second=0, microsecond=0)
+    local_date = late.replace(tzinfo=UTC).astimezone(
+        ZoneInfo("Europe/Moscow")).date()
+    assert local_date != late.date()                     # кросс-полуночный кейс
+    s = build_training_session(db_session, user.id, begin_ts=late,
+                               timezone="Europe/Moscow")
+    build_daily_metrics(db_session, user.id, metric_date=late.date(), rhr=44)
+    build_daily_metrics(db_session, user.id, metric_date=local_date, rhr=55)
+
+    detail = run_tool("get_workout_detail", {"session_id": s.id},
+                      user_id=user.id, db=db_session)
+    assert detail["daily_metrics_morning"]["rhr"] == 55  # локальный день, не UTC

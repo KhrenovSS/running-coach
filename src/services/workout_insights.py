@@ -31,6 +31,8 @@ from src.coach.config import (
     INTERVAL_SEGMENT_MAX_MIN,
     LONG_RUN_MAX_MIN,
     LONG_RUN_MAX_PCT_WEEK,
+    PLAN_INTENSITY_TOLERANCE_PCT,
+    PLAN_VOLUME_TOLERANCE_PCT,
     POINTS_PER_MIN,
     RPE_BASELINE_Z_MAX,
     RPE_ELEVATED_DELTA,
@@ -51,7 +53,7 @@ from src.utils.logger import get_logger
 
 logger = get_logger("services.workout_insights")
 
-INSIGHTS_SCHEMA_VERSION = 2  # версия содержимого computed_json (bump при смене схемы)
+INSIGHTS_SCHEMA_VERSION = 3  # версия содержимого computed_json (bump при смене схемы)
 
 _EMPTY_DRIFT = {"applicable": False, "reason": "no_trackpoints", "drift_pct": None,
                 "first_half_ef": None, "second_half_ef": None, "gap_adjusted": None,
@@ -87,12 +89,13 @@ def compute_workout_metrics(session: TrainingSession, *,
                             baseline: dict | None = None,
                             max_hr: int | None = None,
                             week_km: float | None = None,
-                            rpe_history: dict | None = None) -> dict:
+                            rpe_history: dict | None = None,
+                            plan: dict | None = None) -> dict:
     """Собрать computed_json одной тренировки (pure assembly, без БД).
 
     Все ветки деградируют в applicable/available=false — исключений наружу нет.
-    БД-входы (max_hr, week_km, rpe_history={"rpe", "peers"}) резолвит
-    upsert_workout_insights; None → соответствующий блок available=false.
+    БД-входы (max_hr, week_km, rpe_history={"rpe","peers"}, plan — назначение
+    на день сессии) резолвит upsert_workout_insights; None → available=false.
     """
     times_sec, dists, hrs, alts = _parse_trackpoints(session.trackpoints_json)
     ttype = effective_training_type(session)
@@ -124,6 +127,10 @@ def compute_workout_metrics(session: TrainingSession, *,
             low=CADENCE_LOW_SPM, sanity_min=CADENCE_SANITY_MIN_SPM)
         computed["rpe"] = {"available": False, "reason": "no_trackpoints"}
         computed["warmup"] = {"applicable": False, "reason": "no_trackpoints"}
+        computed["plan_vs_actual"] = sm.plan_vs_actual(
+            plan, ttype, session.total_distance_km, session.duration_minutes,
+            {"available": False}, volume_tol=PLAN_VOLUME_TOLERANCE_PCT,
+            intensity_tol=PLAN_INTENSITY_TOLERANCE_PCT)
         computed["flags"] = sm.collect_flags(computed)
         return computed
 
@@ -175,6 +182,10 @@ def compute_workout_metrics(session: TrainingSession, *,
     computed["warmup"] = sm.warmup_block(
         times_sec, hrs, max_hr, ttype,
         window_min=WARMUP_WINDOW_MIN, easy_share_min=WARMUP_EASY_SHARE_MIN)
+    computed["plan_vs_actual"] = sm.plan_vs_actual(
+        plan, ttype, session.total_distance_km, session.duration_minutes,
+        zones, volume_tol=PLAN_VOLUME_TOLERANCE_PCT,
+        intensity_tol=PLAN_INTENSITY_TOLERANCE_PCT)
     computed["flags"] = sm.collect_flags(computed)
     return computed
 
@@ -198,7 +209,8 @@ def upsert_workout_insights(user_id: int, session_id: int, *, db: Session,
         max_hr=_user_max_hr(user_id, db=db),
         week_km=(TrainingRepository.km_in_window(user_id, session.begin_ts, db=db)
                  if session.begin_ts else None),
-        rpe_history=_rpe_history(user_id, session, db=db))
+        rpe_history=_rpe_history(user_id, session, db=db),
+        plan=_plan_for_session(user_id, session, db=db))
     InsightRepository.upsert(user_id, session_id, db=db, computed=computed,
                              schema_version=INSIGHTS_SCHEMA_VERSION, status=status)
     if effective_training_type(session) in BASELINE_TYPES:
@@ -225,6 +237,41 @@ def _stored_baseline(user_id: int, *, db: Session) -> dict | None:
 def _user_max_hr(user_id: int, *, db: Session) -> int:
     user = db.query(User).filter(User.id == user_id).first()
     return (user.max_hr if user and user.max_hr else settings.default_max_hr)
+
+
+def _plan_for_session(user_id: int, session: TrainingSession, *,
+                      db: Session) -> dict | None:
+    """Назначение на локальную дату сессии — вход plan_vs_actual (M2.2).
+
+    Заодно линкует Recommendation с тренировкой (linked_session_id — колонка
+    задумана как связь «план ↔ факт», до M2.2 не писалась никогда).
+    """
+    from src.models import Recommendation
+    from src.utils.timeutils import session_local_dt
+
+    if session.begin_ts is None:
+        return None
+    user = db.query(User).filter(User.id == user_id).first()
+    day = session_local_dt(session.begin_ts, session, user).date()
+    rec = db.query(Recommendation).filter(
+        Recommendation.user_id == user_id,
+        Recommendation.for_date == day,
+    ).order_by(Recommendation.id.desc()).first()
+    if rec is None:
+        return None
+    if rec.linked_session_id is None:
+        rec.linked_session_id = session.id
+        db.commit()
+    target, volume = rec.target_json or {}, rec.volume_json or {}
+    return {
+        "type": rec.workout_type,
+        "max_zone": target.get("max_zone"),
+        "pace_min_km": target.get("pace_min_km"),
+        "duration_min": volume.get("duration_min"),
+        "distance_km": volume.get("distance_km"),
+        "for_date": rec.for_date.isoformat(),
+        "source": rec.source, "clamped": rec.clamped,
+    }
 
 
 def _rpe_history(user_id: int, session: TrainingSession, *,

@@ -2,6 +2,34 @@
 
 All notable changes to this project are tracked here.
 
+## [29.08.2026] — Коуч: датная гигиена (#262/#265/#267) + план vs факт (M2.2)
+
+### Fixed
+- **#262/#267 — единый якорь дат: локальное «сейчас» пользователя.**
+  `finalize(..., now=user_now(user))` в чате и утреннем вердикте (параметр
+  существовал — сигнатуры не менялись): `Prescription.when`/`for_days_ahead`
+  считаются от локальной даты, полуночное окно 00:00–03:00 MSK закрыто.
+  Гейт будущего дня в `clamp` — от `now.tzinfo`. Фильтры `planned_workouts`
+  (turn_context) и `evening_check_needed` — по `user_now(user).date()` вместо
+  серверной/UTC-даты.
+- **#265 — `daily_metrics_morning` по локальной дате тренировки**: вечерняя
+  пробежка после 00:00 UTC больше не подтягивает «утро не того дня»
+  (`get_workout_detail` → `session_local_dt(...).date()`).
+
+### Added (M2.2 — план vs факт, METRICS_GUIDE §5)
+- `_plan_for_session` (`workout_insights.py`): назначение на локальную дату
+  сессии; **оживлена мёртвая колонка `Recommendation.linked_session_id`** —
+  тренировка линкуется с планом при первом расчёте метрик.
+- `session_metrics.plan_vs_actual`: type_match, минуты/доля выше плановой зоны
+  (флаг `plan_intensity_exceeded` при >10%), объём против плана (флаг
+  `plan_volume_exceeded` при превышении >15%; недобор — не флаг,
+  только `volume_ratio`). Пороги в `coach/config.py` + анти-дрейф-тест.
+- `INSIGHTS_SCHEMA_VERSION` 2 → 3 (lazy-пересчёт), enum `FlagValue` +2 значения.
+- REVIEW_PROMPT/OUTPUT_CONTRACT: `effort_match` переопределён — «сошёлся ли факт
+  с назначением (plan_vs_actual); без плана — с типом тренировки».
+- Тесты: +9 (unit plan_vs_actual, e2e линковка+флаг, регрессии #262 —
+  aware-MSK 01:00 → локальная дата; #265 — метрики локального дня).
+
 ## [29.08.2026] — Коуч: детерминированные метрики разбора M1 (#268)
 
 Реализован этап M1 + §6 из `docs/coach/METRICS_GUIDE.md`: LLM перестаёт оценивать

@@ -8,7 +8,9 @@
 **Статус имплементации: M1 (§4) + §6 реализованы 29.08.2026** (`schema_version` 2:
 формулы — `src/analysis/session_metrics.py` + `effort.py`, сборка —
 `workout_insights.py`, пороги — `coach/config.py`, слияние флагов —
-`orchestrator._merged_flags`). **M2 (§5) и M3 (§8) — не реализованы.**
+`orchestrator._merged_flags`). **M2.2 (план vs факт) реализован 29.08.2026**
+(`schema_version` 3: `plan_vs_actual` + линковка `linked_session_id`).
+**M2.1 (интервалы) и M3 (§8, якорь ПАНО/VDOT) — не реализованы.**
 
 ## 1. Принцип: математика считает — LLM интерпретирует
 

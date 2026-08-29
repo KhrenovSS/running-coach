@@ -105,3 +105,9 @@ def test_m1_flags_exist_in_assessment_enum():
         assert flag in allowed, flag
     for mapped in sm.FLAG_TO_ASSESSMENT.values():
         assert mapped in allowed, mapped
+
+
+def test_m2_plan_thresholds_sane():
+    from src.coach import config as c
+    assert 0 < c.PLAN_INTENSITY_TOLERANCE_PCT < 0.5
+    assert 0 < c.PLAN_VOLUME_TOLERANCE_PCT < 0.5

@@ -213,3 +213,37 @@ def test_m1_week_km_feeds_long_run_share(db_session):
     assert lr["applicable"] is True
     assert lr["share_of_week"] > 0.9
     assert "long_run_share_high" in computed["flags"]
+
+
+def test_plan_vs_actual_links_recommendation(db_session):
+    """M2.2: назначение на локальную дату сессии → блок plan_vs_actual в computed,
+    linked_session_id заполняется (колонка жила мёртвой с C4)."""
+    from src.models import Recommendation
+
+    user = _user(db_session)
+    s = _session_with_track(db_session, user.id, hr=150, ttype='easy')
+    rec = Recommendation(user_id=user.id, for_date=s.begin_ts.date(),
+                         workout_type="easy",
+                         target_json={"max_zone": 2},
+                         volume_json={"duration_min": 40.0},
+                         status="proposed", source="llm")
+    db_session.add(rec)
+    db_session.commit()
+
+    computed = upsert_workout_insights(user.id, s.id, db=db_session)
+    pva = computed["plan_vs_actual"]
+    assert pva["available"] is True
+    assert pva["type_match"] is True
+    # факт весь в Z3 (hr=150) при плане Z2 → интенсивность превышена
+    assert pva["pct_above_planned_zone"] > 0.9
+    assert "plan_intensity_exceeded" in computed["flags"]
+    db_session.refresh(rec)
+    assert rec.linked_session_id == s.id
+
+
+def test_plan_vs_actual_absent_without_recommendation(db_session):
+    user = _user(db_session)
+    s = _session_with_track(db_session, user.id)
+    computed = upsert_workout_insights(user.id, s.id, db=db_session)
+    assert computed["plan_vs_actual"]["available"] is False
+    assert computed["plan_vs_actual"]["reason"] == "no_plan"

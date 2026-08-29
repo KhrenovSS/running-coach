@@ -98,8 +98,9 @@ def set_initiative(user_id: int, level: str, *, db: Session) -> str:
 def morning_verdict(user_id: int, *, db: Session) -> str:
     """Утренний вердикт: состояние + назначение через safety (morning verdict)."""
     state = assess_state(user_id, db=db)
-    prescription = finalize(None, state, db=db, persist=True)
     user = db.query(User).filter(User.id == user_id).first()
+    # Якорь дат — локальное «сейчас» пользователя (#262: не UTC-дата сервера)
+    prescription = finalize(None, state, db=db, persist=True, now=user_now(user))
     return (render_state_card(state) + "\n\n"
             + render_prescription(prescription, max_hr=user_max_hr(user), user=user))
 
@@ -163,7 +164,8 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
             rationale=list(turn.proposal.rationale),
             for_days_ahead=turn.proposal.for_days_ahead,
         )
-        prescription = finalize(proposal, state, db=db, persist=False, source="llm")
+        prescription = finalize(proposal, state, db=db, persist=False, source="llm",
+                                now=user_now(user))
         if kind == "chat" and _unchanged_today(prescription, user_id, db=db):
             # Дедуп (решение владельца 26.08.2026): назначение не изменилось —
             # одна строка-напоминание, без новой строки в recommendations.
@@ -324,7 +326,9 @@ def evening_check_needed(user_id: int, *, db: Session) -> bool:
 
     (Evening question needed? Skipped when today's pain is already recorded.)
     """
-    today = datetime.now(timezone.utc).date()
+    # «Сегодня» — по поясу пользователя (#267: вечер 21:00 MSK = уже завтра в UTC+)
+    user = db.query(User).filter(User.id == user_id).first()
+    today = user_now(user).date()
     wellness = db.query(WellnessReport).filter(
         WellnessReport.user_id == user_id,
         WellnessReport.report_date == today,

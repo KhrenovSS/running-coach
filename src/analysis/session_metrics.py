@@ -22,6 +22,8 @@ FLAG_LONG_RUN_SHARE = "long_run_share_high"
 FLAG_LOW_CADENCE = "low_cadence"
 FLAG_RPE_ELEVATED = "rpe_elevated"
 FLAG_NO_WARMUP = "no_warmup"
+FLAG_PLAN_INTENSITY = "plan_intensity_exceeded"
+FLAG_PLAN_VOLUME = "plan_volume_exceeded"
 
 # Маппинг computed-флагов в значения enum assessment (§6.2, зафиксирован кодом:
 # enum append-only, переименовывать decoupling_* задним числом нельзя).
@@ -235,6 +237,53 @@ def warmup_block(times_sec: list[float], hrs: list[int | None],
     }
 
 
+def plan_vs_actual(plan: dict | None, ttype: str | None,
+                   session_km: float | None, duration_min: float | None,
+                   zones: dict, *, volume_tol: float,
+                   intensity_tol: float) -> dict:
+    """M2.2: соответствие факта назначению (METRICS_GUIDE §5).
+
+    Интенсивность — минуты выше плановой max_zone из точных зон; объём —
+    превышение план+tol (недобор — не флаг, только volume_ratio).
+    (Plan adherence: intensity above planned zone + volume overshoot.)
+    """
+    if not plan:
+        return {"available": False, "reason": "no_plan"}
+    out: dict = {
+        "available": True,
+        "planned": {k: plan.get(k) for k in
+                    ("type", "max_zone", "duration_min", "distance_km",
+                     "pace_min_km")},
+        "type_match": plan.get("type") == ttype,
+    }
+    flags: list[str] = []
+
+    max_zone = plan.get("max_zone")
+    if max_zone and zones.get("available"):
+        above = sum(v for z, v in zones["minutes"].items()
+                    if int(z[1]) > max_zone)
+        pct = above / zones["total_min"] if zones["total_min"] > 0 else 0.0
+        out["minutes_above_planned_zone"] = round(above, 1)
+        out["pct_above_planned_zone"] = round(pct, 3)
+        if pct > intensity_tol:
+            flags.append(FLAG_PLAN_INTENSITY)
+
+    planned_min = plan.get("duration_min")
+    planned_km = plan.get("distance_km")
+    ratio = None
+    if planned_min and duration_min:
+        ratio = duration_min / planned_min
+    elif planned_km and session_km:
+        ratio = session_km / planned_km
+    if ratio is not None:
+        out["volume_ratio"] = round(ratio, 2)
+        if ratio > 1.0 + volume_tol:
+            flags.append(FLAG_PLAN_VOLUME)
+
+    out["flags"] = flags
+    return out
+
+
 def collect_flags(computed: dict) -> list[str]:
     """Плоский список флагов из всех блоков computed_json (METRICS_GUIDE §6.1).
 
@@ -261,6 +310,7 @@ def collect_flags(computed: dict) -> list[str]:
     if computed.get("pace_stability", {}).get("flag"):
         flags.append(FLAG_PACE_UNSTABLE)
     flags.extend(computed.get("quality_volume", {}).get("flags") or [])
+    flags.extend(computed.get("plan_vs_actual", {}).get("flags") or [])
     if computed.get("long_run", {}).get("flag"):
         flags.append(FLAG_LONG_RUN_SHARE)
     if computed.get("cadence", {}).get("flag"):

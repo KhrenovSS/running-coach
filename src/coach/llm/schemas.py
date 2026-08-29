@@ -69,7 +69,9 @@ FlagValue = Literal["hr_drift_high", "pain", "pace_hr_mismatch", "suspect_data",
                     # флаги из computed.flags — LLM не выставляет их сама
                     "easy_run_too_hard", "pace_unstable", "quality_volume_exceeded",
                     "interval_segment_too_long", "long_run_share_high",
-                    "low_cadence", "rpe_elevated", "no_warmup"]
+                    "low_cadence", "rpe_elevated", "no_warmup",
+                    # M2.2: соответствие назначению (plan_vs_actual)
+                    "plan_intensity_exceeded", "plan_volume_exceeded"]
 
 # §6 METRICS_GUIDE: только эти флаги LLM ставит сама (субъективные);
 # остальные приходят из computed.flags и сливаются кодом оркестратора.

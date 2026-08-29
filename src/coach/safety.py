@@ -108,7 +108,7 @@ def clamp(proposal: WorkoutProposal | None, verdict: SafetyVerdict,
     # всё по свежим метрикам. (Future day → compare against the target day's end.)
     gate_ref = (now if days_ahead == 0
                 else datetime.combine(when + timedelta(days=1), time(0),
-                                      tzinfo=timezone.utc))
+                                      tzinfo=now.tzinfo or timezone.utc))
     if (wtype in HARD_TYPES and verdict.earliest_next_hard is not None
             and gate_ref < verdict.earliest_next_hard):
         clamped = True
