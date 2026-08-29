@@ -17,6 +17,9 @@ def test_assess_state_full_fixture(athlete_with_history, db_session):
     assert state.fatigue_score is not None and 0 <= state.fatigue_score <= 100
     assert state.injury_risk is not None and 0 <= state.injury_risk <= 1
     assert state.last_workout is not None and state.last_workout["type"] == "easy"
+    # Время суток для LLM: локальное время старта + пояс (local start time + zone)
+    assert state.last_workout["started_at_local"] is not None
+    assert state.last_workout["tz"] == "Europe/Moscow"
     # Честность: сна/стресса в данных нет — LLM обязан это видеть
     assert "sleep" in state.missing and "stress" in state.missing
     # 4 RPE из 36 в проде; в фикстуре 0 из 5 → rpe тоже missing

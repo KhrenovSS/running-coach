@@ -1,9 +1,11 @@
 # Тесты слоя tools (Tool layer tests) — DEV_PLAN §10
 import json
+from datetime import UTC
 
 import pytest
 
 from src.coach.tools.registry import TOOLS, anthropic_tools, run_tool
+from src.domain.models.base import utcnow
 from src.exceptions import NotFoundError, ToolExecutionError
 from tests.coach.conftest import _unique_user
 
@@ -84,13 +86,63 @@ def test_key_rules_digest_stable():
 def test_session_brief_has_days_ago(athlete_with_history, db_session):
     """Инцидент 23.08: LLM назвал сегодняшнюю тренировку «вчерашней».
 
-    days_ago (0 = сегодня) — единственный источник относительных дат для модели.
+    days_ago (0 = сегодня) и started_at_local — единственные источники
+    относительных дат и времени суток для модели.
     """
+    from zoneinfo import ZoneInfo
+
+    from src.models import TrainingSession
     result = run_tool("get_recent_workouts", {"limit": 5},
                       user_id=athlete_with_history.id, db=db_session)
     newest = result["workouts"][0]
     assert newest["days_ago"] == 0
 
+    # Эталон — zoneinfo напрямую, не через наш хелпер (анти-дрейф)
+    s = db_session.query(TrainingSession).filter_by(
+        id=newest["session_id"]).one()
+    begin_utc = s.begin_ts if s.begin_ts.tzinfo else s.begin_ts.replace(tzinfo=UTC)
+    expected = begin_utc.astimezone(ZoneInfo("Europe/Moscow"))
+    assert newest["started_at_local"] == expected.strftime("%Y-%m-%d %H:%M")
+    assert newest["tz"] == "Europe/Moscow"
+    assert newest["date"] == expected.date().isoformat()
+
     from src.coach.state import assess_state
     state = assess_state(athlete_with_history.id, db=db_session)
     assert state.last_workout["days_ago"] == 0
+    assert state.last_workout["started_at_local"] == expected.strftime("%Y-%m-%d %H:%M")
+    assert state.last_workout["tz"] == "Europe/Moscow"
+
+
+def test_session_brief_evening_workout_stays_evening(db_session):
+    """Инцидент 28.08: LLM назвал вечернюю тренировку «утренней».
+
+    Вечер UTC (16:05) в поясе тренировки Moscow → started_at_local 19:05;
+    кросс-полуночь (22:00 UTC) → локальная дата = UTC-дата + 1, days_ago
+    считается от локальной пары дат.
+    """
+    from zoneinfo import ZoneInfo
+
+    from tests.helpers import build_training_session
+    user = _unique_user(db_session)
+
+    evening = utcnow().replace(hour=16, minute=5, second=0, microsecond=0)
+    s1 = build_training_session(db_session, user.id, begin_ts=evening,
+                                timezone="Europe/Moscow")
+    late = utcnow().replace(hour=22, minute=0, second=0, microsecond=0)
+    s2 = build_training_session(db_session, user.id, begin_ts=late,
+                                timezone="Europe/Moscow")
+
+    result = run_tool("get_recent_workouts", {"limit": 5},
+                      user_id=user.id, db=db_session)
+    briefs = {w["session_id"]: w for w in result["workouts"]}
+
+    assert briefs[s1.id]["started_at_local"].endswith("19:05")
+    assert briefs[s1.id]["tz"] == "Europe/Moscow"
+
+    # 22:00 UTC = 01:00 MSK следующего дня (crosses midnight in local zone)
+    local_late = late.replace(tzinfo=UTC).astimezone(ZoneInfo("Europe/Moscow"))
+    b2 = briefs[s2.id]
+    assert b2["date"] == local_late.date().isoformat()
+    assert b2["started_at_local"] == local_late.strftime("%Y-%m-%d %H:%M")
+    now_local = utcnow().replace(tzinfo=UTC).astimezone(ZoneInfo("Europe/Moscow"))
+    assert b2["days_ago"] == (now_local.date() - local_late.date()).days

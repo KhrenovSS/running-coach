@@ -44,14 +44,15 @@ from src.coach.render import (
 from src.coach.rules.p1_safety import evaluate_safety
 from src.coach.skills import workout
 from src.coach.state import assess_state
-from src.coach.knowledge.loader import review_guides_queries
-from src.coach.knowledge.loader import search as guide_search
 from src.coach.tools.registry import run_tool
 from src.coach.tools.serialize import jsonable
+from src.coach.turn_context import build_extras as _build_extras
+from src.coach.turn_context import unchanged_today as _unchanged_today
 from src.exceptions import CoachError, LLMUnavailableError
-from src.models import Recommendation, TrainingFeedback, User, UserModel, WellnessReport
+from src.models import TrainingFeedback, User, UserModel, WellnessReport
 from src.services.repositories_coach import CoachRepository
 from src.utils.logger import get_logger
+from src.utils.timeutils import fmt_local, local_dt, user_now
 from dataclasses import dataclass, field
 
 logger = get_logger("coach.orchestrator")
@@ -119,121 +120,11 @@ def _history(user_id: int, *, db: Session) -> list[dict]:
             for m in rows if m.role in ("user", "assistant")]
 
 
-def _build_extras(user_id: int, *, db: Session,
-                  weeks: int = COACH_ENRICH_WEEKS,
-                  limit: int = COACH_ENRICH_RECENT_LIMIT,
-                  session_id: int | None = None,
-                  insights_limit: int = COACH_RECENT_REVIEWS_LIMIT,
-                  guides_query: str | None = None) -> dict:
-    """Обогащение today-блока: меньше tool round-trip'ов в API-режиме; в режиме
-    моста tool-цикл неактивен — это его основной источник фактов (enrichment).
-
-    session_id — добавить детали конкретной тренировки (для разбора, C8).
-    D7: итоги последних разборов (carry_forward → утренний вердикт) и
-    действующее назначение — каналы влияния разбора на будущее.
-    """
-    from datetime import date as _date
-
-    from src.services.repositories_insights import InsightRepository
-    extras = {
-        "recent_workouts (get_recent_workouts)": run_tool(
-            "get_recent_workouts", {"limit": limit}, user_id=user_id, db=db),
-        "weekly_summary (get_weekly_summary)": run_tool(
-            "get_weekly_summary", {"weeks": weeks}, user_id=user_id, db=db),
-    }
-    reviews = InsightRepository.recent(user_id, db=db, days=7, limit=insights_limit)
-    if reviews:
-        today = _date.today()
-        extras["recent_reviews (workout_insights)"] = [{
-            "days_ago": (today - r.created_at.date()).days if r.created_at else None,
-            "session_id": r.session_id,
-            "effort_match": r.effort_match,
-            "flags": (r.assessment_json or {}).get("flags"),
-            "carry_forward": r.carry_forward,
-        } for r in reviews]
-    rec = db.query(Recommendation).filter(
-        Recommendation.user_id == user_id,
-        Recommendation.for_date >= _date.today(),
-    ).order_by(Recommendation.id.desc()).first()
-    if rec is not None:
-        # Действующее назначение: наутро модель видит, что уже назначала
-        # (митигация конфликта «карточка разбора vs утренний вердикт», D7).
-        # target/volume — чтобы в чате модель видела зону/объём и не назначала
-        # заново без причины (proposal=null → карточка не дублируется).
-        extras["planned_workout (recommendations)"] = {
-            "for_date": rec.for_date.isoformat(), "type": rec.workout_type,
-            "source": rec.source, "clamped": rec.clamped,
-            "target": rec.target_json, "volume": rec.volume_json,
-        }
-    if session_id is not None:
-        detail = run_tool(
-            "get_workout_detail", {"session_id": session_id}, user_id=user_id, db=db)
-        extras["workout_detail (get_workout_detail)"] = detail
-        # D4: детерминированные физио-метрики (drift/GAP/baseline/heat) — в контекст
-        # разбора; lazy-пересчёт покрывает старые тренировки (computed metrics).
-        from src.services.workout_insights import get_or_compute
-        computed = get_or_compute(user_id, session_id, db=db)
-        if computed is not None:
-            extras["workout_computed (workout_insights)"] = computed
-        # E3 (#242): в мосте search_guides простаивает — чанки методики инлайном
-        # (bridge mode: inline the methodology chunks the tool would have fetched)
-        if guides_query is None:
-            queries = review_guides_queries(detail, computed)
-        else:
-            queries = [guides_query]
-    else:
-        queries = [guides_query] if guides_query else []
-    chunks: list = []
-    seen: set[tuple[str, str]] = set()
-    for q in queries:
-        # по одному лучшему чанку на запрос — боль не вытесняется типом тренировки
-        for c in guide_search(q, top_k=1):
-            if (c.guide, c.heading) not in seen:
-                seen.add((c.guide, c.heading))
-                chunks.append(c)
-    if chunks:
-        extras["method_guides (search_guides)"] = [
-            {"guide": c.guide, "heading": c.heading, "text": c.text}
-            for c in chunks[:2]]
-    return extras
-
-
-def _unchanged_today(p: Prescription, user_id: int, *, db: Session) -> bool:
-    """Совпадает ли назначение с последним сегодняшним из recommendations.
-
-    Сравниваем тип, зону и объём: совпало → в чате карточку не дублируем.
-    (Does the prescription match today's latest recommendation?)
-    """
-    from datetime import date as _date
-
-    rec = db.query(Recommendation).filter(
-        Recommendation.user_id == user_id,
-        Recommendation.for_date >= _date.today(),
-    ).order_by(Recommendation.id.desc()).first()
-    if rec is None:
-        return False
-    target, volume = rec.target_json or {}, rec.volume_json or {}
-
-    def _close(a, b) -> bool:  # None-безопасное сравнение чисел (tolerant compare)
-        if a is None or b is None:
-            return a == b
-        return abs(float(a) - float(b)) < 0.05
-
-    return (rec.workout_type == p.workout_type
-            and target.get("max_zone") == p.target.get("max_zone")
-            and target.get("structure") == p.target.get("structure")
-            and _close(target.get("pace_min_km"), p.target.get("pace_min_km"))
-            and _close(volume.get("duration_min"), p.volume.get("duration_min"))
-            and _close(volume.get("distance_km"), p.volume.get("distance_km")))
-
-
 def _llm_chat_turn(user_id: int, message: str, *, db: Session,
                    llm: CoachLLM, kind: str, extras: dict | None = None,
                    allow_proposal: bool = True,
                    effort: str = COACH_EFFORT_CHAT) -> ChatReply:
     """LLM-ход: state+verdict в контекст → агент → clamp → рендер (one LLM turn)."""
-    from datetime import date as _date
-
     user = db.query(User).filter(User.id == user_id).first()
     state = assess_state(user_id, db=db)
     verdict = evaluate_safety(state)
@@ -241,8 +132,14 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
     state_json.pop("signals", None)
     if extras is None:
         extras = _build_extras(user_id, db=db)
-    today_block = build_today_block(state_json, jsonable(verdict),
-                                    _date.today().isoformat(), extras=extras)
+    # Только JSON-копия: clamp() сравнивает earliest_next_hard в UTC
+    # (JSON copy only — clamp() keeps comparing in UTC)
+    verdict_json = jsonable(verdict)
+    if verdict.earliest_next_hard is not None:
+        verdict_json["earliest_next_hard"] = fmt_local(
+            local_dt(verdict.earliest_next_hard, user))
+    today_block = build_today_block(state_json, verdict_json,
+                                    fmt_local(user_now(user)), extras=extras)
     system = build_system_blocks(_profile(user))
     messages = build_messages(_history(user_id, db=db), today_block, message)
 

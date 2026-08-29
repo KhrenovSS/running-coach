@@ -2,7 +2,7 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from src.utils.timeutils import local_dt
+from src.utils.timeutils import fmt_local, local_dt, session_local_dt, user_now
 
 UTC_DT = datetime(2026, 8, 26, 15, 12, 26, tzinfo=timezone.utc)
 
@@ -61,3 +61,27 @@ def test_naive_treated_as_utc():
 def test_no_user_object():
     local = local_dt(UTC_DT, None, _session("Europe/Moscow"))
     assert local.hour == 18
+
+
+def test_session_local_dt_prefers_workout_zone():
+    # Тренировка в поездке показывается в её поясе (workout zone wins)
+    local = session_local_dt(UTC_DT, _session("Asia/Dubai"), _user("Europe/Moscow"))
+    assert local.hour == 19  # Dubai UTC+4
+
+
+def test_session_local_dt_falls_back_to_user():
+    local = session_local_dt(UTC_DT, _session(None), _user("Europe/Moscow"))
+    assert local.hour == 18
+    local = session_local_dt(UTC_DT, None, _user("Europe/Moscow"))
+    assert local.hour == 18
+
+
+def test_user_now_is_aware_in_user_zone():
+    from zoneinfo import ZoneInfo
+    now = user_now(_user("Europe/Moscow"))
+    assert now.tzinfo == ZoneInfo("Europe/Moscow")
+
+
+def test_fmt_local():
+    local = local_dt(UTC_DT, _user("Europe/Moscow"))
+    assert fmt_local(local) == "2026-08-26 18:12 (Europe/Moscow)"

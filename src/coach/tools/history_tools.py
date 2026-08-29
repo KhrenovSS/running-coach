@@ -15,18 +15,26 @@ from src.models import TrainingSession, User
 from src.services.analytics_helpers import compute_slope, compute_trend_direction
 from src.services.repositories import FeedbackRepository, TrainingRepository
 from src.services.repositories_coach import CoachRepository
+from src.utils.timeutils import session_local_dt, user_now
 
 MAX_SEGMENTS = 20   # больше — только агрегат (above this, aggregate only)
 MAX_POINTS = 60     # даунсэмпл рядов (series downsampling cap)
 
 
-def _session_brief(s: TrainingSession, rpe: int | None, pain: int | None) -> dict:
-    today = datetime.now(timezone.utc).date()
+def _session_brief(s: TrainingSession, rpe: int | None, pain: int | None,
+                   user: User | None = None) -> dict:
+    # Локальное время: пояс тренировки → пояс пользователя → settings
+    # (local time: workout zone → user zone → settings)
+    local = session_local_dt(s.begin_ts, s, user) if s.begin_ts else None
+    today = user_now(user).date()
     return {
         "session_id": s.id,
-        "date": s.begin_ts.date().isoformat() if s.begin_ts else None,
-        # 0 = сегодня, 1 = вчера — LLM считает относительные даты ТОЛЬКО отсюда
-        "days_ago": (today - s.begin_ts.date()).days if s.begin_ts else None,
+        "date": local.date().isoformat() if local else None,
+        # Относительные даты и время суток LLM берёт ТОЛЬКО отсюда
+        # (0 = сегодня, 1 = вчера; started_at_local — единственный источник времени суток)
+        "days_ago": (today - local.date()).days if local else None,
+        "started_at_local": local.strftime("%Y-%m-%d %H:%M") if local else None,
+        "tz": local.tzinfo.key if local else None,
         "type": effective_training_type(s),
         "km": s.total_distance_km,
         "duration_min": s.duration_minutes,
@@ -44,11 +52,12 @@ def get_recent_workouts(ctx: ToolContext, args: dict) -> dict:
     """Последние тренировки с RPE и болью (recent workouts with RPE and pain)."""
     limit = int(args.get("limit", 5))
     sessions = CoachRepository.last_sessions(ctx.user_id, n=limit, db=ctx.db)
+    user = ctx.db.query(User).filter(User.id == ctx.user_id).first()
     out = []
     for s in sessions:
         _, fb = CoachRepository.session_with_feedback(ctx.user_id, s.id, db=ctx.db)
         out.append(_session_brief(s, fb.rating if fb else None,
-                                  fb.pain_level if fb else None))
+                                  fb.pain_level if fb else None, user=user))
     return {"workouts": out}
 
 
@@ -94,7 +103,7 @@ def get_workout_detail(ctx: ToolContext, args: dict) -> dict:
             segments.append({k: v for k, v in row.items() if v is not None})
 
     brief = _session_brief(session, fb.rating if fb else None,
-                           fb.pain_level if fb else None)
+                           fb.pain_level if fb else None, user=user)
     # D4: метрики утра дня тренировки — состояние «на тот день», не «сегодня»
     # (day-of-workout morning metrics, not today's)
     dm = (CoachRepository.metrics_for_date(ctx.user_id, session.begin_ts.date(),

@@ -33,7 +33,7 @@ def test_no_volatile_content_in_system():
 
 def test_today_lives_only_in_last_message():
     """Дата — только в последнем user-блоке (the date only in the last block)."""
-    today = build_today_block({"x": 1}, {"y": 2}, "2026-08-23")
+    today = build_today_block({"x": 1}, {"y": 2}, "2026-08-23 21:40 (Europe/Moscow)")
     messages = build_messages([{"role": "user", "content": "старое"},
                                {"role": "assistant", "content": "ответ"}],
                               today, "вопрос")

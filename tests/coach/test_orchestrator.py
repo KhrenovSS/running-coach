@@ -51,6 +51,24 @@ def test_llm_proposal_goes_through_clamp(athlete_with_history, db_session):
     assert msg.kind == "chat"
 
 
+def test_today_block_has_local_now_and_no_utc_leak(athlete_with_history, db_session):
+    """Инцидент 28.08: LLM назвал вечернюю тренировку «утренней» — времени в промпте
+    не было. Теперь: «Сейчас:» с локальным временем и поясом, started_at_local у
+    тренировок, earliest_next_hard без голого UTC (+00:00).
+    """
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn",
+                                   parsed={"message": "ок", "proposal": None,
+                                           "followup_question": None,
+                                           "log_suggestion": None})])
+    orchestrator.handle_chat(athlete_with_history.id, "как дела?",
+                             db=db_session, llm=llm)
+    content = llm.calls[0]["messages"][-1]["content"]
+    assert "Сейчас: " in content
+    assert "(Europe/Moscow)" in content        # make_user: timezone Moscow
+    assert "started_at_local" in content
+    assert "+00:00" not in content             # earliest_next_hard — локальное время
+
+
 def test_budget_exhausted_no_llm_call(athlete_with_history, db_session):
     """Бюджет исчерпан → вежливый отказ БЕЗ вызова LLM (len(calls)==0)."""
     from src.coach.llm.config import COACH_MAX_TURNS_PER_DAY

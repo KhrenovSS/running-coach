@@ -24,3 +24,25 @@ def local_dt(dt: datetime | None, user: Any, session: Any = None,
         or session_tz or settings.timezone
     tz = ZoneInfo(tz_name)
     return dt.astimezone(tz)
+
+
+def session_local_dt(dt: datetime | None, session: Any = None,
+                     user: Any = None) -> datetime | None:
+    """UTC → пояс тренировки: session.timezone → user.timezone → settings.timezone.
+
+    Обратный приоритет к local_dt: тренировка в поездке показывается в её поясе.
+    (Workout-first zone priority: a workout done while travelling keeps its own zone.)
+    """
+    if session is not None and getattr(session, "timezone", None):
+        return local_dt(dt, None, session=session)
+    return local_dt(dt, user)
+
+
+def user_now(user: Any) -> datetime:
+    """Текущее время в поясе пользователя (current time in the user's timezone)."""
+    return local_dt(datetime.now(timezone.utc), user)
+
+
+def fmt_local(dt: datetime) -> str:
+    """'2026-08-28 21:40 (Europe/Moscow)' — формат даты-времени для LLM-контекста."""
+    return f"{dt:%Y-%m-%d %H:%M} ({dt.tzinfo.key})"

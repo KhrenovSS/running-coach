@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from sqlalchemy.orm import Session
 
 from src.coach.config import (
@@ -20,9 +18,11 @@ from src.coach.config import (
 from src.coach.contracts import AthleteState, SkillResult
 from src.coach.skills import distribution, fatigue, load, pain, progress, recovery
 from src.coach.util import clamp_value, effective_training_type, safe_div
+from src.models import User
 from src.services.recovery_view import hrv_status, rhr_anomaly
 from src.services.repositories import FeedbackRepository, TrainingRepository
 from src.services.repositories_coach import CoachRepository
+from src.utils.timeutils import session_local_dt, user_now
 
 # Маппинги компонент → скор 0..1 (component score maps; 1.0 = лучший для readiness)
 _HRV_SCORE = {"elevated": 1.0, "normal": 1.0, "low": 0.5, "very_low": 0.0}
@@ -169,11 +169,17 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
     sessions = CoachRepository.last_sessions(user_id, n=1, db=db)
     if sessions:
         s = sessions[0]
+        user = db.query(User).filter(User.id == user_id).first()
+        # Локальное время как в _session_brief (см. history_tools) — LLM берёт
+        # время суток только из started_at_local (local time, mirrors _session_brief)
+        local = session_local_dt(s.begin_ts, s, user) if s.begin_ts else None
         last_workout = {
             "session_id": s.id,
-            "date": s.begin_ts.date().isoformat() if s.begin_ts else None,
-            "days_ago": ((datetime.now(timezone.utc).date() - s.begin_ts.date()).days
-                         if s.begin_ts else None),
+            "date": local.date().isoformat() if local else None,
+            "days_ago": ((user_now(user).date() - local.date()).days
+                         if local else None),
+            "started_at_local": local.strftime("%Y-%m-%d %H:%M") if local else None,
+            "tz": local.tzinfo.key if local else None,
             "type": effective_training_type(s),
             "km": s.total_distance_km,
             "duration_min": s.duration_minutes,

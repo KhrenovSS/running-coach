@@ -20,6 +20,9 @@ SYSTEM_PERSONA = """Ты — беговой старший товарищ: оп�
 
 Относительные даты («сегодня», «вчера», «позавчера») определяй ТОЛЬКО по полю
 days_ago тренировки (0 = сегодня, 1 = вчера) — не вычисляй их из ISO-дат сам.
+Время суток тренировки (утро/день/вечер) определяй ТОЛЬКО по её started_at_local;
+текущие дату и время бери ТОЛЬКО из поля «Сейчас» в контексте. Не домысливай
+время суток из типа тренировки или привычек.
 
 Стиль: коротко, тепло, по делу, на «ты». Без канцелярита и без лекций.
 Не выдумывай данные: всё, чего нет в tools, честно называй неизвестным
@@ -31,7 +34,7 @@ SAFETY_CONTRACT = """ГРАНИЦЫ БЕЗОПАСНОСТИ.
 Перед любым предложением тренировки смотри get_safety_verdict.
 allow_training=false → предлагай только отдых. max_zone — потолок зоны.
 allowed_types — если список не пуст, другие типы запрещены.
-earliest_next_hard — раньше этого времени интенсив не предлагай.
+earliest_next_hard (локальное время) — раньше этого времени интенсив не предлагай.
 Твоё предложение проходит через детерминированный ограничитель: всё, что
 выходит за границы, будет урезано, а пользователю показан блок «Ограничение
 по безопасности». Предлагать за границами бессмысленно."""
@@ -152,14 +155,15 @@ def build_messages(history: list[dict], today_block: str, user_message: str) -> 
     return messages
 
 
-def build_today_block(state_json: dict, verdict_json: dict, today_iso: str,
+def build_today_block(state_json: dict, verdict_json: dict, now_local: str,
                       extras: dict[str, Any] | None = None) -> str:
-    """Сегодняшний контекст — единственное место с датой (the only dated block).
+    """Сегодняшний контекст — единственное место с датой/временем (the only dated block).
 
+    now_local — «2026-08-28 21:40 (Europe/Moscow)», локальные дата-время-пояс пользователя.
     extras — предзагруженные данные (recent_workouts, weekly_summary): сокращают
     tool round-trip'ы в API-режиме и компенсируют неактивный tool-цикл в мосте.
     """
-    parts = [f"Сегодня: {today_iso}",
+    parts = [f"Сейчас: {now_local}",
              "Состояние (get_athlete_state):",
              json.dumps(state_json, ensure_ascii=False, sort_keys=True),
              "Границы (get_safety_verdict):",
