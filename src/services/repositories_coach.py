@@ -204,21 +204,34 @@ class CoachRepository:
 
     @staticmethod
     def turns_today(user_id: int, *, db: Session) -> int:
-        """Сколько LLM-ходов сегодня — дневной бюджет (LLM turns today, budget gate)."""
+        """Сколько LLM-ходов сегодня — дневной бюджет (LLM turns today, budget gate).
+
+        Fallback-карточки (meta.fallback) бюджет НЕ тратят (#251): детерминированные
+        разборы бэкфилла не должны блокировать утренний вердикт. Счёт в Python —
+        SQL-фильтр по generic-JSON расходится между SQLite и PG на NULL-строках.
+        """
         today_start = datetime.now(timezone.utc).replace(hour=0, minute=0,
                                                          second=0, microsecond=0)
-        return db.query(CoachMessage).filter(
+        rows = db.query(CoachMessage.meta_json).filter(
             CoachMessage.user_id == user_id,
             CoachMessage.role == "assistant",
             CoachMessage.created_at >= today_start,
-        ).count()
+        ).all()
+        return sum(1 for (meta,) in rows if not (meta or {}).get("fallback"))
 
     @staticmethod
-    def recent_messages(user_id: int, limit: int = 8, *, db: Session) -> list[CoachMessage]:
-        """Последние сообщения диалога, старые первыми (recent chat, oldest first)."""
-        rows = db.query(CoachMessage).filter(
-            CoachMessage.user_id == user_id,
-        ).order_by(CoachMessage.created_at.desc(), CoachMessage.id.desc()).limit(limit).all()
+    def recent_messages(user_id: int, limit: int = 8, *, db: Session,
+                        kinds: tuple[str, ...] | None = None) -> list[CoachMessage]:
+        """Последние сообщения диалога, старые первыми (recent chat, oldest first).
+
+        kinds — фильтр видов для окна истории LLM (#258: weekly/plan-простыни
+        не должны вытеснять живой диалог и служить «образцом формы»).
+        """
+        q = db.query(CoachMessage).filter(CoachMessage.user_id == user_id)
+        if kinds is not None:
+            q = q.filter(CoachMessage.kind.in_(kinds))
+        rows = q.order_by(CoachMessage.created_at.desc(),
+                          CoachMessage.id.desc()).limit(limit).all()
         return list(reversed(rows))
 
     @staticmethod

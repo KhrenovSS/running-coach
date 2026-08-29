@@ -12,11 +12,14 @@ from src.coach.knowledge.loader import search as guide_search
 from src.coach.llm.config import (
     COACH_ENRICH_RECENT_LIMIT,
     COACH_ENRICH_WEEKS,
+    COACH_HISTORY_KINDS,
+    COACH_HISTORY_TURNS,
     COACH_PLANNED_DAYS,
     COACH_RECENT_REVIEWS_LIMIT,
 )
 from src.coach.tools.registry import run_tool
 from src.models import Recommendation, User
+from src.services.repositories_coach import CoachRepository
 from src.utils.timeutils import WEEKDAYS_RU, local_dt, user_now
 
 
@@ -109,6 +112,31 @@ def build_extras(user_id: int, *, db: Session,
             {"guide": c.guide, "heading": c.heading, "text": c.text}
             for c in chunks[:2]]
     return extras
+
+
+# Синтетические user-промпты в истории заменяются метками (#258): чередование
+# ролей сохранено (API-режим требует alternation), токены не тратятся на простыни
+_SYNTHETIC_LABELS = {"morning": "[утренний вердикт]", "review": "[разбор тренировки]"}
+
+
+def history(user_id: int, *, db: Session) -> list[dict]:
+    """Окно истории для LLM (#258): только chat/morning/review; вместо составного
+    текста (проза+карточка) — чистая проза из meta.prose, чтобы модель не
+    копировала форму карточки (мимикрия, инцидент 26.08)."""
+    rows = CoachRepository.recent_messages(user_id, limit=COACH_HISTORY_TURNS,
+                                           db=db, kinds=COACH_HISTORY_KINDS)
+    out = []
+    for m in rows:
+        if m.role not in ("user", "assistant"):
+            continue
+        if m.role == "user" and m.kind in _SYNTHETIC_LABELS:
+            content = _SYNTHETIC_LABELS[m.kind]
+        elif m.role == "assistant":
+            content = (m.meta_json or {}).get("prose") or m.text
+        else:
+            content = m.text
+        out.append({"role": m.role, "content": content})
+    return out
 
 
 def unchanged_today(p: Prescription, user_id: int, *, db: Session) -> bool:

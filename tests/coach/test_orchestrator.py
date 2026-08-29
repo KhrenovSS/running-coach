@@ -220,3 +220,53 @@ def test_future_day_proposal_dated_card_and_dedup(athlete_with_history, db_sessi
     assert "без изменений" not in third.text
     assert db_session.query(Recommendation).filter_by(
         user_id=uid).count() == n_recs + 1
+
+
+def test_turns_today_ignores_fallback(athlete_with_history, db_session):
+    """Регрессия #251: fallback-карточки не тратят LLM-бюджет — бэкфилл из 40
+    детерминированных разборов не блокирует чат/утро."""
+    from src.coach.llm.config import COACH_MAX_TURNS_PER_DAY
+    from src.services.repositories_coach import CoachRepository
+
+    uid = athlete_with_history.id
+    for _ in range(COACH_MAX_TURNS_PER_DAY):
+        CoachRepository.save_message(uid, "assistant", "карточка", db=db_session,
+                                     kind="review", meta={"fallback": True})
+    assert CoachRepository.turns_today(uid, db=db_session) == 0
+
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=EASY_TURN)])
+    reply = orchestrator.handle_chat(uid, "что сегодня?", db=db_session, llm=llm)
+    assert reply.source == "llm"                    # бюджет не съеден fallback'ами
+    assert CoachRepository.turns_today(uid, db=db_session) == 1
+
+
+def test_history_filters_kinds_and_uses_prose(athlete_with_history, db_session):
+    """Регрессия #258: weekly/plan-простыни не попадают в окно истории; вместо
+    составного текста (проза+карточка) модель видит meta.prose; синтетический
+    user-промпт заменён меткой."""
+    from src.coach.turn_context import history
+    from src.services.repositories_coach import CoachRepository
+
+    uid = athlete_with_history.id
+    CoachRepository.save_message(uid, "user", "привет", db=db_session, kind="chat")
+    CoachRepository.save_message(uid, "assistant",
+                                 "проза\n\n🟢 Лёгкий бег · 40 мин",
+                                 db=db_session, kind="chat",
+                                 meta={"prose": "проза"})
+    CoachRepository.save_message(uid, "user", "Составь план недели...",
+                                 db=db_session, kind="plan")
+    CoachRepository.save_message(uid, "assistant", "План на неделю (01.09–07.09)",
+                                 db=db_session, kind="plan")
+    CoachRepository.save_message(uid, "user", "Утренний вердикт: что мне делать...",
+                                 db=db_session, kind="morning")
+    CoachRepository.save_message(uid, "assistant", "вердикт-проза\n\nкарточка",
+                                 db=db_session, kind="morning",
+                                 meta={"fallback": True})
+
+    h = history(uid, db=db_session)
+    contents = [m["content"] for m in h]
+    assert not any("План на неделю" in c for c in contents)     # kind='plan' — вон
+    assert "проза" in contents                                  # prose вместо текста
+    assert "[утренний вердикт]" in contents                     # метка вместо промпта
+    # fallback-строка без prose деградирует на полный текст — без исключений
+    assert any("вердикт-проза" in c for c in contents)

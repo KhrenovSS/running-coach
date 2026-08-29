@@ -70,28 +70,39 @@ class InsightRepository:
 
     @staticmethod
     def release(session_id: int, *, db: Session) -> None:
-        """Вернуть running-строку в очередь после сбоя; исчерпаны попытки → error."""
-        row = db.query(WorkoutInsight).filter(
+        """Вернуть running-строку в очередь после сбоя; исчерпаны попытки → error.
+
+        Атомарный UPDATE с предикатом статуса (#256, паттерн claim/ADR):
+        параллельный finish() → done не будет затёрт обратно в pending.
+        """
+        base = db.query(WorkoutInsight).filter(
             WorkoutInsight.session_id == session_id,
-            WorkoutInsight.status == 'running',
-        ).first()
-        if row is None:
-            return
-        row.status = 'pending' if row.attempts < REVIEW_MAX_ATTEMPTS else 'error'
+            WorkoutInsight.status == 'running')
+        n = base.filter(WorkoutInsight.attempts < REVIEW_MAX_ATTEMPTS).update(
+            {"status": "pending"}, synchronize_session=False)
+        if not n:
+            base.filter(WorkoutInsight.attempts >= REVIEW_MAX_ATTEMPTS).update(
+                {"status": "error"}, synchronize_session=False)
         db.commit()
 
     @staticmethod
     def reclaim_stale_running(older_than_min: int, *, db: Session) -> int:
-        """Зависшие running (креш между claim и finish) → обратно в очередь/error."""
+        """Зависшие running (креш между claim и finish) → обратно в очередь/error.
+
+        Атомарные UPDATE с предикатом status='running' (#256): reclaim-джоба
+        не затирает done живого исполнителя → нет повторного разбора.
+        """
         cutoff = _utcnow() - timedelta(minutes=older_than_min)
-        rows = db.query(WorkoutInsight).filter(
-            WorkoutInsight.status == 'running',
-            WorkoutInsight.claimed_at < cutoff,
-        ).all()
-        for row in rows:
-            row.status = 'pending' if row.attempts < REVIEW_MAX_ATTEMPTS else 'error'
+        stale = (WorkoutInsight.status == 'running',
+                 WorkoutInsight.claimed_at < cutoff)
+        n = db.query(WorkoutInsight).filter(
+            *stale, WorkoutInsight.attempts < REVIEW_MAX_ATTEMPTS).update(
+            {"status": "pending"}, synchronize_session=False)
+        n += db.query(WorkoutInsight).filter(
+            *stale, WorkoutInsight.attempts >= REVIEW_MAX_ATTEMPTS).update(
+            {"status": "error"}, synchronize_session=False)
         db.commit()
-        return len(rows)
+        return n
 
     @staticmethod
     def finish(session_id: int, *, db: Session, source: str,

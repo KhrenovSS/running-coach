@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from src.coach import planning
 from src.coach.contracts import Prescription, WorkoutProposal
+from src.coach.numeric_check import check_prose
 from src.coach.llm.agent import run_turn
 from src.coach.llm.client import CoachLLM, get_llm
 from src.coach.llm.config import (
@@ -19,7 +20,6 @@ from src.coach.llm.config import (
     COACH_EFFORT_PLAN,
     COACH_ENRICH_RECENT_LIMIT,
     COACH_ENRICH_WEEKS,
-    COACH_HISTORY_TURNS,
     COACH_MAX_TURNS_PER_DAY,
     COACH_RECENT_REVIEWS_LIMIT,
     COACH_WEEKLY_REPORT_RECENT,
@@ -48,6 +48,7 @@ from src.coach.state import assess_state
 from src.coach.tools.registry import run_tool
 from src.coach.tools.serialize import jsonable
 from src.coach.turn_context import build_extras as _build_extras
+from src.coach.turn_context import history as _history
 from src.coach.turn_context import unchanged_today as _unchanged_today
 from src.exceptions import CoachError, LLMUnavailableError
 from src.models import TrainingFeedback, User, UserModel, WellnessReport
@@ -116,12 +117,6 @@ def _profile(user: User) -> dict:
     }
 
 
-def _history(user_id: int, *, db: Session) -> list[dict]:
-    rows = CoachRepository.recent_messages(user_id, limit=COACH_HISTORY_TURNS, db=db)
-    return [{"role": m.role, "content": m.text}
-            for m in rows if m.role in ("user", "assistant")]
-
-
 def _llm_chat_turn(user_id: int, message: str, *, db: Session,
                    llm: CoachLLM, kind: str, extras: dict | None = None,
                    allow_proposal: bool = True,
@@ -166,30 +161,31 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
             rationale=list(turn.proposal.rationale),
             for_days_ahead=turn.proposal.for_days_ahead,
         )
+    card: Prescription | None = None   # карточка хода — для numeric-checker (#247)
     morning_result = (planning.confirm_or_adjust_morning(
         proposal, user_id, state, db=db, now=user_now(user))
         if kind == "morning" else None)
     if morning_result is not None:
         # План дня есть: подтверждение (UPDATE status) или осознанная замена
         # (решение владельца 29.08.2026). (Confirm or consciously adjust the plan.)
-        prescription, mode = morning_result
+        card, mode = morning_result
         logger.info("Morning plan %s for user=%s", mode, user_id)
-        text += "\n\n" + render_prescription(prescription, max_hr=max_hr, user=user)
+        text += "\n\n" + render_prescription(card, max_hr=max_hr, user=user)
     elif proposal is not None and not allow_proposal:
         # Разбор/отчёт — про прошлое: назначение даёт утренний вердикт/чат (C8).
         # (Reviews look backward: proposals are dropped, not clamped/persisted.)
         logger.info("Proposal dropped for kind=%s user=%s", kind, user_id)
     elif proposal is not None:
-        prescription = finalize(proposal, state, db=db, persist=False, source="llm",
-                                now=user_now(user))
-        if kind == "chat" and _unchanged_today(prescription, user_id, db=db):
+        card = finalize(proposal, state, db=db, persist=False, source="llm",
+                        now=user_now(user))
+        if kind == "chat" and _unchanged_today(card, user_id, db=db):
             # Дедуп (решение владельца 26.08.2026): назначение не изменилось —
             # одна строка-напоминание, без новой строки в recommendations.
             # (Unchanged plan → one reminder line, no duplicate recommendation row.)
-            text += "\n\n" + render_prescription_short(prescription, max_hr=max_hr)
+            text += "\n\n" + render_prescription_short(card, max_hr=max_hr)
         else:
-            save_prescription(prescription, state, db=db)
-            text += "\n\n" + render_prescription(prescription, max_hr=max_hr, user=user)
+            save_prescription(card, state, db=db)
+            text += "\n\n" + render_prescription(card, max_hr=max_hr, user=user)
     if turn.followup_question:
         text += "\n\n" + turn.followup_question
 
@@ -200,12 +196,20 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
         assessment = None
 
     from src.coach.llm.anthropic_client import estimate_cost_usd
+    meta = {"stop_reason": "end_turn", "tool_calls": usage.get("tool_calls", []),
+            "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0),
+            "cache_creation_input_tokens": usage.get("cache_creation_input_tokens", 0),
+            "prose": turn.message}   # #258: история берёт прозу без карточки
+    if card is not None:
+        # #247 v1: детект расхождений проза↔карточка — лог+метка, текст не режем
+        mismatches = check_prose(turn.message, card, max_hr)
+        if mismatches:
+            logger.warning("Numeric mismatch for kind=%s user=%s: %s",
+                           kind, user_id, "; ".join(mismatches))
+            meta["numeric_mismatch"] = mismatches
     CoachRepository.save_message(user_id, "user", message, db=db, kind=kind)
     assistant_msg = CoachRepository.save_message(
-        user_id, "assistant", text, db=db, kind=kind,
-        meta={"stop_reason": "end_turn", "tool_calls": usage.get("tool_calls", []),
-              "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0),
-              "cache_creation_input_tokens": usage.get("cache_creation_input_tokens", 0)},
+        user_id, "assistant", text, db=db, kind=kind, meta=meta,
         tokens_in=usage.get("input_tokens"), tokens_out=usage.get("output_tokens"),
         cost_usd=estimate_cost_usd(usage))
     return ChatReply(text=text, log_suggestion=turn.log_suggestion, source="llm",

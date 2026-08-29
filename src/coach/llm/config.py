@@ -10,6 +10,8 @@ COACH_EFFORT_PLAN = "medium"
 # Обогащение today-блока (context enrichment) — DEV_PLAN §5
 COACH_ENRICH_RECENT_LIMIT = 5    # последних тренировок в контексте хода
 COACH_PLANNED_DAYS = 8           # действующих назначений в контексте (неделя плана)
+# Виды сообщений в окне истории (#258): weekly/plan-простыни не вытесняют диалог
+COACH_HISTORY_KINDS = ("chat", "morning", "review")
 COACH_ENRICH_WEEKS = 4           # недель сводки в контексте хода
 COACH_WEEKLY_REPORT_WEEKS = 8    # горизонт недельного отчёта (C8)
 COACH_WEEKLY_REPORT_RECENT = 10  # тренировок в контексте недельного отчёта (C8)

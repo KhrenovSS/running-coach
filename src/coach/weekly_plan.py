@@ -118,6 +118,7 @@ def generate_weekly_plan(user_id: int, *, db: Session,
         user_id, "assistant", text, db=db, kind="plan",
         meta={"days": len(prescriptions),
               "clamped": sum(1 for p in prescriptions if p.clamped),
+              "prose": turn.message,   # #258: история берёт прозу без карточки
               "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0)},
         tokens_in=usage.get("input_tokens"), tokens_out=usage.get("output_tokens"),
         cost_usd=estimate_cost_usd(usage))
@@ -133,5 +134,5 @@ def _profile(user: User) -> dict:
 
 
 def _history(user_id: int, *, db: Session) -> list[dict]:
-    from src.coach.orchestrator import _history as history
+    from src.coach.turn_context import history
     return history(user_id, db=db)

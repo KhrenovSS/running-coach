@@ -126,3 +126,53 @@ def test_for_session_ownership(athlete_with_history, empty_user, db_session):
 def test_finish_missing_row_is_noop(athlete_with_history, db_session):
     """finish по сессии без insight-строки (legacy) — молча ничего."""
     InsightRepository.finish(999999, db=db_session, source="llm")  # не бросает
+
+
+def _stale_claimed(sid: int, db, minutes: int = 60) -> WorkoutInsight:
+    """Сдвинуть claimed_at в прошлое (имитация зависшего running)."""
+    row = db.query(WorkoutInsight).filter_by(session_id=sid).first()
+    row.claimed_at = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    db.commit()
+    return row
+
+
+def test_reclaim_does_not_touch_done(athlete_with_history, db_session):
+    """Регрессия гонки #256: живой исполнитель успел finish → reclaim НЕ
+    возвращает done обратно в pending (нет повторного разбора)."""
+    sid = _session_id(athlete_with_history.id, db_session)
+    InsightRepository.upsert(athlete_with_history.id, sid, db=db_session)
+    assert InsightRepository.claim(sid, db=db_session)
+    _stale_claimed(sid, db_session)
+    InsightRepository.finish(sid, db=db_session, source="llm")
+
+    assert InsightRepository.reclaim_stale_running(15, db=db_session) == 0
+    db_session.expire_all()
+    row = InsightRepository.for_session(athlete_with_history.id, sid, db=db_session)
+    assert row.status == "done"
+
+
+def test_reclaim_exhausted_attempts_goes_error(athlete_with_history, db_session):
+    """Reclaim при attempts >= MAX → error (ветка раньше не покрывалась)."""
+    sid = _session_id(athlete_with_history.id, db_session)
+    InsightRepository.upsert(athlete_with_history.id, sid, db=db_session)
+    assert InsightRepository.claim(sid, db=db_session)
+    row = _stale_claimed(sid, db_session)
+    row.attempts = REVIEW_MAX_ATTEMPTS
+    db_session.commit()
+
+    assert InsightRepository.reclaim_stale_running(15, db=db_session) == 1
+    db_session.expire_all()
+    row = InsightRepository.for_session(athlete_with_history.id, sid, db=db_session)
+    assert row.status == "error"
+
+
+def test_release_does_not_touch_done(athlete_with_history, db_session):
+    """release после параллельного finish — done не откатывается (#256)."""
+    sid = _session_id(athlete_with_history.id, db_session)
+    InsightRepository.upsert(athlete_with_history.id, sid, db=db_session)
+    assert InsightRepository.claim(sid, db=db_session)
+    InsightRepository.finish(sid, db=db_session, source="llm")
+    InsightRepository.release(sid, db=db_session)
+    db_session.expire_all()
+    row = InsightRepository.for_session(athlete_with_history.id, sid, db=db_session)
+    assert row.status == "done"
