@@ -86,3 +86,38 @@ def test_heat_block_threshold():
     assert heat_block(HEAT_TEMP_THRESHOLD_C)["heat_flag"] is True
     assert heat_block(HEAT_TEMP_THRESHOLD_C - 1)["heat_flag"] is False
     assert heat_block(None) == {"temp_c": None, "heat_flag": None}
+
+
+def test_drift_v2_reports_bpm_and_pace_cv():
+    """M1.2/M1.3: в drift-блоке есть чистый дрейф в bpm и CV темпа."""
+    tps = build_trackpoints('long', duration_min=45, base_pace=6.0,
+                            hr=140, hr_drift_bpm=20)
+    per_km = [{"pace_min_km": 6.0}] * 7    # ровный темп — CV ≈ 0
+    d = compute_cardiac_drift(*_series(tps), training_type='easy', per_km=per_km)
+    assert d["applicable"] is True
+    # линейный +20 bpm за 45' → между половинами рабочего окна ~9 bpm
+    assert d["drift_bpm"] is not None and 5 < d["drift_bpm"] < 15
+    assert d["hr_second_half"] > d["hr_first_half"]
+    assert d["pace_cv"] is not None and d["pace_cv"] < 0.05
+
+
+def test_hr_stability_flat_vs_drifting():
+    """M1.2: SD/CV пульса растут при дрейфе, на ровном HR почти нулевые."""
+    from src.analysis.effort import hr_stability
+    flat = build_trackpoints('long', duration_min=40, base_pace=6.0, hr=140)
+    drift = build_trackpoints('long', duration_min=40, base_pace=6.0,
+                              hr=140, hr_drift_bpm=25)
+    hs_flat = hr_stability(*_series(flat))
+    hs_drift = hr_stability(*_series(drift))
+    assert hs_flat["available"] and hs_drift["available"]
+    assert hs_flat["sd"] < hs_drift["sd"]
+    assert hs_drift["cv"] > 0
+
+
+def test_pace_cv_public_works_without_drift():
+    """M1.2: pace_cv доступен и когда drift неприменим (interval)."""
+    from src.analysis.effort import pace_cv
+    per_km = [{"pace_min_km": 6.0}, {"pace_min_km": 5.0}, {"pace_min_km": 7.0},
+              {"pace_min_km": 5.2}, {"pace_min_km": 6.8}]
+    cv = pace_cv(per_km)
+    assert cv is not None and cv > 0.1

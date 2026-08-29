@@ -84,3 +84,40 @@ def test_assessment_dropped_outside_review(athlete_with_history, db_session):
                                      db=db_session, llm=llm)
     assert reply.source == "llm"
     assert reply.assessment is None
+
+
+def test_flags_merged_from_computed_not_llm(athlete_with_history, db_session):
+    """§6 METRICS_GUIDE: флаги assessment — детерминированные из computed.flags
+    (с маппингом decoupling_high → hr_drift_high) + субъективные LLM; флаг,
+    заявленный LLM без подтверждения в computed, отбрасывается."""
+    from src.services.workout_insights import INSIGHTS_SCHEMA_VERSION
+
+    sid = _latest_session_id(athlete_with_history.id, db_session)
+    InsightRepository.upsert(
+        athlete_with_history.id, sid, db=db_session,
+        computed={"schema_version": INSIGHTS_SCHEMA_VERSION,
+                  "flags": ["decoupling_high", "easy_run_too_hard", "heat"]},
+        schema_version=INSIGHTS_SCHEMA_VERSION)
+    turn = dict(REVIEW_TURN_WITH_ASSESSMENT)
+    turn["assessment"] = dict(turn["assessment"],
+                              flags=["great_session", "pace_hr_mismatch"])
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
+    orchestrator.on_workout_completed(athlete_with_history.id, sid,
+                                      db=db_session, llm=llm)
+    row = InsightRepository.for_session(athlete_with_history.id, sid, db=db_session)
+    flags = row.assessment_json["flags"]
+    # детерминированные первыми (heat в enum нет — остаётся только в computed);
+    # pace_hr_mismatch без подтверждения в computed отброшен
+    assert flags == ["hr_drift_high", "easy_run_too_hard", "great_session"]
+
+
+def test_merged_flags_unit():
+    """_merged_flags: маппинг, дедуп, фильтр по enum, cap 4."""
+    merged = orchestrator._merged_flags(
+        ["great_session", "pain", "hr_drift_high"],
+        {"flags": ["decoupling_high", "decoupling_moderate", "hilly",
+                   "easy_run_too_hard", "low_cadence", "rpe_elevated"]})
+    assert merged == ["hr_drift_high", "easy_run_too_hard", "low_cadence",
+                      "rpe_elevated"]                     # cap 4, subjective вытеснены
+    assert orchestrator._merged_flags(["pain"], None) == ["pain"]
+    assert orchestrator._merged_flags(["pain"], {"flags": []}) == ["pain"]

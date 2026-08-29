@@ -2,6 +2,46 @@
 
 All notable changes to this project are tracked here.
 
+## [29.08.2026] — Коуч: детерминированные метрики разбора M1 (#268)
+
+Реализован этап M1 + §6 из `docs/coach/METRICS_GUIDE.md`: LLM перестаёт оценивать
+вычислимое «на глаз» — 9 новых метрик считает математика, LLM интерпретирует.
+`INSIGHTS_SCHEMA_VERSION` 1 → 2 (старые тренировки лениво пересчитаются).
+
+### Added
+- `src/analysis/session_metrics.py` — чистые формулы M1 (пороги параметрами):
+  точное время в зонах (посекундно) + **дисциплина лёгкого дня** (`easy_run_too_hard`
+  при >10% времени в Z3+ у easy/recovery/long — главная защита от травмы по обеим
+  книгам); потолки качественного объёма Дэниелса (`quality_volume_exceeded`,
+  `interval_segment_too_long`: км в Z4+/Z3 против min(8%/10% недели, 10/24 км),
+  отрезок ≤5 мин); баллы нагрузки (`load_points`, Л 0.2…Пв 1.5/мин); доля
+  длительной (`long_run_share_high`: >30% недели или >150 мин); каденс против 180
+  (`low_cadence`, санити-гейт «одна нога» <120 spm); RPE-триангуляция «плохого
+  дня» (`rpe_elevated`: RPE ≥ медиана типа +2 при |z| нормы <1, от 5 оценок);
+  разминка перед качественной (`no_warmup`: <50% первых 10 мин в Z1–2);
+  `collect_flags` — единый источник детерминированных флагов.
+- `effort.py`: `drift_bpm`/`hr_first_half`/`hr_second_half` (чистый дрейф в уд/мин
+  по тем же половинам, что decoupling), `pace_cv` наружу (`pace_stability`,
+  работает и для interval), `hr_stability` (time-weighted CV/SD пульса).
+- `TrainingRepository.km_in_window(user_id, end_ts, days=7)` — км за окно до сессии.
+- Пороги — именованные константы в `coach/config.py` (блок «Метрики сессии M1»)
+  с анти-дрейф-тестами (упорядоченность баллов, санити диапазонов, существование
+  каждого флага в enum).
+- Тесты: +24 (unit формул на синтетике, e2e «лёгкая в Z3 → флаг», «длительная
+  100% недели → флаг», слияние флагов, drift_bpm).
+
+### Changed
+- `compute_workout_metrics(..., max_hr=, week_km=, rpe_history=)` — остаётся pure;
+  БД-входы резолвит `upsert_workout_insights`; отсутствие входа → `available:false`.
+- §6 METRICS_GUIDE: флаги assessment теперь собирает код
+  (`orchestrator._merged_flags`) — детерминированные из `computed.flags`
+  (маппинг `decoupling_* → hr_drift_high` зафиксирован кодом) + субъективные LLM
+  (`pain`, `great_session`); флаг, заявленный LLM без подтверждения в computed,
+  отбрасывается. Enum `FlagValue` расширен 8 значениями (append-only).
+- REVIEW_PROMPT: перечислены новые метрики + правило «опирайся на числа из
+  workout_computed, не пересчитывай; флаги — только из computed.flags».
+- `ratings_with_sessions` дополнен `training_type_override` (аддитивно).
+
 ## [29.08.2026] — Коуч: дни недели как явные данные
 
 Владелец хочет общаться с тренером понятиями дня недели («в воскресенье»).

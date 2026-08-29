@@ -229,6 +229,30 @@ def _deterministic_review(user_id: int, session_id: int, *, db: Session) -> str:
     return text
 
 
+def _merged_flags(llm_flags: list[str], computed: dict | None) -> list[str]:
+    """Флаги assessment = детерминированные из computed + субъективные LLM (§6.2).
+
+    Маппинг имён (decoupling_* → hr_drift_high) зафиксирован кодом; LLM-флаги,
+    дублирующие вычислимое, но отсутствующие в computed, отбрасываются.
+    Детерминированные первыми, cap 4 (лимит схемы ReviewAssessment).
+    """
+    from typing import get_args
+
+    from src.analysis.session_metrics import FLAG_TO_ASSESSMENT
+    from src.coach.llm.schemas import SUBJECTIVE_FLAGS, FlagValue
+
+    allowed = set(get_args(FlagValue))
+    deterministic: list[str] = []
+    for f in (computed or {}).get("flags") or []:
+        mapped = FLAG_TO_ASSESSMENT.get(f, f)
+        # heat/hilly/hr_*_baseline остаются контекстом в computed, в enum их нет
+        if mapped in allowed and mapped not in deterministic:
+            deterministic.append(mapped)
+    subjective = [f for f in llm_flags
+                  if f in SUBJECTIVE_FLAGS and f not in deterministic]
+    return (deterministic + subjective)[:4]
+
+
 def on_workout_completed(user_id: int, session_id: int, *, db: Session,
                          llm: CoachLLM | None = None, use_llm: bool = True) -> str:
     """Разбор завершённой тренировки (workout review). C8: через LLM с fallback.
@@ -249,10 +273,16 @@ def on_workout_completed(user_id: int, session_id: int, *, db: Session,
         # Итог разбора → workout_insights (пишет оркестратор из провалидированного
         # output — LLM в БД не пишет, инвариант §1.4). (Persist the review outcome.)
         from src.services.repositories_insights import InsightRepository
+        from src.services.workout_insights import get_or_compute
         a = reply.assessment
+        assessment = a.model_dump() if a else None
+        if assessment is not None:
+            assessment["flags"] = _merged_flags(
+                assessment.get("flags") or [],
+                get_or_compute(user_id, session_id, db=db))
         InsightRepository.finish(
             session_id, db=db, source="llm",
-            assessment=a.model_dump() if a else None,
+            assessment=assessment,
             effort_match=a.effort_match if a else None,
             carry_forward=a.carry_forward if a else None,
             coach_message_id=reply.assistant_message_id)

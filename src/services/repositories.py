@@ -58,6 +58,23 @@ class TrainingRepository:
         ]
 
     @staticmethod
+    def km_in_window(user_id: int, end_ts: datetime, *, days: int = 7,
+                     db: Session) -> float:
+        """Километраж за окно (end_ts − days, end_ts] — «неделя до сессии включительно».
+
+        Для потолков качества/длительной (METRICS_GUIDE M1.5/M1.6): окно от даты
+        сессии честнее ISO-недели — сессия в понедельник не даёт долю ≈100%.
+        (Rolling-window km ending at the session — fairer than the ISO week.)
+        """
+        since = end_ts - timedelta(days=days)
+        total = db.query(func.sum(TrainingSession.total_distance_km)).filter(
+            TrainingSession.user_id == user_id,
+            TrainingSession.begin_ts > since,
+            TrainingSession.begin_ts <= end_ts,
+        ).scalar()
+        return float(total or 0.0)
+
+    @staticmethod
     def zone_distribution(user_id: int, days: int = 28, *, db: Session) -> dict:
         """Распределение времени по пульсовым зонам (Time distribution by HR zones)."""
         since = datetime.now(timezone.utc) - timedelta(days=days)
@@ -176,6 +193,7 @@ class FeedbackRepository:
             TrainingFeedback.rating,
             TrainingFeedback.created_at,
             TrainingSession.training_type,
+            TrainingSession.training_type_override,
             TrainingSession.avg_pace,
             TrainingSession.avg_heart_rate,
             TrainingSession.total_distance_km,
@@ -192,6 +210,7 @@ class FeedbackRepository:
                 "rating": r.rating,
                 "created_at": r.created_at,
                 "training_type": r.training_type,
+                "training_type_override": r.training_type_override,
                 "avg_pace": r.avg_pace,
                 "avg_heart_rate": r.avg_heart_rate,
                 "total_distance_km": r.total_distance_km,

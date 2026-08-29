@@ -74,3 +74,34 @@ def test_recovery_view_uses_config_thresholds():
     assert readiness_structured(None, recovery_pct=RECOVERY_PCT_MODERATE - 1)["status"] == "rest"
     assert readiness_structured(PERFORMANCE_READY + 0.01)["status"] == "ready"
     assert readiness_structured(PERFORMANCE_READY)["status"] == "moderate"
+
+
+def test_m1_session_metric_thresholds_sane():
+    """Анти-дрейф M1 (METRICS_GUIDE §4): пороги согласованы и в разумных рамках."""
+    from src.coach import config as c
+    assert 0 < c.EASY_RUN_Z3_TOLERANCE_PCT < 0.5
+    assert set(c.POINTS_PER_MIN) == {"z1", "z2", "z3", "z4", "z5"}
+    pts = [c.POINTS_PER_MIN[f"z{i}"] for i in range(1, 6)]
+    assert pts == sorted(pts)                      # интенсивнее — дороже
+    assert 0 < c.INTERVAL_MAX_PCT_WEEK < c.THRESHOLD_MAX_PCT_WEEK < 1
+    assert c.INTERVAL_MAX_KM < c.THRESHOLD_MAX_KM
+    assert 0 < c.INTERVAL_SEGMENT_MAX_MIN <= 10
+    assert 0 < c.LONG_RUN_MAX_PCT_WEEK < 0.5 and c.LONG_RUN_MAX_MIN > 60
+    assert c.CADENCE_SANITY_MIN_SPM < c.CADENCE_LOW_SPM < c.CADENCE_TARGET_SPM
+    assert c.RPE_MIN_SAMPLES >= 3 and 0 < c.RPE_BASELINE_Z_MAX <= 2
+    assert 0 < c.WARMUP_EASY_SHARE_MIN <= 1 and c.WARMUP_WINDOW_MIN >= 5
+
+
+def test_m1_flags_exist_in_assessment_enum():
+    """Каждый детерминированный флаг M1 обязан существовать в enum FlagValue."""
+    from typing import get_args
+    from src.analysis import session_metrics as sm
+    from src.coach.llm.schemas import FlagValue
+    allowed = set(get_args(FlagValue))
+    for flag in (sm.FLAG_EASY_TOO_HARD, sm.FLAG_PACE_UNSTABLE,
+                 sm.FLAG_QUALITY_VOLUME, sm.FLAG_SEGMENT_TOO_LONG,
+                 sm.FLAG_LONG_RUN_SHARE, sm.FLAG_LOW_CADENCE,
+                 sm.FLAG_RPE_ELEVATED, sm.FLAG_NO_WARMUP):
+        assert flag in allowed, flag
+    for mapped in sm.FLAG_TO_ASSESSMENT.values():
+        assert mapped in allowed, mapped

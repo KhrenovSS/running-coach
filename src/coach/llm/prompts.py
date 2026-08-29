@@ -62,7 +62,7 @@ OUTPUT_CONTRACT = """ФОРМАТ ОТВЕТА — ровно один JSON-об
   "assessment": {
     "effort_match": "ok|harder|easier|unknown",
     "causes": ["heat|cold|wind|elevation|terrain|poor_sleep|fatigue|pace_too_fast|illness|recovery_good|other"],
-    "flags": ["hr_drift_high|pain|pace_hr_mismatch|suspect_data|overreaching_sign|great_session"],
+    "flags": ["hr_drift_high|pain|pace_hr_mismatch|suspect_data|overreaching_sign|great_session|easy_run_too_hard|pace_unstable|quality_volume_exceeded|interval_segment_too_long|long_run_share_high|low_cadence|rpe_elevated|no_warmup"],
     "carry_forward": "короткая заметка себе на завтра или null"
   }
 }
@@ -109,16 +109,22 @@ OUTPUT_CONTRACT = """ФОРМАТ ОТВЕТА — ровно один JSON-об
 
 REVIEW_PROMPT = (
     "Синхронизировалась новая тренировка: детали — в workout_detail, вычисленные "
-    "метрики (кардиодрейф, GAP с поправкой на рельеф, отклонение пульса от моей "
-    "нормы, жара) — в workout_computed, состояние утра того дня — в "
+    "метрики — в workout_computed: кардиодрейф (drift_pct и drift_bpm), GAP с "
+    "поправкой на рельеф, отклонение пульса от моей нормы, точное время в зонах "
+    "(time_in_zones), дисциплина лёгкого дня (easy_discipline), стабильность "
+    "темпа и пульса, баллы нагрузки (load_points), потолки качественного объёма "
+    "(quality_volume), доля длительной (long_run), каденс, RPE против моей нормы "
+    "(rpe), разминка (warmup), жара. Состояние утра того дня — в "
     "daily_metrics_morning; мои оценки (rpe, боль) уже внутри workout_detail, "
     "если я успел ответить. Разбери тренировку: как легла на состояние и неделю, "
-    "что получилось, что настораживает — пульс к зонам и дрейф, темп с поправкой "
-    "на рельеф/погоду, колено, RPE против ожидаемого. Обязательно заполни "
-    "assessment (effort_match, causes, flags, carry_forward). Если по итогам "
-    "стоит скорректировать следующую тренировку — заполни proposal (он пройдёт "
-    "через ограничитель безопасности); если менять нечего — proposal=null. "
-    "Закончи одним коротким вопросом о самочувствии.")
+    "что получилось, что настораживает — опирайся на числа из workout_computed, "
+    "не пересчитывай их и не оценивай на глаз то, что там уже посчитано. "
+    "Обязательно заполни assessment (effort_match, causes, flags, carry_forward). "
+    "В flags — ТОЛЬКО флаги, которые есть в workout_computed.flags, плюс "
+    "субъективные pain/great_session; не выставляй флаг, которого нет в computed. "
+    "Если по итогам стоит скорректировать следующую тренировку — заполни proposal "
+    "(он пройдёт через ограничитель безопасности); если менять нечего — "
+    "proposal=null. Закончи одним коротким вопросом о самочувствии.")
 
 WEEKLY_PROMPT = (
     "Недельный отчёт. Подведи итог прошедшей недели по weekly_summary, "

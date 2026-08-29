@@ -92,3 +92,17 @@ def test_feedback_repository(db_session):
 def test_feedback_avg_empty(db_session):
     user = _new_user(db_session)
     assert FeedbackRepository.avg_rating(user.id, db=db_session) is None
+
+
+def test_km_in_window_rolling(db_session):
+    """km_in_window: окно (end−7д, end] — включает сессию, исключает старое."""
+    user = _new_user(db_session)
+    now = utcnow()
+    build_training_session(db_session, user.id, total_distance_km=10.0,
+                           begin_ts=now)
+    build_training_session(db_session, user.id, total_distance_km=5.0,
+                           begin_ts=now - timedelta(days=3))
+    build_training_session(db_session, user.id, total_distance_km=8.0,
+                           begin_ts=now - timedelta(days=8))  # вне окна
+    km = TrainingRepository.km_in_window(user.id, now, db=db_session)
+    assert km == 15.0

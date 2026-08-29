@@ -132,4 +132,5 @@
 | Аудит/бэклог | `PROJECT_AUDIT.md`, `BACKLOG.md` |
 | План и архитектура коуча | `docs/coach/DEV_PLAN.md`, `docs/coach/ARCHITECTURE.md` |
 | Открытое задание: ориентир темпа/дистанции (#264) | `docs/coach/TASK_pace_estimate_fallback.md` |
+| Руководство: детерминированные метрики разбора (#268) | `docs/coach/METRICS_GUIDE.md` |
 | Расширенный контекст + история спринтов + карта `src/` | `AGENTS.md` |

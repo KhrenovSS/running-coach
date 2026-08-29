@@ -53,15 +53,24 @@ def build_moving_samples(times_sec: list[float], dists: list[float],
     return samples
 
 
+def _mean_hr(samples: list[MovingSample]) -> float | None:
+    """Time-weighted средний HR по сэмплам (time-weighted mean HR)."""
+    hr_t = sum(s.dt_sec for s in samples if s.hr is not None)
+    if hr_t <= 0:
+        return None
+    return sum(s.hr * s.dt_sec for s in samples if s.hr is not None) / hr_t
+
+
 def _ef(samples: list[MovingSample]) -> float | None:
     """EF половины: grade-adjusted speed / time-weighted HR."""
     t = sum(s.dt_sec for s in samples)
-    hr_t = sum(s.dt_sec for s in samples if s.hr is not None)
-    if t <= 0 or hr_t <= 0:
+    if t <= 0:
+        return None
+    hr = _mean_hr(samples)
+    if hr is None or hr <= 0:
         return None
     speed = sum(s.dist_delta_m * s.grade_factor for s in samples) / t
-    hr = sum(s.hr * s.dt_sec for s in samples if s.hr is not None) / hr_t
-    return speed / hr if hr > 0 else None
+    return speed / hr
 
 
 def _pace_cv(per_km: list[dict] | None) -> float | None:
@@ -77,6 +86,43 @@ def _pace_cv(per_km: list[dict] | None) -> float | None:
         return None
     var = sum((v - mean) ** 2 for v in vals) / len(vals)
     return (var ** 0.5) / mean
+
+
+def pace_cv(per_km: list[dict] | None) -> float | None:
+    """Публичная обёртка _pace_cv — стабильность темпа для computed_json (M1.2).
+
+    Нужна отдельно от drift: для interval drift выходит рано и CV не считает.
+    (Public pace-CV; drift bails out early for intervals, this does not.)
+    """
+    return _pace_cv(per_km)
+
+
+def hr_stability(times_sec: list[float], dists: list[float],
+                 hrs: list[int | None]) -> dict:
+    """Стабильность пульса (M1.2): CV и SD ЧСС по moving-сэмплам без разогрева.
+
+    Time-weighted статистика; разогрев отброшен тем же окном, что и в drift.
+    (Time-weighted HR CV/SD over moving samples, warmup discarded.)
+    """
+    samples = build_moving_samples(times_sec, dists, hrs)
+    warmup_sec = DRIFT_WARMUP_MIN * 60
+    acc = 0.0
+    work: list[MovingSample] = []
+    for s in samples:
+        acc += s.dt_sec
+        if acc > warmup_sec:
+            work.append(s)
+    hr_t = sum(s.dt_sec for s in work if s.hr is not None)
+    if hr_t <= 0:
+        return {"available": False, "reason": "no_hr"}
+    mean = sum(s.hr * s.dt_sec for s in work if s.hr is not None) / hr_t
+    if mean <= 0:
+        return {"available": False, "reason": "no_hr"}
+    var = sum((s.hr - mean) ** 2 * s.dt_sec
+              for s in work if s.hr is not None) / hr_t
+    sd = var ** 0.5
+    return {"available": True, "mean_hr": round(mean, 1),
+            "sd": round(sd, 1), "cv": round(sd / mean, 3)}
 
 
 def compute_cardiac_drift(times_sec: list[float], dists: list[float],
@@ -128,10 +174,18 @@ def compute_cardiac_drift(times_sec: list[float], dists: list[float],
     drift_pct = (ef1 - ef2) / ef1 * 100.0
     flag = ("high" if drift_pct > DRIFT_HIGH_PCT
             else "moderate" if drift_pct > DRIFT_MODERATE_PCT else "normal")
+    # M1.3: чистый дрейф в уд/мин — прямой ответ «вырос ли пульс при том же темпе»
+    # (plain HR drift in bpm between the same halves; EF ratio stays the headline)
+    hr1, hr2 = _mean_hr(first), _mean_hr(second)
     return {
         "applicable": True, "reason": None,
         "drift_pct": round(drift_pct, 1),
         "first_half_ef": round(ef1, 5), "second_half_ef": round(ef2, 5),
+        "hr_first_half": round(hr1, 1) if hr1 is not None else None,
+        "hr_second_half": round(hr2, 1) if hr2 is not None else None,
+        "drift_bpm": (round(hr2 - hr1, 1)
+                      if hr1 is not None and hr2 is not None else None),
+        "pace_cv": round(cv, 3) if cv is not None else None,
         "gap_adjusted": grade_factors is not None,
         "window_min": round(window_min, 1), "flag": flag,
     }

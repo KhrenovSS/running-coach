@@ -11,25 +11,47 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from src.analysis.effort import compute_cardiac_drift, heat_block
+from src.analysis import session_metrics as sm
+from src.analysis.effort import compute_cardiac_drift, heat_block, hr_stability, pace_cv
 from src.analysis.gap import compute_gap, local_grade_factors, smooth_altitudes
 from src.analysis.hr_baseline import (
     baseline_deviation,
-    deviation_flag,
     fit_hr_pace_baseline,
     hr_at_pace_band,
     km_points,
     pace_at_hr_band,
 )
+from src.coach.config import (
+    CADENCE_LOW_SPM,
+    CADENCE_SANITY_MIN_SPM,
+    CADENCE_TARGET_SPM,
+    EASY_RUN_Z3_TOLERANCE_PCT,
+    INTERVAL_MAX_KM,
+    INTERVAL_MAX_PCT_WEEK,
+    INTERVAL_SEGMENT_MAX_MIN,
+    LONG_RUN_MAX_MIN,
+    LONG_RUN_MAX_PCT_WEEK,
+    POINTS_PER_MIN,
+    RPE_BASELINE_Z_MAX,
+    RPE_ELEVATED_DELTA,
+    RPE_HISTORY_DAYS,
+    RPE_MIN_SAMPLES,
+    THRESHOLD_MAX_KM,
+    THRESHOLD_MAX_PCT_WEEK,
+    WARMUP_EASY_SHARE_MIN,
+    WARMUP_WINDOW_MIN,
+)
 from src.coach.util import effective_training_type
-from src.config.constants import BASELINE_TYPES, BASELINE_WINDOW_DAYS
-from src.models import TrainingSession, UserModel, WorkoutInsight
+from src.config import settings
+from src.config.constants import BASELINE_TYPES, BASELINE_WINDOW_DAYS, DRIFT_MAX_PACE_CV
+from src.models import TrainingSession, User, UserModel, WorkoutInsight
+from src.services.repositories import FeedbackRepository, TrainingRepository
 from src.services.repositories_insights import InsightRepository
 from src.utils.logger import get_logger
 
 logger = get_logger("services.workout_insights")
 
-INSIGHTS_SCHEMA_VERSION = 1  # версия содержимого computed_json (bump при смене схемы)
+INSIGHTS_SCHEMA_VERSION = 2  # версия содержимого computed_json (bump при смене схемы)
 
 _EMPTY_DRIFT = {"applicable": False, "reason": "no_trackpoints", "drift_pct": None,
                 "first_half_ef": None, "second_half_ef": None, "gap_adjusted": None,
@@ -62,10 +84,15 @@ def _parse_trackpoints(raw: list[dict] | None) -> tuple[list, list, list, list]:
 
 
 def compute_workout_metrics(session: TrainingSession, *,
-                            baseline: dict | None = None) -> dict:
+                            baseline: dict | None = None,
+                            max_hr: int | None = None,
+                            week_km: float | None = None,
+                            rpe_history: dict | None = None) -> dict:
     """Собрать computed_json одной тренировки (pure assembly, без БД).
 
     Все ветки деградируют в applicable/available=false — исключений наружу нет.
+    БД-входы (max_hr, week_km, rpe_history={"rpe", "peers"}) резолвит
+    upsert_workout_insights; None → соответствующий блок available=false.
     """
     times_sec, dists, hrs, alts = _parse_trackpoints(session.trackpoints_json)
     ttype = effective_training_type(session)
@@ -83,7 +110,21 @@ def compute_workout_metrics(session: TrainingSession, *,
         computed["gap"] = {"available": False}
         computed["hr_vs_baseline"] = {"available": False, "reason": "no_trackpoints"}
         computed["heat"] = heat_block(session.avg_temperature)
-        computed["flags"] = _flags(computed)
+        computed["time_in_zones"] = {"available": False, "reason": "no_trackpoints"}
+        computed["easy_discipline"] = {"applicable": False, "reason": "no_trackpoints"}
+        computed["pace_stability"] = {"available": False, "reason": "no_trackpoints"}
+        computed["hr_stability"] = {"available": False, "reason": "no_trackpoints"}
+        computed["load_points"] = {"available": False, "reason": "no_trackpoints"}
+        computed["quality_volume"] = {"available": False, "reason": "no_trackpoints"}
+        computed["long_run"] = sm.long_run_share(
+            session.total_distance_km, session.duration_minutes, week_km, ttype,
+            max_pct=LONG_RUN_MAX_PCT_WEEK, max_min=LONG_RUN_MAX_MIN)
+        computed["cadence"] = sm.cadence_block(
+            session.segments_json, target=CADENCE_TARGET_SPM,
+            low=CADENCE_LOW_SPM, sanity_min=CADENCE_SANITY_MIN_SPM)
+        computed["rpe"] = {"available": False, "reason": "no_trackpoints"}
+        computed["warmup"] = {"applicable": False, "reason": "no_trackpoints"}
+        computed["flags"] = sm.collect_flags(computed)
         return computed
 
     gap = compute_gap(times_sec, dists, hrs, alts)
@@ -99,26 +140,43 @@ def compute_workout_metrics(session: TrainingSession, *,
     computed["drift"] = drift
     computed["hr_vs_baseline"] = deviation
     computed["heat"] = heat_block(session.avg_temperature)
-    computed["flags"] = _flags(computed)
+
+    # --- M1: детерминированные метрики сессии (METRICS_GUIDE §4) ---
+    zones = sm.time_in_zones(times_sec, hrs, max_hr)
+    computed["time_in_zones"] = zones
+    computed["easy_discipline"] = sm.easy_discipline(
+        zones, ttype, tolerance=EASY_RUN_Z3_TOLERANCE_PCT)
+    # CV темпа: из drift, если посчитан; иначе (interval/ранний выход) — напрямую
+    cv = drift.get("pace_cv")
+    if cv is None:
+        cv = pace_cv(gap.get("per_km"))
+        cv = round(cv, 3) if cv is not None else None
+    computed["pace_stability"] = (
+        {"available": True, "cv": cv, "flag": cv > DRIFT_MAX_PACE_CV}
+        if cv is not None else {"available": False, "reason": "few_km"})
+    computed["hr_stability"] = hr_stability(times_sec, dists, hrs)
+    computed["load_points"] = sm.load_points(zones, POINTS_PER_MIN)
+    computed["quality_volume"] = sm.quality_volume(
+        gap.get("per_km"), zones, week_km, max_hr,
+        interval_max_pct=INTERVAL_MAX_PCT_WEEK, interval_max_km=INTERVAL_MAX_KM,
+        threshold_max_pct=THRESHOLD_MAX_PCT_WEEK, threshold_max_km=THRESHOLD_MAX_KM,
+        segment_max_min=INTERVAL_SEGMENT_MAX_MIN)
+    computed["long_run"] = sm.long_run_share(
+        session.total_distance_km, session.duration_minutes, week_km, ttype,
+        max_pct=LONG_RUN_MAX_PCT_WEEK, max_min=LONG_RUN_MAX_MIN)
+    computed["cadence"] = sm.cadence_block(
+        session.segments_json, target=CADENCE_TARGET_SPM,
+        low=CADENCE_LOW_SPM, sanity_min=CADENCE_SANITY_MIN_SPM)
+    computed["rpe"] = sm.rpe_block(
+        (rpe_history or {}).get("rpe"), (rpe_history or {}).get("peers") or [],
+        deviation.get("z") if deviation.get("available") else None,
+        delta=RPE_ELEVATED_DELTA, min_samples=RPE_MIN_SAMPLES,
+        z_max=RPE_BASELINE_Z_MAX)
+    computed["warmup"] = sm.warmup_block(
+        times_sec, hrs, max_hr, ttype,
+        window_min=WARMUP_WINDOW_MIN, easy_share_min=WARMUP_EASY_SHARE_MIN)
+    computed["flags"] = sm.collect_flags(computed)
     return computed
-
-
-def _flags(computed: dict) -> list[str]:
-    """Плоский список флагов — быстрый вход для LLM (flat flags for the LLM)."""
-    flags: list[str] = []
-    drift = computed.get("drift", {})
-    if drift.get("flag") == "high":
-        flags.append("decoupling_high")
-    elif drift.get("flag") == "moderate":
-        flags.append("decoupling_moderate")
-    if computed.get("heat", {}).get("heat_flag"):
-        flags.append("heat")
-    if computed.get("gap", {}).get("hilly"):
-        flags.append("hilly")
-    dev_flag = deviation_flag(computed.get("hr_vs_baseline", {}))
-    if dev_flag:
-        flags.append(dev_flag)
-    return flags
 
 
 def upsert_workout_insights(user_id: int, session_id: int, *, db: Session,
@@ -135,7 +193,12 @@ def upsert_workout_insights(user_id: int, session_id: int, *, db: Session,
     if session is None:
         return None
     baseline = _stored_baseline(user_id, db=db)
-    computed = compute_workout_metrics(session, baseline=baseline)
+    computed = compute_workout_metrics(
+        session, baseline=baseline,
+        max_hr=_user_max_hr(user_id, db=db),
+        week_km=(TrainingRepository.km_in_window(user_id, session.begin_ts, db=db)
+                 if session.begin_ts else None),
+        rpe_history=_rpe_history(user_id, session, db=db))
     InsightRepository.upsert(user_id, session_id, db=db, computed=computed,
                              schema_version=INSIGHTS_SCHEMA_VERSION, status=status)
     if effective_training_type(session) in BASELINE_TYPES:
@@ -157,6 +220,26 @@ def _stored_baseline(user_id: int, *, db: Session) -> dict | None:
     if um and um.params_json:
         return um.params_json.get("hr_pace_baseline")
     return None
+
+
+def _user_max_hr(user_id: int, *, db: Session) -> int:
+    user = db.query(User).filter(User.id == user_id).first()
+    return (user.max_hr if user and user.max_hr else settings.default_max_hr)
+
+
+def _rpe_history(user_id: int, session: TrainingSession, *,
+                 db: Session) -> dict | None:
+    """RPE сессии + оценки того же типа за окно — вход для rpe_block (M1.8)."""
+    rpe = FeedbackRepository.rating_for_session(session.id, db=db)
+    if rpe is None:
+        return None
+    ttype = effective_training_type(session)
+    rows = FeedbackRepository.ratings_with_sessions(
+        user_id, days=RPE_HISTORY_DAYS, db=db)
+    peers = [r["rating"] for r in rows
+             if r.get("rating") is not None and r["session_id"] != session.id
+             and (r.get("training_type_override") or r.get("training_type")) == ttype]
+    return {"rpe": rpe, "peers": peers}
 
 
 def _bootstrap_window_insights(user_id: int, *, db: Session) -> list[int]:

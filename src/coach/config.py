@@ -118,3 +118,40 @@ LOAD_PROGRESSION = {
     "max_weekly_increase_pct": 10,
     "max_monthly_increase_pct": 30,
 }
+
+# --- Метрики сессии M1 (Session metrics) — docs/coach/METRICS_GUIDE.md §4 ---
+# Пороги применяет src/services/workout_insights.py; чистые формулы в
+# src/analysis/session_metrics.py принимают их параметрами (без импорта coach→analysis).
+
+# M1.1: дисциплина лёгкого дня (гайды 00/10 — «лёгкие бегают слишком быстро»)
+EASY_RUN_Z3_TOLERANCE_PCT = 0.10   # доля moving-time в Z3+ у easy/recovery/long → флаг
+
+# M1.4: баллы нагрузки за минуту по зонам (Дэниелс, гайд 44: Л 0.2 … Пв 1.5–2.0;
+# коэффициенты — первое приближение для %max_hr-зон, уточняются после M3/ПАНО)
+POINTS_PER_MIN = {"z1": 0.2, "z2": 0.25, "z3": 0.5, "z4": 1.0, "z5": 1.5}
+
+# M1.5: потолки качественного объёма (Дэниелс, гайд 44)
+INTERVAL_MAX_PCT_WEEK = 0.08       # км в Z4+ ≤ 8% недельного км…
+INTERVAL_MAX_KM = 10.0             # …или 10 км — что меньше
+THRESHOLD_MAX_PCT_WEEK = 0.10      # км в Z3 ≤ 10% недельного км…
+THRESHOLD_MAX_KM = 24.0            # …или 24 км
+INTERVAL_SEGMENT_MAX_MIN = 5.0     # непрерывный отрезок в Z4+ не дольше 5 мин
+
+# M1.6: длительная (Дэниелс, гайд 45: ≤25–30% недели или 150 мин)
+LONG_RUN_MAX_PCT_WEEK = 0.30
+LONG_RUN_MAX_MIN = 150.0
+
+# M1.7: каденс (Дэниелс, гайд 46 — профилактика колена; цель ~180 spm)
+CADENCE_TARGET_SPM = 180
+CADENCE_LOW_SPM = 170              # медиана ниже → флаг low_cadence
+CADENCE_SANITY_MIN_SPM = 120       # ниже — подозрение на «одну ногу» → available=false
+
+# M1.8: RPE-триангуляция «плохого дня» (Фицджеральд, гайд 40)
+RPE_ELEVATED_DELTA = 2             # RPE выше медианы того же типа на ≥2 → флаг
+RPE_HISTORY_DAYS = 90
+RPE_MIN_SAMPLES = 5                # меньше оценок того же типа → available=false
+RPE_BASELINE_Z_MAX = 1.0           # гейт «объективный фон в норме»: |z| hr_vs_baseline
+
+# M1.9: разминка перед качественной (Фицджеральд, гайд 41)
+WARMUP_WINDOW_MIN = 10.0           # окно проверки, минуты от старта
+WARMUP_EASY_SHARE_MIN = 0.5        # меньше половины окна в Z1–2 → флаг no_warmup

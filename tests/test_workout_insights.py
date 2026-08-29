@@ -178,3 +178,38 @@ def test_baseline_absent_with_few_sessions(db_session):
     assert baseline is None
     um = db_session.query(UserModel).filter_by(user_id=user.id).first()
     assert "hr_pace_baseline" not in (um.params_json or {})
+
+
+def test_m1_blocks_present_and_easy_discipline_flag(db_session):
+    """M1 (METRICS_GUIDE §4): computed v2 содержит новые блоки; лёгкая,
+    пробежанная в Z3+, ловит easy_run_too_hard детерминированно."""
+    user = _user(db_session)
+    # hr=150 при max_hr=177 → Z3: вся «лёгкая» выше Z2
+    s = _session_with_track(db_session, user.id, hr=150, ttype='easy')
+    computed = upsert_workout_insights(user.id, s.id, db=db_session)
+    for key in ("time_in_zones", "easy_discipline", "pace_stability",
+                "hr_stability", "load_points", "quality_volume",
+                "long_run", "cadence", "rpe", "warmup"):
+        assert key in computed, key
+    assert computed["time_in_zones"]["available"] is True
+    assert computed["easy_discipline"]["flag"] is True
+    assert "easy_run_too_hard" in computed["flags"]
+    assert computed["load_points"]["available"] is True
+    # ровный синтетический темп → стабильность считается и не флагуется
+    assert computed["pace_stability"]["available"] is True
+    assert computed["pace_stability"]["flag"] is False
+    assert computed["hr_stability"]["available"] is True
+    # drift v2: чистый дрейф в bpm присутствует
+    assert "drift_bpm" in computed["drift"]
+    json.dumps(computed)
+
+
+def test_m1_week_km_feeds_long_run_share(db_session):
+    """Единственная длительная в неделе → доля ≈100% → long_run_share_high."""
+    user = _user(db_session)
+    s = _session_with_track(db_session, user.id, ttype='long')
+    computed = upsert_workout_insights(user.id, s.id, db=db_session)
+    lr = computed["long_run"]
+    assert lr["applicable"] is True
+    assert lr["share_of_week"] > 0.9
+    assert "long_run_share_high" in computed["flags"]
