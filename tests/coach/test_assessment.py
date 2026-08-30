@@ -111,6 +111,40 @@ def test_flags_merged_from_computed_not_llm(athlete_with_history, db_session):
     assert flags == ["hr_drift_high", "easy_run_too_hard", "great_session"]
 
 
+def test_flags_validator_drops_unknown():
+    """Контекст-имена (heat/hilly) и мусор — выкидываются, не роняют схему;
+    валидные субъективные флаги остаются (инцидент 30.08.2026)."""
+    a = ReviewAssessment.model_validate(
+        {"effort_match": "ok", "flags": ["heat", "pain", "hilly", "great_session"]})
+    assert a.flags == ["pain", "great_session"]
+    # дедуп + cap 4 не роняют ход даже при длинном списке валидных
+    long = ReviewAssessment.model_validate(
+        {"flags": ["pain", "pain", "great_session", "hr_drift_high",
+                   "low_cadence", "rpe_elevated", "no_warmup"]})
+    assert len(long.flags) == 4 and long.flags[0] == "pain"
+
+
+def test_review_with_heat_flag_no_fallback(athlete_with_history, db_session):
+    """Жаркая тренировка: LLM вернул flags=['heat', ...] → разбор проходит через
+    LLM (source=llm), а не сваливается в fallback (инцидент 30.08.2026)."""
+    from src.services.workout_insights import INSIGHTS_SCHEMA_VERSION
+
+    sid = _latest_session_id(athlete_with_history.id, db_session)
+    InsightRepository.upsert(
+        athlete_with_history.id, sid, db=db_session,
+        computed={"schema_version": INSIGHTS_SCHEMA_VERSION, "flags": ["heat"]},
+        schema_version=INSIGHTS_SCHEMA_VERSION)
+    turn = dict(REVIEW_TURN_WITH_ASSESSMENT)
+    turn["assessment"] = dict(turn["assessment"], flags=["heat", "great_session"])
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
+    orchestrator.on_workout_completed(athlete_with_history.id, sid,
+                                      db=db_session, llm=llm)
+    row = InsightRepository.for_session(athlete_with_history.id, sid, db=db_session)
+    assert row.source == "llm"                 # не fallback
+    assert "heat" not in row.assessment_json["flags"]
+    assert "great_session" in row.assessment_json["flags"]
+
+
 def test_merged_flags_unit():
     """_merged_flags: маппинг, дедуп, фильтр по enum, cap 4."""
     merged = orchestrator._merged_flags(

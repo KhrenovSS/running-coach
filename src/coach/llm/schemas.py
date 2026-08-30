@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -87,6 +87,30 @@ class ReviewAssessment(BaseModel):
     causes: list[CauseValue] = Field(default_factory=list, max_length=4)
     flags: list[FlagValue] = Field(default_factory=list, max_length=4)
     carry_forward: str | None = Field(default=None, max_length=300)
+
+    @field_validator("flags", mode="before")
+    @classmethod
+    def _drop_unknown_flags(cls, v):
+        """Невалидные флаги от LLM — выкинуть, не ронять весь ход разбора.
+
+        На жаре/холмах LLM зеркалит контекст-имена из computed.flags (heat, hilly,
+        decoupling_*), которых нет в enum FlagValue → строгая валидация раньше
+        роняла CoachTurn целиком, и разбор уходил в деградированный fallback
+        (инцидент 30.08.2026). Реальные детерминированные флаги всё равно пересобирает
+        orchestrator._merged_flags из computed; у LLM значимы лишь субъективные
+        pain/great_session. Дедуп + cap 4 — чтобы длина не роняла ход повторно.
+        (Drop unknown LLM flags instead of failing the whole review turn.)
+        """
+        if v is None:
+            return []
+        if not isinstance(v, list):
+            return v  # не список — пусть падает штатной ошибкой типа
+        allowed = set(get_args(FlagValue))
+        out: list = []
+        for f in v:
+            if f in allowed and f not in out:
+                out.append(f)
+        return out[:4]
 
 
 class CoachTurn(BaseModel):

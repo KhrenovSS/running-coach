@@ -2,6 +2,35 @@
 
 All notable changes to this project are tracked here.
 
+## [30.08.2026] — Коуч: разбор больше не падает в fallback из-за флага `heat`
+
+Фикс воспроизводимого бага: на жаркой тренировке (температура старта > 20 °C →
+`heat_flag`) LLM зеркалил контекст-имя `heat` из `workout_computed.flags` в
+`assessment.flags`, которого нет в enum `FlagValue`. Строгая валидация `CoachTurn`
+роняла весь ход → разбор уходил в деградированный `_deterministic_review`
+(«странный» разбор; инцидент утром 30.08, user=2, лог `LLM review fallback … input_value='heat'`).
+
+### Fixed
+- `ReviewAssessment.flags` — `field_validator(mode="before")` молча отбрасывает
+  невалидные флаги (`heat`/`hilly`/`decoupling_*`/мусор), дедуп + cap 4, вместо
+  hard-fail всего разбора. Реальные детерминированные флаги и так пересобирает
+  `orchestrator._merged_flags` из `computed`; у LLM значимы лишь субъективные
+  `pain`/`great_session`. Устойчиво к «мост не форсит JSON-schema».
+- Промпт разбора (`prompts.py`): в `flags` просим только `pain`/`great_session`,
+  детерминированные добавляет код — не копировать контекст-имена.
+- Тесты: +2 (`test_flags_validator_drops_unknown`,
+  `test_review_with_heat_flag_no_fallback`). Полный прогон — 533 passed.
+
+### Операционка (задеплоено 30.08.2026, ~11:31 MSK)
+- Бэкап БД (`backups/backup_2026-08-30_11-30-05.sql.gz`) → пересборка образа `bot`
+  → `docker compose up -d bot`. Контейнер поднялся, polling ок, мост LLM — `sonnet`.
+- Повторно разобрана утренняя пробежка **session=40** (воскресный забег, 09:01 MSK):
+  теперь `source=llm` (был `fallback`), `flags=['low_cadence','great_session']`
+  (`heat` отброшен валидатором), нормальный разбор доставлен в Telegram (message_id 466).
+- **Не закоммичено** (по дисциплине — коммит по запросу владельца): 5 файлов —
+  `src/coach/llm/schemas.py`, `src/coach/llm/prompts.py`, `tests/coach/test_assessment.py`,
+  `CHANGELOG.md`, `BACKLOG.md`. Незакоммиченное состояние видно в `git status`.
+
 ## [30.08.2026] — Коуч: утреннее напоминание о скриншоте сна (#257)
 
 Если к 10:00 (локальный пояс) скриншот сна за сегодня не прислан — бот шлёт мягкий
