@@ -35,15 +35,15 @@ def save_sleep_shot(user_id: int, shot: SleepShot, *, db: Session) -> DailyMetri
         db.add(dm)
         db.flush()
     dm.sleep_duration_min = shot.duration_min
-    dm.sleep_deep_min = shot.deep_min
-    dm.sleep_light_min = shot.light_min
-    dm.sleep_rem_min = shot.rem_min
     dm.sleep_awake_min = shot.awake_min
+    dm.sleep_deep_min = shot.deep_min          # минуты фаз — если экран их показывает
+    dm.sleep_rem_min = shot.rem_min
     dm.sleep_score = shot.score
+    dm.sleep_extra = shot.extra()              # deep_pct/rem_pct/stress/bedtime/note
     dm.sleep_source = SLEEP_SOURCE
     db.commit()
-    logger.info("Sleep shot saved: user=%s date=%s dur=%s score=%s",
-                user_id, day, shot.duration_min, shot.score)
+    logger.info("Sleep shot saved: user=%s date=%s dur=%s extra=%s",
+                user_id, day, shot.duration_min, bool(shot.extra()))
     return dm
 
 

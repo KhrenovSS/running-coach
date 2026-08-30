@@ -84,16 +84,30 @@ def _hm(minutes: int | None) -> str | None:
 
 def _render_ack(shot: SleepShot) -> str:
     """Подтверждение — числа детерминированно из SleepShot (deterministic ack)."""
-    parts = [f"✅ Записал сон: *{_hm(shot.duration_min)}*"] if shot.duration_min \
-        else ["✅ Записал данные сна"]
+    head = f"✅ Записал сон: *{_hm(shot.duration_min)}*" if shot.duration_min \
+        else "✅ Записал данные сна"
+    lines = [head]
     phases = []
-    for label, val in (("глубокий", shot.deep_min), ("лёгкий", shot.light_min),
-                       ("REM", shot.rem_min), ("бодрств.", shot.awake_min)):
-        if val is not None:
-            phases.append(f"{label} {_hm(val)}")
-    lines = [" ".join(parts)]
+    if shot.deep_pct is not None:
+        phases.append(f"глубокий {shot.deep_pct}%")
+    if shot.rem_pct is not None:
+        phases.append(f"REM {shot.rem_pct}%")
+    if shot.awake_min is not None:
+        aw = f"бодрств. {_hm(shot.awake_min)}"
+        if shot.awake_interruptions is not None:
+            aw += f" ({shot.awake_interruptions} прерыв.)"
+        phases.append(aw)
     if phases:
         lines.append(" · ".join(phases))
+    tail = []
+    if shot.sleep_stress is not None:
+        tail.append(f"стресс сна {shot.sleep_stress}")
+    if shot.bedtime_offset_min is not None:
+        o = shot.bedtime_offset_min
+        when = "позже" if o >= 0 else "раньше"
+        tail.append(f"отход ко сну на {abs(o)} мин {when} обычного")
     if shot.score is not None:
-        lines.append(f"Оценка сна: {shot.score}/100")
+        tail.append(f"оценка {shot.score}/100")
+    if tail:
+        lines.append(" · ".join(tail))
     return "\n".join(lines)

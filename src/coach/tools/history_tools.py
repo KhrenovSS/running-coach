@@ -129,12 +129,11 @@ def get_workout_detail(ctx: ToolContext, args: dict) -> dict:
             "hrv": dm.avg_sleep_hrv, "hrv_baseline": dm.sleep_hrv_baseline,
             "rhr": dm.rhr, "recovery_pct": dm.recovery_pct,
             "tired_rate": dm.tired_rate,
-            # Сон из скриншота (#257) — None, если пользователь не присылал
+            # Сон из скриншота (#257) — None, если пользователь не присылал.
+            # sleep_extra: deep_pct/rem_pct/sleep_stress/bedtime_offset_min/note
             "sleep_duration_min": dm.sleep_duration_min,
-            "sleep_score": dm.sleep_score,
-            "sleep_stages": ({"deep": dm.sleep_deep_min, "light": dm.sleep_light_min,
-                              "rem": dm.sleep_rem_min, "awake": dm.sleep_awake_min}
-                             if dm.sleep_duration_min is not None else None),
+            "sleep_awake_min": dm.sleep_awake_min,
+            "sleep_extra": dm.sleep_extra,
         } if dm else None),
         "suspect_flags": session.suspect_flags or [],
     })

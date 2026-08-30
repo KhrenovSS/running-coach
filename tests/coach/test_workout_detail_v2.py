@@ -69,7 +69,7 @@ def test_daily_metrics_morning_of_workout_day(empty_user, db_session):
     assert dm["hrv"] == 62.0 and dm["hrv_baseline"] == 65.0
     assert dm["rhr"] == 56 and dm["recovery_pct"] == 44 and dm["tired_rate"] == 2
     # Сон из скриншота не присылали (#257) → поля None
-    assert dm["sleep_duration_min"] is None and dm["sleep_stages"] is None
+    assert dm["sleep_duration_min"] is None and dm["sleep_extra"] is None
 
 
 def test_no_metrics_day_graceful(empty_user, db_session):

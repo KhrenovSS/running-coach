@@ -43,7 +43,10 @@ class DailyMetrics(Base):
     sleep_light_min = Column(Integer, nullable=True)      # лёгкий сон, мин
     sleep_rem_min = Column(Integer, nullable=True)        # REM, мин
     sleep_awake_min = Column(Integer, nullable=True)      # бодрствование, мин
-    sleep_score = Column(Integer, nullable=True)          # оценка сна 0-100
+    sleep_score = Column(Integer, nullable=True)          # оценка сна 0-100 (если экран показывает)
+    # Гибкие метрики экрана сна Coros: deep_pct, rem_pct, sleep_stress,
+    # bedtime_offset_min (± vs среднего), awake_interruptions, note (резюме).
+    sleep_extra = Column(JSON, nullable=True)
     sleep_source = Column(String(30), nullable=True)      # 'coros_screenshot'
     source_brand = Column(String(50), nullable=True)  # e.g. 'coros', 'garmin' (source of metric)
 

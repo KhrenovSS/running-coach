@@ -18,46 +18,68 @@ from src.utils.logger import get_logger
 
 logger = get_logger("coach.vision")
 
-_SYSTEM = ("Ты извлекаешь данные из скриншота экрана сна фитнес-приложения. "
+_SYSTEM = ("Ты извлекаешь данные из скриншота экрана сна приложения Coros. "
            "Отвечай СТРОГО одним JSON-объектом, без markdown и пояснений.")
 
+# Промпт под реальный экран Coros (подписи смешанные RU/EN):
+# «Всего сна», «Deep Sleep %», «REM %», «Бдение» (время / прерывания),
+# «Bedtime Consistency» (сдвиг vs 30-дн. среднего), «Sleep Stress», текст-резюме.
 _PROMPT = (
-    "Прочитай изображение (Read tool) и верни JSON строго с этими полями:\n"
+    "Прочитай изображение (Read tool) — это экран сна Coros — и верни JSON строго:\n"
     '{"is_sleep_screen": true|false,\n'
-    ' "duration_min": целое минут общего сна или null,\n'
-    ' "deep_min": минут глубокого сна или null,\n'
-    ' "light_min": минут лёгкого сна или null,\n'
-    ' "rem_min": минут REM или null,\n'
-    ' "awake_min": минут бодрствования или null,\n'
-    ' "score": оценка сна 0-100 или null,\n'
+    ' "duration_min": минут общего сна («Всего сна» 5h 52min → 352) или null,\n'
+    ' "deep_pct": процент глубокого сна («Deep Sleep %» → целое 0-100) или null,\n'
+    ' "rem_pct": процент REM («REM %») или null,\n'
+    ' "awake_min": минут бодрствования («Бдение» total time) или null,\n'
+    ' "awake_interruptions": число прерываний («/ N раз») или null,\n'
+    ' "bedtime_offset_min": «Bedtime Consistency vs среднего»: целое со знаком, '
+    'позже среднего = плюс (49мин later → 49), раньше = минус, или null,\n'
+    ' "sleep_stress": число «Sleep Stress» или null,\n'
+    ' "deep_min": минуты глубокого, если показаны отдельно, иначе null,\n'
+    ' "rem_min": минуты REM, если показаны, иначе null,\n'
+    ' "score": оценка/балл сна, если есть, иначе null,\n'
+    ' "note": короткое текстовое резюме сна с экрана (одна строка) или null,\n'
     ' "date": "YYYY-MM-DD" если дата видна, иначе null}\n'
-    "Время вида «7ч 42м» / «7h 42m» переводи в минуты (462). "
-    "Если это НЕ экран сна — верни {\"is_sleep_screen\": false} и остальные null. "
-    "Не выдумывай: чего нет на экране — null."
+    "Время «7ч 42м»/«7h 42m» переводи в минуты. Если это НЕ экран сна — "
+    '{"is_sleep_screen": false} и остальное null. Чего нет на экране — null, '
+    "не выдумывай."
 )
 
 
 class SleepShot(BaseModel):
-    """Данные сна, извлечённые из скриншота (parsed sleep screenshot)."""
+    """Данные сна, извлечённые из скриншота Coros (parsed sleep screenshot)."""
     is_sleep_screen: bool = False
     duration_min: int | None = Field(default=None, ge=0, le=1440)
-    deep_min: int | None = Field(default=None, ge=0, le=1440)
-    light_min: int | None = Field(default=None, ge=0, le=1440)
-    rem_min: int | None = Field(default=None, ge=0, le=1440)
     awake_min: int | None = Field(default=None, ge=0, le=1440)
+    deep_pct: int | None = Field(default=None, ge=0, le=100)
+    rem_pct: int | None = Field(default=None, ge=0, le=100)
+    awake_interruptions: int | None = Field(default=None, ge=0, le=200)
+    bedtime_offset_min: int | None = Field(default=None, ge=-720, le=720)
+    sleep_stress: int | None = Field(default=None, ge=0, le=100)
+    # опционально — если конкретный экран показывает минуты фаз / балл:
+    deep_min: int | None = Field(default=None, ge=0, le=1440)
+    rem_min: int | None = Field(default=None, ge=0, le=1440)
     score: int | None = Field(default=None, ge=0, le=100)
+    note: str | None = Field(default=None, max_length=500)
     date: str | None = None
 
-    @field_validator("duration_min", "deep_min", "light_min", "rem_min",
-                     "awake_min", "score", mode="before")
+    @field_validator("duration_min", "awake_min", "deep_pct", "rem_pct",
+                     "awake_interruptions", "bedtime_offset_min", "sleep_stress",
+                     "deep_min", "rem_min", "score", mode="before")
     @classmethod
     def _empty_to_none(cls, v):
         return None if v in ("", "null", "-") else v
 
     def has_data(self) -> bool:
-        """Есть ли что сохранять (минимум длительность или скор)."""
-        return self.is_sleep_screen and (self.duration_min is not None
-                                         or self.score is not None)
+        """Есть ли что сохранять (минимум общая длительность)."""
+        return self.is_sleep_screen and self.duration_min is not None
+
+    def extra(self) -> dict | None:
+        """Гибкие метрики → JSON-колонка sleep_extra (flexible metrics blob)."""
+        keys = ("deep_pct", "rem_pct", "awake_interruptions", "bedtime_offset_min",
+                "sleep_stress", "deep_min", "rem_min", "score", "note")
+        d = {k: getattr(self, k) for k in keys if getattr(self, k) is not None}
+        return d or None
 
 
 def extract_sleep(image_bytes: bytes, *, timeout: int = 150) -> SleepShot | None:
