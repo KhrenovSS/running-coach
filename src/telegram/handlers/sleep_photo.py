@@ -50,30 +50,45 @@ async def handle_sleep_photo(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if tg_file is None:
         return
 
-    await msg.reply_text("🌙 Читаю скриншот сна…")
+    progress = await msg.reply_text("🌙 Читаю скриншот сна…")
     try:
         image_bytes = bytes(await tg_file.download_as_bytearray())
-        text = await asyncio.to_thread(_ingest_blocking, user.id, image_bytes)
-        await send_md_safe(msg.reply_text, text)
+        text, ok = await asyncio.to_thread(_ingest_blocking, user.id, image_bytes)
+        if ok and await _delete_screenshot(msg, user.id):
+            # Приватность: скриншот распознан и сохранён — убираем его из чата
+            text += "\n🗑 Скриншот удалён из чата."
+        await send_md_safe(progress.edit_text, text)
     except telegram.error.TelegramError as e:
         logger.error("Sleep photo error for user=%s: %s", user.id, e, exc_info=True)
         await msg.reply_text("😔 Не удалось обработать картинку — попробуй ещё раз.")
 
 
-def _ingest_blocking(user_id: int, image_bytes: bytes) -> str:
-    """Sync: vision → сохранение; сессия живёт внутри треда (thread-local session)."""
+async def _delete_screenshot(msg, user_id: int) -> bool:
+    """Удалить сообщение-скриншот (best-effort). В приватном чате бот удаляет
+    входящие сообщения ≤48ч; при отказе — лог, поток не рушим (данные уже в БД)."""
+    try:
+        await msg.delete()
+        return True
+    except telegram.error.TelegramError as e:
+        logger.warning("Не удалось удалить скриншот сна user=%s: %s", user_id, e)
+        return False
+
+
+def _ingest_blocking(user_id: int, image_bytes: bytes) -> tuple[str, bool]:
+    """Sync: vision → сохранение. Возвращает (текст, ok) — ok=True при распознавании.
+    Сессия живёт внутри треда (thread-local session)."""
     shot = extract_sleep(image_bytes)
     if shot is None:
-        return "😔 Тренер сейчас не смог прочитать картинку — попробуй чуть позже."
+        return "😔 Тренер сейчас не смог прочитать картинку — попробуй чуть позже.", False
     if not shot.has_data():
         return ("🤔 Это не похоже на экран сна. Пришли скриншот именно экрана сна "
-                "из приложения Coros (с длительностью и фазами).")
+                "из приложения Coros (с длительностью и фазами).", False)
     db = SessionLocal()
     try:
         save_sleep_shot(user_id, shot, db=db)
     finally:
         db.close()
-    return _render_ack(shot)
+    return _render_ack(shot), True
 
 
 def _hm(minutes: int | None) -> str | None:
