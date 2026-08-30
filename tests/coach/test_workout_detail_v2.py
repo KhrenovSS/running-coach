@@ -66,8 +66,10 @@ def test_daily_metrics_morning_of_workout_day(empty_user, db_session):
     detail = run_tool("get_workout_detail", {"session_id": s.id},
                       user_id=empty_user.id, db=db_session)
     dm = detail["daily_metrics_morning"]
-    assert dm == {"hrv": 62.0, "hrv_baseline": 65.0, "rhr": 56,
-                  "recovery_pct": 44, "tired_rate": 2}
+    assert dm["hrv"] == 62.0 and dm["hrv_baseline"] == 65.0
+    assert dm["rhr"] == 56 and dm["recovery_pct"] == 44 and dm["tired_rate"] == 2
+    # Сон из скриншота не присылали (#257) → поля None
+    assert dm["sleep_duration_min"] is None and dm["sleep_stages"] is None
 
 
 def test_no_metrics_day_graceful(empty_user, db_session):

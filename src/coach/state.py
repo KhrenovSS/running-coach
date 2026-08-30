@@ -121,7 +121,10 @@ def _hrv_very_low_days(user_id: int, *, db: Session) -> int:
 
 def _missing(dm, rpe_coverage: float | None, pain_known: bool) -> list[str]:
     """Чего система не знает — честность для LLM (what the system does not know)."""
-    missing = ["sleep", "stress", "per_session_tss"]
+    missing = ["stress", "per_session_tss"]
+    # sleep — известен, если есть данные из скриншота (#257); иначе честно missing
+    if dm is None or dm.sleep_duration_min is None:
+        missing.append("sleep")
     if dm is None or dm.avg_sleep_hrv is None:
         missing.append("hrv")
     if rpe_coverage is None or rpe_coverage < 0.5:

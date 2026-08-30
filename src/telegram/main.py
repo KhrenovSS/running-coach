@@ -16,6 +16,7 @@ from src.telegram.handlers.account import cmd_delete_me, cmd_delete_me_confirm, 
 from src.telegram.handlers.coach import (cmd_coach_settings, cmd_plan,
                                           cmd_verdict, handle_text,
                                           initiative_callback)
+from src.telegram.handlers.sleep_photo import cmd_sleep, handle_sleep_photo
 from src.telegram.handlers.feedback import feedback_callback
 from src.telegram.handlers.pain import pain_callback, pain_phase_callback, wellness_callback
 from src.telegram.handlers.hr_max import hr_max_callback
@@ -70,6 +71,7 @@ def run_bot():
     application.add_handler(CommandHandler("login_info", cmd_login_info))
     application.add_handler(CommandHandler("verdict", cmd_verdict))
     application.add_handler(CommandHandler("plan", cmd_plan))
+    application.add_handler(CommandHandler("sleep", cmd_sleep))
     application.add_handler(CommandHandler("coach_settings", cmd_coach_settings))
 
     reset_pw_handler = ConversationHandler(
@@ -89,6 +91,9 @@ def run_bot():
     application.add_handler(CallbackQueryHandler(hr_max_callback, pattern="^maxhr:"))
     application.add_handler(CallbackQueryHandler(stats_callback, pattern="^stats:"))
     application.add_handler(CallbackQueryHandler(trainings_callback, pattern="^trainings:"))
+    # Скриншот сна (#257): фото или картинка-документ → vision → DailyMetrics.
+    application.add_handler(MessageHandler(
+        filters.PHOTO | filters.Document.IMAGE, handle_sleep_photo))
     # Роутер текста: вес (приоритет) → коуч. Прямой catch-all на вес молча глотал
     # сообщения (weight handler silently returned when not awaiting — DEV_PLAN §7).
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))

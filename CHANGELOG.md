@@ -2,6 +2,40 @@
 
 All notable changes to this project are tracked here.
 
+## [30.08.2026] — Коуч: сон из скриншота (#257)
+
+Coros API длительность/фазы/оценку сна не отдаёт (разведка D8), перехват трафика
+владелец отклонил. Решение: пользователь присылает в Telegram скриншот экрана сна,
+vision-LLM извлекает данные, они сохраняются в `DailyMetrics`. Vision — через
+расширенный мост подписки (без API-ключа; feasibility подтверждена и
+end-to-end проверена: синтетический скрин → точный JSON).
+
+### Added
+- Мост `bin/coach_llm_bridge.py` — endpoint `/vision`: принимает картинку base64,
+  пишет во временный файл на хосте (0700), `claude -p --allowedTools Read
+  --add-dir <tmp> --max-turns 3` читает её, temp удаляется (`finally`). Основной
+  `/complete` не тронут. Деплой моста — `systemctl restart` (без пересборки).
+- `src/coach/vision.py` — `SleepShot` (pydantic, все поля Optional + валидация
+  диапазонов) + `extract_sleep(image_bytes)`: строгий промпт, парсинг, None-безопасно
+  (фото пользователя не роняет хендлер).
+- `src/services/sleep_ingest.py::save_sleep_shot` — upsert в `DailyMetrics` по
+  локальной дате пользователя, не перетирая Coros-HRV/recovery.
+- `DailyMetrics`: колонки `sleep_duration_min/deep/light/rem/awake_min`,
+  `sleep_score`, `sleep_source` (миграция `r1s2t3u4v5w6`, чисто аддитивная).
+- Telegram: `src/telegram/handlers/sleep_photo.py` — фото/картинка-документ →
+  vision → запись + подтверждение (числа детерминированно из SleepShot);
+  команда `/sleep`; хендлер `filters.PHOTO | filters.Document.IMAGE`.
+  Джоба `recovery.py` при отсутствии сна предлагает прислать скриншот.
+- Контекст коуча: `sleep` уходит из `state.missing` при наличии данных;
+  `daily_metrics_morning` в разборе получает `sleep_duration_min`, `sleep_score`,
+  фазы.
+- Тесты: +9 (extract_sleep валид/не-сон/битый JSON/ошибка моста/вне диапазона,
+  upsert без перетирания HRV, sleep уходит из missing).
+
+### Notes
+- API-ключ НЕ требуется (vision через мост подписки).
+- Точный набор полей подстроится под реальный экран Coros при первом живом скрине.
+
 ## [29.08.2026] — Коуч: пакет гигиены (#251, #247 v1, #256, #258)
 
 Гигиена из DEV_PLAN §9 п.2 — надёжность потоков утро/план/разбор.

@@ -36,6 +36,15 @@ class DailyMetrics(Base):
     load_impact = Column(Float, nullable=True)  # Coros "Влияние нагрузки"
     intensity_trend = Column(Float, nullable=True)  # Coros "Тренд интенсивности"
     sleep_hrv_interval_list = Column(JSON, nullable=True)  # Coros HRV intervals [min, low, normal_start, normal_end]
+    # Сон из скриншота Coros (#257) — API длительность/фазы/скор не отдаёт,
+    # пользователь присылает скрин, vision извлекает. sleep_source='coros_screenshot'.
+    sleep_duration_min = Column(Integer, nullable=True)   # общая длительность сна, мин
+    sleep_deep_min = Column(Integer, nullable=True)       # глубокий сон, мин
+    sleep_light_min = Column(Integer, nullable=True)      # лёгкий сон, мин
+    sleep_rem_min = Column(Integer, nullable=True)        # REM, мин
+    sleep_awake_min = Column(Integer, nullable=True)      # бодрствование, мин
+    sleep_score = Column(Integer, nullable=True)          # оценка сна 0-100
+    sleep_source = Column(String(30), nullable=True)      # 'coros_screenshot'
     source_brand = Column(String(50), nullable=True)  # e.g. 'coros', 'garmin' (source of metric)
 
     user = relationship("User", back_populates="daily_metrics")
