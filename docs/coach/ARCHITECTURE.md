@@ -37,6 +37,12 @@ host-сервис `bin/coach_llm_bridge.py` (systemd `running-coach-llm-bridge.s
 латентность до 150 с спрятана в фоновые треды/джобы. Остаточный зазор — проза guides
 доезжает только дайджестом (search_guides простаивает) → инлайн чанков, BACKLOG #242.
 Переезд на личный ключ = `ANTHROPIC_API_KEY` в `.env` (#241 ⏸ опция) — код не меняется.
+**30.08.2026 — второй endpoint моста `/vision` (#257):** картинка (base64) → temp-файл на
+хосте (0700) → `claude -p --output-format json --max-turns 3 --allowedTools Read --add-dir
+<tmp>` → JSON. Это осознанное исключение из «no tools»: Read-tool включён и ограничен
+temp-каталогом, `--max-turns ≥2` (ход на Read + ход на ответ), файл удаляется в `finally`.
+Нужен для распознавания сна из скриншота БЕЗ API-ключа (мультимодальность подписки через файл).
+Рестарт моста агентом — без пароля (sudoers `bin/sudoers-bridge-restart`).
 
 ## Решение 4: отложенный разбор — статус в БД, не очередь в памяти (D-серия, 24.08.2026)
 
@@ -56,36 +62,64 @@ expired/error) с атомарным claim (`UPDATE ... WHERE status='pending'`,
 
 Детерминированно гарантирована только **карточка** (числа из `Prescription` после clamp) и
 блок «⚠️ Ограничение по безопасности». Проза LLM инструктирована не называть чисел тренировки,
-но это правило промпта, не гарантия. Numeric-consistency checker — BACKLOG.
+но это правило промпта, не гарантия. Numeric-consistency checker — **v1 реализован 29.08.2026**
+(`src/coach/numeric_check.py`, #247): детект чисел прозы (км/мин/темп/зоны/пульс) против
+карточки → `logger.warning` + `meta.numeric_mismatch`; текст пользователю пока не режется
+(обрезание — после наблюдений).
 
-## Карта модулей `src/coach/` (фактическая, C0–C8)
+## Решение 5: недельный персистентный план (29.08.2026)
+
+План недели живёт построчно в `recommendations` (не только прозой): вс 19:00 после отчёта
+`weekly_plan.generate_weekly_plan` раскладывает неделю по дням (каждый через `clamp`),
+`status='planned'`. **Числа недели детерминированы** (`planning.py`: мезоцикл 3:1, прогрессия
+≤10%, потолки качества/длительной) — LLM только распределяет в этих рамках (инвариант «числа —
+код, не проза»). Утренний вердикт подтверждает план дня (`confirmed`) или осознанно меняет
+(`adjusted`). Перепланирование — `/plan`. Детали — DEV_PLAN §12.
+
+## Решение 6: сон — из скриншота, не через перехват API (30.08.2026)
+
+Coros API длительность/фазы/оценку сна не отдаёт (разведка D8); перехват трафика приложения
+владелец отклонил. Решение: пользователь шлёт скриншот экрана сна → мост `/vision` → `vision.py`
+(`SleepShot`, строгий JSON) → `sleep_ingest` → `DailyMetrics.sleep_*`/`sleep_extra`. Гибкие
+метрики (deep/rem %, sleep stress, bedtime offset, note) — в JSON `sleep_extra` (устойчиво к
+вариациям экранов, без миграций). Приватность: скриншот удаляется из чата после распознавания,
+байты нигде не персистятся. Ключ не нужен (мост подписки).
+
+## Карта модулей `src/coach/` (фактическая, C0–C8 + сессия 28–30.08)
 
 ```
 coach/
 ├── config.py          # ЕДИНСТВЕННЫЙ исполняемый источник порогов (метрики ← coros-док,
-│                      #   safety/pain ← DEV_PLAN §4); анти-дрейф-тесты test_coach_config
+│                      #   safety/pain ← DEV_PLAN §4, метрики M1/план); анти-дрейф test_coach_config
 ├── contracts.py       # SkillResult, AthleteState(+signals), SafetyVerdict,
-│                      #   WorkoutProposal, Prescription(kw_only, safety обязателен), ReasoningStep
-├── state.py           # assess_state → AthleteState (скиллы + скоры + signals + missing)
+│                      #   WorkoutProposal(+for_days_ahead), Prescription(kw_only), ReasoningStep
+├── state.py           # assess_state → AthleteState; _missing() (sleep уходит при данных, #257)
 ├── util.py            # effective_training_type (override > авто), safe_div, clamp_value
-├── safety.py          # clamp() — ЕДИНСТВЕННЫЙ конструктор Prescription (только сужает)
-├── prescriber.py      # finalize(): proposal → evaluate_safety → clamp → persist
+├── safety.py          # clamp() — ЕДИНСТВЕННЫЙ конструктор Prescription (when=for_days_ahead)
+├── prescriber.py      # finalize(): proposal → evaluate_safety → clamp → persist(status)
 ├── fallback.py        # табличное предложение без LLM (readiness → easy/recovery/rest)
-├── render.py          # детерминированный рендер карточек — числа только отсюда
-│                      #   (+ render_weekly — дайджест-fallback недельного отчёта, C8)
-├── orchestrator.py    # morning_verdict, handle_chat (LLM+fallback), on_workout_completed
-│                      #   (C8: LLM-разбор, proposal отбрасывается), weekly_report (C8),
-│                      #   get/set_initiative; ChatReply
-├── rules/p1_safety.py # evaluate_safety(state) — 11 триггеров границы (чистая функция)
+├── render.py          # детерминированный рендер карточек + render_week_plan (недельный план)
+├── orchestrator.py    # morning_verdict (подтверждает план дня), handle_chat, on_workout_completed
+│                      #   (+ слияние флагов из computed), weekly_report; ChatReply
+├── turn_context.py    # build_extras / unchanged_today / history (вынос из orchestrator, #266)
+├── planning.py        # детерминированные числа недели (мезоцикл 3:1, прогрессия, потолки),
+│                      #   week_plan_review, confirm_or_adjust_morning
+├── weekly_plan.py     # generate_weekly_plan (вс 19:00, строки recommendations status=planned)
+├── numeric_check.py   # #247: сверка чисел прозы LLM с карточкой (детект+лог)
+├── vision.py          # #257: SleepShot + extract_sleep (скриншот → мост /vision)
+├── rules/p1_safety.py # evaluate_safety(state) — триггеры границы (чистая функция)
 ├── skills/            # base(SkillFn, SKILL_KEYS=6) + fatigue, recovery, load,
 │                      #   distribution, progress, pain (state) + workout (per-session)
-├── tools/             # registry (7 read-only tools, фикс. порядок), context(ToolContext),
-│                      #   serialize, state_tools, history_tools, knowledge_tools
-├── knowledge/         # loader (front-matter без PyYAML, key_rules_digest, keyword-поиск)
-│   └── guides/        #   4 seed-руководства (Лидьярд, 80/20, прогрессия, колено)
-└── llm/               # client (CoachLLM Protocol + get_llm: ключ→мост→Null), config,
-                       #   schemas (CoachTurn), prompts (2 кэш-блока + today), agent
-                       #   (ручной tool-loop), anthropic_client, bridge_client, null
+├── tools/             # registry (7 read-only tools), context, serialize, state_tools,
+│                      #   history_tools (daily_metrics_morning += сон), knowledge_tools
+├── knowledge/         # loader (front-matter, key_rules_digest, keyword-поиск)
+│   └── guides/        #   методика: Лидьярд/80-20/прогрессия/колено + Дэниелс/Фицджеральд
+└── llm/               # client (get_llm: ключ→мост→Null), config, schemas (CoachTurn+weekly_plan),
+                       #   prompts (кэш-блоки + today + PLAN/MORNING/REVIEW), agent, anthropic/bridge/null
+
+# Смежное: analysis/session_metrics.py (метрики M1), services/{workout_insights,sleep_ingest,
+#   repositories_insights}.py, telegram/{handlers/sleep_photo, jobs/{sleep_reminder,coach_weekly}}.py,
+#   bin/coach_llm_bridge.py (/complete + /vision). Миграции сна: r1s2t3u4v5w6, s2t3u4v5w6x7.
 ```
 
 Смежное: `src/services/repositories_coach.py` (CoachRepository — выборки для скиллов/state,

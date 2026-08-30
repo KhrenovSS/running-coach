@@ -146,6 +146,9 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 - `src/services/raw_files.py` — хранилище исходных FIT/TCX: `uploads/raw/<user_id>/<sha256>.<ext>` (content-addressed); reanalyze читает отсюда
 - `src/services/weight_service.py` — save_weight (измерение + профиль одной транзакцией), current_weight (последнее измерение)
 - `src/services/repositories_coach.py` — CoachRepository: выборки для скиллов/state коуча, честный ACWR (#219), coach_messages
+- `src/services/repositories_insights.py` — InsightRepository: очередь отложенного разбора (claim/release/reclaim — атомарные, #256), итоги разборов
+- `src/services/workout_insights.py` — computed_json метрик тренировки (INSIGHTS_SCHEMA_VERSION=3), план-vs-факт
+- `src/services/sleep_ingest.py` — `save_sleep_shot` → колонки `sleep_*` в DailyMetrics (#257, из скриншота)
 - `src/services/hr_max.py` — адаптивный max_hr (авто-повышение по пикам, еженедельное предложение снижения)
 - `src/coach/` — пакет гибридного ИИ-коуча (**в проде с 23.08.2026**; C0–C7 закрыты,
   полная карта модулей — `docs/coach/ARCHITECTURE.md`):
@@ -154,12 +157,20 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
   - `contracts.py` — реализованные дата-классы: `SkillResult`, `AthleteState(+signals)`,
     `SafetyVerdict`, `WorkoutProposal`, `Prescription(kw_only)`, `ReasoningStep`
   - `rules/p1_safety.py` + `safety.py` — граница: evaluate_safety + clamp (единственный
-    конструктор Prescription); `state.py`, `prescriber.py`, `render.py`, `fallback.py`,
-    `orchestrator.py`, `util.py`
+    конструктор Prescription; `for_days_ahead` → назначение на будущий день); `state.py`,
+    `prescriber.py`, `render.py`, `fallback.py`, `orchestrator.py`, `util.py`
+  - `turn_context.py` — `build_extras`/`unchanged_today`/`history` (вынос из orchestrator, #266)
+  - `planning.py` — детерминированные числа недели (мезоцикл 3:1, прогрессия ≤10%, потолки,
+    `week_targets`/`advance_mesocycle`/`week_plan_review`/`confirm_or_adjust_morning`)
+  - `weekly_plan.py` — генерация недельного плана (вс 19:00, строки `recommendations`
+    со `status='planned'`, kind='plan')
+  - `numeric_check.py` — сверка чисел прозы LLM с карточкой (#247 v1: детект+лог)
+  - `vision.py` — извлечение сна из скриншота через мост `/vision` (#257; `SleepShot`)
   - `skills/` (fatigue/recovery/load/distribution/progress/pain + workout), `tools/` (7 read-only),
-    `knowledge/guides/` (4 seed-руководства), `llm/` (anthropic / **bridge_client — мост
+    `knowledge/guides/` (методика Дэниелса/Фицджеральда), `llm/` (anthropic / **bridge_client — мост
     подписки, прод сейчас** / null + ручной agent-цикл)
-  - Источник порогов для skills/rules — `docs/coros_health_metrics.md`
+  - Источник порогов для skills/rules — `docs/coros_health_metrics.md`;
+    метрики разбора M1 — `src/analysis/session_metrics.py`
 - `src/telegram/` — пакет Telegram-бота (handlers + jobs + инфраструктура):
   - `main.py` — `run_bot`, Application сборка
   - `config.py` — константы состояний
@@ -168,9 +179,11 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
   - `sync_runner.py` — `run_sync_in_thread`
   - `handlers/start.py`, `sync.py`, `stats.py`, `trainings.py`, `weight.py`, `account.py`,
     `feedback.py` (RPE → строка «Колено?»), `coach.py` (роутер текста, /verdict,
-    /coach_settings), `pain.py` (callbacks pain/painphase/wellness), `hr_max.py`
+    /coach_settings, **/plan**), `pain.py` (callbacks pain/painphase/wellness), `hr_max.py`,
+    **`sleep_photo.py`** (приём фото сна → vision → БД, удаление скриншота, /sleep)
   - `jobs/weight.py`, `recovery.py`, `hr_max.py`, `coach_morning.py` (вердикт 09:30),
-    `coach_evening.py` (вопрос о самочувствии 21:00)
+    `coach_evening.py` (вопрос о самочувствии 21:00), `coach_weekly.py` (отчёт+план вс 19:00),
+    `coach_review.py` (отложенные разборы), **`sleep_reminder.py`** (напоминание о скриншоте сна 10:00)
 - `src/api/middleware.py` — централизованная обработка ошибок, логирование запросов и session middleware
 - `src/api/deps.py` — `get_current_user` dependency (session-cookie)
 - `src/api/routes/health.py` — health check endpoint
@@ -181,20 +194,26 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 - `src/web/routes/sync.py` — POST /sync/{brand}/run, /sync/{brand}/health (93 строки)
 - `src/web/routes/logs.py` — GET /logs
 - `src/web/templates/` — 6 Jinja2-шаблонов
-- `src/analysis/` — пакет анализа тренировок (7 файлов):
+- `src/analysis/` — пакет анализа тренировок:
   - `__init__.py` — оркестратор `process_trackpoints()` (GPS → HR зоны → сегментация → классификация → осцилляции → погода)
   - `oscillation.py` — детекция осцилляций темпа + HR-lag корреляция
   - `classify.py` — классификация тренировок (interval/tempo/long/recovery/easy)
   - `segment.py` — сегментация по темпу + fallback на осцилляции
   - `segment_km.py` — km-segment fallback, compute_km_variability
   - `hr_zones.py` — пульсовые зоны
+  - `gap.py`, `effort.py`, `hr_baseline.py` — GAP/кардиодрейф/decoupling, HR↔темп baseline (D2)
+  - `session_metrics.py` — детерминированные метрики разбора M1 (время в зонах, дисциплина
+    лёгкого, load_points, quality_volume, каденс, RPE, plan_vs_actual, collect_flags)
   - `utils.py` — форматирование, GPS-хелперы
 - `src/parsers/` — парсеры TCX/FIT (`tcx_parser.py`, `fit_parser.py` — плюс `extract_*_trackpoints`
   для reanalyze-от-сырья), GPS (`gps.py`), погода (`weather.py`)
 - `src/services/reanalyze.py` — пересчёт: сначала сырой файл (`raw_file_path`), fallback `trackpoints_json`
 - `bin/` — ops-скрипты (версионируются точечно через `.gitignore`): `backup_db.sh`, `docker.sh`,
   `backfill_external_ids.py` / `backfill_raw_fits.py` / `backfill_avg_pace.py` (все с `--dry-run` по умолчанию);
-  `coach_llm_bridge.py` — НЕ backfill, а рантайм-компонент прода: LLM-мост коуча (systemd, :8765)
+  `coach_llm_bridge.py` — НЕ backfill, а рантайм-компонент прода: LLM-мост коуча (systemd, :8765;
+  endpoints `/complete` текст + `/vision` картинка→Read-tool);
+  `sudoers-bridge-restart` + `install_bridge_sudoers.sh` — правило, чтобы агент рестартил мост без пароля;
+  `install_bridge_sudoers.sh` ставится под root один раз
 
 ## Реализованная логика (сегментация, классификация, пульсовые зоны, осцилляции)
 См. `docs/ARCHITECTURE.md` и `src/analysis/`.
@@ -209,6 +228,26 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 См. также `CLAUDE.md` → «Git / коммиты».
 
 ## Текущее состояние
+
+**Session 28–30.08.2026 — точность дат, метрики разбора, недельный план, сон из скриншота ✅ (задеплоено):**
+- **Даты/пояс во входе LLM**: «Сейчас: <день недели>, дата время (пояс)», `started_at_local`+`weekday`
+  у тренировок, `days_ago` от локальной пары дат (окно 00:00–03:00 MSK устранено, #262/#267);
+  `daily_metrics_morning` по локальной дате (#265). Инциденты «вчерашняя/утренняя/на сегодня» закрыты.
+- **Назначения на будущий день** (`for_days_ahead` 0–7 → `Recommendation.for_date`): «план на воскресенье»
+  пишется правильной датой; дедуп по дате; карточка «— воскресенье 31.08».
+- **Метрики разбора M1 + план-vs-факт (M2.2)** — `analysis/session_metrics.py` (schema v3): время в зонах,
+  дисциплина лёгкого, потолки качества Дэниелса, каденс, RPE, стабильность, `plan_vs_actual`
+  (оживлён `linked_session_id`); флаги — только из `computed.flags` (§6), `numeric_check.py` (#247 v1).
+  Руководство — `docs/coach/METRICS_GUIDE.md`.
+- **Недельный персистентный план (#269)** — `planning.py` (числа: мезоцикл 3:1, прогрессия ≤10%, потолки)
+  + `weekly_plan.py` (вс 19:00 после отчёта, `/plan`); утро подтверждает план дня (status
+  planned→confirmed/adjusted). DEV_PLAN §12 переформулирован.
+- **Пакет гигиены** (#251 fallback не жгут бюджет · #256 атомарный reclaim · #258 история без мимикрии
+  · #247 numeric-checker); вынос `turn_context.py` (#266).
+- **Сон из скриншота (#257)** — перехват Coros API отклонён владельцем; фото экрана сна → мост `/vision`
+  (Read-tool, БЕЗ API-ключа) → `vision.py`/`sleep_ingest.py` → колонки `sleep_*`/`sleep_extra`
+  (миграции `r1s2t3u4v5w6`, `s2t3u4v5w6x7`); скриншот удаляется из чата; напоминание 10:00
+  (`sleep_reminder.py`), `/sleep`. Sudoers-правило — агент рестартит мост сам.
 
 **Session 24–25.08.2026 — «Разбор тренировки v2» (D0–D8) ✅, задеплоено в прод 25.08:**
 - Отложенный разбор: синк создаёт `workout_insights` (статус-очередь, атомарный claim),

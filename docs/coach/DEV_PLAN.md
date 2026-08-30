@@ -179,6 +179,9 @@ Index(user_id, created_at)); `recommendations` += `proposal_json`, `safety_json`
 host-мост `bin/coach_llm_bridge.py` + systemd `running-coach-llm-bridge.service` + `.env.bridge`;
 headless `claude -p` под подпиской владельца, модель `BRIDGE_MODEL`, по умолчанию `sonnet` —
 бережём лимиты), иначе `NullLLM` (→ `LLMUnavailableError` → `fallback.py`).
+Мост-endpoints: `/complete` (текст, `--tools "" --max-turns 1`) и `/vision` (#257: картинка
+base64 → temp-файл на хосте → `claude -p --allowedTools Read --add-dir <tmp>` — исключение из
+«no tools», Read разрешён только на temp-каталог; для распознавания сна из скриншота).
 Ограничения режима моста: tool-цикл неактивен (компенсация — обогащение §5), prompt-cache
 между ходами не гарантирован, `cost_usd` считается по ценам opus → в мосте величина условная
 (реальная цена — лимиты подписки). API-режим: модель `claude-opus-5`, `max_tokens=4000`,
@@ -334,6 +337,13 @@ carry_forward в утреннем контексте — 3 записи / 7 дн
   опирается на HRV/RHR/recovery утра дня тренировки (`daily_metrics_morning`, D4);
   `'sleep'` в `state.missing` остаётся честным. Отдельный sleep-endpoint
   неофициального API — BACKLOG #257.
+- ✅ **30.08.2026 — #257 РЕШЁН иначе (перехват API отклонён владельцем):** сон вводится
+  из **скриншота** экрана сна (Telegram фото → мост `/vision`, Read-tool → `vision.py` →
+  `sleep_ingest.save_sleep_shot`). Колонки `DailyMetrics.sleep_duration_min/deep/light/rem/
+  awake_min`, `sleep_score`, `sleep_extra`(JSON), `sleep_source='coros_screenshot'` (миграции
+  `r1s2t3u4v5w6`, `s2t3u4v5w6x7`). `state.missing` убирает `'sleep'` при наличии данных.
+  Скриншот удаляется из чата, напоминание в 10:00 (`sleep_reminder.py`), `/sleep`. API-ключ
+  НЕ требуется (через мост подписки). Следующее — правило безопасности #254 «недосып→осторожнее».
 
 Зависимости: D0→D1→(D2 ∥ D3 ∥ D4)→D5→D6→D7; D8 — параллелен после разведки.
 
@@ -386,10 +396,15 @@ PDF-текст). Книги → конспекты-гайды своими сл�
 3. **Персонализация** — когда insights накопятся (3–4 недели данных): #244
    (lessons-продюсер из assessment/computed), #246 (EWMA-калибровка, PredictionLog
    прогноз↔факт).
-4. **План к цели**: #243 (race_date + целевой результат → многонедельный план
-   kind='plan', недельный отчёт сверяет факт с планом).
-5. **Данные**: #257 (сон — отдельный endpoint Coros), #232 (repair performance),
-   #249 (recovery-шкала 20/70/90), #255 (осадки в разбор).
+   Метрики разбора M1 + план-vs-факт (M2.2) ✅ 29.08 (#268, `analysis/session_metrics.py`).
+4. **План к цели**: #243 (race_date + целевой результат → многонедельный план,
+   недельный отчёт сверяет факт с планом). **Фундамент готов ✅ 29.08:** недельный
+   персистентный план #269 (§12, `weekly_plan.py`/`planning.py`); осталось race_date
+   и многонедельный горизонт.
+5. **Данные**: **#257 сон ✅ 30.08 — решён иначе: скриншот сна → мост `/vision` →
+   `DailyMetrics.sleep_*` (см. D8 ниже и CHANGELOG 30.08)**; правило «недосып→осторожнее»
+   #254 (данные сна теперь есть); #232 (repair performance), #249 (recovery-шкала 20/70/90),
+   #255 (осадки в разбор), M2.1 (интервалы), M3 (якорь ПАНО/VDOT — нужен тест владельца).
 
 ## 10. Тесты (`tests/coach/`)
 

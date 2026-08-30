@@ -78,7 +78,7 @@
 | `src/services/`, `src/parsers/`, `src/analysis/`, `src/watch/`, `src/config/`, `src/domain/`, `src/models.py` | `app` + `bot` (бот сам синкает: sync → parse_fit → analysis) |
 | `src/coach/` | `bot` (коуч живёт в боте; веб коуч не использует) |
 | `pyproject.toml`, `Dockerfile`, `docker-compose.yml` | `app` + `bot` |
-| `bin/coach_llm_bridge.py`, `.env.bridge` | не пересборка — `systemctl restart running-coach-llm-bridge` |
+| `bin/coach_llm_bridge.py`, `.env.bridge` | не пересборка — `sudo systemctl restart running-coach-llm-bridge` (агент рестартит БЕЗ пароля: sudoers-правило `bin/sudoers-bridge-restart`, установка — `bin/install_bridge_sudoers.sh`). Мост: `/complete` (текст) + `/vision` (картинка→Read-tool) |
 | `alembic/` | `app` (миграции при старте; **с ALTER — сначала stop bot**, §7) |
 
 ## Git / коммиты
@@ -113,9 +113,20 @@
 - LLM-бэкенды: `get_llm()` = ключ → **мост подписки** (прод; **постоянный режим** — решение
   владельца 25.08.2026, корпоративная подписка; `bin/coach_llm_bridge.py`, ограничение —
   tool-цикл неактивен) → NullLLM/fallback. Решения и причины — `docs/coach/ARCHITECTURE.md`.
-- **Чек-листы C0–C9 и D0–D8 («Разбор v2») в `docs/coach/DEV_PLAN.md` §9 закрыты, задеплоены
-  25.08.2026. Дальше — по приоритетам §9 «Дальше»: обкатка v2 → гигиена (#251/#247/#242/#256)
-  → персонализация (#244/#246) → план к цели (#243).**
+- **Недельный план** (`weekly_plan.py` + детерминированные числа `planning.py`, вс 19:00 после
+  отчёта, команда `/plan`): строки `recommendations` со `status` planned→confirmed/adjusted;
+  утренний вердикт подтверждает план дня. **Метрики разбора M1** — `analysis/session_metrics.py`
+  (время в зонах, дисциплина лёгкого, потолки качества, каденс, RPE, план-vs-факт; флаги — только
+  из `computed.flags`, `numeric_check.py` сверяет числа прозы с карточкой). Контекст/дедуп/история
+  вынесены в `turn_context.py`.
+- **Сон — из скриншота** (Coros API длительность/фазы не отдаёт): пользователь шлёт фото экрана
+  сна в Telegram → мост `/vision` (Read-tool) → `vision.py`/`sleep_ingest.py` → колонки `sleep_*`
+  в `DailyMetrics`; **API-ключ НЕ нужен** (через мост подписки); скриншот удаляется из чата,
+  напоминание в 10:00 (`sleep_reminder.py`), команда `/sleep`.
+- **Чек-листы C0–C9 и D0–D8 закрыты 25.08.2026. Дальше (§9 DEV_PLAN): гигиена ✅ 29.08
+  (#251/#247/#256/#258), недельный план ✅ (#269), метрики M1/M2.2 ✅ (#268), сон ✅ (#257).
+  Осталось: персонализация (#244/#246, ждёт накопления insights), правило «недосып→осторожнее»
+  (#254, данные сна теперь есть), план к цели/гонке (#243), M2.1 интервалы, M3 (ПАНО/VDOT).**
 
 ## Документация
 | Тема | Файл |
