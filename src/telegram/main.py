@@ -22,6 +22,7 @@ from src.telegram.handlers.pain import pain_callback, pain_phase_callback, welln
 from src.telegram.handlers.hr_max import hr_max_callback
 from src.telegram.jobs.weight import daily_weight_job
 from src.telegram.jobs.recovery import daily_recovery_check_job
+from src.telegram.jobs.sleep_reminder import sleep_screenshot_reminder_job
 from src.telegram.jobs.coach_evening import evening_wellness_job
 from src.telegram.jobs.coach_morning import morning_verdict_job
 from src.telegram.jobs.coach_review import pending_reviews_job
@@ -109,6 +110,10 @@ def run_bot():
 
     application.job_queue.run_daily(daily_recovery_check_job, time=dt_time(hour=10, minute=0))
     logger.info("Проверка данных сна запланирована на 10:00")
+
+    application.job_queue.run_daily(sleep_screenshot_reminder_job,
+                                    time=dt_time(hour=10, minute=0))
+    logger.info("Напоминание о скриншоте сна запланировано на 10:00")
 
     application.job_queue.run_daily(evening_wellness_job, time=dt_time(hour=21, minute=0))
     logger.info("Вечерний вопрос о самочувствии запланирован на 21:00")
