@@ -28,6 +28,10 @@ FLAG_PLAN_VOLUME = "plan_volume_exceeded"
 FLAG_GPS_UNRELIABLE = "gps_unreliable"
 FLAG_DEVICE_MISMATCH = "device_mismatch"
 FLAG_POOR_INTERVAL_RECOVERY = "poor_interval_recovery"  # F3: HRR60 ниже порога
+FLAG_HARD_DAYS_TOO_CLOSE = "hard_days_too_close"          # M4.1: качественные слишком часто
+FLAG_POST_RACE_RECOVERY = "post_race_recovery_violated"   # M4.1: рано после гонки
+FLAG_DOWNHILL_LOAD = "downhill_load_high"                 # M4.2: ударные спуски (колено)
+FLAG_DETRAINING = "detraining_expected"                   # M4.3: пауза ≥6 дней
 
 # Маппинг computed-флагов в значения enum assessment (§6.2, зафиксирован кодом:
 # enum append-only, переименовывать decoupling_* задним числом нельзя).
@@ -353,4 +357,9 @@ def collect_flags(computed: dict) -> list[str]:
         flags.append(FLAG_NO_WARMUP)
     if computed.get("interval_recovery", {}).get("flag"):
         flags.append(FLAG_POOR_INTERVAL_RECOVERY)
+    flags.extend(computed.get("week_structure", {}).get("flags") or [])
+    if computed.get("downhill", {}).get("flag"):
+        flags.append(FLAG_DOWNHILL_LOAD)
+    if computed.get("detraining", {}).get("flag"):
+        flags.append(FLAG_DETRAINING)
     return flags

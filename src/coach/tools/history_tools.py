@@ -260,4 +260,37 @@ def get_weekly_summary(ctx: ToolContext, args: dict) -> dict:
         "wow_change_pct": wow,
         "max_allowed_increase_pct": LOAD_PROGRESSION["max_weekly_increase_pct"],
         "avg_rpe": avg_rpe,
+        # M4.4 (F6, гайд 44 «Мониторинг»): тренд самооценки — «поймать перетрен
+        # раньше результатов»; из уже собираемого, новых вопросов пользователю нет
+        # (self-report trend from existing wellness data; no new questions asked)
+        "wellness_trend": _wellness_trend(ctx.user_id, db=ctx.db),
     }
+
+
+def _wellness_trend(user_id: int, *, db) -> dict | None:
+    """Средние самооценки за 7 дней против 28 (weekly vs monthly self-report averages).
+
+    None — отчётов нет (отклик низкий — честная деградация)."""
+    from src.models import WellnessReport
+
+    since = (datetime.now(timezone.utc) - timedelta(days=28)).date()
+    rows = db.query(WellnessReport).filter(
+        WellnessReport.user_id == user_id,
+        WellnessReport.report_date >= since,
+    ).all()
+    if not rows:
+        return None
+    today = datetime.now(timezone.utc).date()
+
+    def _avg(field: str, days: int) -> float | None:
+        vals = [getattr(r, field) for r in rows
+                if getattr(r, field) is not None
+                and (today - r.report_date).days < days]
+        return round(sum(vals) / len(vals), 1) if vals else None
+
+    out = {}
+    for field in ("mood", "soreness", "pain_level", "sleep_quality_self"):
+        week, month = _avg(field, 7), _avg(field, 28)
+        if week is not None or month is not None:
+            out[field] = {"week": week, "month": month}
+    return out or None

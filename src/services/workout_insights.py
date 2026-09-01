@@ -7,15 +7,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
 from src.analysis import session_metrics as sm
 from src.analysis.effort import compute_cardiac_drift, heat_block, hr_stability, pace_cv
 from src.analysis.data_checks import device_check, lap_check
+from src.analysis.week_structure import detraining, week_structure
 from src.analysis.intervals import interval_recovery
-from src.analysis.gap import compute_gap, local_grade_factors, smooth_altitudes
+from src.analysis.gap import compute_gap, downhill_block, local_grade_factors, smooth_altitudes
 from src.analysis.hr_baseline import baseline_deviation
 from src.coach.config import (
     CADENCE_LOW_SPM,
@@ -56,11 +57,35 @@ from src.utils.logger import get_logger
 
 logger = get_logger("services.workout_insights")
 
-INSIGHTS_SCHEMA_VERSION = 6  # версия computed_json (v4 — gps_quality; v5 — F0-фиксы усреднений; v6 — F3: interval_recovery/HRR)
+INSIGHTS_SCHEMA_VERSION = 7  # версия computed_json (v5 — F0; v6 — F3 HRR; v7 — F5/F6: week_structure/downhill/detraining/session_rpe)
 
 _EMPTY_DRIFT = {"applicable": False, "reason": "no_trackpoints", "drift_pct": None,
                 "first_half_ef": None, "second_half_ef": None, "gap_adjusted": None,
                 "window_min": None, "flag": None}
+
+
+def _session_day(session: TrainingSession):
+    """Локальная дата сессии для недельных правил (local session date)."""
+    if session.begin_ts is None:
+        return None
+    from src.utils.timeutils import session_local_dt
+    return session_local_dt(session.begin_ts, session, None).date()
+
+
+def _history_briefs(user_id: int, session: TrainingSession, *,
+                    db: Session, days: int = 15) -> list[dict]:
+    """Краткая история за окно до сессии — вход week_structure/detraining (M4.1/M4.3).
+    (Compact session history for the weekly-structure and detraining blocks.)"""
+    if session.begin_ts is None:
+        return []
+    since = session.begin_ts - timedelta(days=days)
+    rows = db.query(TrainingSession).filter(
+        TrainingSession.user_id == user_id,
+        TrainingSession.begin_ts >= since,
+        TrainingSession.begin_ts <= session.begin_ts,
+    ).all()
+    return [{"date": _session_day(r), "type": effective_training_type(r),
+             "km": r.total_distance_km, "avg_hr": r.avg_heart_rate} for r in rows]
 
 
 def _parse_trackpoints(raw: list[dict] | None) -> tuple[list, list, list, list, datetime | None]:
@@ -95,7 +120,8 @@ def compute_workout_metrics(session: TrainingSession, *,
                             lthr: int | None = None,
                             week_km: float | None = None,
                             rpe_history: dict | None = None,
-                            plan: dict | None = None) -> dict:
+                            plan: dict | None = None,
+                            history_briefs: list[dict] | None = None) -> dict:
     """Собрать computed_json одной тренировки (pure assembly, без БД).
 
     Все ветки деградируют в applicable/available=false — исключений наружу нет.
@@ -148,6 +174,11 @@ def compute_workout_metrics(session: TrainingSession, *,
             {"available": False}, volume_tol=PLAN_VOLUME_TOLERANCE_PCT,
             intensity_tol=PLAN_INTENSITY_TOLERANCE_PCT)
         computed["interval_recovery"] = {"available": False, "reason": "no_trackpoints"}
+        computed["week_structure"] = week_structure(
+            history_briefs or [], _session_day(session), ttype)
+        computed["detraining"] = detraining(history_briefs or [], _session_day(session))
+        computed["downhill"] = {"available": False, "reason": "no_trackpoints"}
+        computed["session_rpe"] = {"available": False, "reason": "no_rpe"}
         computed["flags"] = sm.collect_flags(computed)
         return computed
 
@@ -230,6 +261,20 @@ def compute_workout_metrics(session: TrainingSession, *,
         dists=None if gps_unreliable else dists,
         laps=session.laps_json if isinstance(session.laps_json, list) else None,
         t0=tp_t0, ttype=ttype)
+    # M4 (F5/F6): структура недели, детренированность, downhill, session-RPE
+    computed["week_structure"] = week_structure(
+        history_briefs or [], _session_day(session), ttype,
+        session_avg_hr=session.avg_heart_rate, max_hr=max_hr, lthr=lthr)
+    computed["detraining"] = detraining(history_briefs or [], _session_day(session))
+    computed["downhill"] = (
+        {"available": False, "reason": "gps_unreliable"} if gps_unreliable
+        else downhill_block(dists, smooth_altitudes(alts)))
+    rpe_val = (rpe_history or {}).get("rpe")
+    computed["session_rpe"] = (
+        {"available": True, "rpe": rpe_val,
+         # Foster session-RPE: усилие × минуты — шкала нагрузки, независимая от Coros
+         "load_au": round(rpe_val * (session.duration_minutes or 0))}
+        if rpe_val is not None else {"available": False, "reason": "no_rpe"})
     computed["flags"] = sm.collect_flags(computed)
     return computed
 
@@ -256,7 +301,8 @@ def upsert_workout_insights(user_id: int, session_id: int, *, db: Session,
         week_km=(TrainingRepository.km_in_window(user_id, session.begin_ts, db=db)
                  if session.begin_ts else None),
         rpe_history=_rpe_history(user_id, session, db=db),
-        plan=_plan_for_session(user_id, session, db=db))
+        plan=_plan_for_session(user_id, session, db=db),
+        history_briefs=_history_briefs(user_id, session, db=db))
     InsightRepository.upsert(user_id, session_id, db=db, computed=computed,
                              schema_version=INSIGHTS_SCHEMA_VERSION, status=status)
     if effective_training_type(session) in BASELINE_TYPES:

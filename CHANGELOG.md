@@ -24,6 +24,19 @@ All notable changes to this project are tracked here.
   `repositories.zone_distribution`, `history_tools.get_workout_detail`.
 - `INSIGHTS_SCHEMA_VERSION` 4→5 (lazy-пересчёт).
 
+### Added (F5/F6 — M4: недельная структура и мониторинг по литературе)
+- `src/analysis/week_structure.py`: ≤3 качественных за 7 дней и ≥1 лёгкий день между
+  качественными (гайды 41/45; «качественный день» = interval/race либо tempo с
+  avg HR ≥ 95% порога — residual-«tempo» не в счёт), восстановление после гонки
+  1 лёгкий день/3 км; `detraining` — пауза ≥6 дней → поправка ожиданий (VDOT-декай).
+- `gap.downhill_block`: объём крутых спусков (ударная нагрузка на колено, гайд 46;
+  пороги калиброваны по истории владельца) → флаг `downhill_load_high`.
+- `session_rpe` (Foster: RPE×минуты) в computed; `wellness_trend` (7 vs 28 дней)
+  в weekly summary — из уже собираемых самоотчётов, без новых вопросов.
+- Safety-замыкание (§7): p1 правила 12–14 — качественные слишком близко →
+  «интенсив не раньше чем», post-race и возврат после паузы → max_zone=2 + запрет
+  hard-типов. Сигналы — `state._week_signals`. Схема insights v7; флаги в enum/промпте.
+
 ### Added (F4/M3.1 — зоны и нормативные темпы от ПАНО)
 - **Зоны от LTHR** (`hr_zones.py`, лестница Фицджеральда ≤81/89/100/105% порога; fallback
   %max_hr без валидного lthr): вся аналитика — time-in-zones, 80/20, классификация

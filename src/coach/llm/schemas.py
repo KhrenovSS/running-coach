@@ -95,7 +95,10 @@ FlagValue = Literal["hr_drift_high", "pain", "pace_hr_mismatch", "suspect_data",
                     # M2.2: соответствие назначению (plan_vs_actual)
                     "plan_intensity_exceeded", "plan_volume_exceeded",
                     # F3 (M2.1 разбора): восстановление между интервалами
-                    "poor_interval_recovery"]
+                    "poor_interval_recovery",
+                    # M4 (F5/F6): недельная структура и мониторинг
+                    "hard_days_too_close", "post_race_recovery_violated",
+                    "downhill_load_high", "detraining_expected"]
 
 # §6 METRICS_GUIDE: только эти флаги LLM ставит сама (субъективные);
 # остальные приходят из computed.flags и сливаются кодом оркестратора.

@@ -173,3 +173,18 @@ def test_merged_flags_passes_poor_interval_recovery():
     merged = orchestrator._merged_flags(
         ["pain"], {"flags": ["poor_interval_recovery"]})
     assert merged == ["poor_interval_recovery", "pain"]
+
+
+def test_merged_flags_passes_week_structure_flags():
+    """M4 (F5/F6): флаги недельной структуры/downhill/detraining есть в enum
+    FlagValue и проходят в assessment без маппинга, порядок сохранён."""
+    merged = orchestrator._merged_flags(
+        [], {"flags": ["hard_days_too_close", "post_race_recovery_violated",
+                       "downhill_load_high", "detraining_expected"]})
+    assert merged == ["hard_days_too_close", "post_race_recovery_violated",
+                      "downhill_load_high", "detraining_expected"]
+    # субъективный LLM-флаг вытесняется cap=4 — детерминированные первичны
+    merged = orchestrator._merged_flags(
+        ["pain"], {"flags": ["hard_days_too_close", "post_race_recovery_violated",
+                             "downhill_load_high", "detraining_expected"]})
+    assert "pain" not in merged and merged[0] == "hard_days_too_close"

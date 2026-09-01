@@ -171,3 +171,38 @@ def test_workout_detail_morning_metrics_by_local_date(db_session):
     detail = run_tool("get_workout_detail", {"session_id": s.id},
                       user_id=user.id, db=db_session)
     assert detail["daily_metrics_morning"]["rhr"] == 55  # локальный день, не UTC
+
+
+def test_weekly_summary_wellness_trend_averages(db_session):
+    """M4.4 (F6): средние самооценки 7 дн. против 28; поля без данных опущены."""
+    from datetime import timedelta
+
+    from src.models import WellnessReport
+
+    user = _unique_user(db_session)
+    today = utcnow().date()
+    for i in range(3):                              # свежая неделя: mood 7, soreness 2
+        db_session.add(WellnessReport(user_id=user.id,
+                                      report_date=today - timedelta(days=i),
+                                      mood=7, soreness=2))
+    db_session.add(WellnessReport(user_id=user.id,   # хвост месяца: mood 3, soreness 6
+                                  report_date=today - timedelta(days=20),
+                                  mood=3, soreness=6))
+    db_session.commit()
+
+    result = run_tool("get_weekly_summary", {"weeks": 4},
+                      user_id=user.id, db=db_session)
+    wt = result["wellness_trend"]
+    assert wt["mood"] == {"week": 7.0, "month": 6.0}       # (7·3+3)/4
+    assert wt["soreness"] == {"week": 2.0, "month": 3.0}   # (2·3+6)/4
+    # боль и сон не сообщались → полей нет (честная деградация)
+    assert "pain_level" not in wt
+    assert "sleep_quality_self" not in wt
+    json.dumps(result)
+
+
+def test_weekly_summary_wellness_trend_none_without_reports(empty_user, db_session):
+    """Отчётов нет → wellness_trend = None (низкий отклик — не выдумываем)."""
+    result = run_tool("get_weekly_summary", {"weeks": 4},
+                      user_id=empty_user.id, db=db_session)
+    assert result["wellness_trend"] is None

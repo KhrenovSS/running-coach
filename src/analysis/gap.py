@@ -13,6 +13,9 @@ from statistics import median
 from src.config.constants import (
     ALT_SMOOTH_MEAN_WINDOW,
     ALT_SMOOTH_MEDIAN_WINDOW,
+    DOWNHILL_GRADE,
+    DOWNHILL_KM_FLAG,
+    DOWNHILL_SHARE_FLAG_PCT,
     ELEV_MIN_DELTA_M,
     GAP_MAX_GRADE,
     GAP_GRADE_WINDOW_M,
@@ -101,6 +104,35 @@ def local_grade_factors(dists: list[float],
         grade = (alts_smoothed[i] - alts_smoothed[j0]) / d
         factors.append(gap_factor(grade))
     return factors
+
+
+def downhill_block(dists: list[float], alts_smoothed: list[float] | None) -> dict:
+    """M4.2 (F6, гайд 46): объём крутых спусков — главная ударная нагрузка на колено.
+
+    Пороги калиброваны на истории владельца (медиана доли 7.9%, max 12.7% —
+    флаг только на заметно более «убойном» рельефе).
+    (Downhill load: steep-descent volume, the main impact load on the knee.)
+    """
+    if alts_smoothed is None or len(dists) < 2:
+        return {"available": False, "reason": "no_altitude"}
+    down_m = 0.0
+    total_m = 0.0
+    for i in range(1, len(dists)):
+        dd = dists[i] - dists[i - 1]
+        if dd <= 0:
+            continue
+        total_m += dd
+        if (alts_smoothed[i] - alts_smoothed[i - 1]) / dd < DOWNHILL_GRADE:
+            down_m += dd
+    if total_m <= 0:
+        return {"available": False, "reason": "no_distance"}
+    share = down_m / total_m
+    return {
+        "available": True,
+        "downhill_km": round(down_m / 1000, 2),
+        "downhill_share_pct": round(share, 3),
+        "flag": share > DOWNHILL_SHARE_FLAG_PCT or down_m / 1000 > DOWNHILL_KM_FLAG,
+    }
 
 
 def compute_gap(times_sec: list[float], dists: list[float],

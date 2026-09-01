@@ -49,6 +49,23 @@ HRR_TREND_MIN_REPS: Final[int] = 3       # минимум повторов дл�
 HRR60_LOW_BPM: Final[int] = 12           # медиана HRR60 ниже → poor_interval_recovery
                                          # (стартово из литературы; калибруется по данным)
 
+# M4 — недельная структура и мониторинг (F5/F6, METRICS_GUIDE §11)
+QUALITY_MAX_PER_WEEK: Final[int] = 3         # >3 качественных за 7 дней — перебор (Дэниелс, гайд 45)
+# «Качественный день» — настоящая работа: interval/race всегда; tempo — только с
+# avg HR ≥ порога ниже (наша классификация «tempo» — остаточная и ловит умеренные
+# пробежки; без этого гейта правило ≤3/нед полыхало бы постоянно)
+QUALITY_TEMPO_MIN_LTHR_PCT: Final[float] = 0.95   # tempo качественная при avg_hr ≥ 95% LTHR
+QUALITY_TEMPO_MIN_MAXHR_PCT: Final[float] = 0.85  # fallback без lthr: ≥ 85% max_hr
+QUALITY_MIN_GAP_DAYS: Final[int] = 2         # следующий качественный не раньше чем через 1 лёгкий день
+POST_RACE_KM_PER_EASY_DAY: Final[float] = 3.0  # 1 лёгкий день на каждые 3 км гонки (гайд 45)
+DETRAINING_MIN_DAYS_OFF: Final[int] = 6      # до 5 дней паузы форма не теряется (гайд 46)
+DETRAINING_VDOT_PCT_PER_DAY: Final[float] = 0.3  # ~-11% за 6 недель простоя → ≈0.3%/день после 5-го
+# Downhill-нагрузка на колено (гайд 46). Пороги от эмпирики истории владельца 01.09.2026:
+# медиана доли спусков >3% — 7.9%, максимум — 12.7% → флаг заметно выше типичного рельефа
+DOWNHILL_GRADE: Final[float] = -0.03         # уклон круче → ударный спуск
+DOWNHILL_SHARE_FLAG_PCT: Final[float] = 0.15  # доля спусков от дистанции выше → флаг
+DOWNHILL_KM_FLAG: Final[float] = 2.0         # или абсолют крутых спусков, км
+
 # Период синхронизации метрик здоровья (Health sync days)
 HEALTH_SYNC_DAYS: Final[int] = 180
 

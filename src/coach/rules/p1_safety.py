@@ -8,6 +8,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from src.config.constants import (
+    DETRAINING_MIN_DAYS_OFF,
+    QUALITY_MAX_PER_WEEK,
+    QUALITY_MIN_GAP_DAYS,
+)
 from src.coach.config import (
     ATI_CTI_HIGH,
     HARD_TYPES,
@@ -138,6 +143,40 @@ def evaluate_safety(state: AthleteState, *, now: datetime | None = None) -> Safe
         reasons.append(_step("интенсив не раньше чем",
                              "пульс плохо падал между повторами последней интервальной — "
                              f"минимум {HRR_POOR_RECOVERY_EXTRA_H} ч до следующего качественного дня"))
+
+    # 12. Качественные дни слишком близко (M4.1, гайды 41/45): минимум 1 лёгкий
+    # день между качественными и ≤3 качественных за 7 дней
+    # (quality days too close: at least one easy day between, ≤3 per week)
+    dsq = sig.get("days_since_quality")
+    if ((dsq is not None and dsq < QUALITY_MIN_GAP_DAYS)
+            or (sig.get("quality_days_7d") or 0) >= QUALITY_MAX_PER_WEEK):
+        triggered.append("hard_days_too_close")
+        gap_earliest = now + timedelta(days=max(1, QUALITY_MIN_GAP_DAYS - (dsq or 0)))
+        if earliest_next_hard is None or gap_earliest > earliest_next_hard:
+            earliest_next_hard = gap_earliest
+        reasons.append(_step("интенсив не раньше чем",
+                             "между качественными днями нужен минимум один лёгкий день "
+                             f"(качественных за неделю: {sig.get('quality_days_7d')})"))
+
+    # 13. Восстановление после гонки (M4.1, гайд 45): 1 лёгкий день на каждые 3 км
+    # (post-race recovery: one easy day per 3 km of race distance)
+    race_left = sig.get("post_race_days_left") or 0
+    if race_left > 0:
+        triggered.append("post_race_recovery")
+        max_zone = min(max_zone, 2)
+        forbidden |= set(HARD_TYPES)
+        reasons.append(_step("max_zone=2",
+                             f"восстановление после гонки: ещё {race_left} лёгких дн."))
+
+    # 14. Возврат после паузы (M4.3, гайд 46): ≥6 дней без бега → мягкий вход
+    # (return from a layoff: gentle first sessions back)
+    days_off = sig.get("days_off")
+    if days_off is not None and days_off >= DETRAINING_MIN_DAYS_OFF:
+        triggered.append("detraining")
+        max_zone = min(max_zone, 2)
+        forbidden |= set(HARD_TYPES)
+        reasons.append(_step("max_zone=2",
+                             f"пауза {days_off} дн. — форма просела, возвращаемся мягко"))
 
     allowed_types: tuple[str, ...] = ()
     if forbidden:

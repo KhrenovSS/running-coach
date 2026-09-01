@@ -8,6 +8,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from src.coach.config import (
+    HARD_TYPES,
     CONFIDENCE_MIN_DAYS,
     CONFIDENCE_MIN_SESSIONS,
     FATIGUE_WEIGHTS,
@@ -137,12 +138,49 @@ def _missing(dm, rpe_coverage: float | None, pain_known: bool) -> list[str]:
     return missing
 
 
+def _week_signals(user_id: int, today, user, *, db: Session) -> dict:
+    """Сигналы M4.1/M4.3: дни с последней качественной, пост-гоночное окно, пауза.
+    (Days since last quality day, post-race recovery window, layoff length.)"""
+    from math import ceil
+
+    from src.config.constants import POST_RACE_KM_PER_EASY_DAY
+
+    recent = CoachRepository.last_sessions(user_id, n=15, db=db)
+    out = {"days_since_quality": None, "quality_days_7d": 0,
+           "post_race_days_left": 0, "days_off": None}
+    if not recent:
+        return out
+    dated = [(session_local_dt(s.begin_ts, s, user).date(), s)
+             for s in recent if s.begin_ts is not None]
+    if not dated:
+        return out
+    out["days_off"] = (today - max(d for d, _ in dated)).days
+    from src.analysis.week_structure import is_quality_session
+    from src.services.repositories import latest_lthr
+    lthr = latest_lthr(user_id, db=db)
+    max_hr_val = user.max_hr if user and user.max_hr else None
+    quality = sorted({d for d, s in dated
+                      if is_quality_session(effective_training_type(s),
+                                            s.avg_heart_rate, max_hr_val, lthr)})
+    if quality:
+        out["days_since_quality"] = (today - quality[-1]).days
+        out["quality_days_7d"] = sum(1 for d in quality if (today - d).days < 7)
+    races = [(d, s) for d, s in dated if effective_training_type(s) == "race"]
+    if races:
+        d, s = max(races, key=lambda x: x[0])
+        required = ceil((s.total_distance_km or 0) / POST_RACE_KM_PER_EASY_DAY)
+        out["post_race_days_left"] = max(0, required - (today - d).days)
+    return out
+
+
 def assess_state(user_id: int, *, db: Session) -> AthleteState:
     """Собрать AthleteState из скиллов и метрик (assemble AthleteState).
 
     Никогда не бросает исключение из-за отсутствия данных: пустая БД → скоры None,
     skills со статусом unknown, data_confidence 0.0.
     """
+    user_row = db.query(User).filter(User.id == user_id).first()
+    today_local = user_now(user_row).date()
     dm = CoachRepository.latest_metrics(user_id, db=db)
     baseline_rhr = CoachRepository.baseline_rhr(user_id, db=db)
     acwr = CoachRepository.acwr(user_id, db=db)
@@ -225,6 +263,9 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
         "poor_interval_recovery": InsightRepository.recent_flag(
             user_id, FLAG_POOR_INTERVAL_RECOVERY, db=db,
             days=HRR_POOR_RECOVERY_LOOKBACK_DAYS),
+        # M4.1/M4.3 (F5/F6): структура недели и пауза — сырьё правил 12–14 p1_safety
+        # (weekly-structure and layoff signals for the safety rules)
+        **_week_signals(user_id, today_local, user_row, db=db),
     }
 
     return AthleteState(
