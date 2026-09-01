@@ -173,5 +173,15 @@ class LLMUnavailableError(CoachError):
     """LLM недоступен: нет ключа/сети — оркестратор уходит в fallback (LLM unavailable)."""
 
 
+class LLMTransientError(LLMUnavailableError):
+    """Временный сбой моста (5xx/timeout/сеть) — можно повторить (retryable).
+
+    Подкласс LLMUnavailableError → существующие `except (LLMUnavailableError, ...)`
+    ловят его без изменений; отличается от постоянных сбоев (нет ключа/NullLLM,
+    401 bad token, 400 bad image), которые остаются обычным LLMUnavailableError.
+    (Transient bridge failure — retryable; permanent failures stay LLMUnavailableError.)
+    """
+
+
 class ToolExecutionError(CoachError):
     """Ошибка выполнения tool'а LLM (LLM tool execution error)."""

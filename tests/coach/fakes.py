@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from src.coach.llm.client import LLMResponse
-from src.exceptions import LLMUnavailableError
+from src.exceptions import LLMTransientError, LLMUnavailableError
 
 
 class ScriptedLLM:
@@ -21,7 +21,7 @@ class ScriptedLLM:
 
 
 class FailingLLM:
-    """Всегда LLMUnavailableError — проверка fallback-пути."""
+    """Всегда LLMUnavailableError (постоянная) — проверка fallback-пути."""
 
     calls: list = []
 
@@ -31,3 +31,14 @@ class FailingLLM:
     def complete(self, **kwargs) -> LLMResponse:
         self.calls.append(kwargs)
         raise LLMUnavailableError("scripted failure")
+
+
+class TransientFailingLLM:
+    """Всегда LLMTransientError (временный сбой моста) — проверка retriable-ветки."""
+
+    def __init__(self):
+        self.calls: list = []
+
+    def complete(self, **kwargs) -> LLMResponse:
+        self.calls.append(kwargs)
+        raise LLMTransientError("scripted transient failure")

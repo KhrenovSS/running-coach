@@ -87,6 +87,35 @@ class SafetyVerdict:
 
 
 @dataclass
+class RecoverySpec:
+    """Критерий восстановления между повторами (recovery criterion between reps).
+
+    Любая комбинация — рендерится как «до пульса ≤X, или N мин, или N км — что раньше».
+    """
+    until_hr: int | None = None                # «до пульса ≤ X»
+    duration_min: float | None = None          # «или N мин»
+    distance_km: float | None = None           # «или N км»
+    target_zone: int | None = None             # зона трусцы восстановления (обычно 1)
+
+
+@dataclass
+class WorkoutSegment:
+    """Сегмент тренировки ДО простановки чисел (qualitative segment from LLM).
+
+    Числа пульса/темпа проставляет детерминированно `segments.enrich_and_clamp_segments`
+    из зон/истории — сам сегмент несёт только качественную структуру.
+    """
+    role: str                                  # warmup|work|recovery|cooldown|steady
+    repeat: int = 1                            # повторов (для work с чередованием — пара work+recovery)
+    amount_kind: str = "min"                   # min|sec|km|m|open (open → критерий в recovery/until)
+    amount_value: float | None = None          # величина в единицах amount_kind
+    target_zone: int | None = None             # зона сегмента → потолок пульса детерминированно
+    pace_target_min_km: float | None = None    # явный темп, если задан (иначе оценим/пометим «мало данных»)
+    effort: str | None = None                  # «свободно, не до предела» — для коротких ускорений
+    recovery: RecoverySpec | None = None       # восстановление между повторами work
+
+
+@dataclass
 class WorkoutProposal:
     """Предложение тренировки ДО границы безопасности (от LLM или fallback).
 
@@ -98,7 +127,8 @@ class WorkoutProposal:
     duration_min: int | None = None
     distance_km: float | None = None
     target_pace_min_km: float | None = None    # задан → ведём по темпу (pace-lead mode)
-    structure: str | None = None               # «10×400/400» и т.п.
+    structure: str | None = None               # legacy: «10×400/400» (старые записи); новое — segments
+    segments: list[WorkoutSegment] = field(default_factory=list)  # структура по сегментам
     rationale: list[str] = field(default_factory=list)
     for_days_ahead: int = 0                    # 0 = сегодня, 1 = завтра (target day offset)
 

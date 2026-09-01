@@ -13,6 +13,27 @@ from pydantic import BaseModel, Field, field_validator
 from src.coach.config import PACE_TARGET_MAX_PER_KM, PACE_TARGET_MIN_PER_KM
 
 
+class RecoverySpecIn(BaseModel):
+    """Критерий восстановления между повторами (recovery criterion)."""
+    until_hr: int | None = Field(default=None, ge=60, le=220)
+    duration_min: float | None = Field(default=None, ge=0.1, le=30)
+    distance_km: float | None = Field(default=None, ge=0.05, le=10)
+    target_zone: int | None = Field(default=None, ge=1, le=5)
+
+
+class WorkoutSegmentIn(BaseModel):
+    """Сегмент тренировки от LLM — качественная структура, числа проставит система."""
+    role: Literal["warmup", "work", "recovery", "cooldown", "steady"] = "steady"
+    repeat: int = Field(default=1, ge=1, le=30)
+    amount_kind: Literal["min", "sec", "km", "m", "open"] = "min"
+    amount_value: float | None = Field(default=None, ge=0, le=180)
+    target_zone: int | None = Field(default=None, ge=1, le=5)
+    pace_target_min_km: float | None = Field(default=None, ge=PACE_TARGET_MIN_PER_KM,
+                                             le=PACE_TARGET_MAX_PER_KM)
+    effort: str | None = Field(default=None, max_length=80)
+    recovery: RecoverySpecIn | None = None
+
+
 class WorkoutProposalIn(BaseModel):
     """Предложение тренировки от LLM — до границы safety (LLM proposal, pre-clamp)."""
     workout_type: Literal["rest", "recovery", "easy", "long", "tempo", "interval", "race"]
@@ -21,7 +42,8 @@ class WorkoutProposalIn(BaseModel):
     distance_km: float | None = Field(default=None, ge=1, le=60)
     target_pace_min_km: float | None = Field(default=None, ge=PACE_TARGET_MIN_PER_KM,
                                              le=PACE_TARGET_MAX_PER_KM)
-    structure: str | None = Field(default=None, max_length=200)
+    structure: str | None = Field(default=None, max_length=200)   # legacy (совместимость)
+    segments: list[WorkoutSegmentIn] = Field(default_factory=list, max_length=12)
     rationale: list[str] = Field(default_factory=list, max_length=5)
     # На какой день назначение: 0 = сегодня, 1 = завтра, максимум неделя.
     # Относительный день, не ISO-дата — симметрично days_ago (инцидент 29.08:

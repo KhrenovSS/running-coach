@@ -46,7 +46,40 @@ def test_extract_sleep_bad_json_returns_none(monkeypatch):
 
 def test_extract_sleep_bridge_error_returns_none(monkeypatch):
     _bridge(monkeypatch, "", status=502)
-    assert extract_sleep(b"img") is None
+    # sleep=no-op: транзиентный 502 ретраится, реально спать в тесте не нужно
+    assert extract_sleep(b"img", sleep=lambda _s: None) is None
+
+
+def test_extract_sleep_transient_then_succeeds(monkeypatch):
+    """502 → 200: транзиентный сбой моста добивается повтором (vision retry)."""
+    calls = {"n": 0}
+    ok = ('{"is_sleep_screen": true, "duration_min": 471}')
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        calls["n"] += 1
+        req = httpx.Request("POST", url)
+        if calls["n"] == 1:
+            return httpx.Response(502, json={"detail": "claude CLI exit=1: "}, request=req)
+        return httpx.Response(200, json={"text": ok}, request=req)
+    monkeypatch.setattr(vision.httpx, "post", fake_post)
+    monkeypatch.setattr(vision.settings, "coach_llm_bridge_url", "http://bridge")
+    shot = extract_sleep(b"img", sleep=lambda _s: None)
+    assert shot is not None and shot.duration_min == 471
+    assert calls["n"] == 2
+
+
+def test_extract_sleep_bad_image_not_retried(monkeypatch):
+    """400 (bad image) — постоянная ошибка: без повтора, None."""
+    calls = {"n": 0}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        calls["n"] += 1
+        req = httpx.Request("POST", url)
+        return httpx.Response(400, json={"detail": "bad image_b64"}, request=req)
+    monkeypatch.setattr(vision.httpx, "post", fake_post)
+    monkeypatch.setattr(vision.settings, "coach_llm_bridge_url", "http://bridge")
+    assert extract_sleep(b"img", sleep=lambda _s: None) is None
+    assert calls["n"] == 1
 
 
 def test_extract_sleep_no_bridge_configured(monkeypatch):

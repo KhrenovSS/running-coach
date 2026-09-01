@@ -4,14 +4,16 @@ import httpx
 import pytest
 
 from src.coach.llm.bridge_client import BridgeLLM, extract_json
-from src.exceptions import LLMUnavailableError
+from src.exceptions import LLMTransientError, LLMUnavailableError
 
 TURN = '{"message": "Полегче сегодня.", "proposal": null, "followup_question": null, "log_suggestion": null}'
 
 
 def _bridge(handler) -> BridgeLLM:
+    # sleep=no-op: ретраи на транзиентный сбой не должны реально спать в тестах
     return BridgeLLM(base_url="http://bridge.test", token="secret",
-                     transport=httpx.MockTransport(handler))
+                     transport=httpx.MockTransport(handler),
+                     sleep=lambda _s: None)
 
 
 def test_extract_json_variants():
@@ -57,20 +59,71 @@ def test_bridge_system_blocks_flattened():
     assert "ПЕРСОНА" in captured["system_text"] and "ПРОФИЛЬ" in captured["system_text"]
 
 
-@pytest.mark.parametrize("status", [401, 502, 504])
-def test_bridge_http_errors_raise_unavailable(status):
+def test_bridge_permanent_4xx_not_retried():
+    """401 (bad token) — постоянная ошибка: без повтора, LLMUnavailableError (не Transient)."""
+    calls = {"n": 0}
+
     def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(401, json={"detail": "bad bridge token"})
+    llm = _bridge(handler)
+    with pytest.raises(LLMUnavailableError) as ei:
+        llm.complete(system=[], messages=[{"role": "user", "content": "x"}])
+    assert not isinstance(ei.value, LLMTransientError)
+    assert calls["n"] == 1
+
+
+@pytest.mark.parametrize("status", [502, 503, 504])
+def test_bridge_transient_exhausted_raises_transient(status):
+    """5xx на всех попытках → LLMTransientError; попыток = 1 + COACH_BRIDGE_RETRIES."""
+    from src.coach.llm.config import COACH_BRIDGE_RETRIES
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
         return httpx.Response(status, json={"detail": "boom"})
     llm = _bridge(handler)
-    with pytest.raises(LLMUnavailableError):
+    with pytest.raises(LLMTransientError):
         llm.complete(system=[], messages=[{"role": "user", "content": "x"}])
+    assert calls["n"] == 1 + COACH_BRIDGE_RETRIES
 
 
-def test_bridge_connection_error_raises_unavailable():
+def test_bridge_retries_then_succeeds():
+    """502 → 502 → 200: транзиентный сбой добивается повтором (recovery within retries)."""
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return httpx.Response(502, json={"detail": "claude CLI exit=1: "})
+        return httpx.Response(200, json={"text": TURN, "usage": {}})
+    llm = _bridge(handler)
+    resp = llm.complete(system=[], messages=[{"role": "user", "content": "x"}])
+    assert resp.parsed["message"] == "Полегче сегодня."
+    assert calls["n"] == 3
+
+
+def test_bridge_timeout_then_succeeds():
+    """Timeout на первой попытке → повтор → успех (timeout is transient/retryable)."""
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ReadTimeout("slow")
+        return httpx.Response(200, json={"text": TURN, "usage": {}})
+    llm = _bridge(handler)
+    resp = llm.complete(system=[], messages=[{"role": "user", "content": "x"}])
+    assert resp.parsed["message"] == "Полегче сегодня."
+    assert calls["n"] == 2
+
+
+def test_bridge_connection_error_exhausted_raises_transient():
+    """Сетевой отказ на всех попытках → LLMTransientError (network is transient)."""
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("refused")
     llm = _bridge(handler)
-    with pytest.raises(LLMUnavailableError):
+    with pytest.raises(LLMTransientError):
         llm.complete(system=[], messages=[{"role": "user", "content": "x"}])
 
 

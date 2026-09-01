@@ -8,12 +8,15 @@
 from __future__ import annotations
 
 import base64
+import time
+from collections.abc import Callable
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from src.coach.llm.bridge_client import extract_json
+from src.coach.llm.bridge_client import extract_json, post_with_retry
 from src.config import settings
+from src.exceptions import LLMTransientError
 from src.utils.logger import get_logger
 
 logger = get_logger("coach.vision")
@@ -82,10 +85,14 @@ class SleepShot(BaseModel):
         return d or None
 
 
-def extract_sleep(image_bytes: bytes, *, timeout: int = 150) -> SleepShot | None:
+def extract_sleep(image_bytes: bytes, *, timeout: int = 150,
+                  sleep: Callable[[float], None] = time.sleep) -> SleepShot | None:
     """Скрин → SleepShot через мост /vision. None — мост недоступен/ошибка/мусор.
 
     Никогда не бросает наружу: фото пользователя не должно ронять хендлер.
+    Транзиентный сбой моста (5xx/timeout/сеть) ретраится внутри post_with_retry;
+    на длинный сбой страховка — напоминание в 10:00 + ручная пересылка (картинка
+    на сервере не хранится, отложенной очереди переобработки нет). `sleep` — для тестов.
     """
     base_url = (settings.coach_llm_bridge_url or "").rstrip("/")
     if not base_url:
@@ -97,13 +104,16 @@ def extract_sleep(image_bytes: bytes, *, timeout: int = 150) -> SleepShot | None
         "system_text": _SYSTEM,
     }
     try:
-        resp = httpx.post(f"{base_url}/vision", json=payload,
-                          headers={"X-Bridge-Token": settings.coach_llm_bridge_token},
-                          timeout=timeout)
-    except httpx.HTTPError as e:
-        logger.warning("Vision: мост недоступен: %s", e)
+        resp = post_with_retry(
+            lambda: httpx.post(
+                f"{base_url}/vision", json=payload,
+                headers={"X-Bridge-Token": settings.coach_llm_bridge_token},
+                timeout=timeout),
+            sleep=sleep)
+    except LLMTransientError as e:   # исчерпаны повторы на транзиентном сбое
+        logger.warning("Vision: %s", e)
         return None
-    if resp.status_code != 200:
+    if resp.status_code != 200:      # постоянная ошибка (400 bad image, 401)
         logger.warning("Vision: мост HTTP %s: %s", resp.status_code, resp.text[:200])
         return None
     parsed = extract_json(resp.json().get("text", ""))

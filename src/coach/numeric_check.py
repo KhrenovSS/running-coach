@@ -39,6 +39,14 @@ def _expected_values(p: Prescription, max_hr: int | None) -> dict[str, list[floa
         ceiling = zone_ceiling_hr(zone, max_hr)
         if ceiling is not None:
             hr.append(float(ceiling))
+    # Пульсовые числа сегментов (детерминированы кодом): в карточке легальны,
+    # проза может на них ссылаться — добавляем в эталон, чтобы не ловить ложное.
+    for seg in (p.target.get("segments") or []):
+        if seg.get("hr_ceiling") is not None:
+            hr.append(float(seg["hr_ceiling"]))
+        rec = seg.get("recovery") or {}
+        if rec.get("until_hr") is not None:
+            hr.append(float(rec["until_hr"]))
     return {"km": km, "min": minutes, "pace": pace, "hr": hr,
             "zone": [float(zone)] if zone is not None else []}
 

@@ -176,6 +176,8 @@ def week_plan_review(user_id: int, *, db: Session) -> dict | None:
 
 def _proposal_from_row(rec: Recommendation) -> WorkoutProposal:
     """Восстановить предложение из плановой строки (для re-clamp утром)."""
+    from src.coach.segments import segments_from_target
+
     target, volume = rec.target_json or {}, rec.volume_json or {}
     return WorkoutProposal(
         workout_type=rec.workout_type,
@@ -184,6 +186,7 @@ def _proposal_from_row(rec: Recommendation) -> WorkoutProposal:
         distance_km=volume.get("distance_km"),
         target_pace_min_km=target.get("pace_min_km"),
         structure=target.get("structure"),
+        segments=segments_from_target(target.get("segments")),
         rationale=["план недели"],
     )
 

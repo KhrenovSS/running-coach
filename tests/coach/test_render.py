@@ -258,3 +258,32 @@ def test_render_future_day_card_and_short():
                                today=p_today.when).startswith("*🟦 Длительный бег*")
     assert render_prescription_short(p_today, max_hr=177, today=p_today.when
                                      ).startswith("План на сегодня без изменений:")
+
+
+def test_render_week_plan_shows_distance():
+    """Недельная карточка: у каждого бегового дня есть примерная дистанция ≈X км.
+
+    Пожелание владельца 31.08.2026: раньше в плане выводились только темп/пульс +
+    время, без пройденного расстояния. Дистанцию берём из уже клэмпленного объёма.
+    """
+    from datetime import date
+
+    from src.coach.render import render_week_plan
+
+    state = _state()
+    verdict = evaluate_safety(state)
+    tempo, _ = clamp(WorkoutProposal(workout_type="tempo", target_zone=4,
+                                     duration_min=40, target_pace_min_km=5.5),
+                     verdict, state)               # pace-режим → volume km 7.3
+    easy, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2,
+                                    duration_min=45, distance_km=7.5),
+                    verdict, state)                # HR-режим → volume km 7.5
+    tempo.when = date(2026, 9, 2)
+    easy.when = date(2026, 9, 4)
+    targets = {"week_start": "2026-08-31", "mesocycle_week": 2,
+               "mesocycle_length": 4, "phase": "build", "target_km": 40}
+
+    text = render_week_plan([tempo, easy], targets, max_hr=177)
+    assert "План на неделю" in text
+    assert "≈7.3 км" in text                       # темп-день: 40 / 5.5
+    assert "≈7.5 км" in text                       # лёгкий день: объём из proposal

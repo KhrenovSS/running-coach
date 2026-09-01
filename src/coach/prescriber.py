@@ -118,6 +118,20 @@ def finalize(proposal: WorkoutProposal | None, state: AthleteState, *,
                     prescription.workout_type, ",".join(verdict.triggered))
     if db is not None:
         prescription.predicted = predict_volume(prescription, state, db=db)
+    if db is not None and proposal.segments:
+        # Числа сегментам проставляются ПОСЛЕ clamp — по итоговым зоне/типу (симметрично
+        # predict_volume). enrich сам вернёт [], если структуру нельзя показать безопасно.
+        from src.coach.segments import enrich_and_clamp_segments
+        user = db.query(User).filter(User.id == state.user_id).first()
+        seg_dicts = enrich_and_clamp_segments(
+            proposal.segments,
+            workout_type=prescription.workout_type,
+            proposal_type=proposal.workout_type,
+            max_zone=prescription.target.get("max_zone", 1),
+            max_hr=user_max_hr(user),
+            user_id=state.user_id, db=db)
+        if seg_dicts:
+            prescription.target["segments"] = seg_dicts
     if persist and db is not None:
         save_prescription(prescription, state, db=db)
     return prescription

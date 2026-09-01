@@ -50,7 +50,7 @@ from src.coach.tools.serialize import jsonable
 from src.coach.turn_context import build_extras as _build_extras
 from src.coach.turn_context import history as _history
 from src.coach.turn_context import unchanged_today as _unchanged_today
-from src.exceptions import CoachError, LLMUnavailableError
+from src.exceptions import CoachError, LLMTransientError, LLMUnavailableError
 from src.models import TrainingFeedback, User, UserModel, WellnessReport
 from src.services.repositories_coach import CoachRepository
 from src.utils.logger import get_logger
@@ -66,6 +66,7 @@ class ChatReply:
     text: str
     log_suggestion: LogSuggestion | None = None
     source: str = "fallback"          # llm | fallback
+    retriable: bool = False           # fallback из-за транзиентного сбоя моста → есть смысл повторить
     assessment: ReviewAssessment | None = None   # D3: только kind=review
     assistant_message_id: int | None = None      # D3: link в workout_insights
 
@@ -151,6 +152,7 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
                        kind, user_id)
     proposal = None
     if turn.proposal is not None:
+        from src.coach.segments import segments_from_schema
         proposal = WorkoutProposal(
             workout_type=turn.proposal.workout_type,
             target_zone=turn.proposal.target_zone,
@@ -158,6 +160,7 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
             distance_km=turn.proposal.distance_km,
             target_pace_min_km=turn.proposal.target_pace_min_km,
             structure=turn.proposal.structure,
+            segments=segments_from_schema(turn.proposal.segments),
             rationale=list(turn.proposal.rationale),
             for_days_ahead=turn.proposal.for_days_ahead,
         )
@@ -231,13 +234,19 @@ def handle_chat(user_id: int, message: str, *, db: Session,
         return _llm_chat_turn(user_id, message, db=db, llm=llm, kind=kind)
     except (LLMUnavailableError, CoachError) as e:
         logger.info("LLM chat fallback for user=%s: %s", user_id, e)
-        state = assess_state(user_id, db=db)
-        text = ("Тренер сейчас отвечает в базовом режиме.\n"
-                "Вот твоё текущее состояние:\n\n" + render_state_card(state))
+        transient = isinstance(e, LLMTransientError)
+        if kind == "morning":
+            # Утро: детерминированный вердикт со НАЗНАЧЕНИЕМ через safety (как /verdict),
+            # а не generic-карточка состояния — иначе теряется план дня (инцидент 01.09).
+            text = morning_verdict(user_id, db=db)
+        else:
+            state = assess_state(user_id, db=db)
+            text = ("Тренер сейчас отвечает в базовом режиме.\n"
+                    "Вот твоё текущее состояние:\n\n" + render_state_card(state))
         CoachRepository.save_message(user_id, "user", message, db=db, kind=kind)
         CoachRepository.save_message(user_id, "assistant", text, db=db, kind=kind,
-                                     meta={"fallback": True})
-        return ChatReply(text=text, source="fallback")
+                                     meta={"fallback": True, "transient": transient})
+        return ChatReply(text=text, source="fallback", retriable=transient)
 
 
 def _deterministic_review(user_id: int, session_id: int, *, db: Session) -> str:

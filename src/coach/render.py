@@ -12,6 +12,7 @@ from typing import Any
 from src.analysis.hr_zones import zone_ceiling_hr
 from src.analysis.utils import format_pace
 from src.coach.contracts import AthleteState, Prescription, SafetyVerdict, SkillResult
+from src.coach.render_segments import render_segment_lines, segments_total_min
 from src.config.constants import HR_DISPLAY_UNIT
 from src.utils.timeutils import WEEKDAYS_RU as _WEEKDAYS_RU
 from src.utils.timeutils import local_dt
@@ -52,6 +53,23 @@ def _predicted_estimate(p: Prescription) -> tuple[float, float] | None:
     return None
 
 
+def _distance_hint_km(p: Prescription) -> float | None:
+    """Примерная дистанция для карточки: объём → прогноз → темп×время (or None).
+
+    (Approximate distance for a card: volume, else prediction, else pace×duration.)
+    """
+    km = p.volume.get("distance_km")
+    if km is not None:
+        return km
+    est = _predicted_estimate(p)          # (pace, km) из p.predicted
+    if est is not None:
+        return est[1]
+    pace, dur = p.target.get("pace_min_km"), p.volume.get("duration_min")
+    if pace and dur:
+        return dur / pace
+    return None
+
+
 def _pace_lead_lines(p: Prescription) -> list[str]:
     """Строки pace-режима: цель — темп+время, пульс — справочный прогноз.
 
@@ -63,7 +81,7 @@ def _pace_lead_lines(p: Prescription) -> list[str]:
         parts.append(f"{p.volume['duration_min']:.0f} мин")
     if p.volume.get("distance_km") is not None:
         parts.append(f"≈{p.volume['distance_km']:.1f} км")
-    if p.target.get("structure"):
+    if p.target.get("structure") and not p.target.get("segments"):
         parts.append(p.target["structure"])
     lines = [" · ".join(parts), "Ведём по темпу — на пульс сегодня не смотрим."]
     if p.predicted.get("expected_hr") is not None:
@@ -88,7 +106,7 @@ def _hr_lead_lines(p: Prescription, max_hr: int | None) -> list[str]:
         parts.append(f"{p.volume['duration_min']:.0f} мин")
     if p.volume.get("distance_km") is not None and estimate is None:
         parts.append(f"~{p.volume['distance_km']:.1f} км")
-    if p.target.get("structure"):
+    if p.target.get("structure") and not p.target.get("segments"):
         parts.append(p.target["structure"])
     lines = [" · ".join(parts)]
     if estimate is not None:
@@ -111,9 +129,22 @@ def render_prescription(p: Prescription, max_hr: int | None = None,
     """
     day = _day_label(p.when, today)
     title = _TYPE_LABEL.get(p.workout_type, p.workout_type)
-    lines = [f"*{title} — {day}*" if day else f"*{title}*"]
+    segments = p.target.get("segments") or []
+    if (segments and any(s.get("role") == "work" for s in segments)
+            and p.workout_type in ("easy", "long", "recovery")):
+        title += " с ускорениями"
+    header = f"*{title} — {day}*" if day else f"*{title}*"
+    if segments:
+        # Итог считаем из самих сегментов — иначе верхняя строка (общая длительность
+        # предложения) противоречит сумме сегментов (инцидент 01.09: 35 мин vs ~46).
+        total = segments_total_min(segments)
+        if total:
+            header += f" · ~{total} мин"
+    lines = [header]
     if p.workout_type != "rest":
-        if p.target.get("pace_min_km") is not None:
+        if segments:
+            lines += render_segment_lines(segments)   # посегментная раскладка вместо сводной
+        elif p.target.get("pace_min_km") is not None:
             lines += _pace_lead_lines(p)
         else:
             lines += _hr_lead_lines(p, max_hr)
@@ -189,7 +220,12 @@ def render_week_plan(prescriptions: list[Prescription], targets: dict,
                 parts.append(f"Z{p.target['max_zone']} и ниже")
         if p.volume.get("duration_min") is not None:
             parts.append(f"{p.volume['duration_min']:.0f} мин")
-        if p.target.get("structure"):
+        km = _distance_hint_km(p)
+        if km is not None:
+            parts.append(f"≈{km:.1f} км")
+        if p.target.get("segments"):
+            parts.append("по сегментам — детали в дне")
+        elif p.target.get("structure"):
             parts.append(p.target["structure"])
         lines.append(f"{day} — " + " · ".join(parts))
     if any(p.clamped for p in prescriptions):
