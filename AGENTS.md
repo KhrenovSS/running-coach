@@ -150,15 +150,19 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 - `src/services/workout_insights.py` — computed_json метрик тренировки (INSIGHTS_SCHEMA_VERSION=3), план-vs-факт
 - `src/services/sleep_ingest.py` — `save_sleep_shot` → колонки `sleep_*` в DailyMetrics (#257, из скриншота)
 - `src/services/hr_max.py` — адаптивный max_hr (авто-повышение по пикам, еженедельное предложение снижения)
-- `src/coach/` — пакет гибридного ИИ-коуча (**в проде с 23.08.2026**; C0–C7 закрыты,
+- `src/coach/` — пакет гибридного ИИ-коуча (**в проде с 23.08.2026**; C0–C9/D0–D8 закрыты,
   полная карта модулей — `docs/coach/ARCHITECTURE.md`):
   - `config.py` — **единственный исполняемый источник порогов** (метрики зеркалят
-    `docs/coros_health_metrics.md`, safety/pain — DEV_PLAN §4; анти-дрейф-тесты в `test_coach_config.py`)
+    `docs/coros_health_metrics.md`, safety/pain — DEV_PLAN §4; анти-дрейф-тесты в `test_coach_config.py`);
+    здесь же константы устойчивости моста `COACH_BRIDGE_RETRIES`/`COACH_MORNING_RETRY_*` — в `llm/config.py`
   - `contracts.py` — реализованные дата-классы: `SkillResult`, `AthleteState(+signals)`,
-    `SafetyVerdict`, `WorkoutProposal`, `Prescription(kw_only)`, `ReasoningStep`
+    `SafetyVerdict`, `WorkoutProposal(+segments)`, `WorkoutSegment`, `RecoverySpec`,
+    `Prescription(kw_only)`, `ReasoningStep` (строковая `WorkoutProposal.structure` — legacy, читается для совместимости)
   - `rules/p1_safety.py` + `safety.py` — граница: evaluate_safety + clamp (единственный
     конструктор Prescription; `for_days_ahead` → назначение на будущий день); `state.py`,
-    `prescriber.py`, `render.py`, `fallback.py`, `orchestrator.py`, `util.py`
+    `prescriber.py`, `render.py`, `render_segments.py` (рендер сегментов + общий итог из них),
+    `segments.py` (`enrich_and_clamp_segments` — числа сегментам из зон/истории, per-segment clamp, M2.1),
+    `fallback.py`, `orchestrator.py`, `util.py`
   - `turn_context.py` — `build_extras`/`unchanged_today`/`history` (вынос из orchestrator, #266)
   - `planning.py` — детерминированные числа недели (мезоцикл 3:1, прогрессия ≤10%, потолки,
     `week_targets`/`advance_mesocycle`/`week_plan_review`/`confirm_or_adjust_morning`)
@@ -168,7 +172,8 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
   - `vision.py` — извлечение сна из скриншота через мост `/vision` (#257; `SleepShot`)
   - `skills/` (fatigue/recovery/load/distribution/progress/pain + workout), `tools/` (7 read-only),
     `knowledge/guides/` (методика Дэниелса/Фицджеральда), `llm/` (anthropic / **bridge_client — мост
-    подписки, прод сейчас** / null + ручной agent-цикл)
+    подписки, прод сейчас; `post_with_retry` — ретрай транзиентных 502/timeout, `LLMTransientError`** /
+    null + ручной agent-цикл)
   - Источник порогов для skills/rules — `docs/coros_health_metrics.md`;
     метрики разбора M1 — `src/analysis/session_metrics.py`
 - `src/telegram/` — пакет Telegram-бота (handlers + jobs + инфраструктура):
@@ -228,6 +233,20 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 См. также `CLAUDE.md` → «Git / коммиты».
 
 ## Текущее состояние
+
+**Session 01.09.2026 — устойчивость моста + тренировки по сегментам (M2.1) ✅ (задеплоено, e27f6b2):**
+- **Устойчивость к сбою LLM-моста** (инцидент утра 01.09, мост отдавал `502 claude CLI exit=1`):
+  `LLMTransientError`, ретрай с backoff `post_with_retry` (`bridge_client.py`, `vision.py`) на
+  транзиентные 502/timeout/сеть; при сбое утренний вердикт — **детерминированный со назначением**
+  (`orchestrator.handle_chat` kind=morning → `morning_verdict()`), а не generic-«базовый режим»;
+  отложенный upgrade-повтор `_morning_upgrade_job` (`coach_morning.py`) + аудит отправки вердикта.
+- **Тренировки по сегментам (M2.1)**: `WorkoutSegment`/`RecoverySpec` + `WorkoutProposal.segments`
+  (`contracts.py`); `segments.py` детерминированно ставит потолки пульса из зон и ориентир темпа
+  из истории (честная деградация «мало данных»/«по ощущениям»), per-segment clamp под safety;
+  `render_segments.py` — компактная карточка с общим итогом времени, посчитанным из сегментов
+  (устранено расхождение «верх ≠ сумма»). Схема `WorkoutSegmentIn` в `llm/schemas.py`, промпт обновлён.
+  Экспорт в Coros и нормативный темп VDOT/ПАНО — BACKLOG #272/#273.
+- **Дистанция ≈км** в карточке недельного плана (`render_week_plan`).
 
 **Session 28–30.08.2026 — точность дат, метрики разбора, недельный план, сон из скриншота ✅ (задеплоено):**
 - **Даты/пояс во входе LLM**: «Сейчас: <день недели>, дата время (пояс)», `started_at_local`+`weekday`

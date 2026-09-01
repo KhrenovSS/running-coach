@@ -43,6 +43,13 @@ host-сервис `bin/coach_llm_bridge.py` (systemd `running-coach-llm-bridge.s
 temp-каталогом, `--max-turns ≥2` (ход на Read + ход на ответ), файл удаляется в `finally`.
 Нужен для распознавания сна из скриншота БЕЗ API-ключа (мультимодальность подписки через файл).
 Рестарт моста агентом — без пароля (sudoers `bin/sudoers-bridge-restart`).
+**01.09.2026 — устойчивость к транзиентному сбою моста** (инцидент утра: `502 claude CLI exit=1`):
+транзиентные ответы (5xx/timeout/сеть) → `LLMTransientError(LLMUnavailableError)` и ретрай с backoff
+`post_with_retry` (`llm/bridge_client.py`, применён и в `vision.py`; `COACH_BRIDGE_RETRIES` в
+`llm/config.py`); постоянные (401/400, нет ключа) — обычный `LLMUnavailableError`. Утренний вердикт
+при недоступности моста — детерминированный со назначением (`handle_chat` kind="morning" →
+`morning_verdict()`), не generic-«базовый режим»; при транзиентном сбое `morning_verdict_job` ставит
+отложенный `_morning_upgrade_job` (`run_once`, добор LLM-вердикта после восстановления моста).
 
 ## Решение 4: отложенный разбор — статус в БД, не очередь в памяти (D-серия, 24.08.2026)
 
@@ -91,14 +98,17 @@ Coros API длительность/фазы/оценку сна не отдаё�
 coach/
 ├── config.py          # ЕДИНСТВЕННЫЙ исполняемый источник порогов (метрики ← coros-док,
 │                      #   safety/pain ← DEV_PLAN §4, метрики M1/план); анти-дрейф test_coach_config
-├── contracts.py       # SkillResult, AthleteState(+signals), SafetyVerdict,
-│                      #   WorkoutProposal(+for_days_ahead), Prescription(kw_only), ReasoningStep
+├── contracts.py       # SkillResult, AthleteState(+signals), SafetyVerdict, WorkoutProposal(+segments),
+│                      #   WorkoutSegment, RecoverySpec, PaceClampContext, Prescription(kw_only), ReasoningStep
+│                      #   (WorkoutProposal.structure — legacy-строка, читается для совместимости)
 ├── state.py           # assess_state → AthleteState; _missing() (sleep уходит при данных, #257)
 ├── util.py            # effective_training_type (override > авто), safe_div, clamp_value
 ├── safety.py          # clamp() — ЕДИНСТВЕННЫЙ конструктор Prescription (when=for_days_ahead)
 ├── prescriber.py      # finalize(): proposal → evaluate_safety → clamp → persist(status)
 ├── fallback.py        # табличное предложение без LLM (readiness → easy/recovery/rest)
 ├── render.py          # детерминированный рендер карточек + render_week_plan (недельный план)
+├── render_segments.py # рендер посегментной раскладки + segments_total_min (общий итог из сегментов, M2.1)
+├── segments.py        # enrich_and_clamp_segments: числа сегментам из зон/истории, per-segment clamp (M2.1)
 ├── orchestrator.py    # morning_verdict (подтверждает план дня), handle_chat, on_workout_completed
 │                      #   (+ слияние флагов из computed), weekly_report; ChatReply
 ├── turn_context.py    # build_extras / unchanged_today / history (вынос из orchestrator, #266)

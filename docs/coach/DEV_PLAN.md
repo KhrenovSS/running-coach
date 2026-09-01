@@ -58,7 +58,7 @@
 | `personalization/` (весь) | удалить (C5) | 4 RPE из 36 — калибровать нечего; вернём, когда фидбек накопится → BACKLOG |
 | `rules/p1_safety.py` | **реализовать** (C2) | граница, через которую проходит 100% назначений |
 
-## 3. Контракты (`src/coach/contracts.py`, один файл, ~120 строк)
+## 3. Контракты (`src/coach/contracts.py`, один файл, ~170 строк)
 
 - `SkillResult` += `unit: str | None` (иначе LLM спутает единицы), `as_of: date | None`
   (защита от «сегодня HRV 62» по позавчерашним данным). `evidence` остаётся `str` —
@@ -70,7 +70,13 @@
   модель видит вердикт, не сырьё).
 - Новые: `SafetyVerdict(allow_training, max_zone, max_duration_min, allowed_types,
   earliest_next_hard, triggered, reasons)`; `WorkoutProposal(workout_type, target_zone,
-  duration_min, distance_km, structure, rationale)`.
+  duration_min, distance_km, target_pace_min_km, structure, segments, rationale, for_days_ahead)`.
+- **Сегменты тренировки (M2.1 назначения, 01.09.2026)**: `WorkoutSegment(role, repeat, amount_kind,
+  amount_value, target_zone, pace_target_min_km, effort, recovery)` и `RecoverySpec(until_hr,
+  duration_min, distance_km, target_zone)` — качественная структура от LLM; числа проставляет
+  детерминированно `segments.py` (§4). Строковая `WorkoutProposal.structure` — legacy (старые записи,
+  читается для совместимости). Также `PaceClampContext(expected_hr, safe_pace_min_km, zone_ceiling_bpm)`
+  — прекомпьют для safety-ветки темпа (clamp остаётся без БД).
 - `Prescription` += `safety: SafetyVerdict` (обязательное), `clamped: bool`,
   `source: "llm"|"fallback"`, `earliest: datetime | None`, `proposal: WorkoutProposal | None`
   (что предлагали до урезания). `when` остаётся `date`. Класс объявлен
@@ -92,6 +98,15 @@
 `now < earliest_next_hard` → `easy`. Любое срабатывание → `clamped=True` +
 `ReasoningStep(rule="p1_safety", ...)`. При `clamped=True` рендер добавляет фиксированный
 не-LLM-блок «⚠️ Ограничение по безопасности: …».
+
+**Посегментный слой (M2.1 назначения, 01.09.2026)**: если предложение содержит `segments`,
+после скалярного `clamp()` их обогащает и клэмпит `src/coach/segments.py::enrich_and_clamp_segments`
+(вызов из `prescriber.finalize` ПОСЛЕ clamp, симметрично `predict_volume`): per-segment
+`zone = max(1, min(zone, verdict.max_zone))`, потолок пульса из зоны (`zone_ceiling_hr`),
+ориентир темпа из истории (`expected_pace_at_hr`) с честными пометками `pace_missing`/`hr_missing`;
+если итоговый тип понижен по лестнице интенсивности — сегменты сбрасываются (их числа недостоверны,
+как drop-on-clamp для строковой `structure`). Результат кладётся в `prescription.target["segments"]`;
+рендер — `render_segments.py` (общий итог времени тренировки считается ИЗ сегментов).
 
 Триггеры v1 (пороги — только из `coach/config.py`):
 
@@ -179,6 +194,14 @@ Index(user_id, created_at)); `recommendations` += `proposal_json`, `safety_json`
 host-мост `bin/coach_llm_bridge.py` + systemd `running-coach-llm-bridge.service` + `.env.bridge`;
 headless `claude -p` под подпиской владельца, модель `BRIDGE_MODEL`, по умолчанию `sonnet` —
 бережём лимиты), иначе `NullLLM` (→ `LLMUnavailableError` → `fallback.py`).
+**Устойчивость к сбою моста (01.09.2026)**: транзиентные ответы моста (HTTP 502/503/504, timeout,
+сетевой отказ) → подкласс `LLMTransientError(LLMUnavailableError)` (`src/exceptions.py`) и ретрай
+с backoff `post_with_retry` (`llm/bridge_client.py`, применён и в `vision.py`; константы
+`COACH_BRIDGE_RETRIES`/`COACH_BRIDGE_RETRY_BACKOFF_S` в `llm/config.py`). Постоянные (401/400,
+нет ключа) — обычный `LLMUnavailableError`. Утренний вердикт при сбое — детерминированный со
+назначением (`orchestrator.handle_chat` kind="morning" → `morning_verdict()`), не generic-«базовый
+режим»; при транзиентном сбое `morning_verdict_job` ставит отложенный `_morning_upgrade_job`
+(`run_once`, добор LLM-вердикта когда мост поднимется; `COACH_MORNING_RETRY_*`); `ChatReply.retriable`.
 Мост-endpoints: `/complete` (текст, `--tools "" --max-turns 1`) и `/vision` (#257: картинка
 base64 → temp-файл на хосте → `claude -p --allowedTools Read --add-dir <tmp>` — исключение из
 «no tools», Read разрешён только на temp-каталог; для распознавания сна из скриншота).
@@ -404,7 +427,9 @@ PDF-текст). Книги → конспекты-гайды своими сл�
 5. **Данные**: **#257 сон ✅ 30.08 — решён иначе: скриншот сна → мост `/vision` →
    `DailyMetrics.sleep_*` (см. D8 ниже и CHANGELOG 30.08)**; правило «недосып→осторожнее»
    #254 (данные сна теперь есть); #232 (repair performance), #249 (recovery-шкала 20/70/90),
-   #255 (осадки в разбор), M2.1 (интервалы), M3 (якорь ПАНО/VDOT — нужен тест владельца).
+   #255 (осадки в разбор), M2.1 разбора (восстановление между интервалами — HRR/`hrr60`,
+   `analysis/intervals.py`; **не путать** с уже сделанным НАЗНАЧЕНИЕМ по сегментам, §3/§4 —
+   `segments.py`/`render_segments.py`, помеченным в коде «M2.1»), M3 (якорь ПАНО/VDOT — нужен тест владельца).
 
 ## 10. Тесты (`tests/coach/`)
 
@@ -423,6 +448,15 @@ PDF-текст). Книги → конспекты-гайды своими сл�
 `test_prompt_stability` (побайтная стабильность system-блоков), `test_orchestrator`
 (FailingLLM → детерминированный текст; бюджет исчерпан → LLM не вызывается),
 `test_pain_flow` (тап → БД → скилл → rest), `test_render`.
+
+### Инцидент 01.09 (утро) — мост недоступен, вердикт деградировал — закрыт
+Мост дважды отдал `502 claude CLI exit=1` (Claude временно недоступен, восстановился сам).
+Утренний вердикт (09:30) ушёл в общий чат-fallback `handle_chat` и **потерял назначение на день**
+(выдал generic-карточку состояния), хотя рядом была детерминированная `morning_verdict()`.
+Скриншот сна (07:35) не распознался — оба без повтора. Исправлено: `handle_chat(kind="morning")`
+в fallback вызывает `morning_verdict()` (состояние + назначение через safety); ретрай транзиентных
+сбоев моста (`post_with_retry`, `LLMTransientError`) в `/complete` и `/vision`; отложенный
+upgrade-повтор утренней джобы (`_morning_upgrade_job`); аудит отправки вердикта. См. CHANGELOG 01.09.
 
 ### Инцидент 23.08 (первый день в проде) — закрыт хотфиксом
 Пользователь получил тишину: LLM отдал rest с нулевыми объёмами → схема отвергла → fallback;
