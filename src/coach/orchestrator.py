@@ -53,6 +53,7 @@ from src.coach.turn_context import history as _history
 from src.coach.turn_context import unchanged_today as _unchanged_today
 from src.exceptions import CoachError, LLMTransientError, LLMUnavailableError
 from src.models import TrainingFeedback, User, UserModel, WellnessReport
+from src.services.repositories import latest_lthr
 from src.services.repositories_coach import CoachRepository
 from src.utils.logger import get_logger
 from src.utils.timeutils import fmt_local, local_dt, user_now
@@ -106,7 +107,8 @@ def morning_verdict(user_id: int, *, db: Session) -> str:
     # Якорь дат — локальное «сейчас» пользователя (#262: не UTC-дата сервера)
     prescription = finalize(None, state, db=db, persist=True, now=user_now(user))
     return (render_state_card(state) + "\n\n"
-            + render_prescription(prescription, max_hr=user_max_hr(user), user=user))
+            + render_prescription(prescription, max_hr=user_max_hr(user), user=user,
+                                  lthr=latest_lthr(user_id, db=db)))
 
 
 def _profile(user: User) -> dict:
@@ -148,6 +150,7 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
 
     text = turn.message
     max_hr = user_max_hr(user)
+    lthr = latest_lthr(user_id, db=db)  # зоны/потолки от порога (F4/M3.1)
     if turn.weekly_plan is not None:
         # Недельный план строится только отдельным ходом kind='plan' (weekly_plan.py)
         logger.warning("Unexpected weekly_plan for kind=%s user=%s — dropped",
@@ -175,7 +178,7 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
         # (решение владельца 29.08.2026). (Confirm or consciously adjust the plan.)
         card, mode = morning_result
         logger.info("Morning plan %s for user=%s", mode, user_id)
-        text += "\n\n" + render_prescription(card, max_hr=max_hr, user=user)
+        text += "\n\n" + render_prescription(card, max_hr=max_hr, user=user, lthr=lthr)
     elif proposal is not None and not allow_proposal:
         # Разбор/отчёт — про прошлое: назначение даёт утренний вердикт/чат (C8).
         # (Reviews look backward: proposals are dropped, not clamped/persisted.)
@@ -187,10 +190,10 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
             # Дедуп (решение владельца 26.08.2026): назначение не изменилось —
             # одна строка-напоминание, без новой строки в recommendations.
             # (Unchanged plan → one reminder line, no duplicate recommendation row.)
-            text += "\n\n" + render_prescription_short(card, max_hr=max_hr)
+            text += "\n\n" + render_prescription_short(card, max_hr=max_hr, lthr=lthr)
         else:
             save_prescription(card, state, db=db)
-            text += "\n\n" + render_prescription(card, max_hr=max_hr, user=user)
+            text += "\n\n" + render_prescription(card, max_hr=max_hr, user=user, lthr=lthr)
     if turn.followup_question:
         text += "\n\n" + turn.followup_question
     if suffix:
@@ -211,7 +214,7 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
             "prose": turn.message}   # #258: история берёт прозу без карточки
     if card is not None:
         # #247 v1: детект расхождений проза↔карточка — лог+метка, текст не режем
-        mismatches = check_prose(turn.message, card, max_hr)
+        mismatches = check_prose(turn.message, card, max_hr, lthr=lthr)
         if mismatches:
             logger.warning("Numeric mismatch for kind=%s user=%s: %s",
                            kind, user_id, "; ".join(mismatches))

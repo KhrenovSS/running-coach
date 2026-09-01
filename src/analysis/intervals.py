@@ -123,7 +123,8 @@ def interval_recovery(times_sec: list[float], hrs: list[int | None],
                       dists: list[float] | None = None,
                       laps: list[dict] | None = None,
                       t0: datetime | None = None,
-                      ttype: str | None = None) -> dict:
+                      ttype: str | None = None,
+                      lthr: int | None = None) -> dict:
     """Блок computed_json «interval_recovery» (M2.1 разбора).
 
     HRR60 на каждой границе работа→отдых: пик = max HR последних
@@ -158,7 +159,7 @@ def interval_recovery(times_sec: list[float], hrs: list[int | None],
         peak_window = _window_hrs(times_sec, hrs,
                                   b['t'] - HRR_PEAK_WINDOW_S, b['t'] + HRR_PEAK_LAG_S)
         peak = max(peak_window) if peak_window else None
-        if peak is None or get_zone(peak, max_hr) < HRR_MIN_PEAK_ZONE:
+        if peak is None or get_zone(peak, max_hr, lthr) < HRR_MIN_PEAK_ZONE:
             continue  # граница easy-лапов (разминка/заминка) — не «работа»
         hr60 = _hr_at(times_sec, hrs, b['t'] + HRR_WINDOW_S)
         if hr60 is None:
@@ -172,7 +173,7 @@ def interval_recovery(times_sec: list[float], hrs: list[int | None],
         recoveries.append({
             "rep": len(recoveries) + 1,
             "peak_hr": peak,
-            "peak_zone": get_zone(peak, max_hr),
+            "peak_zone": get_zone(peak, max_hr, lthr),
             "hrr60": peak - hr60,
             "min_hr": min(rec_hrs) if rec_hrs else None,
             "recovery_s": round(b['recovery_s']),

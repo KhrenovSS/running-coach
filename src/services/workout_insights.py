@@ -92,6 +92,7 @@ def _parse_trackpoints(raw: list[dict] | None) -> tuple[list, list, list, list, 
 def compute_workout_metrics(session: TrainingSession, *,
                             baseline: dict | None = None,
                             max_hr: int | None = None,
+                            lthr: int | None = None,
                             week_km: float | None = None,
                             rpe_history: dict | None = None,
                             plan: dict | None = None) -> dict:
@@ -177,7 +178,7 @@ def compute_workout_metrics(session: TrainingSession, *,
     computed["heat"] = heat_block(session.avg_temperature)
 
     # --- M1: детерминированные метрики сессии (METRICS_GUIDE §4) ---
-    zones = sm.time_in_zones(times_sec, hrs, max_hr)
+    zones = sm.time_in_zones(times_sec, hrs, max_hr, lthr)
     computed["time_in_zones"] = zones
     computed["easy_discipline"] = sm.easy_discipline(
         zones, ttype, tolerance=EASY_RUN_Z3_TOLERANCE_PCT)
@@ -195,7 +196,7 @@ def compute_workout_metrics(session: TrainingSession, *,
     computed["quality_volume"] = (
         {"available": False, "reason": "gps_unreliable"} if gps_unreliable else
         sm.quality_volume(
-            gap.get("per_km"), zones, week_km, max_hr,
+            gap.get("per_km"), zones, week_km, max_hr, lthr=lthr,
             interval_max_pct=INTERVAL_MAX_PCT_WEEK, interval_max_km=INTERVAL_MAX_KM,
             threshold_max_pct=THRESHOLD_MAX_PCT_WEEK, threshold_max_km=THRESHOLD_MAX_KM,
             segment_max_min=INTERVAL_SEGMENT_MAX_MIN))
@@ -212,7 +213,8 @@ def compute_workout_metrics(session: TrainingSession, *,
         z_max=RPE_BASELINE_Z_MAX)
     computed["warmup"] = sm.warmup_block(
         times_sec, hrs, max_hr, ttype,
-        window_min=WARMUP_WINDOW_MIN, easy_share_min=WARMUP_EASY_SHARE_MIN)
+        window_min=WARMUP_WINDOW_MIN, easy_share_min=WARMUP_EASY_SHARE_MIN,
+        lthr=lthr)
     computed["plan_vs_actual"] = sm.plan_vs_actual(
         plan, ttype, session.total_distance_km, session.duration_minutes,
         zones, volume_tol=PLAN_VOLUME_TOLERANCE_PCT,
@@ -224,7 +226,7 @@ def compute_workout_metrics(session: TrainingSession, *,
     # чтобы fallback-осцилляции не строились по фейковому темпу
     # (HRR uses time+HR so it survives bad GPS; garbage dists are withheld from the fallback)
     computed["interval_recovery"] = interval_recovery(
-        times_sec, hrs, max_hr,
+        times_sec, hrs, max_hr, lthr=lthr,
         dists=None if gps_unreliable else dists,
         laps=session.laps_json if isinstance(session.laps_json, list) else None,
         t0=tp_t0, ttype=ttype)
@@ -246,9 +248,11 @@ def upsert_workout_insights(user_id: int, session_id: int, *, db: Session,
     if session is None:
         return None
     baseline = _stored_baseline(user_id, db=db)
+    from src.services.repositories import latest_lthr
     computed = compute_workout_metrics(
         session, baseline=baseline,
         max_hr=_user_max_hr(user_id, db=db),
+        lthr=latest_lthr(user_id, db=db),
         week_km=(TrainingRepository.km_in_window(user_id, session.begin_ts, db=db)
                  if session.begin_ts else None),
         rpe_history=_rpe_history(user_id, session, db=db),

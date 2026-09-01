@@ -32,6 +32,9 @@ METRIC_FIELDS = {
     "recovery_pct": DailyMetrics.recovery_pct,
     "training_load": DailyMetrics.training_load,
     "vo2max": DailyMetrics.vo2max,
+    # F4/M3.1: порог по пульсу и темпу — якорь зон (threshold HR/pace, zone anchors)
+    "lthr": DailyMetrics.lthr,
+    "ltsp": DailyMetrics.ltsp,
 }
 
 

@@ -11,6 +11,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from src.analysis.hr_zones import zone_ceiling_hr
+from src.services.repositories import latest_lthr, latest_ltsp
 from src.coach.contracts import (
     AthleteState,
     PaceClampContext,
@@ -59,7 +60,8 @@ def predict_volume(p: Prescription, state: AthleteState, *, db: Session) -> dict
     if zone is None or duration is None:
         return {}
     user = db.query(User).filter(User.id == state.user_id).first()
-    ceiling = zone_ceiling_hr(zone, user_max_hr(user))
+    ceiling = zone_ceiling_hr(zone, user_max_hr(user),
+                              latest_lthr(state.user_id, db=db))
     if ceiling is None:
         return {}
     estimate = expected_pace_at_hr(state.user_id, ceiling, db=db)
@@ -84,7 +86,8 @@ def _pace_clamp_context(proposal: WorkoutProposal, verdict, state: AthleteState,
 
     user = db.query(User).filter(User.id == state.user_id).first()
     zone = min(proposal.target_zone, verdict.max_zone)
-    ceiling = zone_ceiling_hr(zone, user_max_hr(user))  # Z5 → None
+    ceiling = zone_ceiling_hr(zone, user_max_hr(user),
+                              latest_lthr(state.user_id, db=db))  # Z5 → None
     est_hr = expected_hr_at_pace(state.user_id, proposal.target_pace_min_km, db=db)
     est_pace = (expected_pace_at_hr(state.user_id, ceiling, db=db)
                 if ceiling is not None else None)
@@ -129,6 +132,8 @@ def finalize(proposal: WorkoutProposal | None, state: AthleteState, *,
             proposal_type=proposal.workout_type,
             max_zone=prescription.target.get("max_zone", 1),
             max_hr=user_max_hr(user),
+            lthr=latest_lthr(state.user_id, db=db),
+            ltsp_s_km=latest_ltsp(state.user_id, db=db),
             user_id=state.user_id, db=db)
         if seg_dicts:
             prescription.target["segments"] = seg_dicts

@@ -64,7 +64,12 @@ async def sync_activities_for_user(cred, brand: str, db,
     pending  — dict для кэширования pending-deleted тренировок (web UI); None для автосинхронизации.
     """
     from src.parsers.fit_parser import parse_fit
+    from src.services.repositories import latest_lthr
     from src.analysis.utils import format_pace, format_duration
+
+    # LTHR один раз на прогон: зоны от порога (F4/M3.1); None → fallback %max_hr
+    # (resolve LTHR once per run: threshold-anchored zones, %max_hr fallback)
+    user_lthr = latest_lthr(cred.user_id, db=db)
 
     async def _download_parse(act):
         """Скачать FIT и распарсить; вернуть (data, fit_bytes) или (None, None)
@@ -80,7 +85,8 @@ async def sync_activities_for_user(cred, brand: str, db,
                              max_credible_pace=us.max_credible_pace,
                              max_gps_jump_m=us.max_gps_jump_m,
                              min_hr_for_fast_pace=us.min_hr_for_fast_pace,
-                             coros_cadence_workaround=True)
+                             coros_cadence_workaround=True,
+                             lthr=user_lthr)
             return data, fit_data
         except Exception:
             logger.warning("Parse error for %s", act.get('name'), exc_info=True)

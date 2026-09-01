@@ -16,6 +16,30 @@ from src.config import settings
 from src.models import TrainingSession, DailyMetrics, User, TrainingFeedback
 
 
+def latest_lthr(user_id: int, *, db: Session, max_age_days: int = 45) -> int | None:
+    """Свежий LTHR из DailyMetrics (F4/M3.1): None — нет данных или устарел.
+    (Freshest lactate-threshold HR from daily metrics; None when absent/stale.)"""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).date()
+    row = db.query(DailyMetrics.lthr).filter(
+        DailyMetrics.user_id == user_id,
+        DailyMetrics.lthr.isnot(None),
+        DailyMetrics.date >= cutoff,
+    ).order_by(DailyMetrics.date.desc()).first()
+    return row[0] if row else None
+
+
+def latest_ltsp(user_id: int, *, db: Session, max_age_days: int = 45) -> float | None:
+    """Свежий пороговый темп (с/км) из DailyMetrics (F4/M3.1, #273).
+    (Freshest lactate-threshold pace, seconds per km.)"""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).date()
+    row = db.query(DailyMetrics.ltsp).filter(
+        DailyMetrics.user_id == user_id,
+        DailyMetrics.ltsp.isnot(None),
+        DailyMetrics.date >= cutoff,
+    ).order_by(DailyMetrics.date.desc()).first()
+    return row[0] if row else None
+
+
 class TrainingRepository:
     """Агрегационные запросы для тренировок (Aggregation queries for training sessions)."""
 
@@ -80,6 +104,7 @@ class TrainingRepository:
         since = datetime.now(timezone.utc) - timedelta(days=days)
         user = db.query(User).filter(User.id == user_id).first()
         max_hr = user.max_hr if user else settings.default_max_hr
+        lthr = latest_lthr(user_id, db=db)
         sessions = db.query(TrainingSession).filter(
             TrainingSession.user_id == user_id,
             TrainingSession.begin_ts >= since,
@@ -111,7 +136,7 @@ class TrainingRepository:
             for segment in session.segments_json:
                 avg_hr = segment.get('avg_hr') or 0
                 duration = segment.get('duration_min', 0) or 0
-                zone = get_zone(avg_hr, max_hr)
+                zone = get_zone(avg_hr, max_hr, lthr)
                 zone_key = f"z{zone}"
                 if zone_key in zone_minutes:
                     zone_minutes[zone_key] += duration

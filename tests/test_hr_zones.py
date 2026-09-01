@@ -1,5 +1,8 @@
 # Тесты пульсовых зон (HR zones tests)
-from src.analysis.hr_zones import get_zone, get_band, zone_ceiling_hr
+import pytest
+
+from src.analysis.hr_zones import (get_zone, get_band, lthr_valid,
+                                   zone_bounds, zone_ceiling_hr)
 
 
 class TestGetZone:
@@ -103,3 +106,82 @@ class TestZoneCeilingHr:
         for max_hr in (160, 177, 200):
             for zone in (1, 2, 3, 4):
                 assert get_zone(zone_ceiling_hr(zone, max_hr), max_hr) == zone
+
+
+# --- F4/M3.1: лестница зон от LTHR (LTHR-anchored zone ladder) ---
+
+class TestLthrValid:
+    def test_valid_range_is_exclusive(self):
+        """Валидность строго внутри (LTHR_SANITY_MIN=100, max_hr)."""
+        assert lthr_valid(180, 156) is True
+        assert lthr_valid(180, 101) is True
+        assert lthr_valid(180, 179) is True
+        assert lthr_valid(180, 100) is False      # ровно нижняя граница
+        assert lthr_valid(180, 99) is False
+        assert lthr_valid(180, 180) is False      # ровно max_hr
+        assert lthr_valid(180, 190) is False      # выше max_hr
+        assert lthr_valid(180, None) is False
+        assert lthr_valid(0, 156) is False        # max_hr невалиден
+
+
+class TestZoneBoundsLthr:
+    def test_bounds_from_lthr_156(self):
+        """Лестница Фицджеральда: 0.81/0.89/1.00/1.05 от LTHR."""
+        bounds = zone_bounds(180, lthr=156)
+        assert bounds == pytest.approx((126.36, 138.84, 156.0, 163.8))
+
+    def test_invalid_lthr_falls_back_to_max_hr_ladder(self):
+        """Невалидный lthr (низкий/выше max_hr/None) → прежняя %max_hr-лестница."""
+        fallback = zone_bounds(180)
+        assert zone_bounds(180, lthr=99) == fallback
+        assert zone_bounds(180, lthr=190) == fallback
+        assert zone_bounds(180, lthr=None) == fallback
+        assert fallback == pytest.approx((126.0, 144.0, 156.6, 167.4))
+
+
+class TestGetZoneLthr:
+    def test_hr140_zone_differs_between_ladders(self):
+        """HR 140 при max_hr 180: fallback → Z2 (≤144), от LTHR 156 → Z3 (>138.84)."""
+        assert get_zone(140, 180) == 2
+        assert get_zone(140, 180, lthr=156) == 3
+
+    def test_z2_boundary_at_lthr_156(self):
+        """Граница Z2 от LTHR 156: 138 ≤ 138.84 → Z2, 139 → Z3."""
+        assert get_zone(138, 180, lthr=156) == 2
+        assert get_zone(139, 180, lthr=156) == 3
+
+    def test_z4_and_z5_from_lthr(self):
+        """LTHR сам — потолок Z3; Z4 до 1.05·LTHR; выше — Z5."""
+        assert get_zone(156, 180, lthr=156) == 3
+        assert get_zone(157, 180, lthr=156) == 4
+        assert get_zone(163, 180, lthr=156) == 4    # ≤163.8
+        assert get_zone(164, 180, lthr=156) == 5
+
+    def test_invalid_lthr_uses_fallback(self):
+        """Невалидный lthr не меняет зону против fallback."""
+        assert get_zone(140, 180, lthr=99) == get_zone(140, 180)
+        assert get_zone(140, 180, lthr=190) == get_zone(140, 180)
+
+    def test_band_shifts_with_lthr(self):
+        """HR 140: easy по fallback, moderate по LTHR-лестнице (Z3)."""
+        assert get_band(140, 180) == 'easy'
+        assert get_band(140, 180, lthr=156) == 'moderate'
+
+
+class TestZoneCeilingLthr:
+    def test_ceiling_z2_from_lthr(self):
+        """Потолок Z2 = floor(156·0.89) = 138 (vs fallback 144)."""
+        assert zone_ceiling_hr(2, 180, 156) == 138
+        assert zone_ceiling_hr(2, 180) == 144
+
+    def test_ceilings_all_zones_lthr_156(self):
+        assert zone_ceiling_hr(1, 180, 156) == 126   # floor(126.36)
+        assert zone_ceiling_hr(3, 180, 156) == 156
+        assert zone_ceiling_hr(4, 180, 156) == 163   # floor(163.8)
+        assert zone_ceiling_hr(5, 180, 156) is None
+
+    def test_roundtrip_ceiling_stays_in_zone_lthr(self):
+        """Обратность и на LTHR-лестнице: get_zone(потолок) == сама зона."""
+        for zone in (1, 2, 3, 4):
+            ceil = zone_ceiling_hr(zone, 180, 156)
+            assert get_zone(ceil, 180, lthr=156) == zone

@@ -57,7 +57,8 @@ def _smooth(values: list[float], window: int) -> list[float]:
             for i in range(len(values))]
 
 
-def _build_segment_stats(chunk_points: list[dict], max_hr: int) -> dict | None:
+def _build_segment_stats(chunk_points: list[dict], max_hr: int,
+                         lthr: int | None = None) -> dict | None:
     """Собрать статистику сегмента из точек (Build segment stats from points)"""
     if len(chunk_points) < 2:
         return None
@@ -91,8 +92,8 @@ def _build_segment_stats(chunk_points: list[dict], max_hr: int) -> dict | None:
         'pace': format_pace(pace_val) if pace_val else None,
         'pace_min_km': round(pace_val, 2) if pace_val else None,
         'avg_cadence': avg_cad_seg,
-        'zone': get_zone(avg_hr_seg, max_hr),
-        'band': get_band(avg_hr_seg, max_hr),
+        'zone': get_zone(avg_hr_seg, max_hr, lthr),
+        'band': get_band(avg_hr_seg, max_hr, lthr),
         'elevation_gain': elev_gain,
         'elevation_loss': elev_loss,
     }
@@ -163,7 +164,8 @@ def _chunk_by_km(trackpoints: list[dict], num_kms: int) -> list[list[dict]]:
     return km_chunks
 
 
-def km_segment_fallback(trackpoints: list[dict], max_hr: int, total_dist_km: float) -> tuple[list[dict], int]:
+def km_segment_fallback(trackpoints: list[dict], max_hr: int, total_dist_km: float,
+                        lthr: int | None = None) -> tuple[list[dict], int]:
     """Запасной вариант: сегментация по км-блокам (Fallback: km-based segmentation)"""
     segments = []
     if total_dist_km < 0.1:
@@ -185,7 +187,7 @@ def km_segment_fallback(trackpoints: list[dict], max_hr: int, total_dist_km: flo
                 points_data.append({'dist_delta': d_dist, 'time_delta_sec': d_delta, 'hr': prev['hr'], 'cad': prev['cad'], 'alt': prev['alt']})
             prev = cur
         if points_data:
-            stats = _build_segment_stats(points_data, max_hr)
+            stats = _build_segment_stats(points_data, max_hr, lthr)
             if stats:
                 segments.append(stats)
     var_count = compute_km_variability(trackpoints, total_dist_km)

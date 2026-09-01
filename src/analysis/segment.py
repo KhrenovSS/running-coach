@@ -53,7 +53,8 @@ def _all_adjacent_paces_differ_by(segments: list[dict], threshold: float = 1.0) 
     return True
 
 
-def build_time_in_zones(trackpoints: list[dict], max_hr: int) -> tuple[dict, list[dict], float]:
+def build_time_in_zones(trackpoints: list[dict], max_hr: int,
+                        lthr: int | None = None) -> tuple[dict, list[dict], float]:
     """
     Рассчитать время в пульсовых зонах и найти длинные Z4+ сегменты.
     Calculate time in HR zones and find long Z4+ segments.
@@ -98,7 +99,7 @@ def build_time_in_zones(trackpoints: list[dict], max_hr: int) -> tuple[dict, lis
             continue
         total_duration_min += delta
         if prev['hr'] is not None:
-            zone = get_zone(prev['hr'], max_hr)
+            zone = get_zone(prev['hr'], max_hr, lthr)
             time_in_zone[zone] += delta
             if zone >= 4:
                 if not in_z4:
@@ -179,7 +180,8 @@ def _merge_short_segments(boundaries: list[int], min_dist_m: int, points: list[d
     return bounds[1:-1]
 
 
-def _build_segments_from_boundaries(boundaries: list[int], points: list[dict], max_hr: int) -> list[dict]:
+def _build_segments_from_boundaries(boundaries: list[int], points: list[dict], max_hr: int,
+                                    lthr: int | None = None) -> list[dict]:
     """Построить сегменты из списка границ (Build segments from boundary list)"""
     segments = []
     all_bounds = sorted([0] + boundaries + [len(points)])
@@ -189,13 +191,14 @@ def _build_segments_from_boundaries(boundaries: list[int], points: list[dict], m
         if end - start < 3:
             continue
         chunk_points = points[start:end]
-        stats = _build_segment_stats(chunk_points, max_hr)
+        stats = _build_segment_stats(chunk_points, max_hr, lthr)
         if stats:
             segments.append(stats)
     return segments
 
 
-def _merge_similar_segments(segments: list[dict], threshold: float = 1.0, max_hr: int = settings.default_max_hr) -> list[dict]:
+def _merge_similar_segments(segments: list[dict], threshold: float = 1.0, max_hr: int = settings.default_max_hr,
+                            lthr: int | None = None) -> list[dict]:
     """
     Слить соседние отрезки, если разница темпа ≤ threshold.
     Merge adjacent segments if pace difference ≤ threshold.
@@ -237,8 +240,8 @@ def _merge_similar_segments(segments: list[dict], threshold: float = 1.0, max_hr
                     'pace': format_pace(pace_val) if pace_val else None,
                     'pace_min_km': round(pace_val, 2) if pace_val else None,
                     'avg_cadence': avg_cad,
-                    'zone': get_zone(avg_hr, max_hr),
-                    'band': get_band(avg_hr, max_hr),
+                    'zone': get_zone(avg_hr, max_hr, lthr),
+                    'band': get_band(avg_hr, max_hr, lthr),
                     'elevation_gain': (a.get('elevation_gain') or 0) + (b.get('elevation_gain') or 0),
                     'elevation_loss': (a.get('elevation_loss') or 0) + (b.get('elevation_loss') or 0),
                 }
@@ -249,6 +252,7 @@ def _merge_similar_segments(segments: list[dict], threshold: float = 1.0, max_hr
 
 
 def segment_by_pace(trackpoints: list[dict], max_hr: int, total_dist_km: float,
+                    lthr: int | None = None,
                      min_oscillations: int = 3, pace_gap: float = 1.0,
                      min_phase_duration_sec: int = 15,
                      max_credible_pace: float = 3.0) -> tuple[list[dict], int]:
@@ -281,7 +285,7 @@ def segment_by_pace(trackpoints: list[dict], max_hr: int, total_dist_km: float,
     # Distance-based change-point detection
     change_points = _find_change_points(smoothed, dists, window_m=CHANGE_POINT_WINDOW_M, min_diff=min_diff)
     boundaries = _merge_short_segments(change_points, MIN_SEGMENT_DIST_M, points)
-    segments = _build_segments_from_boundaries(boundaries, points, max_hr)
+    segments = _build_segments_from_boundaries(boundaries, points, max_hr, lthr)
 
     # Если change-point detection дал мало сегментов — пробуем осцилляции
     if len(segments) <= 2:
@@ -298,7 +302,7 @@ def segment_by_pace(trackpoints: list[dict], max_hr: int, total_dist_km: float,
         if osc_phases and len(osc_phases) >= min_oscillations:
             osc_boundaries = [p['end_idx'] for p in osc_phases if p['end_idx'] < len(points)]
             osc_boundaries = _merge_short_segments(osc_boundaries, MIN_SEGMENT_DIST_M, points)
-            osc_segments = _build_segments_from_boundaries(osc_boundaries, points, max_hr)
+            osc_segments = _build_segments_from_boundaries(osc_boundaries, points, max_hr, lthr)
             if len(osc_segments) > len(segments):
                 # Проверка: если сегменты не имеют реальной вариативности
                 # (все Z2-Z3, без значимого разброса темпа) — это шум, km fallback
@@ -312,10 +316,10 @@ def segment_by_pace(trackpoints: list[dict], max_hr: int, total_dist_km: float,
                 num_kms_osc = max(1, int(total_dist_km))
                 count_off_osc = len(osc_segments) < num_kms_osc * 0.5 or len(osc_segments) > num_kms_osc * 1.5
                 if len(osc_segments) > 2 and count_off_osc and not (has_real_intensity and has_real_variability):
-                    return km_segment_fallback(trackpoints, max_hr, total_dist_km)
+                    return km_segment_fallback(trackpoints, max_hr, total_dist_km, lthr=lthr)
 
                 var_count = compute_km_variability(trackpoints, total_dist_km)
-                osc_segments = _merge_similar_segments(osc_segments, threshold=pace_gap * 0.5, max_hr=max_hr)
+                osc_segments = _merge_similar_segments(osc_segments, threshold=pace_gap * 0.5, max_hr=max_hr, lthr=lthr)
                 return osc_segments, var_count
 
     # Если change-point сегментов > 2, но не все соседние отличаются > 1.0 мин/км —
@@ -337,10 +341,10 @@ def segment_by_pace(trackpoints: list[dict], max_hr: int, total_dist_km: float,
         if osc_phases and len(osc_phases) >= min_oscillations:
             osc_boundaries = [p['end_idx'] for p in osc_phases if p['end_idx'] < len(points)]
             osc_boundaries = _merge_short_segments(osc_boundaries, MIN_SEGMENT_DIST_M, points)
-            osc_segments = _build_segments_from_boundaries(osc_boundaries, points, max_hr)
+            osc_segments = _build_segments_from_boundaries(osc_boundaries, points, max_hr, lthr)
             if len(osc_segments) > 2:
                 var_count = compute_km_variability(trackpoints, total_dist_km)
-                osc_segments = _merge_similar_segments(osc_segments, threshold=pace_gap * 0.5, max_hr=max_hr)
+                osc_segments = _merge_similar_segments(osc_segments, threshold=pace_gap * 0.5, max_hr=max_hr, lthr=lthr)
                 logger.info("Oscillation found %d cycles — interval structure, %d segments",
                             len(osc_phases), len(osc_segments))
                 return osc_segments, var_count
@@ -348,7 +352,7 @@ def segment_by_pace(trackpoints: list[dict], max_hr: int, total_dist_km: float,
         # Не нашли осцилляции → это не интервалы, fallback на км-блоки
         # (No oscillations found → not intervals, fallback to km-blocks
         logger.info("No oscillations found — fallback to km-blocks")
-        return km_segment_fallback(trackpoints, max_hr, total_dist_km)
+        return km_segment_fallback(trackpoints, max_hr, total_dist_km, lthr=lthr)
 
     # Проверка: если число сегментов сильно не соответствует числу км —
     # это шум (GPS/ходьба/остановки) — fallback на км-блоки,
@@ -363,17 +367,17 @@ def segment_by_pace(trackpoints: list[dict], max_hr: int, total_dist_km: float,
         _max_zone = max(_seg_zones) if _seg_zones else 1
         _pace_spread = (max(_seg_paces) - min(_seg_paces)) if len(_seg_paces) >= 2 else 0
         if not (_max_zone >= 4 and _pace_spread >= 0.5):
-            return km_segment_fallback(trackpoints, max_hr, total_dist_km)
+            return km_segment_fallback(trackpoints, max_hr, total_dist_km, lthr=lthr)
 
     # Монотонная тренировка: если change-points не нашли структуры И осцилляций нет
     # — км-блоки (каждый км + последний неполный)
     if (not segments or len(segments) <= 2) and total_dist_km >= 0.5:
-        return km_segment_fallback(trackpoints, max_hr, total_dist_km)
+        return km_segment_fallback(trackpoints, max_hr, total_dist_km, lthr=lthr)
 
     # Страховка: если сегментов нет совсем
     if not segments:
-        return km_segment_fallback(trackpoints, max_hr, total_dist_km)
+        return km_segment_fallback(trackpoints, max_hr, total_dist_km, lthr=lthr)
 
     var_count = compute_km_variability(trackpoints, total_dist_km)
-    segments = _merge_similar_segments(segments, threshold=1.0, max_hr=max_hr)
+    segments = _merge_similar_segments(segments, threshold=1.0, max_hr=max_hr, lthr=lthr)
     return segments, var_count

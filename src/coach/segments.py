@@ -11,25 +11,29 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from src.analysis.hr_zones import zone_ceiling_hr
+from src.config.constants import LTSP_ZONE_OFFSET_S
 from src.coach.config import TYPE_INTENSITY_ORDER
 from src.coach.contracts import RecoverySpec, WorkoutSegment
 
 _LADDER = {t: i for i, t in enumerate(TYPE_INTENSITY_ORDER)}
 
 
-def _recovery_to_dict(rec: RecoverySpec | None, max_hr: int) -> dict | None:
+def _recovery_to_dict(rec: RecoverySpec | None, max_hr: int,
+                      lthr: int | None = None) -> dict | None:
     if rec is None:
         return None
     until_hr = rec.until_hr
     if until_hr is None and rec.target_zone is not None:
-        until_hr = zone_ceiling_hr(rec.target_zone, max_hr)
+        until_hr = zone_ceiling_hr(rec.target_zone, max_hr, lthr)
     return {"until_hr": until_hr, "duration_min": rec.duration_min,
             "distance_km": rec.distance_km, "target_zone": rec.target_zone}
 
 
 def enrich_and_clamp_segments(segments: list[WorkoutSegment], *, workout_type: str,
                               proposal_type: str, max_zone: int, max_hr: int,
-                              user_id: int, db: Session | None) -> list[dict]:
+                              user_id: int, db: Session | None,
+                              lthr: int | None = None,
+                              ltsp_s_km: float | None = None) -> list[dict]:
     """Проставить числа сегментам и заклэмпить зоны под safety (→ render-ready dicts).
 
     Возвращает [] если структуру нельзя показать безопасно: тип понижен по интенсивности
@@ -53,10 +57,11 @@ def enrich_and_clamp_segments(segments: list[WorkoutSegment], *, workout_type: s
         zone = seg.target_zone
         if zone is not None:
             zone = max(1, min(zone, max_zone))     # per-segment clamp под потолок safety
-        hr_ceiling = zone_ceiling_hr(zone, max_hr) if zone is not None else None
+        hr_ceiling = zone_ceiling_hr(zone, max_hr, lthr) if zone is not None else None
 
         pace_target = seg.pace_target_min_km
         pace_hint = None
+        pace_source = "history"
         pace_missing = False
         hr_missing = False
         if pace_target is not None:
@@ -70,6 +75,12 @@ def enrich_and_clamp_segments(segments: list[WorkoutSegment], *, workout_type: s
                    if db is not None else None)
             if est is not None:
                 pace_hint = est["pace_min_km"]
+            elif ltsp_s_km and zone in LTSP_ZONE_OFFSET_S:
+                # Нормативная ступень (#273/M3.1): темп зоны от порогового темпа часов —
+                # закрывает «мало данных» на высоких зонах («правило шести секунд»)
+                # (normative step: zone pace anchored to the watch threshold pace)
+                pace_hint = round((ltsp_s_km + LTSP_ZONE_OFFSET_S[zone]) / 60, 2)
+                pace_source = "threshold"
             else:
                 pace_missing = True
 
@@ -82,10 +93,11 @@ def enrich_and_clamp_segments(segments: list[WorkoutSegment], *, workout_type: s
             "hr_ceiling": hr_ceiling,
             "pace_target_min_km": pace_target,
             "pace_hint_min_km": pace_hint,
+            "pace_source": pace_source if pace_hint is not None else None,
             "pace_missing": pace_missing,
             "hr_missing": hr_missing,
             "effort": seg.effort,
-            "recovery": _recovery_to_dict(seg.recovery, max_hr),
+            "recovery": _recovery_to_dict(seg.recovery, max_hr, lthr),
         })
     return out
 

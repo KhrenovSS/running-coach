@@ -26,7 +26,8 @@ _PACE_TOL = 0.25     # темп: ±15 сек/км
 _HR_TOL = 5.0        # пульс: ±5 уд/мин
 
 
-def _expected_values(p: Prescription, max_hr: int | None) -> dict[str, list[float]]:
+def _expected_values(p: Prescription, max_hr: int | None,
+                     lthr: int | None = None) -> dict[str, list[float]]:
     """Эталонные числа карточки: target/volume/predicted + потолок пульса зоны."""
     km = [v for v in (p.volume.get("distance_km"),
                       (p.predicted or {}).get("distance_km")) if v]
@@ -36,7 +37,7 @@ def _expected_values(p: Prescription, max_hr: int | None) -> dict[str, list[floa
     hr = [v for v in ((p.predicted or {}).get("expected_hr"),) if v]
     zone = p.target.get("max_zone")
     if zone is not None and max_hr is not None:
-        ceiling = zone_ceiling_hr(zone, max_hr)
+        ceiling = zone_ceiling_hr(zone, max_hr, lthr)
         if ceiling is not None:
             hr.append(float(ceiling))
     # Пульсовые числа сегментов (детерминированы кодом): в карточке легальны,
@@ -63,7 +64,7 @@ def _mismatches(found: list[float], expected: list[float], tol: float,
 
 
 def check_prose(message: str, p: Prescription | None,
-                max_hr: int | None = None) -> list[str]:
+                max_hr: int | None = None, lthr: int | None = None) -> list[str]:
     """Числа тренировки в прозе, противоречащие карточке (пусто = всё сходится).
 
     Structure-строки типа «10×400/400» не парсим — они попадают в карточку
@@ -71,7 +72,7 @@ def check_prose(message: str, p: Prescription | None,
     """
     if p is None or not message:
         return []
-    exp = _expected_values(p, max_hr)
+    exp = _expected_values(p, max_hr, lthr)
     out: list[str] = []
     out += _mismatches([float(m.replace(",", "."))
                         for m in _KM_RE.findall(message)],

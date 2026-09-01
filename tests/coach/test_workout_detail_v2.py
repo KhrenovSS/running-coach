@@ -113,11 +113,13 @@ def test_zone_minutes_segment_fallback_without_insight(empty_user, db_session):
     detail = run_tool("get_workout_detail", {"session_id": s.id},
                       user_id=empty_user.id, db=db_session)
     zm = detail["zone_minutes"]
-    assert zm["z2"] == pytest.approx(11.8)     # 6.0 + 5.8
-    assert zm["z3"] == pytest.approx(6.2)
+    # F4: лестница от LTHR фикстуры (170): границы 137.7/151.3 → 135→Z1, 139/142→Z2
+    assert zm["z1"] == pytest.approx(6.0)
+    assert zm["z2"] == pytest.approx(12.0)    # 5.8 + 6.2
+    assert zm["z3"] == pytest.approx(0.0)
     assert zm["z4"] == 0.0 and zm["z5"] == 0.0
-    assert detail["band_minutes"]["easy"] == pytest.approx(11.8)
-    assert detail["band_minutes"]["moderate"] == pytest.approx(6.2)
+    assert detail["band_minutes"]["easy"] == pytest.approx(18.0)  # F4: все три сегмента ≤ Z2
+    assert detail["band_minutes"]["moderate"] == pytest.approx(0.0)  # F4: 142 ≤ Z2-потолка 151
 
 
 def test_review_extras_include_workout_computed(empty_user, db_session):

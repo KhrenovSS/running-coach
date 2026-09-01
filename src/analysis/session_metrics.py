@@ -43,7 +43,7 @@ QUALITY_TYPES_M1 = ("tempo", "interval", "race")  # M1.9: где нужна ра
 
 
 def time_in_zones(times_sec: list[float], hrs: list[int | None],
-                  max_hr: int | None) -> dict:
+                  max_hr: int | None, lthr: int | None = None) -> dict:
     """M1.1: точное время в зонах по трекпоинтам (посекундно, минуты).
 
     Дельта времени относится к зоне ПРЕДЫДУЩЕЙ точки (как build_time_in_zones).
@@ -70,7 +70,7 @@ def time_in_zones(times_sec: list[float], hrs: list[int | None],
                                     "avg_hr": round(seg_hr_sum / seg_min)})
                 seg_min, seg_hr_sum = 0.0, 0.0
             continue
-        zone = get_zone(hr, max_hr)
+        zone = get_zone(hr, max_hr, lthr)
         minutes[f"z{zone}"] += dt_min
         if zone >= 4:
             seg_min += dt_min
@@ -121,6 +121,7 @@ def load_points(zones: dict, points_per_min: dict[str, float]) -> dict:
 
 def quality_volume(per_km: list[dict] | None, zones: dict, week_km: float | None,
                    max_hr: int | None, *, interval_max_pct: float,
+                   lthr: int | None = None,
                    interval_max_km: float, threshold_max_pct: float,
                    threshold_max_km: float, segment_max_min: float) -> dict:
     """M1.5: потолки качественного объёма (Дэниелс, гайд 44).
@@ -139,9 +140,9 @@ def quality_volume(per_km: list[dict] | None, zones: dict, week_km: float | None
         return (r.get("km_len_m") or 1000.0) / 1000.0
 
     interval_km = sum(_row_km(r) for r in per_km
-                      if r.get("avg_hr") and get_zone(r["avg_hr"], max_hr) >= 4)
+                      if r.get("avg_hr") and get_zone(r["avg_hr"], max_hr, lthr) >= 4)
     threshold_km = sum(_row_km(r) for r in per_km
-                       if r.get("avg_hr") and get_zone(r["avg_hr"], max_hr) == 3)
+                       if r.get("avg_hr") and get_zone(r["avg_hr"], max_hr, lthr) == 3)
     interval_cap = min(week_km * interval_max_pct, interval_max_km)
     threshold_cap = min(week_km * threshold_max_pct, threshold_max_km)
     longest = max((s["duration_min"] for s in zones.get("z4_plus_segments", [])),
@@ -227,7 +228,8 @@ def rpe_block(session_rpe: int | None, peer_rpes: list[int], hr_z: float | None,
 
 def warmup_block(times_sec: list[float], hrs: list[int | None],
                  max_hr: int | None, ttype: str | None, *,
-                 window_min: float, easy_share_min: float) -> dict:
+                 window_min: float, easy_share_min: float,
+                 lthr: int | None = None) -> dict:
     """M1.9: разминка перед качественной — доля Z1–2 в первом окне (гайд 41)."""
     if ttype not in QUALITY_TYPES_M1:
         return {"applicable": False, "reason": "not_quality_type"}
@@ -243,7 +245,7 @@ def warmup_block(times_sec: list[float], hrs: list[int | None],
         if dt <= 0 or hr is None:
             continue
         total += dt
-        if get_zone(hr, max_hr) <= 2:
+        if get_zone(hr, max_hr, lthr) <= 2:
             easy += dt
     if total <= 0:
         return {"applicable": False, "reason": "no_hr"}

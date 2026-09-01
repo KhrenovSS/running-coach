@@ -102,6 +102,8 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
                        current_user: User = Depends(get_current_user),
                        _: None = Depends(rate_limit(max_requests=30, window_seconds=60))):
     settings = get_settings(db, current_user.id)
+    from src.services.repositories import latest_lthr
+    user_lthr = latest_lthr(current_user.id, db=db)  # зоны от порога (F4/M3.1)
     saved = 0
     hr_peak = 0  # пик батча для адаптивного max_hr (batch peak for adaptive max HR)
     deleted_hit = None
@@ -143,12 +145,14 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
                 data = parse_fit(tmp_path, max_hr=settings.max_hr,
                                  max_credible_pace=settings.max_credible_pace,
                                  max_gps_jump_m=settings.max_gps_jump_m,
-                                 min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
+                                 min_hr_for_fast_pace=settings.min_hr_for_fast_pace,
+                                 lthr=user_lthr)
             else:
                 data = parse_tcx(tmp_path, max_hr=settings.max_hr,
                                  max_credible_pace=settings.max_credible_pace,
                                  max_gps_jump_m=settings.max_gps_jump_m,
-                                 min_hr_for_fast_pace=settings.min_hr_for_fast_pace)
+                                 min_hr_for_fast_pace=settings.min_hr_for_fast_pace,
+                                 lthr=user_lthr)
         except Exception as e:
             logger.warning("Upload: parse error for %s — %s", file.filename, e, exc_info=True)
             parse_errors.append(file.filename or "unknown")

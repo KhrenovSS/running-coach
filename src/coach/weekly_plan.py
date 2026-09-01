@@ -23,6 +23,7 @@ from src.coach.llm.prompts import (
     build_today_block,
 )
 from src.coach.prescriber import finalize, save_prescription, user_max_hr
+from src.services.repositories import latest_lthr
 from src.coach.render import render_week_plan
 from src.coach.rules.p1_safety import evaluate_safety
 from src.coach.state import assess_state
@@ -112,7 +113,8 @@ def generate_weekly_plan(user_id: int, *, db: Session,
         prescriptions.append(p)
 
     text = (turn.message + "\n\n"
-            + render_week_plan(prescriptions, targets, max_hr=user_max_hr(user)))
+            + render_week_plan(prescriptions, targets, max_hr=user_max_hr(user),
+                               lthr=latest_lthr(user_id, db=db)))
     CoachRepository.save_message(user_id, "user", PLAN_PROMPT, db=db, kind="plan")
     CoachRepository.save_message(
         user_id, "assistant", text, db=db, kind="plan",

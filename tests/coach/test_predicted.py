@@ -12,7 +12,7 @@ from src.coach.state import assess_state
 from src.models import Recommendation
 from tests.coach.fakes import ScriptedLLM
 
-# Эмпирическая оценка: на потолке Z2 (141 при max_hr=177) темп 6.12 мин/км;
+# Эмпирическая оценка: на потолке Z2 (151 при lthr=170, F4) темп 6.12 мин/км;
 # 40 мин → ≈6.5 км. (Empirical estimate stub for the coach flow tests.)
 _ESTIMATE = {"pace_min_km": 6.12, "n_points": 20}
 
@@ -25,7 +25,7 @@ def test_finalize_fills_predicted_and_persists(athlete_with_history, db_session,
     p = finalize(WorkoutProposal(workout_type="easy", target_zone=2,
                                  duration_min=40), state,
                  db=db_session, persist=True, source="llm")
-    assert p.predicted["hr_ceiling"] == 141
+    assert p.predicted["hr_ceiling"] == 151  # F4: 0.89×lthr(170)
     assert p.predicted["pace_min_km"] == 6.12
     assert abs(p.predicted["distance_km"] - 6.5) < 0.06
     assert p.predicted["based_on"]["n_points"] == 20
@@ -64,7 +64,7 @@ def test_chat_reply_contains_estimate_line(athlete_with_history, db_session,
 
 # --- Pace-режим: прогноз пульса на целевом темпе (pace-lead predicted) ---
 
-_HR_ESTIMATE = {"hr_bpm": 138, "n_points": 8}  # ниже потолка Z2 (141) — clamp не вмешивается
+_HR_ESTIMATE = {"hr_bpm": 138, "n_points": 8}  # ниже потолка Z2 (151, F4) — clamp не вмешивается
 
 
 def test_finalize_pace_mode_fills_expected_hr(athlete_with_history, db_session,

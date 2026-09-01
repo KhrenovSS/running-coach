@@ -53,10 +53,26 @@ HRR60_LOW_BPM: Final[int] = 12           # медиана HRR60 ниже → poo
 HEALTH_SYNC_DAYS: Final[int] = 180
 
 # Пороги пульсовых зон в процентах от max_hr (HR zone thresholds as % of max_hr)
+# Fallback-лестница: используется, когда LTHR неизвестен (см. LTHR_ZONE_* ниже, F4/M3.1)
 HR_ZONE_1_MAX_PCT: Final[float] = 0.70
 HR_ZONE_2_MAX_PCT: Final[float] = 0.80
 HR_ZONE_3_MAX_PCT: Final[float] = 0.87
 HR_ZONE_4_MAX_PCT: Final[float] = 0.93
+
+# Зоны от ПАНО (F4/M3.1, METRICS_GUIDE §8; Фицджеральд 80/20, гайд 40):
+# Z1 ≤81% LTHR, Z2 ≤89% (выше — «серая зона X», в нашей 5-зонной шкале входит в Z3),
+# Z3 ≤100% (порог), Z4 ≤105%, Z5 выше. Решение владельца 01.09.2026: включено полностью.
+LTHR_ZONE_1_MAX_PCT: Final[float] = 0.81
+LTHR_ZONE_2_MAX_PCT: Final[float] = 0.89
+LTHR_ZONE_3_MAX_PCT: Final[float] = 1.00
+LTHR_ZONE_4_MAX_PCT: Final[float] = 1.05
+LTHR_SANITY_MIN: Final[int] = 100        # lthr вне (LTHR_SANITY_MIN, max_hr) → fallback %max_hr
+# Классификация при известном LTHR: recovery целиком в Z1, easy — не выше Z2
+RECOVERY_MAX_LTHR_PCT: Final[float] = 0.81
+EASY_MAX_LTHR_PCT: Final[float] = 0.89
+# Нормативный темп зоны от порогового темпа ltsp (#273, «правило шести секунд» Дэниелса:
+# соседние качественные уровни различаются ~15–20 c/км; easy консервативно медленнее порога)
+LTSP_ZONE_OFFSET_S: Final[dict] = {1: 105, 2: 75, 3: 0, 4: -17, 5: -34}
 
 # Настройки погоды Open-Meteo (Open-Meteo weather settings)
 WEATHER_API_URL: Final[str] = "https://archive-api.open-meteo.com/v1/archive"

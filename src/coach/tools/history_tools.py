@@ -78,6 +78,8 @@ def get_workout_detail(ctx: ToolContext, args: dict) -> dict:
 
     user = ctx.db.query(User).filter(User.id == ctx.user_id).first()
     max_hr = user.max_hr if user else settings.default_max_hr
+    from src.services.repositories import latest_lthr
+    lthr = latest_lthr(ctx.user_id, db=ctx.db)
     zone_minutes = {f"z{i}": 0.0 for i in range(1, 6)}
     band_minutes = {"easy": 0.0, "moderate": 0.0, "hard": 0.0}
     segments = []
@@ -104,8 +106,8 @@ def get_workout_detail(ctx: ToolContext, args: dict) -> dict:
         dur = seg.get("duration_min", 0) or 0
         if not zones_exact:
             # Fallback — сегментное приближение (segment-average fallback)
-            zone_minutes[f"z{get_zone(avg_hr, max_hr)}"] += dur
-            band_minutes[get_band(avg_hr, max_hr)] += dur
+            zone_minutes[f"z{get_zone(avg_hr, max_hr, lthr)}"] += dur
+            band_minutes[get_band(avg_hr, max_hr, lthr)] += dur
         if len(segments) < MAX_SEGMENTS:
             # D4: полный сегмент — рельеф/каденс/длительность; погода дельтой
             # (full segment; weather delta-encoded — it rarely changes mid-run)

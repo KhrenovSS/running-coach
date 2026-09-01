@@ -179,7 +179,7 @@ def extract_fit_trackpoints(file_path, coros_cadence_workaround=False):
 
 
 # Парсинг FIT-файла (FIT file parsing)
-def parse_fit(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130, coros_cadence_workaround=False):
+def parse_fit(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130, coros_cadence_workaround=False, lthr=None):
     if max_hr is None:
         max_hr = settings.default_max_hr
     activity = extract_fit_activity(file_path, coros_cadence_workaround=coros_cadence_workaround)
@@ -188,7 +188,9 @@ def parse_fit(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.
         return None
     start_time_utc = trackpoints[0]['time']
     result = process_trackpoints(trackpoints, start_time_utc, max_hr,
-                                  max_credible_pace, max_gps_jump_m, min_hr_for_fast_pace)
+                                  max_credible_pace, lthr=lthr,
+                                  max_gps_jump_m=max_gps_jump_m,
+                                  min_hr_for_fast_pace=min_hr_for_fast_pace)
     if result is None:
         return None
     if activity['calories'] is not None:

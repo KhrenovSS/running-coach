@@ -24,6 +24,18 @@ All notable changes to this project are tracked here.
   `repositories.zone_distribution`, `history_tools.get_workout_detail`.
 - `INSIGHTS_SCHEMA_VERSION` 4→5 (lazy-пересчёт).
 
+### Added (F4/M3.1 — зоны и нормативные темпы от ПАНО)
+- **Зоны от LTHR** (`hr_zones.py`, лестница Фицджеральда ≤81/89/100/105% порога; fallback
+  %max_hr без валидного lthr): вся аналитика — time-in-zones, 80/20, классификация
+  (recovery ≤81%·lthr, easy ≤89%·lthr), потолки пульса в карточках назначений,
+  HRR-гейты — считается от порога Coros (`lthr` уже синкался, но не использовался).
+  Стоп-поинт пройден: владельцу показано сравнение (доля лёгкого 72%→47%) — решение
+  «включить полностью, историю пересчитать». Резолверы `latest_lthr`/`latest_ltsp`;
+  `lthr`/`ltsp` в whitelist METRIC_FIELDS.
+- **Нормативный темп сегментов от `ltsp`** (#273): нет истории на потолке зоны →
+  ориентир = пороговый темп ± книжный сдвиг (`LTSP_ZONE_OFFSET_S`, «правило шести
+  секунд» Дэниелса), `pace_source="threshold"` — «мало данных» для ускорений закрыт.
+
 ### Added (F3 — восстановление между интервалами, M2.1 разбора)
 - `src/analysis/intervals.py`: HRR60 по каждой границе «работа → отдых» (границы —
   структурные лапы часов, fallback — детектор осцилляций для interval), min HR отдыха,

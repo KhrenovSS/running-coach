@@ -2,7 +2,10 @@
 # Training classification: interval / tempo / long / recovery / easy
 
 from src.analysis.hr_zones import get_zone
+from src.analysis.hr_zones import lthr_valid
 from src.config.constants import (
+    EASY_MAX_LTHR_PCT,
+    RECOVERY_MAX_LTHR_PCT,
     RECOVERY_MAX_HR_PCT,
     EASY_MAX_HR_PCT,
     EASY_MIN_Z2_PCT,
@@ -24,6 +27,7 @@ def classify_training(
     min_oscillations: int = 3,
     segments_len: int = 0,
     avg_pace: float | None = None,
+    lthr: int | None = None,
 ) -> tuple[str, int]:
     """
     Мульти-сигнальная классификация тренировки.
@@ -54,10 +58,25 @@ def classify_training(
     """
     total_z4_time = time_in_zone.get(4, 0.0) + time_in_zone.get(5, 0.0)
     z4_time_pct = (total_z4_time / total_duration_min * 100) if total_duration_min > 0 else 0
-    z2_pct = (time_in_zone.get(2, 0.0) / total_duration_min * 100) if total_duration_min > 0 else 0
+    # Доля лёгких зон Z1+Z2 (F4: LTHR-лестница сузила Z2 — низ лёгкого бега уходит
+    # в Z1, считать только Z2 стало неверно; для fallback-лестницы эквивалентно)
+    # (easy share = Z1+Z2: the LTHR ladder narrowed Z2, Z1 time is still easy running)
+    z2_pct = ((time_in_zone.get(1, 0.0) + time_in_zone.get(2, 0.0))
+              / total_duration_min * 100) if total_duration_min > 0 else 0
 
     has_long_z4 = any(s.get('duration', 0) > EASY_MAX_Z4_SEGMENT_MIN for s in z4_plus_segments)
-    avg_hr_pct = avg_hr / max_hr if max_hr > 0 else 0
+    # Гейты по среднему пульсу: от LTHR при наличии (F4/M3.1 — recovery целиком в Z1,
+    # easy не выше Z2, подтверждение интервалов — средний на уровне порога),
+    # иначе историческая %max_hr-лестница
+    # (avg-HR gates: LTHR-anchored when available, %max_hr fallback otherwise)
+    if lthr_valid(max_hr, lthr):
+        recovery_hr_max = RECOVERY_MAX_LTHR_PCT * lthr
+        easy_hr_max = EASY_MAX_LTHR_PCT * lthr
+        interval_hr_min = float(lthr)
+    else:
+        recovery_hr_max = RECOVERY_MAX_HR_PCT * max_hr
+        easy_hr_max = EASY_MAX_HR_PCT * max_hr
+        interval_hr_min = 0.87 * max_hr
 
     # Защита: если < 3 сегментов — реальных интервалов нет
     # (Guard: fewer than 3 segments — not real intervals)
@@ -69,7 +88,7 @@ def classify_training(
     # (Interval — series of work→recovery + confirmation)
     is_interval = (
         oscillation_count >= 2
-        and (hr_correlated or avg_hr_pct >= 0.87)
+        and (hr_correlated or avg_hr >= interval_hr_min)
         and segments_len >= 3
     )
 
@@ -84,7 +103,7 @@ def classify_training(
     # 3. Recovery — очень лёгкая, низкий пульс, медленный темп
     # (Recovery — very easy, low HR, slow pace)
     is_recovery = (
-        avg_hr_pct <= RECOVERY_MAX_HR_PCT
+        avg_hr <= recovery_hr_max
         and z4_time_pct < RECOVERY_MAX_Z4_PCT
         and (avg_pace is None or avg_pace > 6.0)
     )
@@ -92,7 +111,7 @@ def classify_training(
     # 4. Easy (Легкая пробежка) — лёгкая стабильная, Z2 доминирование
     # (Easy — light stable run, Z2 dominant)
     is_easy = (
-        avg_hr_pct <= EASY_MAX_HR_PCT
+        avg_hr <= easy_hr_max
         and z2_pct >= EASY_MIN_Z2_PCT
         and not has_long_z4
     )

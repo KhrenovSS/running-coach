@@ -88,9 +88,11 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
     min_osc = user.interval_min_oscillations or 3
 
     try:
+        from src.services.repositories import latest_lthr
         result = process_trackpoints(
             trackpoints, session.begin_ts,
             max_hr=user.max_hr or app_settings.default_max_hr,
+            lthr=latest_lthr(user_id, db=db),
             max_credible_pace=user.max_credible_pace or 3.0,
             max_gps_jump_m=user.max_gps_jump_m or 100.0,
             min_hr_for_fast_pace=user.min_hr_for_fast_pace or 130,

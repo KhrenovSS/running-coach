@@ -28,6 +28,7 @@ logger = get_logger("analysis")
 
 def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datetime,
                           max_hr: int = settings.default_max_hr, max_credible_pace: float = 3.0,
+                         lthr: int | None = None,
                          max_gps_jump_m: float = 100.0, min_hr_for_fast_pace: int = 130,
                          pace_gap: float = 1.0,
                          interval_min_phase_duration: int = 60,
@@ -126,10 +127,10 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
                 hrs.append(tp['hr'])
                 dists.append(tp['dist'])
 
-    time_in_zone, z4_plus_segments, total_duration_min = build_time_in_zones(trackpoints, max_hr)
+    time_in_zone, z4_plus_segments, total_duration_min = build_time_in_zones(trackpoints, max_hr, lthr=lthr)
 
     segments, var_count = segment_by_pace(
-        trackpoints, max_hr, total_dist_km,
+        trackpoints, max_hr, total_dist_km, lthr=lthr,
         min_oscillations=interval_min_oscillations,
         pace_gap=pace_gap,
         min_phase_duration_sec=interval_min_phase_duration,
@@ -176,7 +177,7 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
 
     t_type, segments_count = classify_training(
         var_count, time_in_zone, total_duration_min, max_hr,
-        z4_plus_segments, avg_hr,
+        z4_plus_segments, avg_hr, lthr=lthr,
         oscillation_count=oscillation_count,
         hr_correlated=hr_correlated,
         min_oscillations=interval_min_oscillations,
@@ -189,7 +190,7 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
     # для интервалов — oscillation/change-point сегменты
     # (For non-interval trainings — always km-blocks, for interval — oscillation segments)
     if t_type != 'interval':
-        km_segments, km_var = km_segment_fallback(trackpoints, max_hr, total_dist_km)
+        km_segments, km_var = km_segment_fallback(trackpoints, max_hr, total_dist_km, lthr=lthr)
         if km_segments:
             segments = km_segments
             var_count = km_var

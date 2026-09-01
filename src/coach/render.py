@@ -37,11 +37,11 @@ def _day_label(when: date | None, today: date | None = None) -> str | None:
     return f"{_WEEKDAYS_RU[when.weekday()]} {when:%d.%m}"
 
 
-def _hr_ceiling(p: Prescription, max_hr: int | None) -> int | None:
+def _hr_ceiling(p: Prescription, max_hr: int | None, lthr: int | None = None) -> int | None:
     """Потолок пульса назначения в уд/мин или None (prescription bpm ceiling)."""
     if max_hr is None or p.target.get("max_zone") is None:
         return None
-    return zone_ceiling_hr(p.target["max_zone"], max_hr)
+    return zone_ceiling_hr(p.target["max_zone"], max_hr, lthr)
 
 
 def _predicted_estimate(p: Prescription) -> tuple[float, float] | None:
@@ -92,14 +92,15 @@ def _pace_lead_lines(p: Prescription) -> list[str]:
     return lines
 
 
-def _hr_lead_lines(p: Prescription, max_hr: int | None) -> list[str]:
+def _hr_lead_lines(p: Prescription, max_hr: int | None,
+                   lthr: int | None = None) -> list[str]:
     """Строки HR-режима: цель — зона/пульс+время, темп и км — ориентир.
 
     (HR-lead card lines: zone/HR+time are the goal, pace and km are estimates.)
     """
     estimate = _predicted_estimate(p)
     parts = [f"Z{p.target['max_zone']} и ниже"]
-    ceiling = _hr_ceiling(p, max_hr)
+    ceiling = _hr_ceiling(p, max_hr, lthr)
     if ceiling is not None:
         parts.append(f"пульс до {ceiling} {HR_DISPLAY_UNIT}")
     if p.volume.get("duration_min") is not None:
@@ -117,6 +118,7 @@ def _hr_lead_lines(p: Prescription, max_hr: int | None) -> list[str]:
 
 
 def render_prescription(p: Prescription, max_hr: int | None = None,
+                        lthr: int | None = None,
                         user: Any = None, today: date | None = None) -> str:
     """Карточка назначения — все числа только из заклэмпленного Prescription.
 
@@ -147,7 +149,7 @@ def render_prescription(p: Prescription, max_hr: int | None = None,
         elif p.target.get("pace_min_km") is not None:
             lines += _pace_lead_lines(p)
         else:
-            lines += _hr_lead_lines(p, max_hr)
+            lines += _hr_lead_lines(p, max_hr, lthr)
     if p.earliest is not None and p.workout_type != "rest":
         # naive-UTC → пояс пользователя (BACKLOG #260; инциденты 23.08 и 26.08: UTC)
         earliest = local_dt(p.earliest, user)
@@ -163,6 +165,7 @@ def render_prescription(p: Prescription, max_hr: int | None = None,
 
 
 def render_prescription_short(p: Prescription, max_hr: int | None = None,
+                              lthr: int | None = None,
                               today: date | None = None) -> str:
     """Строка-напоминание: назначение на день не изменилось (unchanged-plan line).
 
@@ -182,7 +185,7 @@ def render_prescription_short(p: Prescription, max_hr: int | None = None,
             if p.volume.get("distance_km") is not None:
                 parts.append(f"≈{p.volume['distance_km']:.1f} км")
             return prefix + " · ".join(parts)
-        ceiling = _hr_ceiling(p, max_hr)
+        ceiling = _hr_ceiling(p, max_hr, lthr)
         if ceiling is not None:
             parts.append(f"пульс до {ceiling}")
         elif p.target.get("max_zone") is not None:
@@ -197,7 +200,7 @@ def render_prescription_short(p: Prescription, max_hr: int | None = None,
 
 
 def render_week_plan(prescriptions: list[Prescription], targets: dict,
-                     max_hr: int | None = None) -> str:
+                     max_hr: int | None = None, lthr: int | None = None) -> str:
     """Сводная карточка недельного плана — числа только из клэмпленных
     Prescription и детерминированных targets (weekly plan card).
     """
@@ -213,7 +216,7 @@ def render_week_plan(prescriptions: list[Prescription], targets: dict,
         if p.target.get("pace_min_km") is not None:
             parts.append(f"темп {format_pace(p.target['pace_min_km'])}/км")
         else:
-            ceiling = _hr_ceiling(p, max_hr)
+            ceiling = _hr_ceiling(p, max_hr, lthr)
             if ceiling is not None:
                 parts.append(f"пульс до {ceiling}")
             elif p.target.get("max_zone") is not None:

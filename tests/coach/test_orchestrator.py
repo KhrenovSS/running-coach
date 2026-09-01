@@ -114,7 +114,7 @@ def test_chat_unchanged_proposal_renders_reminder_not_card(athlete_with_history,
     second = orchestrator.handle_chat(uid, "какой пульс допустим?",
                                       db=db_session, llm=llm)
     assert "План на сегодня без изменений" in second.text
-    assert "пульс до 141" in second.text          # max_hr=177 → потолок Z2
+    assert "пульс до 151" in second.text          # F4: lthr=170 → потолок Z2 = 151
     assert "и ниже" not in second.text            # полная карточка не повторяется
     assert db_session.query(Recommendation).filter_by(
         user_id=uid).count() == n_recs            # дубль-записи нет
@@ -160,7 +160,7 @@ def test_llm_card_contains_bpm_ceiling(athlete_with_history, db_session):
     llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=EASY_TURN)])
     reply = orchestrator.handle_chat(athlete_with_history.id, "что сегодня?",
                                      db=db_session, llm=llm)
-    assert "пульс до 141 уд/мин" in reply.text    # max_hr=177, Z2 → 141
+    assert "пульс до 151 уд/мин" in reply.text    # F4: lthr=170, Z2 → 151
 
 
 def test_log_suggestion_passthrough(athlete_with_history, db_session):

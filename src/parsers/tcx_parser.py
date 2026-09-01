@@ -49,11 +49,13 @@ def extract_tcx_trackpoints(file_path):
 
 
 # Основная функция парсинга TCX-файла (Main TCX file parsing function)
-def parse_tcx(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130):
+def parse_tcx(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130, lthr=None):
     if max_hr is None:
         max_hr = settings.default_max_hr
     trackpoints, start_time_utc = extract_tcx_trackpoints(file_path)
 
     # Обработка через общий процессор (Process through shared pipeline)
     return process_trackpoints(trackpoints, start_time_utc, max_hr,
-                                max_credible_pace, max_gps_jump_m, min_hr_for_fast_pace)
+                                max_credible_pace, lthr=lthr,
+                                max_gps_jump_m=max_gps_jump_m,
+                                min_hr_for_fast_pace=min_hr_for_fast_pace)
