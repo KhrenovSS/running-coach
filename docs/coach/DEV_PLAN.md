@@ -66,7 +66,9 @@
 - `AthleteState` += `user_id`, `as_of`, `missing: list[str]` (например `['sleep','stress','rpe']`) —
   LLM обязан видеть, чего не знает; += `signals: dict` — сырьё для чистой safety-функции
   (hrv_status, rhr_status, recovery_pct, ati_cti_ratio, acwr_ratio, consecutive_hard_days,
-  pain_level, pain_days; заполняется в `state.py`, LLM в tool `get_athlete_state` НЕ отдаётся —
+  pain_level, pain_days; с 01.09 также poor_interval_recovery, days_since_quality,
+  quality_days_7d, post_race_days_left, days_off — сырьё правил 11–14; заполняется в
+  `state.py`/`_week_signals`, LLM в tool `get_athlete_state` НЕ отдаётся —
   модель видит вердикт, не сырьё).
 - Новые: `SafetyVerdict(allow_training, max_zone, max_duration_min, allowed_types,
   earliest_next_hard, triggered, reasons)`; `WorkoutProposal(workout_type, target_zone,
@@ -102,8 +104,11 @@
 **Посегментный слой (M2.1 назначения, 01.09.2026)**: если предложение содержит `segments`,
 после скалярного `clamp()` их обогащает и клэмпит `src/coach/segments.py::enrich_and_clamp_segments`
 (вызов из `prescriber.finalize` ПОСЛЕ clamp, симметрично `predict_volume`): per-segment
-`zone = max(1, min(zone, verdict.max_zone))`, потолок пульса из зоны (`zone_ceiling_hr`),
-ориентир темпа из истории (`expected_pace_at_hr`) с честными пометками `pace_missing`/`hr_missing`;
+`zone = max(1, min(zone, verdict.max_zone))`, потолок пульса из зоны (`zone_ceiling_hr` —
+с 01.09 от LTHR-лестницы при валидном lthr), ориентир темпа из истории
+(`expected_pace_at_hr`); нет истории на потолке зоны → нормативный темп от порогового
+`ltsp` (`pace_hint = ltsp + LTSP_ZONE_OFFSET_S[зона]`, `pace_source="threshold"`, F4/M3.1);
+иначе честные пометки `pace_missing`/`hr_missing`;
 если итоговый тип понижен по лестнице интенсивности — сегменты сбрасываются (их числа недостоверны,
 как drop-on-clamp для строковой `structure`). Результат кладётся в `prescription.target["segments"]`;
 рендер — `render_segments.py` (общий итог времени тренировки считается ИЗ сегментов).
@@ -123,7 +128,14 @@
 | 8 | `pain_level >= PAIN_STOP_LEVEL` (5) | `allow_training=False` |
 | 9 | `pain_level >= PAIN_CAUTION_LEVEL` (3) или боль ≥ `PAIN_PERSIST_DAYS` дней подряд | `max_zone=2`, `max_duration_min=40`, без `HARD_TYPES` |
 | 10 | `recovery_hours_left > 0` | `earliest_next_hard` |
+| 11 | `poor_interval_recovery` — плохой HRR в недавнем разборе (F3, окно `HRR_POOR_RECOVERY_LOOKBACK_DAYS`) | `earliest_next_hard` ≥ +`HRR_POOR_RECOVERY_EXTRA_H` (48 ч) |
+| 12 | `days_since_quality < QUALITY_MIN_GAP_DAYS` или `quality_days_7d ≥ QUALITY_MAX_PER_WEEK` (M4.1) | `earliest_next_hard` ≥ +1–2 дня |
+| 13 | `post_race_days_left > 0` — восстановление после гонки, 1 лёгкий день/3 км (M4.1) | `max_zone=2`, без `HARD_TYPES` |
+| 14 | `days_off ≥ DETRAINING_MIN_DAYS_OFF` (6) — возврат после паузы (M4.3) | `max_zone=2`, без `HARD_TYPES` |
 
+Константы правил 11–14: `HRR_POOR_RECOVERY_EXTRA_H/LOOKBACK_DAYS` — `coach/config.py`;
+`QUALITY_MAX_PER_WEEK`, `QUALITY_MIN_GAP_DAYS`, `POST_RACE_KM_PER_EASY_DAY`,
+`DETRAINING_MIN_DAYS_OFF` — `src/config/constants.py` (чистая математика M4).
 Константы границы в `coach/config.py`: `PAIN_SCALE_MAX=10`, `PAIN_CAUTION_LEVEL=3`,
 `PAIN_STOP_LEVEL=5`, `PAIN_PERSIST_DAYS=3`, `SAFETY_MAX_ZONE_DEFAULT=5`,
 `SAFETY_MAX_DURATION_CAUTION_MIN=40`, `TYPE_INTENSITY_ORDER`, `HARD_TYPES`, `EASY_TYPES`,
@@ -138,7 +150,8 @@
 перестановка обнуляет кэш), схемы с `additionalProperties: false` + `required`, `"strict": True`.
 
 `get_athlete_state {}` · `get_safety_verdict {}` · `get_recent_workouts {limit 1..20}` ·
-`get_workout_detail {session_id}` (ownership-проверка внутри) ·
+`get_workout_detail {session_id}` (ownership внутри; + `gps_quality`, `zone_minutes`
+посекундные из `computed_json` c fallback на сегменты, зоны от LTHR) ·
 `get_metrics_series {metric enum, days 7..180}` (whitelist, никакого getattr от LLM) ·
 `get_weekly_summary {weeks 1..16}` (здесь живёт бывший P3) · `search_guides {query, top_k 1..5}`.
 
@@ -457,9 +470,6 @@ lap-сообщения (готовая разметка интервалов) и
 - ✅ **F7 (частично, 01.09.2026)**: `data_checks.lap_check` — телеметрия per_km vs
   авто-лапы часов (>2% → warning-лог), в `computed.inputs.lap_check`. Сверка GAP vs
   Coros Effort Pace — отложена (эталон сохранён в `device_summary.effort_pace_ms`).
-- ⬜ **F4 — M3.1 зоны/темпы от LTHR/LTSP** (METRICS_GUIDE §8): 🛑 стоп-поинт — показать
-  владельцу «зоны %max_hr vs LTHR» на истории ДО включения; отдельно — решение о
-  пересчёте истории. Закрывает #273, #276.
 - ✅ **F5 — M4.1 структура недели (01.09.2026)**: `src/analysis/week_structure.py` —
   ≤3 качественных/7 дней, ≥1 лёгкий день между качественными, восстановление после
   гонки 1 день/3 км; флаги `hard_days_too_close`/`post_race_recovery_violated`.
@@ -488,7 +498,12 @@ lap-сообщения (готовая разметка интервалов) и
   («правило шести секунд»), `pace_source="threshold"` — «мало данных» для ускорений закрыт.
   M3.2 (полевой тест ПАНО — валидация lthr Coros) — за владельцем.
 
-Зависимости: F0 → F1 → (F2 ∥ F3 ∥ F7) → F4 → (F5 ∥ F6). Осталось: F5/F6 (M4) и M3.2 (тест ПАНО).
+Зависимости: F0 → F1 → (F2 ∥ F3 ∥ F7) → F4 → (F5 ∥ F6). Осталось: M3.2 (полевой тест ПАНО —
+за владельцем), F7-часть «GAP vs Coros Effort Pace», хвосты замыканий §7 METRICS_GUIDE (#289).
+
+Enum флагов assessment — `schemas.FlagValue` (append-only, 21 значение, зеркало в
+`prompts.py`); LLM сама ставит только `SUBJECTIVE_FLAGS` (pain/great_session),
+детерминированные сливает `orchestrator._merged_flags` из `computed.flags`.
 
 ### Дальше (приоритеты, согласованы владельцем 25.08.2026)
 
@@ -507,9 +522,9 @@ lap-сообщения (готовая разметка интервалов) и
 5. **Данные**: **#257 сон ✅ 30.08 — решён иначе: скриншот сна → мост `/vision` →
    `DailyMetrics.sleep_*` (см. D8 ниже и CHANGELOG 30.08)**; правило «недосып→осторожнее»
    #254 (данные сна теперь есть); #232 (repair performance), #249 (recovery-шкала 20/70/90),
-   #255 (осадки в разбор). **M2.1 разбора (HRR) и M3 (ПАНО/VDOT) расписаны F-серией
-   выше (01.09.2026: F3/F4; блокер M3 снят — `lthr`/`ltsp` уже синкаются); не путать
-   M2.1 разбора с уже сделанным НАЗНАЧЕНИЕМ по сегментам (`segments.py`, в коде «M2.1»).**
+   #255 (осадки в разбор). **M2.1 разбора (HRR) и M3.1 (зоны/темпы от LTHR/LTSP) —
+   ✅ 01.09.2026 (F3/F4); осталось M3.2 — полевой тест ПАНО (за владельцем); не путать
+   M2.1 разбора с НАЗНАЧЕНИЕМ по сегментам (`segments.py`, в коде «M2.1»).**
 
 ## 10. Тесты (`tests/coach/`)
 
@@ -565,6 +580,9 @@ CoachError → сообщение погибло. Исправлено: `send_md
 7. `training_type_override` в остальном приложении не слит с `training_type` → BACKLOG, не «заодно».
 
 ## 12. Принятые допущения (менять по слову владельца)
+- **Зоны — от ПАНО (01.09.2026)**: лестница 81/89/100/105% LTHR (Coros, окно свежести
+  45 дней), fallback %max_hr при отсутствии/невалидном lthr; история пересчитана
+  (решение владельца). LTHR часов не валидирован полевым тестом — M3.2.
 
 - Боль — 3 кнопки: `PAIN_LEVELS = (0 «не беспокоило», 2 «немного», 5 «мешало»)`;
   третья = `PAIN_STOP_LEVEL` → немедленный вердикт «Отдых». Колонка Integer держит шкалу 0–10.

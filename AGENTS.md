@@ -5,7 +5,7 @@
 > (opencode: architect/coder/tester/reviewer/orchestrator) ретирован — разработку ведёт Claude-агент.
 
 ## Суть
-Персональный AI-тренер для бега. Парсит TCX-файлы (любые часы: Garmin, Coros, Polar, Suunto), анализирует тренировки, определяет тип (интервальная/темповая/long/recovery), разбивает на сегменты, считает пульсовые зоны, очищает GPS-ошибки.
+Персональный AI-тренер для бега. Парсит TCX/FIT-файлы (любые часы: Garmin, Coros, Polar, Suunto), анализирует тренировки, определяет тип (интервальная/темповая/long/recovery), разбивает на сегменты, считает пульсовые зоны (от ПАНО/LTHR, fallback %max_hr), очищает GPS-ошибки и меряет качество GPS.
 
 ## Стек
 Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через ИИ (open code style).
@@ -117,7 +117,7 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
   - `models/health.py` — DailyMetrics, WeightMeasurement
   - `models/auth.py` — AuthToken
   - `models/audit.py` — AuditEvent
-  - `models/coach.py` — Recommendation, PredictionLog, UserModel, Lesson, CoachMessage (коуч)
+  - `models/coach.py` — Recommendation, PredictionLog, UserModel, Lesson, CoachMessage, WorkoutInsight (коуч)
   - `models/health.py` — DailyMetrics, WeightMeasurement, WellnessReport (вечерний самоотчёт)
 - `src/config/settings.py` — `Settings(BaseSettings)` из pydantic-settings
 - `src/config/constants.py` — плоские module-level константы
@@ -147,7 +147,10 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 - `src/services/weight_service.py` — save_weight (измерение + профиль одной транзакцией), current_weight (последнее измерение)
 - `src/services/repositories_coach.py` — CoachRepository: выборки для скиллов/state коуча, честный ACWR (#219), coach_messages
 - `src/services/repositories_insights.py` — InsightRepository: очередь отложенного разбора (claim/release/reclaim — атомарные, #256), итоги разборов
-- `src/services/workout_insights.py` — computed_json метрик тренировки (INSIGHTS_SCHEMA_VERSION=3), план-vs-факт
+- `src/services/workout_insights.py` — computed_json метрик тренировки (INSIGHTS_SCHEMA_VERSION=7:
+  M1 + кросс-чеки часов + HRR + структура недели/downhill/session_rpe), план-vs-факт
+- `src/services/insights_baseline.py` — базовая линия HR↔темп поверх insights (ensure/refresh,
+  expected_pace_at_hr/expected_hr_at_pace; вынос из workout_insights, #270)
 - `src/services/sleep_ingest.py` — `save_sleep_shot` → колонки `sleep_*` в DailyMetrics (#257, из скриншота)
 - `src/services/hr_max.py` — адаптивный max_hr (авто-повышение по пикам, еженедельное предложение снижения)
 - `src/coach/` — пакет гибридного ИИ-коуча (**в проде с 23.08.2026**; C0–C9/D0–D8 закрыты,
@@ -162,7 +165,8 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
     конструктор Prescription; `for_days_ahead` → назначение на будущий день); `state.py`,
     `prescriber.py`, `render.py`, `render_segments.py` (рендер сегментов + общий итог из них),
     `segments.py` (`enrich_and_clamp_segments` — числа сегментам из зон/истории, per-segment clamp, M2.1),
-    `fallback.py`, `orchestrator.py`, `util.py`
+    `fallback.py`, `orchestrator.py`, `review_flow.py` (pending-разборы: ensure/run/due),
+    `util.py`
   - `turn_context.py` — `build_extras`/`unchanged_today`/`history` (вынос из orchestrator, #266)
   - `planning.py` — детерминированные числа недели (мезоцикл 3:1, прогрессия ≤10%, потолки,
     `week_targets`/`advance_mesocycle`/`week_plan_review`/`confirm_or_adjust_morning`)
@@ -194,7 +198,7 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 - `src/api/routes/health.py` — health check endpoint
 - `src/api/routes/auth.py` — маршруты аутентификации
 - `src/web/state.py` — глобальное состояние (`_pending`, `_sync_tasks`)
-- `src/web/routes/pages/` — пакет: `auth.py` (48), `index.py` (240), `session.py` (191), `settings.py` (149)
+- `src/web/routes/pages/` — пакет: `auth.py` (48), `index.py` (242), `session.py` (213), `settings.py` (149)
 - `src/web/routes/uploads.py` — POST /upload, /upload/confirm
 - `src/web/routes/sync.py` — POST /sync/{brand}/run, /sync/{brand}/health (93 строки)
 - `src/web/routes/logs.py` — GET /logs
@@ -205,13 +209,20 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
   - `classify.py` — классификация тренировок (interval/tempo/long/recovery/easy)
   - `segment.py` — сегментация по темпу + fallback на осцилляции
   - `segment_km.py` — km-segment fallback, compute_km_variability
-  - `hr_zones.py` — пульсовые зоны
+  - `hr_zones.py` — зоны от LTHR (лестница Фицджеральда 81/89/100/105%) с fallback %max_hr:
+    get_zone/get_band/zone_bounds/zone_ceiling_hr/lthr_valid
   - `gap.py`, `effort.py`, `hr_baseline.py` — GAP/кардиодрейф/decoupling, HR↔темп baseline (D2)
-  - `session_metrics.py` — детерминированные метрики разбора M1 (время в зонах, дисциплина
-    лёгкого, load_points, quality_volume, каденс, RPE, plan_vs_actual, collect_flags)
+  - `session_metrics.py` — детерминированные метрики разбора M1 (посекундное время в зонах
+    с отсечением разрывов записи, дисциплина лёгкого, load_points, quality_volume, каденс,
+    RPE, plan_vs_actual, collect_flags — единый словарь флагов)
+  - `gps_quality.py` — квалиметрия GPS + оценка дистанции по шагам (каденс × длина шага)
+  - `data_checks.py` — кросс-чеки с часами: device_check (F2), lap_check (F7)
+  - `intervals.py` — HRR-разбор интервалов: границы из лапов/осцилляций, hrr60, тренд пиков
+  - `week_structure.py` — структура недели (качественные дни, пост-гонка), детренированность
   - `utils.py` — форматирование, GPS-хелперы
-- `src/parsers/` — парсеры TCX/FIT (`tcx_parser.py`, `fit_parser.py` — плюс `extract_*_trackpoints`
-  для reanalyze-от-сырья), GPS (`gps.py`), погода (`weather.py`)
+- `src/parsers/` — парсеры TCX/FIT (`tcx_parser.py`, `fit_parser.py` v2: `extract_fit_activity` —
+  трекпоинты + лапы часов + паузы записи + эталоны session-сообщения + каналы динамики
+  pw/st/vo/vr/sl; `extract_*_trackpoints` для reanalyze-от-сырья), GPS (`gps.py`), погода (`weather.py`)
 - `src/services/reanalyze.py` — пересчёт: сначала сырой файл (`raw_file_path`), fallback `trackpoints_json`
 - `bin/` — ops-скрипты (версионируются точечно через `.gitignore`): `backup_db.sh`, `docker.sh`,
   `backfill_external_ids.py` / `backfill_raw_fits.py` / `backfill_avg_pace.py` (все с `--dry-run` по умолчанию);
@@ -239,10 +250,28 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
   очистка 4.58 → честная оценка 6.7 км): `src/analysis/gps_quality.py`, колонка `gps_quality`,
   флаг `gps_unreliable`→`suspect_data`, `render_gps_warning`; №42 пересчитана, разбор перегенерирован.
 - **Аудит усреднений темпа/пульса** (`docs/AUDIT_averaging_2026-09-01.md`): км-числа = lap'ам
-  часов (корректны); системные перекосы → BACKLOG #277–#284 (код не менялся — решение владельца).
-- **Аудит сырых данных → F-серия (DEV_PLAN §9)**: PACE 4 отдаёт power/динамику (METRICS_GUIDE §10
-  исправлен), 328 lap и timer-события игнорировались, `lthr`/`ltsp` уже в БД → F0 фиксы → F1 парсер
-  v2 (#285) → F2 moving-time (#286) ∥ F3 HRR → F4 зоны от LTHR (🛑 показ зон) → F5/F6 M4 (#287, §11).
+  часов (корректны); системные перекосы #277–#284 применены той же ночью в F0.
+
+**Session 01.09.2026 (ночь) — F-серия «сырые данные и физиология» ЗАКРЫТА ✅
+(коммиты 1090509/7debd8b/236054b, всё в проде, история 42 тренировок пересчитана):**
+- **F0** — фиксы усреднений: время выброшенных GPS-дельт вне avg_pace, дистанционно-взвешенный
+  GAP, `km_len_m` (хвостовой км не полный), разрывы записи >30 c вне зон/длительности,
+  сглаженный max HR, посекундные зоны в 80/20 и деталях, cad==0 вне средних (insights v5).
+- **F1** — парсер FIT v2 (#285): `extract_fit_activity` → `laps_json` (лапы часов — ground truth
+  интервалов), `device_summary` (эталоны session + точные паузы), каналы pw/st/vo/vr/sl;
+  миграция `u4v5w6x7y8z9`; reanalyze от сырья заполняет новые колонки.
+- **F2** — кросс-чек с часами: `data_checks.device_check` → флаг `device_mismatch`→`suspect_data`
+  (#286 остаётся 🟡: avg_pace от timer-пауз не внедрён).
+- **F3** — HRR-разбор интервалов (`analysis/intervals.py`): пик с лагом, флаг
+  `poor_interval_recovery` только по пикам Z4+ → p1 правило 11 (интенсив ≥ +48 ч); insights v6.
+- **F4** — зоны/темпы от LTHR/LTSP (🛑 стоп-поинт пройден: показано сравнение, решение
+  «включить полностью»): `hr_zones.zone_bounds`, классификация от порога (easy-доля = Z1+Z2),
+  `latest_lthr/latest_ltsp`, нормативный темп сегментов `pace_source="threshold"` (#273, #276).
+- **F5/F6** — M4 (#287): `week_structure` (≤3 качественных/нед — «качественная» = interval/race
+  или tempo ≥95%·LTHR; пост-гонка 1 день/3 км), `detraining` (≥6 дней), `downhill_block`
+  (колено), `session_rpe`, `wellness_trend`; p1 правила 12–14; insights v7.
+- **F7** — телеметрия `lap_check` (per_km vs авто-лапы часов). Тесты: 705 passed.
+  Осталось: M3.2 (полевой тест ПАНО — за владельцем), хвосты замыканий §7 (#289).
 
 **Session 01.09.2026 — устойчивость моста + тренировки по сегментам (M2.1) ✅ (задеплоено, e27f6b2):**
 - **Устойчивость к сбою LLM-моста** (инцидент утра 01.09, мост отдавал `502 claude CLI exit=1`):

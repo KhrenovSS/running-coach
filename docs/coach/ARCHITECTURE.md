@@ -59,8 +59,12 @@ temp-каталогом, `--max-turns ≥2` (ход на Read + ход на от
 expired/error) с атомарным claim (`UPDATE ... WHERE status='pending'`, rowcount==1):
 синк из любого контейнера только создаёт строки, исполняет разбор только бот (хендлеры
 тапов + периодическая джоба). Переживает рестарты, дедуп гарантирован БД, in-memory
-состояния нет. Та же строка — персистентный итог разбора: `computed_json` (детерминированные
-метрики: кардиодрейф Pa:HR, GAP/уклон, отклонение от базовой линии HR↔темп, heat) +
+состояния нет. Та же строка — персистентный итог разбора: `computed_json` **schema v7** (детерминированные
+метрики: кардиодрейф Pa:HR, GAP/уклон, отклонение от базовой линии HR↔темп, heat, время в
+зонах, потолки качества, план-vs-факт; с 01.09 также кросс-чеки с часами `device_check`/
+`lap_check`, HRR интервалов `interval_recovery`, структура недели `week_structure`,
+`detraining`, `downhill`, `session_rpe`; при `gps_unreliable` pace-производные блоки честно
+гасятся `reason:"gps_unreliable"`) +
 `assessment_json`/`carry_forward` (структурированная оценка LLM, записывает оркестратор из
 провалидированного output — инвариант «LLM не пишет в БД» сохранён). Недельные/месячные
 отчёты и утренний вердикт читают итоги, не пересканируя сырьё.
@@ -92,7 +96,33 @@ Coros API длительность/фазы/оценку сна не отдаё�
 вариациям экранов, без миграций). Приватность: скриншот удаляется из чата после распознавания,
 байты нигде не персистятся. Ключ не нужен (мост подписки).
 
-## Карта модулей `src/coach/` (фактическая, C0–C8 + сессия 28–30.08)
+## Решение 7: зоны и темпы — от ПАНО (LTHR/LTSP), %max_hr — fallback (F4/M3.1, 01.09.2026)
+
+Coros синкает `lthr`/`ltsp` — они стали якорем всей интенсивности (решение владельца после
+показа сравнения лестниц: доля лёгкого 72%→47%). `analysis/hr_zones.zone_bounds` — лестница
+Фицджеральда (Z1≤81%, Z2≤89%, Z3≤100%, Z4≤105% LTHR; «зона X» внутри Z3), fallback %max_hr
+при отсутствии/невалидном lthr (`lthr_valid`: диапазон (100, max_hr)). Резолверы
+`latest_lthr`/`latest_ltsp` (repositories, окно свежести 45 дней) — единственный источник
+порога; lthr прокинут по пайплайну (парсеры → process_trackpoints → зоны/сегменты/
+классификация) и коучу (insights, потолки карточек `zone_ceiling_hr`, history_tools,
+zone_distribution). Классификация: recovery ≤81%·lthr, easy ≤89%·lthr; «качественный день»
+M4 — interval/race либо tempo с avg_hr ≥95%·lthr. Нормативный темп сегментов при пустой
+истории — `ltsp + LTSP_ZONE_OFFSET_S[зона]` (`pace_source="threshold"`). LTHR часов не
+валидирован полевым тестом — M3.2 за владельцем.
+
+## Решение 8: граница безопасности потребляет метрики разбора (F3/F5/F6, 01.09.2026)
+
+Флаги computed_json замыкаются на safety не прозой, а сигналами: `state._week_signals` +
+`InsightRepository.recent_flag` → `p1_safety` правила 11–14 (плохой HRR между повторами →
+`earliest_next_hard` +48 ч; качественные дни слишком близко → +1–2 дня; после гонки —
+1 лёгкий день/3 км → max_zone=2; пауза ≥6 дней → мягкий возврат). Появилась осознанная
+зависимость `coach/rules → analysis` (константы правил — `src/config/constants.py`).
+Квалиметрия GPS — та же честность на уровне данных: `gps_quality` + оценка дистанции по
+шагам, предупреждение рендерит `render_gps_warning` (числа — код, не проза LLM);
+`gps_unreliable`/`device_mismatch` идут в assessment как `suspect_data`, ограничений safety
+сознательно не дают. Хвосты замыканий — BACKLOG #289.
+
+## Карта модулей `src/coach/` (фактическая, C0–C8 + сессии 28–30.08 и 01.09)
 
 ```
 coach/
@@ -110,6 +140,7 @@ coach/
 ├── render_segments.py # рендер посегментной раскладки + segments_total_min (общий итог из сегментов, M2.1)
 ├── segments.py        # enrich_and_clamp_segments: числа сегментам из зон/истории, per-segment clamp (M2.1)
 ├── orchestrator.py    # morning_verdict (подтверждает план дня), handle_chat, on_workout_completed
+├── review_flow.py     # ensure_insights_for_batch, run_pending_review, due_review_sessions
 │                      #   (+ слияние флагов из computed), weekly_report; ChatReply
 ├── turn_context.py    # build_extras / unchanged_today / history (вынос из orchestrator, #266)
 ├── planning.py        # детерминированные числа недели (мезоцикл 3:1, прогрессия, потолки),
@@ -140,5 +171,5 @@ hr_baseline}.py` — Minetti-GAP, decoupling Pa:HR, базовая линия HR
 `src/telegram/jobs/coach_{morning,evening,weekly}.py` (09:30 / 21:00 / вс 19:00),
 `src/services/sync/activities.py::_coach_reviews` (post-sync разборы в daemon-треде:
 гейт initiative, LLM только для самой свежей тренировки батча),
-`src/domain/models/coach.py` (5 таблиц) + `WellnessReport` в `health.py`,
-миграция `p9q0r1s2t3u4`, `tests/coach/` (13 модулей + fakes).
+`src/domain/models/coach.py` (6 таблиц, включая `WorkoutInsight`) + `WellnessReport` в
+`health.py`, миграции `p9q0r1s2t3u4`/`q0r1s2t3u4v5`, `tests/coach/` (31 модуль + fakes).

@@ -41,7 +41,8 @@
 
 - [ ] Unit-тесты для бизнес-логики
 - [ ] Edge cases покрыты
-- [ ] Тесты проходят: `pytest tests/ -v`
+- [ ] Тесты проходят: `.venv/bin/python -m pytest -q`
+- [ ] Новый порог/константа коуча → анти-дрейф-строка в `tests/test_coach_config.py`
 
 ## Документация (Documentation)
 
@@ -61,7 +62,7 @@
 
 ```bash
 # Тесты (Tests)
-pytest tests/ -v
+.venv/bin/python -m pytest -q
 
 # Проверка импортов (Import check)
 python -c "from src.startup import create_app; print('OK')"

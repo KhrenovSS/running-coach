@@ -15,7 +15,7 @@ from src.services.workout_insights import upsert_workout_insights
 from tests.helpers import (build_daily_metrics, build_recovery_trackpoints,
                            build_trackpoints, build_training_session, make_user)
 
-_seq = iter(range(94100, 94999))
+_seq = iter(range(88000, 88999))  # свой диапазон (94xxx занят test_hr_max)
 
 
 def _user(db, **kw):

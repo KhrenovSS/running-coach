@@ -7,18 +7,31 @@
 ```
 tests/
 ├── conftest.py              # Два режима БД: SQLite (дефолт) / PostgreSQL (opt-in, см. ниже)
-├── helpers.py               # Фабрики: build_trackpoints, make_user, build_training_session, build_daily_metrics
+├── helpers.py               # Фабрики: build_trackpoints, make_user, build_training_session, build_daily_metrics,
+│                            #   build_training_feedback, build_gps_glitch_trackpoints
+├── helpers_intervals.py     # Фабрики HRR-синтетики: build_hr_series/build_laps/interval_workout/build_hrr_trackpoints
 ├── fixtures/                # TCX/FIT файлы для тестов (tempo_run.tcx, short_walk.tcx)
 ├── skills/                  # Фикстуры каркаса коуча (conftest + scaffold-гейт)
-├── coach/                   # Тесты гибридного коуча: скиллы, state, safety/clamp (табличный),
+├── coach/                   # Тесты гибридного коуча (31 модуль): скиллы, state, safety/clamp (табличный),
 │                            #   source-гварды (Prescription только из clamp; tools read-only),
 │                            #   tools, agent (ScriptedLLM), промпт-стабильность, оркестратор,
-│                            #   pain-флоу, рендер, BridgeLLM (httpx.MockTransport); fakes.py
+│                            #   pain-флоу, рендер, BridgeLLM (httpx.MockTransport); fakes.py;
+│                            #   test_lthr_coach.py (LTHR у коуча), test_safety_week_rules.py (правила 12–14)
 ├── test_gps.py              # clean_trackpoints, haversine_m
 ├── test_classify.py / test_classify_boundaries.py  # classify_training
-├── test_hr_zones.py         # get_zone, get_band
+├── test_hr_zones.py         # get_zone/get_band/zone_bounds (LTHR-лестница + fallback %max_hr)
 ├── test_oscillation.py      # detect_pace_oscillations, compute_hr_lag_correlation
 ├── test_segment.py          # segment_by_pace, km_segment_fallback
+├── test_gps_quality.py      # квалиметрия GPS / оценка дистанции по шагам
+├── test_intervals.py        # HRR-разбор интервалов
+├── test_week_structure.py   # структура недели / детренированность (M4)
+├── test_lthr_pipeline.py    # зоны от LTHR по всему пайплайну
+├── test_session_metrics.py  # метрики M1 разбора
+├── test_workout_insights.py # разбор тренировки (computed_json schema v7)
+├── test_hr_baseline.py      # базовая линия HR↔темп
+├── test_effort.py           # кардиодрейф / HR-стабильность
+├── test_gap.py              # GAP/Minetti + downhill_block
+├── test_timeutils.py        # хелперы времени/таймзон
 ├── test_stats.py            # calc_stats, fmt_duration, zone_ranges
 ├── test_health.py           # /health/ endpoint
 ├── test_process_trackpoints.py  # process_trackpoints pipeline
@@ -71,8 +84,9 @@ docker stop pg-test
 In-memory БД (и PG-схема) живёт **весь прогон** — данные тестов не чистятся между
 файлами. Поэтому `make_user` в каждом тесте должен получать уникальные
 `chat_id`/`email` (иначе `UNIQUE constraint failed`). Занятые диапазоны chat_id:
-`123456789/999/111/222` (test_models, auto_sync), `77xxx` (backfill), `90001-90002`
-(skills), `94xxx` (hr_max), `95xxx` (stage0), `96xxx` (auto_sync), `97xxx` (dedup),
+`123456789/999/111/222` (test_models, auto_sync), `77xxx` (backfill), `88xxx` (test_lthr_pipeline),
+`89xxx` (test_week_structure), `90001-90002` (skills), `93xxx` (test_workout_insights),
+`94xxx` (hr_max), `95xxx` (stage0), `96xxx` (auto_sync), `97xxx` (dedup),
 `98xxx` (raw_files), `99xxx` (weight), `92xxx` (coach — счётчик `tests/coach/conftest._seq`).
 Для нового файла бери свободный диапазон и хелпер вида:
 
@@ -143,10 +157,15 @@ from src.analysis.hr_zones import get_zone, get_band
 
 
 def test_get_zone_max_hr_177():
-    """Зоны для max_hr=177"""
+    """Зоны для max_hr=177 (fallback без LTHR)"""
     assert get_zone(150, 177) == 4
     assert get_zone(130, 177) == 2
     assert get_zone(90, 177) == 1
+
+
+def test_get_zone_lthr():
+    """Зоны от ПАНО (лестница 81/89/100/105% от LTHR)"""
+    assert get_zone(150, 177, lthr=160) == 3  # лестница от ПАНО
 
 
 def test_get_zone_zero_max_hr():
@@ -194,4 +213,4 @@ def test_km_fallback_short():
 
 ---
 
-**Последнее обновление:** 23.08.2026 (tests/coach/, инвариант «без сети/без ключа», диапазон 92xxx)
+**Последнее обновление:** 01.09.2026 (F-серия: тесты gps_quality/intervals/week_structure/lthr, новые диапазоны chat_id)

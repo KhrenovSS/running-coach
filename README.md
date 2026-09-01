@@ -8,10 +8,14 @@
 
 - **📤 Поддержка форматов** – TCX (XML) и FIT (бинарный) от любых часов/приложений
 - **🧠 Автоклассификация** – автоматически определяет тип тренировки (интервальная, темповая, long, recovery) по вариативности темпа и осцилляциям
-- **🔄 Пересчёт тренировок** – ручная смена типа (interval/tempo/long/recovery/easy) + автоматический пересчёт анализа из сохранённых трекпоинтов
+- **🔄 Пересчёт тренировок** – ручная смена типа (interval/tempo/long/recovery/easy) + автоматический пересчёт от сырого FIT/TCX (fallback — сохранённые трекпоинты)
 - **📊 Сегментация** – каждый километр как отдельный отрезок; для интервальных тренировок – сплит на быстрые/медленные фазы
-- **🫀 Пульсовые зоны** – время в зонах Z1–Z5 (на основе max_hr)
-- **🗺️ Чистка GPS‑данных** – удаляет скачки и нереальные темпы, пересчитывает дистанцию
+- **🫀 Пульсовые зоны** – время в зонах Z1–Z5 от ПАНО (LTHR, лестница 81/89/100/105%), fallback — %max_hr
+- **🗺️ Чистка GPS‑данных** – удаляет скачки и нереальные темпы, пересчитывает дистанцию; + квалиметрия GPS: при недостоверном треке дистанция оценивается по шагам (каденс × длина шага)
+- **📦 Парсер FIT v2** – лапы часов (laps_json), паузы записи и эталоны session-сообщения (device_summary), каналы динамики (power/stance/oscillation/step_length)
+- **🔍 Кросс-чек с часами** – расхождение с эталонами устройства (device_mismatch) и лапами (lap_check)
+- **⏱️ HRR-разбор интервалов** – восстановление пульса между повторами
+- **📅 Мониторинг недели** – структура качественных дней, downhill-нагрузка, детренированность, session-RPE
 - **🌤️ Погода** – температура и иконка погоды для каждой тренировки (Open‑Meteo API)
 - **⛰️ Высота** – парсинг набора/спуска (AltitudeMeters)
 - **🕐 Часовой пояс** – автоматическое определение по GPS‑координатам
@@ -45,7 +49,7 @@
 ### Стек
 - **Backend**: Python + FastAPI + SQLAlchemy + PostgreSQL 16 (через Docker Compose)
 - **Frontend**: HTML/CSS/JS (Vanilla) + Chart.js
-- **Анализ**: `src/analysis/` — пакет анализа (7 файлов): `__init__.py` (оркестратор process_trackpoints), `oscillation.py` (детекция интервалов: base_pace + pace_gap + HR-lag), `classify.py` (interval/tempo/long/recovery/easy), `segment.py` (change-point detection + осцилляции), `segment_km.py` (km-fallback, вариативность), `hr_zones.py` (пульсовые зоны Z1–Z5), `utils.py`
+- **Анализ**: `src/analysis/` — пакет анализа (15 модулей): `__init__.py` (оркестратор process_trackpoints), `oscillation.py` (детекция интервалов: base_pace + pace_gap + HR-lag), `classify.py` (interval/tempo/long/recovery/easy), `segment.py` (change-point detection + осцилляции), `segment_km.py` (km-fallback, вариативность), `hr_zones.py` (зоны от LTHR c fallback %max_hr: get_zone/get_band/zone_bounds/zone_ceiling_hr), `gap.py` (GAP/Minetti + downhill_block), `effort.py` (кардиодрейф/HR-стабильность), `hr_baseline.py` (базовая линия HR↔темп), `session_metrics.py` (метрики M1 разбора), `gps_quality.py` (квалиметрия GPS + оценка по шагам), `data_checks.py` (кросс-чеки с часами), `intervals.py` (HRR интервалов), `week_structure.py` (структура недели/детренированность), `utils.py`
 - **Парсеры**: `src/parsers/` — `tcx_parser.py` (XML), `fit_parser.py` (бинарный), `gps.py` (очистка GPS), `weather.py` (Open-Meteo API, httpx)
 - **Интеграции**: Coros Training Hub (неофициальное API), Open‑Meteo (погода), Telegram Bot API. Мульти-бренд: `BaseWatchClient` ABC + `factory.py` реестр.
 - **Аутентификация**: email+пароль (bcrypt), одноразовые токены регистрации (`secrets`), session-cookie (`SessionMiddleware`)
@@ -79,7 +83,8 @@ uvicorn main:app --host 0.0.0.0 --port 8000
   тип/цель/объём/rationale + наблюдаемость `proposal_json`/`safety_json`/`clamped`/`source`),
   `prediction_logs` (прогноз vs факт, UNIQUE по session_id), `user_models` (персональные параметры,
   1 строка/юзер), `lessons` (извлечённые уроки), `coach_messages` (история диалога + токены/стоимость
-  LLM), `wellness_reports` (вечерний самоотчёт: боль/крепатура/настроение/сон, UNIQUE user+date).
+  LLM), `wellness_reports` (вечерний самоотчёт: боль/крепатура/настроение/сон, UNIQUE user+date),
+  `workout_insights` (очередь + итог разбора тренировки, `computed_json` schema v7, миграция `q0r1s2t3u4v5`).
 - В `training_feedback` добавлены колонки боли: `pain_level` (0–10), `pain_location`, `pain_phase`
   (start/middle/end/after/none).
 
@@ -142,6 +147,14 @@ anaerobic_training_effect FLOAT         -- Анаэробный трениров
 vo2max FLOAT                           -- Макс. потребление кислорода
 calories INTEGER                        -- Потраченные калории
 avg_pace FLOAT                          -- Средний темп (мин/км)
+hr_peak_smoothed INTEGER                -- Сглаженный пик пульса (для адаптивного max_hr)
+external_activity_id VARCHAR(64)        -- ID активности у провайдера (честный дедуп)
+source_brand VARCHAR(50)                -- Бренд-источник (coros, polar, …)
+file_sha256 VARCHAR(64)                 -- SHA-256 исходного файла
+raw_file_path VARCHAR(255)              -- Путь к сырому FIT/TCX (uploads/raw/)
+gps_quality JSON                        -- Квалиметрия GPS (достоверность трека, оценка по шагам)
+laps_json JSON                          -- Лапы часов (из FIT)
+device_summary JSON                     -- Эталоны session-сообщения + паузы записи (из FIT)
 ```
 
 #### **`daily_metrics`** — ежедневные метрики здоровья (Coros)
@@ -246,8 +259,11 @@ created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 - `j3k4l5m6n7o8` — 4 таблицы модуля коуча (recommendations, prediction_logs, user_models, lessons)
 - `m6n7o8p9q0r1`/`n7o8p9q0r1s2` — честный дедуп (`external_activity_id`) + сырые FIT/TCX
 - `o8p9q0r1s2t3` — адаптивный max_hr (`hr_peak_smoothed`)
-- `p9q0r1s2t3u4` — **текущий head**: боль (`training_feedback.pain_*`), `wellness_reports`,
+- `p9q0r1s2t3u4` — боль (`training_feedback.pain_*`), `wellness_reports`,
   `coach_messages`, наблюдаемость решений в `recommendations`
+- `q0r1s2t3u4v5` (workout_insights) → `r1s2t3u4v5w6` (сон из скриншота, `sleep_*` в daily_metrics)
+  → `s2t3u4v5w6x7` (sleep_extra) → `t3u4v5w6x7y8` (gps_quality)
+  → `u4v5w6x7y8z9` — **текущий head** (laps_json/device_summary)
 
 Файлы миграций: `alembic/versions/`. Конфигурация: `alembic.ini`, `alembic/env.py` (`DATABASE_URL` из env).
 
@@ -292,8 +308,9 @@ running-coach/
 │   │   ├── utils.py                  #   get_user, _get_web_app_url
 │   │   ├── sync_runner.py            #   run_sync_in_thread
 │   │   ├── handlers/                 #   start, sync, stats, trainings, weight, account, feedback,
-│   │   │                             #   coach (/verdict, /coach_settings, роутер текста), pain, hr_max
-│   │   └── jobs/                     #   weight, recovery, hr_max, coach_morning (09:30), coach_evening (21:00)
+│   │   │                             #   coach (/verdict, /coach_settings, роутер текста), pain, hr_max, sleep_photo
+│   │   └── jobs/                     #   weight, recovery, hr_max, coach_morning (09:30), coach_evening (21:00),
+│   │                                 #   coach_weekly (вс 19:00), coach_review (pending-разборы), sleep_reminder (10:00)
 │   ├── models.py                    # Shim: реэкспорт из src/domain/models/ + хелперы
 │   ├── domain/
 │   │   └── models/                  # Доменные модели (User, TrainingSession, WatchCredential, …)
@@ -303,7 +320,7 @@ running-coach/
 │   │       ├── training.py          #   TrainingSession, TrainingFeedback, DeletedTraining
 │   │       ├── watch.py             #   WatchCredential
 │   │       ├── health.py            #   DailyMetrics, WeightMeasurement, WellnessReport
-│   │       ├── coach.py             #   Recommendation, PredictionLog, UserModel, Lesson, CoachMessage
+│   │       ├── coach.py             #   Recommendation, PredictionLog, UserModel, Lesson, CoachMessage, WorkoutInsight
 │   │       ├── auth.py              #   AuthToken
 │   │       └── audit.py             #   AuditEvent
 │   ├── watch/                       # Мульти-брендовая абстракция часов
@@ -320,7 +337,7 @@ running-coach/
 │   │   ├── prescriber / render / fallback / orchestrator / util
 │   │   ├── skills/                  #   fatigue, recovery, load, distribution, progress, pain, workout
 │   │   ├── tools/                   #   7 read-only tools для LLM
-│   │   ├── knowledge/guides/        #   методические руководства (loader + 4 seed)
+│   │   ├── knowledge/guides/        #   методические руководства (loader + 12 руководств: Лидьярд/80-20 Фицджеральда/Дэниелс + планы)
 │   │   └── llm/                     #   CoachLLM: anthropic / bridge (мост подписки) / null + agent
 │   ├── api/
 │   │   ├── __init__.py              # re-export: register_middleware, get_db
@@ -333,13 +350,21 @@ running-coach/
 │   │   ├── __init__.py              # Экспортирует settings + constants
 │   │   ├── settings.py              # pydantic-settings BaseSettings (env vars)
 │   │   └── constants.py             # Плоские module-level константы
-│   ├── analysis/                    # Пакет анализа тренировок
+│   ├── analysis/                    # Пакет анализа тренировок (15 модулей)
 │   │   ├── __init__.py              #   оркестратор process_trackpoints()
 │   │   ├── oscillation.py           #   детекция интервалов: base_pace + pace_gap + HR-lag
 │   │   ├── classify.py              #   классификация (interval/tempo/long/recovery/easy)
 │   │   ├── segment.py               #   сегментация: change-point detection + осцилляции
 │   │   ├── segment_km.py            #   km-fallback, вариативность
-│   │   ├── hr_zones.py              #   пульсовые зоны Z1–Z5
+│   │   ├── hr_zones.py              #   зоны от LTHR c fallback %max_hr: get_zone/get_band/zone_bounds/zone_ceiling_hr
+│   │   ├── gap.py                   #   GAP/Minetti + downhill_block
+│   │   ├── effort.py                #   кардиодрейф / HR-стабильность
+│   │   ├── hr_baseline.py           #   базовая линия HR↔темп
+│   │   ├── session_metrics.py       #   метрики M1 разбора
+│   │   ├── gps_quality.py           #   квалиметрия GPS + оценка дистанции по шагам
+│   │   ├── data_checks.py           #   кросс-чеки с часами (device_mismatch, lap_check)
+│   │   ├── intervals.py             #   HRR-разбор интервалов
+│   │   ├── week_structure.py        #   структура недели / детренированность
 │   │   └── utils.py                 #   format_pace, haversine_m, calc_elevation
 │   ├── parsers/
 │   │   ├── __init__.py              #   (очищен)
@@ -356,7 +381,8 @@ running-coach/
 │   │   │   ├── utils.py             #   SYNC_TICK_INTERVAL, интервалы, _make_client
 │   │   │   ├── health.py            #   save_dashboard_data, sync_health_for_user
 │   │   │   ├── activities.py        #   sync_activities_for_user
-│   │   │   └── orchestrator.py      #   run_sync_for_user, auto_sync_health, auto_sync_activities
+│   │   │   ├── dedup.py             #   дедуп: external_activity_id first, окно ±120с — legacy fallback
+│   │   │   └── orchestrator.py      #   run_sync_for_user, _auto_sync, счётчики сбоев + notify + backoff
 │   │   ├── sync_service.py          # Shim: DeprecationWarning (обратная совместимость)
 │   │   ├── watch_credentials.py     # upsert_watch_credential()
 │   │   ├── training_service.py      #   delete_training(), upsert_feedback()
@@ -368,6 +394,10 @@ running-coach/
 │   │   ├── analytics_helpers.py     # compute_slope, compute_ewma, moving average
 │   │   ├── repositories.py          # TrainingRepository, HealthRepository, FeedbackRepository
 │   │   ├── repositories_coach.py    # CoachRepository: выборки для коуча, честный ACWR, coach_messages
+│   │   ├── workout_insights.py      # Разбор тренировки: computed_json (schema v7)
+│   │   ├── repositories_insights.py # Выборки WorkoutInsight (очередь pending, история)
+│   │   ├── insights_baseline.py     # Базовая линия поверх insights
+│   │   ├── sleep_ingest.py          # Приём данных сна из скриншота → DailyMetrics
 │   │   ├── hr_max.py                # Адаптивный max_hr (пики/снижение)
 │   │   ├── raw_files.py             # Хранилище исходных FIT/TCX (uploads/raw/)
 │   │   └── weight_service.py        # save_weight, current_weight
@@ -376,7 +406,7 @@ running-coach/
 │   │   ├── templates/               # 6 Jinja2-шаблонов + __init__.py
 │   │   └── routes/
 │   │       ├── __init__.py          # web_router = pages + uploads + sync + logs
-│   │       ├── pages/               # Пакет: auth (48), index (240), session (191), settings (149)
+│   │       ├── pages/               # Пакет: auth (48), index (242), session (213), settings (149)
 │   │       │   ├── auth.py          #   GET /login, /register
 │   │       │   ├── index.py         #   GET / — главная страница
 │   │       │   ├── session.py       #   GET /session/{id}, POST /session/{id}/delete, /session/{id}/feedback, /session/{id}/reanalyze
@@ -386,6 +416,7 @@ running-coach/
 │   │       └── logs.py              # GET /logs
 │   └── utils/
 │       ├── logger.py                # Структурированное логирование, ротация
+│       ├── timeutils.py             # Хелперы времени/таймзон
 │       └── rate_limit.py            # In-memory rate limiter (Sprint 13)
 ├── alembic/
 │   ├── env.py
@@ -393,6 +424,8 @@ running-coach/
 │   └── versions/                    # Миграции (fresh baseline f75d2362cf9f)
 ├── docs/                            # Документация (см. таблицу в CLAUDE.md)
 │   ├── coach/                       #   DEV_PLAN.md (нормативный план) + ARCHITECTURE.md (ADR коуча)
+│   │                                #   + METRICS_GUIDE.md (метрики разбора) + TASK_pace_estimate_fallback.md (#264)
+│   ├── AUDIT_averaging_2026-09-01.md #  Аудит усреднений (F-серия)
 │   ├── ARCHITECTURE.md
 │   ├── CODE_GUIDELINES.md
 │   ├── API_ROUTES_GUIDE.md
@@ -519,7 +552,7 @@ running-coach/
 
 ### Метрики здоровья — аналитические тренды (частично в коуче; развитие — C8+, docs/coach/DEV_PLAN.md)
 
-> ⚠️ **Не реализовано.** Generic-хелперы трендов (slope, EWMA, MA) есть в `analytics_helpers.py`, но конкретные расчёты VO₂max/LTHR/Stamina/Performance trend не реализованы. Тренды VO2max/веса/темпа уже считает скилл `progress` (`src/coach/skills/progress.py`); выделенные веб-графики трендов — в рамках C8+ (`docs/coach/DEV_PLAN.md`).
+> ⚠️ **Частично.** LTHR/LTSP используются (зоны и нормативные темпы, F4/M3.1); не реализованы веб-графики трендов VO₂max/Stamina/Performance. Generic-хелперы трендов (slope, EWMA, MA) есть в `analytics_helpers.py`; тренды VO2max/веса/темпа уже считает скилл `progress` (`src/coach/skills/progress.py`); выделенные веб-графики трендов — в рамках C8+ (`docs/coach/DEV_PLAN.md`).
 
 Данные для расчётов загружаются через внешние эндпоинты Coros API `/dashboard/query` и `/analyse/dayDetail/query` (за последние 180 дней, инкрементально).
 
@@ -706,7 +739,11 @@ Telegram-интеграция, tools, LLM-мост через подписку C
 01.09.2026: **тренировки по сегментам** (назначение с посегментными метриками —
 `segments.py`/`render_segments.py`, «M2.1» в коде) и **устойчивость к сбою LLM-моста**
 (ретрай транзиентных ошибок, детерминированный утренний вердикт со назначением, отложенный
-повтор). Актуальные статусы — в `docs/coach/DEV_PLAN.md`.
+повтор). Сессия 01.09.2026 (вечер) — F-серия «сырые данные и физиология»: квалиметрия GPS +
+оценка дистанции по шагам; фиксы усреднений (честный avg_pace, взвешенный GAP, разрывы записи);
+парсер FIT v2 (лапы/паузы/эталоны/динамика); кросс-чеки с часами; HRR-разбор интервалов;
+зоны и нормативные темпы от LTHR/LTSP; M4-мониторинг недели; p1 правила 11–14; insights
+schema v7; история пересчитана. Актуальные статусы — в `docs/coach/DEV_PLAN.md`.
 
 > **Единственный нормативный план разработки — [`docs/coach/DEV_PLAN.md`](docs/coach/DEV_PLAN.md)**
 > (инварианты, чек-листы C0–C9, статусы). Дорожная карта здесь не дублируется.
@@ -763,4 +800,4 @@ LOGS_DIR=logs
 
 ---
 
-*Последнее обновление: 01.09.2026 — синхронизация с кодом: тренировки по сегментам (M2.1), устойчивость к сбою LLM-моста; сверка docs/coach/*, CLAUDE.md, AGENTS.md*
+*Последнее обновление: 01.09.2026 — синхронизация с кодом: тренировки по сегментам (M2.1), устойчивость к сбою LLM-моста, F-серия «сырые данные и физиология» (см. выше)*

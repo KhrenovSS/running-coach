@@ -12,7 +12,7 @@ from statistics import median
 from src.analysis.hr_zones import get_zone
 from src.config.constants import RECORDING_GAP_MAX_SEC
 
-# Единый словарь имён детерминированных флагов (METRICS_GUIDE §6.1).
+# Единый словарь имён детерминированных флагов (METRICS_GUIDE §6).
 # Значения обязаны существовать в enum FlagValue (src/coach/llm/schemas.py) либо
 # в FLAG_TO_ASSESSMENT ниже. (Single source of deterministic flag names.)
 FLAG_EASY_TOO_HARD = "easy_run_too_hard"
@@ -315,7 +315,7 @@ def plan_vs_actual(plan: dict | None, ttype: str | None,
 
 
 def collect_flags(computed: dict) -> list[str]:
-    """Плоский список флагов из всех блоков computed_json (METRICS_GUIDE §6.1).
+    """Плоский список флагов из всех блоков computed_json (METRICS_GUIDE §6).
 
     Единственный источник детерминированных флагов для LLM и assessment.
     (The single flat flag list the LLM is allowed to use.)

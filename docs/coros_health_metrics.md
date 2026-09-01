@@ -1,5 +1,6 @@
 # Coros Health Metrics — теоретическая база для модуля анализа и рекомендаций
-> **Исполняемое зеркало — `src/coach/config.py`**: пороги из этого документа живут в коде
+> **Исполняемые зеркала — `src/coach/config.py` (пороги коуча) и `src/config/constants.py`
+> (зоны от LTHR, HRR, M4)**: пороги из этого документа живут в коде
 > именованными константами (потребители: `recovery_view`, skills, safety). Правка порога здесь
 > требует правки `config.py` и анти-дрейф-тестов `tests/test_coach_config.py` — иначе док и
 > поведение разъедутся.
@@ -124,9 +125,9 @@ HRV, измеренная во время сна, отслеживает бал�
 | `ati` | Float | у.е. | 0–500+ | Acute Training Impulse (7 дней) | ✅ из dayDetail |
 | `cti` | Float | у.е. | 0–2000+ | Chronic Training Impulse (42 дня) | ✅ из dayDetail |
 | `vo2max` | Float | мл/кг/мин | 30–60 | Аэробный порог | ✅ dayDetail + analyse |
-| `lthr` | Integer | уд/мин | 140–180 | Lactate Threshold HR | ✅ dayDetail + analyse |
+| `lthr` | Integer | уд/мин | 140–180 | Lactate Threshold HR → якорь пульсовых зон (F4/M3.1, `hr_zones.zone_bounds`) | ✅ dayDetail + analyse |
 | `stamina_level` | Float | % | 0–100 | Уровень выносливости | ✅ dayDetail + analyse |
-| `ltsp` | Float | с/км | 180–360 | Lactate Threshold Pace | ✅ из analyse |
+| `ltsp` | Float | с/км | 180–360 | Lactate Threshold Pace → нормативный темп сегментов (F4/M3.1, `LTSP_ZONE_OFFSET_S`) | ✅ из analyse |
 | `stamina_level_7d` | Float | % | 0–100 | Тренд выносливости за 7 дней | ✅ из analyse |
 
 **Легенда:**
@@ -314,7 +315,7 @@ def anomaly(rhr, rhr_baseline):
 | Running Efficiency | 🧮 Рассчитать | Сравнение pace vs HR относительно исторической нормы |
 | Race Predictor | ❌ | Только официальный COROS MCP (OAuth) |
 | Running Fitness Score | ❌ | Только официальный COROS MCP (OAuth) |
-| Threshold HR Zones | ✅ из настроек | max_hr + lthr → 6 зон (уже реализовано в проекте) |
+| Threshold HR Zones | ✅ реализовано (F4/M3.1, 01.09.2026) | 5 зон Z1–Z5 от LTHR (81/89/100/105%, `analysis/hr_zones.py`), fallback %max_hr; 6-зонная модель Coros 1:1 не переносится |
 | Weekly TL Recom. | 🧮 Рассчитать | Rolling avg TL за 7д vs 42д + 3:1 цикл |
 | RHR Trends | 🧮 Рассчитать | Скользящее среднее по rhr за 30 дней |
 | Sleep Stages | ⬜ | Mobile API Coros (не интегрирован) |
@@ -503,6 +504,9 @@ training load по темповым зонам.
 ---
 
 ## 18. Threshold HR & Pace Zones (6 пульсово-темповых зон)
+
+> Реализация проекта (F4/M3.1): 5-зонная лестница от LTHR — Z5/Z6 Coros свёрнуты в нашу Z5;
+> границы — `LTHR_ZONE_*_MAX_PCT` в `src/config/constants.py`, fallback %max_hr без валидного lthr.
 
 Это зоны, которые COROS рассчитывает персонально на основе LTHR.
 

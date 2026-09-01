@@ -5,7 +5,8 @@
 
 ## Что это за проект
 Персональный AI-тренер для бега. Парсит TCX/FIT-файлы (Garmin, Coros, Polar, Suunto), анализирует
-тренировки (тип, сегменты, пульсовые зоны, GPS-очистка), синхронизируется с Coros. Интерфейсы:
+тренировки (тип, сегменты, пульсовые зоны от ПАНО/max_hr, GPS-очистка + квалиметрия),
+синхронизируется с Coros. Интерфейсы:
 веб (FastAPI + Jinja2) и Telegram-бот. **Гибридный ИИ-коуч работает в проде** (LLM — мост через
 подписку Claude Code); нормативный план — `docs/coach/DEV_PLAN.md`.
 
@@ -76,7 +77,7 @@
 | `src/web/`, `src/api/` | `app` |
 | `src/telegram/` | `bot` |
 | `src/services/`, `src/parsers/`, `src/analysis/`, `src/watch/`, `src/config/`, `src/domain/`, `src/models.py` | `app` + `bot` (бот сам синкает: sync → parse_fit → analysis) |
-| `src/coach/` | `bot` (коуч живёт в боте; веб коуч не использует) |
+| `src/coach/` | `bot`; при правке `config.py`/порогов и разборов — `app`+`bot` (web читает recovery_view→coach/config, app-scheduler исполняет разборы) |
 | `pyproject.toml`, `Dockerfile`, `docker-compose.yml` | `app` + `bot` |
 | `bin/coach_llm_bridge.py`, `.env.bridge` | не пересборка — `sudo systemctl restart running-coach-llm-bridge` (агент рестартит БЕЗ пароля: sudoers-правило `bin/sudoers-bridge-restart`, установка — `bin/install_bridge_sudoers.sh`). Мост: `/complete` (текст) + `/vision` (картинка→Read-tool) |
 | `alembic/` | `app` (миграции при старте; **с ALTER — сначала stop bot**, §7) |
@@ -115,10 +116,12 @@
   tool-цикл неактивен) → NullLLM/fallback. Решения и причины — `docs/coach/ARCHITECTURE.md`.
 - **Недельный план** (`weekly_plan.py` + детерминированные числа `planning.py`, вс 19:00 после
   отчёта, команда `/plan`): строки `recommendations` со `status` planned→confirmed/adjusted;
-  утренний вердикт подтверждает план дня. **Метрики разбора M1** — `analysis/session_metrics.py`
-  (время в зонах, дисциплина лёгкого, потолки качества, каденс, RPE, план-vs-факт; флаги — только
-  из `computed.flags`, `numeric_check.py` сверяет числа прозы с карточкой). Контекст/дедуп/история
-  вынесены в `turn_context.py`.
+  утренний вердикт подтверждает план дня. **Метрики разбора — insights v7**: `workout_insights.py`
+  композирует `session_metrics` (M1) + `effort`/`gap` + `hr_baseline` + `data_checks`
+  (кросс-чеки с часами) + `intervals` (HRR) + `week_structure`/downhill/session_rpe (M4);
+  baseline — `services/insights_baseline.py`; флаги — только из `computed.flags`,
+  `numeric_check.py` сверяет числа прозы с карточкой. Контекст/дедуп/история —
+  в `turn_context.py`.
 - **Сон — из скриншота** (Coros API длительность/фазы не отдаёт): пользователь шлёт фото экрана
   сна в Telegram → мост `/vision` (Read-tool) → `vision.py`/`sleep_ingest.py` → колонки `sleep_*`
   в `DailyMetrics`; **API-ключ НЕ нужен** (через мост подписки); скриншот удаляется из чата,
@@ -145,7 +148,8 @@
   и физиология» ЗАКРЫТА ✅ 01.09.2026 (DEV_PLAN §9)**: F0 фиксы аудита усреднений,
   F1 парсер FIT v2 (лапы/паузы/эталоны/динамика), F2 кросс-чек с часами, F3 HRR-разбор
   интервалов, F4 зоны/темпы от LTHR/LTSP (лестница Фицджеральда), F5/F6 M4 (структура
-  недели, downhill, детренированность, session-RPE/wellness; p1 правила 11–14),
+  недели, downhill, детренированность, session-RPE/wellness; p1 правило 11 — F3/HRR,
+  правила 12–14 — M4),
   F7 lap-валидация; insights schema v7. Осталось M3.2 — полевой тест ПАНО (за владельцем).**
 
 ## Документация
@@ -163,5 +167,6 @@
 | Аудит/бэклог | `PROJECT_AUDIT.md`, `BACKLOG.md` |
 | План и архитектура коуча | `docs/coach/DEV_PLAN.md`, `docs/coach/ARCHITECTURE.md` |
 | Открытое задание: ориентир темпа/дистанции (#264) | `docs/coach/TASK_pace_estimate_fallback.md` |
-| Руководство: детерминированные метрики разбора (#268) | `docs/coach/METRICS_GUIDE.md` |
+| Метрики разбора и физиология (#268, F-серия: §6.1 GPS/§7 замыкания/§10/§11 M4) | `docs/coach/METRICS_GUIDE.md` |
+| Аудит усреднений темпа/пульса (исторический, только чтение) | `docs/AUDIT_averaging_2026-09-01.md` |
 | Расширенный контекст + история спринтов + карта `src/` | `AGENTS.md` |
