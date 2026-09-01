@@ -46,6 +46,10 @@ def _session_brief(s: TrainingSession, rpe: int | None, pain: int | None,
         "rpe": rpe,
         "pain_level": pain,
         "suspect": bool(s.suspect_flags),
+        # km — оценка по шагам, не GPS (kм is a cadence estimate, not GPS)
+        **({"distance_estimated": True}
+           if ((s.gps_quality or {}).get("distance") or {}).get("source") == "cadence_estimate"
+           else {}),
     }
 
 
@@ -136,6 +140,9 @@ def get_workout_detail(ctx: ToolContext, args: dict) -> dict:
             "sleep_extra": dm.sleep_extra,
         } if dm else None),
         "suspect_flags": session.suspect_flags or [],
+        # Квалиметрия GPS: счётчики ущерба + провенанс дистанции (оценка по шагам)
+        # (GPS quality: damage counters + distance provenance for the LLM)
+        "gps_quality": session.gps_quality,
     })
     return brief
 

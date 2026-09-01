@@ -24,12 +24,14 @@ FLAG_RPE_ELEVATED = "rpe_elevated"
 FLAG_NO_WARMUP = "no_warmup"
 FLAG_PLAN_INTENSITY = "plan_intensity_exceeded"
 FLAG_PLAN_VOLUME = "plan_volume_exceeded"
+FLAG_GPS_UNRELIABLE = "gps_unreliable"
 
 # Маппинг computed-флагов в значения enum assessment (§6.2, зафиксирован кодом:
 # enum append-only, переименовывать decoupling_* задним числом нельзя).
 FLAG_TO_ASSESSMENT = {
     "decoupling_high": "hr_drift_high",
     "decoupling_moderate": "hr_drift_high",
+    FLAG_GPS_UNRELIABLE: "suspect_data",
 }
 
 EASY_TYPES_M1 = ("easy", "recovery", "long")      # M1.1: где лёгкость обязательна
@@ -240,11 +242,14 @@ def warmup_block(times_sec: list[float], hrs: list[int | None],
 def plan_vs_actual(plan: dict | None, ttype: str | None,
                    session_km: float | None, duration_min: float | None,
                    zones: dict, *, volume_tol: float,
-                   intensity_tol: float) -> dict:
+                   intensity_tol: float,
+                   distance_quality: str | None = None) -> dict:
     """M2.2: соответствие факта назначению (METRICS_GUIDE §5).
 
     Интенсивность — минуты выше плановой max_zone из точных зон; объём —
     превышение план+tol (недобор — не флаг, только volume_ratio).
+    distance_quality — пометка «объём по оценке» при недостоверном GPS
+    (estimate/rough/unknown из gps_quality.distance.quality).
     (Plan adherence: intensity above planned zone + volume overshoot.)
     """
     if not plan:
@@ -256,6 +261,8 @@ def plan_vs_actual(plan: dict | None, ttype: str | None,
                      "pace_min_km")},
         "type_match": plan.get("type") == ttype,
     }
+    if distance_quality:
+        out["distance_quality"] = distance_quality
     flags: list[str] = []
 
     max_zone = plan.get("max_zone")
@@ -293,6 +300,10 @@ def collect_flags(computed: dict) -> list[str]:
     from src.analysis.hr_baseline import deviation_flag
 
     flags: list[str] = []
+    # GPS недостоверен — первым: разбор обязан начинаться с честности о данных
+    # (GPS unreliable goes first: the review must lead with data honesty)
+    if (computed.get("inputs", {}).get("gps_quality") or {}).get("unreliable"):
+        flags.append(FLAG_GPS_UNRELIABLE)
     drift = computed.get("drift", {})
     if drift.get("flag") == "high":
         flags.append("decoupling_high")

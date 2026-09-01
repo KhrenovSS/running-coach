@@ -287,3 +287,42 @@ def test_render_week_plan_shows_distance():
     assert "План на неделю" in text
     assert "≈7.3 км" in text                       # темп-день: 40 / 5.5
     assert "≈7.5 км" in text                       # лёгкий день: объём из proposal
+
+
+def test_render_gps_warning_with_cadence_estimate():
+    """GPS недостоверен + оценка по шагам → числа из детерминированного рендера:
+    длительность сбоя, оценка в км и число, которое пользователь видел на часах."""
+    from src.coach.render import render_gps_warning
+
+    text = render_gps_warning({
+        "unreliable": True,
+        "bad_first_min": 0.0, "bad_last_min": 15.0,
+        "device_distance_km": 15.65,
+        "gps_distance_km": 4.35,
+        "distance": {"source": "cadence_estimate", "quality": "estimate",
+                     "estimated_km": 6.52},
+    })
+    assert text is not None
+    assert "GPS сбоил" in text
+    assert "оценка по шагам" in text
+    assert "6.5 км" in text          # число из estimated_km, не из прозы LLM
+    assert "часы намерили 15.7" in text  # контраст с числом на часах, не пост-очистка
+    assert "15 мин" in text          # длительность сбоя из bad_first/last
+
+
+def test_render_gps_warning_without_estimate_degrades_honestly():
+    """Оценки нет → предупреждение без чисел дистанции-оценки."""
+    from src.coach.render import render_gps_warning
+
+    text = render_gps_warning({"unreliable": True, "gps_distance_km": 4.35,
+                               "distance": {"source": "gps", "quality": "unknown"}})
+    assert "ненадёжны" in text
+    assert "оценка по шагам" not in text
+
+
+def test_render_gps_warning_none_when_reliable():
+    """GPS в порядке (или блока нет) → предупреждения нет."""
+    from src.coach.render import render_gps_warning
+
+    assert render_gps_warning(None) is None
+    assert render_gps_warning({"unreliable": False}) is None

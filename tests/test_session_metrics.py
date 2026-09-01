@@ -210,6 +210,31 @@ def test_collect_flags_gathers_all_blocks():
                           "low_cadence", "rpe_elevated", "no_warmup"}
 
 
+def test_collect_flags_gps_unreliable_goes_first():
+    """GPS недостоверен → gps_unreliable в списке ПЕРВЫМ: разбор начинается
+    с честности о данных (data honesty leads the review)."""
+    from src.analysis.session_metrics import FLAG_GPS_UNRELIABLE
+
+    computed = {
+        "inputs": {"gps_quality": {"unreliable": True}},
+        "drift": {"flag": "high"},
+        "heat": {"heat_flag": True},
+    }
+    flags = collect_flags(computed)
+    assert flags[0] == FLAG_GPS_UNRELIABLE
+    assert "decoupling_high" in flags and "heat" in flags
+
+
+def test_collect_flags_gps_reliable_or_absent_no_flag():
+    """unreliable=False / gps_quality=None / inputs нет → флага нет."""
+    from src.analysis.session_metrics import FLAG_GPS_UNRELIABLE
+
+    for inputs in ({"gps_quality": {"unreliable": False}},
+                   {"gps_quality": None}, {}):
+        assert FLAG_GPS_UNRELIABLE not in collect_flags({"inputs": inputs})
+    assert FLAG_GPS_UNRELIABLE not in collect_flags({})
+
+
 # --- M2.2: plan_vs_actual ---
 
 def test_plan_vs_actual_no_plan_degrades():
@@ -252,3 +277,20 @@ def test_plan_vs_actual_type_mismatch_reported():
     r = plan_vs_actual({"type": "rest", "max_zone": 1}, "easy", 6.0, 40.0, zones,
                        volume_tol=0.15, intensity_tol=0.10)
     assert r["type_match"] is False
+
+
+def test_plan_vs_actual_distance_quality_marker():
+    """GPS недостоверен → объём по оценке: пометка distance_quality проходит в
+    блок; без пометки ключа нет (no marker → no key)."""
+    from src.analysis.session_metrics import plan_vs_actual
+    times, hrs = _ramp(40, 130)
+    zones = time_in_zones(times, hrs, MAX_HR)
+    plan = {"type": "easy", "max_zone": 2, "duration_min": 40}
+    marked = plan_vs_actual(plan, "easy", 6.5, 40.0, zones,
+                            volume_tol=0.15, intensity_tol=0.10,
+                            distance_quality="estimate")
+    assert marked["available"] is True
+    assert marked["distance_quality"] == "estimate"
+    plain = plan_vs_actual(plan, "easy", 6.5, 40.0, zones,
+                           volume_tol=0.15, intensity_tol=0.10)
+    assert "distance_quality" not in plain

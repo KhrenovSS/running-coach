@@ -17,7 +17,11 @@ from src.analysis.utils import (
     is_km_segmentation, serialize_trackpoints, build_hr_pace_series,
     smoothed_hr_peak, TrackpointDict, AnalysisResult,
 )
+from src.analysis.gps_quality import (
+    raw_gps_stats, build_gps_quality, clean_windows, estimate_distance_by_cadence,
+)
 from src.config import settings
+from src.config.constants import STRIDE_DEFAULT_M
 
 logger = get_logger("analysis")
 
@@ -49,6 +53,16 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
 
     if start_time_utc.tzinfo is None:
         start_time_utc = start_time_utc.replace(tzinfo=timezone.utc)
+
+    # Квалиметрия и оценка по шагам — по СЫРЫМ точкам, до очистки и пересборки dist
+    # (Quality counters & cadence estimate — over RAW points, before cleaning mutates dist)
+    raw_stats = raw_gps_stats(trackpoints, max_credible_pace)
+    distance_estimate = None
+    if raw_stats is not None:
+        distance_estimate = estimate_distance_by_cadence(
+            trackpoints, clean_windows(trackpoints, max_credible_pace),
+            fallback_stride_m=STRIDE_DEFAULT_M,
+        )
 
     trackpoints, cleaning_log = clean_trackpoints(
         trackpoints, max_credible_pace, max_gps_jump_m, min_hr_for_fast_pace
@@ -88,6 +102,11 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
     total_dist_km = distances[-1] / 1000
     avg_hr = round(sum(hr_values) / len(hr_values))
     max_hr_val = max(hr_values)
+
+    # Вердикт по качеству GPS: dropped_dist_pct требует пересобранной дистанции
+    # (GPS quality verdict: dropped_dist_pct needs the rebuilt distance)
+    gps_quality = build_gps_quality(raw_stats, total_dist_km)
+    gps_unreliable = bool(gps_quality and gps_quality.get('unreliable'))
 
     start_ts = trackpoints[0]['time']
     times = []
@@ -136,6 +155,13 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
         oscillation_count = 0
         hr_correlated = False
 
+    # GPS недостоверен → темповые сигналы мусорные: классификация только по HR-зонам
+    # (GPS unreliable → pace-derived signals are garbage: classify by HR zones only)
+    if gps_unreliable:
+        var_count = 0
+        oscillation_count = 0
+        hr_correlated = False
+
     t_type, segments_count = classify_training(
         var_count, time_in_zone, total_duration_min, max_hr,
         z4_plus_segments, avg_hr,
@@ -143,7 +169,8 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
         hr_correlated=hr_correlated,
         min_oscillations=interval_min_oscillations,
         segments_len=len(segments),
-        avg_pace=round(total_duration_min / total_dist_km, 2) if total_dist_km > 0 else None,
+        avg_pace=(round(total_duration_min / total_dist_km, 2)
+                  if total_dist_km > 0 and not gps_unreliable else None),
     )
 
     # Для не-интервалов — всегда км-блоки (по умолчанию),
@@ -191,6 +218,16 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
     all_cads = [tp['cad'] for tp in trackpoints if tp['cad'] is not None]
     avg_cadence = round(sum(all_cads) / len(all_cads)) if all_cads else None
 
+    # GPS недостоверен → дистанция заменяется оценкой по шагам (решение владельца 01.09.2026),
+    # GPS-число сохраняется в gps_quality.gps_distance_km; нет каденса → честное "unknown"
+    # (GPS unreliable → distance replaced by the cadence estimate; original kept in gps_quality)
+    if gps_unreliable:
+        if distance_estimate is not None:
+            gps_quality['distance'] = distance_estimate
+            total_dist_km = distance_estimate['estimated_km']
+        else:
+            gps_quality['distance'] = {'source': 'gps', 'quality': 'unknown'}
+
     result = {
         'begin_ts': begin_ts,
         'total_distance_km': total_dist_km,
@@ -212,16 +249,21 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
         'timezone': tz_name,
         'trackpoints_json': serialize_trackpoints(trackpoints),
         'avg_pace': round(total_duration_min / total_dist_km, 2) if total_dist_km > 0 else None,
+        'gps_quality': gps_quality,
     }
 
+    # suspect_flags — строки-причины (web/коуч ждут строки); количественный ущерб — в gps_quality
+    # (suspect_flags are reason strings; quantitative damage lives in gps_quality)
+    suspect_flags = []
     if cleaning_log:
         result['cleaning_log'] = cleaning_log
-        result['suspect_flags'] = list(cleaning_log)
-
+        suspect_flags = sorted({r for entry in cleaning_log for r in entry.get('reason', [])})
+    if gps_unreliable:
+        suspect_flags.append('gps_unreliable')
     if result['duration_minutes'] < 2.0 and result['total_distance_km'] > 0.3:
-        if 'suspect_flags' not in result:
-            result['suspect_flags'] = []
-        result['suspect_flags'].append('too_short')
+        suspect_flags.append('too_short')
+    if suspect_flags:
+        result['suspect_flags'] = suspect_flags
 
     return result
 
@@ -246,6 +288,7 @@ def _empty_result(start_time_utc: datetime, cleaning_log: list) -> AnalysisResul
         'timezone': None,
         'cleaning_log': cleaning_log,
         'avg_pace': None,
+        'gps_quality': None,
     }
 
 

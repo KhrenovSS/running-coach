@@ -229,6 +229,43 @@ def _build_gps_errors(start_time, base_pace, distance_km, error_indices):
     return trackpoints
 
 
+def build_gps_glitch_trackpoints(
+    glitch_min: float = 15.0,
+    clean_min: float = 30.0,
+    glitch_speed_ms: float = 5.7,
+    clean_pace: float = 6.9,
+    cad: int | None = 156,
+    hr: int = 142,
+    no_pos_every: int = 4,
+    start_time: datetime | None = None,
+) -> list[dict]:
+    """Синтетика «кейс-42»: GPS-сбой в начале (нереальный темп device-дистанции +
+    дыры координат каждые no_pos_every точек), затем чистая часть; 1 запись/сек.
+    (Case-42 synthetic: leading GPS glitch — impossible device pace + coordinate
+    gaps — followed by a clean segment; 1 record/sec.)"""
+    if start_time is None:
+        start_time = datetime(2026, 9, 1, 6, 0, 0, tzinfo=timezone.utc)
+    tps: list[dict] = []
+    t = start_time
+    dist = 0.0
+    lat, lon = 55.75, 37.62
+    clean_dd = _pace_to_dist_delta(clean_pace, 1.0)
+    for i in range(int(glitch_min * 60)):
+        dist += glitch_speed_ms
+        no_pos = bool(no_pos_every) and i % no_pos_every == 0
+        tps.append(_make_tp(t, dist, hr, alt=150,
+                            lat=None if no_pos else lat,
+                            lon=None if no_pos else lon, cad=cad))
+        t += timedelta(seconds=1)
+        lat += 0.00005
+    for _ in range(int(clean_min * 60)):
+        dist += clean_dd
+        tps.append(_make_tp(t, dist, hr, alt=150, lat=lat, lon=lon, cad=cad))
+        t += timedelta(seconds=1)
+        lat += 0.00002
+    return tps
+
+
 # Обратная совместимость (Backward compatibility aliases)
 def build_interval_trackpoints(**kwargs):
     return build_trackpoints(training_type='interval', **kwargs)

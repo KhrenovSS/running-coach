@@ -91,6 +91,7 @@ async def session_detail(request: Request, session_id: int, db: Session = Depend
         'gps_spike': 'Скачки GPS (GPS jumps)',
         'too_short': 'Слишком короткая тренировка (Too short)',
         'anomaly': 'Аномалия (Anomaly)',
+        'gps_unreliable': 'GPS ненадёжен — дистанция оценена по шагам (GPS unreliable, distance estimated by cadence)',
     }
     if s.cleaning_log:
         items = ""
@@ -108,9 +109,30 @@ async def session_detail(request: Request, session_id: int, db: Session = Depend
             suspect_badge = '<span style="background:#ff9800;color:white;padding:2px 10px;border-radius:4px;font-size:14px">✂️ Очищено</span>'
             suspect_detail = f'<div style="background:#fff3e0;border:1px solid #ffccbc;border-radius:8px;padding:10px;margin-bottom:15px"><b>✂️ Удалены ошибочные участки тренировки:</b><ul style="margin:5px 0 0 0;padding-left:20px">{items}</ul></div>'
     elif s.suspect_flags:
-        items = "".join(f"<li>{reason_labels.get(f, f)}</li>" for f in s.suspect_flags)
+        # Legacy-строки могли хранить dict'ы вместо строк — защищаемся str()
+        # (legacy rows may hold dicts instead of strings — defensive str())
+        items = "".join(f"<li>{reason_labels.get(f, str(f)) if isinstance(f, str) else reason_labels['anomaly']}</li>"
+                        for f in s.suspect_flags)
         suspect_badge = '<span style="background:#ff5722;color:white;padding:2px 10px;border-radius:4px;font-size:14px">⚠️ Ошибочные данные</span>'
         suspect_detail = f'<div style="background:#fff3e0;border:1px solid #ffccbc;border-radius:8px;padding:10px;margin-bottom:15px"><b>⚠️ Обнаружены проблемы:</b><ul style="margin:5px 0 0 0;padding-left:20px">{items}</ul></div>'
+
+    # Квалиметрия GPS: явный блок «дистанция — оценка по шагам» (GPS quality block)
+    gq = s.gps_quality or {}
+    if gq.get('unreliable'):
+        dist = gq.get('distance') or {}
+        if dist.get('source') == 'cadence_estimate':
+            est_note = (f"дистанция ~{dist.get('estimated_km')} км — оценка по шагам "
+                        f"(шаг {dist.get('stride_m')} м, {dist.get('steps')} шагов)")
+        else:
+            est_note = "дистанция и темп ненадёжны"
+        gps_km = gq.get('gps_distance_km')
+        gps_note = f", по GPS после очистки {gps_km} км" if gps_km else ""
+        suspect_badge += ' <span style="background:#607d8b;color:white;padding:2px 10px;border-radius:4px;font-size:14px">📡 ≈ по шагам</span>'
+        suspect_detail += (
+            f'<div style="background:#eceff1;border:1px solid #b0bec5;border-radius:8px;padding:10px;margin-bottom:15px">'
+            f'<b>📡 GPS ненадёжен:</b> без координат {gq.get("no_position_pct", 0):.0%} записей, '
+            f'невозможных скоростей {gq.get("impossible_speed_pct", 0):.0%}, '
+            f'выброшено {gq.get("dropped_dist_pct", 0):.0%} дистанции; {est_note}{gps_note}</div>')
 
     cadence_display = str(s.avg_cadence) if s.avg_cadence is not None else "—"
     cal = str(s.calories) if s.calories is not None else "—"

@@ -2,6 +2,42 @@
 
 All notable changes to this project are tracked here.
 
+## [01.09.2026] — Честный анализ тренировок с плохим GPS (квалиметрия + оценка по шагам)
+
+Кейс-мотиватор: тренировка №42 (01.09) — 15 минут GPS-сбоя (25% записей без координат,
+24% с невозможными скоростями). Часы намеряли 15.65 км (мусор), очистка занизила до 4.58 км
+с темпом 10:05/км и типом «tempo»; разбор коуча построил ложную историю. Реальность:
+~6.7 км лёгкого бега по 6:55/км.
+
+### Added
+- `src/analysis/gps_quality.py` — квалиметрия GPS по сырым точкам: доля записей без координат,
+  доля невозможных скоростей, доля выброшенной дистанции; вердикт `unreliable`; калибровка
+  длины шага по чистым окнам трека; оценка дистанции интегралом каденса (quality:
+  estimate/rough/unknown — паттерн честной деградации #264). Константы-пороги —
+  `src/config/constants.py` (блок «GPS quality», откалиброван на кейсе №42 vs чистые №40/41;
+  treadmill-гвард: трек вовсе без координат — не флаг).
+- Колонка `training_sessions.gps_quality` (JSON, nullable; миграция `t3u4v5w6x7y8` — additive).
+- При `unreliable`: `total_distance_km`/`avg_pace` заменяются оценкой по шагам (решение
+  владельца 01.09.2026; GPS-число сохраняется в `gps_quality.gps_distance_km`), классификация
+  типа — только по HR-зонам (temп-сигналы подавляются, ложные «tempo/interval» из GPS-шума
+  исключены), флаг `gps_unreliable` в `suspect_flags`.
+- Коуч говорит правду: `computed.inputs.gps_quality` + флаг `gps_unreliable` в `computed.flags`
+  (маппится в `suspect_data` enum'а assessment — раньше флаг был мёртв); pace-производные блоки
+  (`gap`/`drift`/`pace_stability`/`quality_volume`/`hr_vs_baseline`) честно недоступны с
+  reason="gps_unreliable" (сессия автоматически выпадает из HR-baseline); `plan_vs_actual` —
+  по оценке с пометкой `distance_quality`; детерминированное предупреждение
+  `render_gps_warning` («GPS сбоил ~15 мин: дистанция ~6.7 км — оценка по шагам») аппендится
+  к разбору в LLM- и fallback-путях; правило в REVIEW-промпте; `gps_quality` в
+  `get_workout_detail`, `distance_estimated` в brief'ах истории.
+- Веб: бейдж «📡 ≈ по шагам» + блок квалиметрии на странице тренировки.
+
+### Fixed
+- `suspect_flags` теперь строки-причины (раньше — список dict'ов cleaning_log, и веб рендерил их
+  как объекты); web защищён от legacy-dict'ов.
+- `reanalyze_training` теперь обновляет `total_distance_km`/`suspect_flags`/`cleaning_log`/
+  `gps_quality` — пересчёт от сырья доносит улучшения GPS-алгоритма до строки БД.
+- `INSIGHTS_SCHEMA_VERSION` 3→4 (lazy-пересчёт старых разборов штатный).
+
 ## [01.09.2026] — Коуч: тренировки с посегментными метриками (M2.1)
 
 Владелец просил конкретные, считываемые с часов метрики по сегментам вместо расплывчатой

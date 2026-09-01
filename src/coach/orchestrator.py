@@ -36,6 +36,7 @@ from src.coach.llm.prompts import (
 from src.coach.llm.schemas import LogSuggestion, ReviewAssessment
 from src.coach.prescriber import finalize, save_prescription, user_max_hr
 from src.coach.render import (
+    render_gps_warning,
     render_prescription,
     render_prescription_short,
     render_review,
@@ -121,7 +122,8 @@ def _profile(user: User) -> dict:
 def _llm_chat_turn(user_id: int, message: str, *, db: Session,
                    llm: CoachLLM, kind: str, extras: dict | None = None,
                    allow_proposal: bool = True,
-                   effort: str = COACH_EFFORT_CHAT) -> ChatReply:
+                   effort: str = COACH_EFFORT_CHAT,
+                   suffix: str | None = None) -> ChatReply:
     """LLM-ход: state+verdict в контекст → агент → clamp → рендер (one LLM turn)."""
     user = db.query(User).filter(User.id == user_id).first()
     state = assess_state(user_id, db=db)
@@ -191,6 +193,10 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
             text += "\n\n" + render_prescription(card, max_hr=max_hr, user=user)
     if turn.followup_question:
         text += "\n\n" + turn.followup_question
+    if suffix:
+        # Детерминированный хвост хода (напр. GPS-предупреждение) — до персиста,
+        # чтобы история и отправленный текст совпадали (append before persist)
+        text += suffix
 
     assessment = turn.assessment
     if assessment is not None and kind != "review":
@@ -249,10 +255,19 @@ def handle_chat(user_id: int, message: str, *, db: Session,
         return ChatReply(text=text, source="fallback", retriable=transient)
 
 
+def _gps_warning_suffix(user_id: int, session_id: int, *, db: Session) -> str:
+    """Хвост-предупреждение о недостоверном GPS для разбора; '' — GPS в порядке.
+    (GPS-unreliable suffix for reviews; empty string when GPS is fine.)"""
+    session, _ = CoachRepository.session_with_feedback(user_id, session_id, db=db)
+    warning = render_gps_warning(session.gps_quality if session else None)
+    return f"\n\n{warning}" if warning else ""
+
+
 def _deterministic_review(user_id: int, session_id: int, *, db: Session) -> str:
     """Детерминированный разбор + персист в историю и итог (deterministic review path)."""
     from src.services.repositories_insights import InsightRepository
-    text = render_review(workout.evaluate_session(user_id, session_id, db=db))
+    text = (render_review(workout.evaluate_session(user_id, session_id, db=db))
+            + _gps_warning_suffix(user_id, session_id, db=db))
     msg = CoachRepository.save_message(user_id, "assistant", text, db=db,
                                        kind="review", meta={"fallback": True})
     InsightRepository.finish(session_id, db=db, source="fallback",
@@ -300,7 +315,8 @@ def on_workout_completed(user_id: int, session_id: int, *, db: Session,
         reply = _llm_chat_turn(
             user_id, REVIEW_PROMPT, db=db, llm=llm, kind="review",
             extras=_build_extras(user_id, db=db, session_id=session_id),
-            allow_proposal=True)
+            allow_proposal=True,
+            suffix=_gps_warning_suffix(user_id, session_id, db=db))
         # Итог разбора → workout_insights (пишет оркестратор из провалидированного
         # output — LLM в БД не пишет, инвариант §1.4). (Persist the review outcome.)
         from src.services.repositories_insights import InsightRepository

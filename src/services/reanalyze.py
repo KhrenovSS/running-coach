@@ -116,6 +116,16 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
         # Пересчёт от сырья → обновляем кэш очищенных трекпоинтов (refresh the cleaned-trackpoints cache)
         session.trackpoints_json = result['trackpoints_json']
     session.training_type = result['training_type']
+    if from_raw:
+        # Дистанция/флаги/квалиметрия — ТОЛЬКО при пересчёте от сырья: кэш trackpoints_json
+        # хранит уже очищенные точки с пересобранной дистанцией — повторная квалиметрия по нему
+        # даст ложное «чисто» и сотрёт провенанс/оценку (db-safety ревью 01.09.2026)
+        # (distance/flags/quality only from raw: the cache is post-cleaning — recomputing from it
+        # would fake a clean verdict and erase provenance/the honest estimate)
+        session.total_distance_km = result['total_distance_km']
+        session.suspect_flags = result.get('suspect_flags') or []
+        session.cleaning_log = result.get('cleaning_log') or []
+        session.gps_quality = result.get('gps_quality')
     session.segments_count = result['segments_count']
     session.segments_json = result['segments_json']
     session.hr_pace_series = result['hr_pace_series']
@@ -128,7 +138,13 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
     session.elevation_loss = result.get('elevation_loss')
     session.avg_temperature = result.get('avg_temperature')
     session.weather_code = result.get('weather_code')
-    session.avg_pace = result.get('avg_pace')
+    if from_raw:
+        session.avg_pace = result.get('avg_pace')
+    elif session.total_distance_km:
+        # Кэш-путь: дистанция сохранена прежней (см. гейт выше) — темп пересчитываем от неё,
+        # а не от кэшевой дистанции, иначе у gps_unreliable-сессий разъедутся темп и километраж
+        # (cache path: keep pace consistent with the preserved distance, not the cache distance)
+        session.avg_pace = round(session.duration_minutes / session.total_distance_km, 2)
 
     db.commit()
     logger.info("Reanalyze: тренировка %d пересчитана → %s, %d сегментов (Training %d reanalyzed → %s, %d segments)",

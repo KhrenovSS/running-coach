@@ -98,3 +98,76 @@ class TestReanalyzeFromRaw:
 
         result = reanalyze_training(db_session, session.id, user.id)
         assert result is not None
+
+
+class TestReanalyzeGpsQualityProvenance:
+    """db-safety 01.09.2026: дистанция/флаги/квалиметрия пишутся ТОЛЬКО при
+    пересчёте от сырья — кэш trackpoints_json уже очищен, повторная квалиметрия
+    по нему дала бы ложное «чисто» и стёрла бы честную оценку по шагам."""
+
+    def test_cache_reanalyze_preserves_distance_and_gps_quality(
+            self, db_session, monkeypatch):
+        from src.analysis.utils import serialize_trackpoints
+        from tests.helpers import build_trackpoints
+
+        monkeypatch.setattr("src.analysis.fetch_weather", lambda *a, **k: None)
+        user = _user(db_session, 3)
+        tps = build_trackpoints(training_type='tempo', distance_km=6.0)
+        stored_quality = {
+            "unreliable": True,
+            "gps_distance_km": 4.35,
+            "distance": {"source": "cadence_estimate", "quality": "estimate",
+                         "estimated_km": 6.52},
+        }
+        stored_log = [{"removed_count": 900, "reason": ["pace_impossible"]}]
+        session = build_training_session(
+            db_session, user.id,
+            begin_ts=tps[0]['time'],
+            total_distance_km=6.52,            # честная оценка по шагам
+            trackpoints_json=serialize_trackpoints(tps),
+            raw_file_path=None,                # сырья нет → from_raw=False
+            suspect_flags=["gps_unreliable"],
+            cleaning_log=stored_log,
+            gps_quality=stored_quality,
+        )
+
+        result = reanalyze_training(db_session, session.id, user.id)
+
+        assert result is not None
+        db_session.refresh(session)
+        # провенанс сохранён: пересчёт от кэша не затирает оценку и вердикт
+        assert session.total_distance_km == 6.52
+        assert session.gps_quality == stored_quality
+        assert session.suspect_flags == ["gps_unreliable"]
+        assert session.cleaning_log == stored_log
+        # при этом пересчитываемые поля обновились (recomputable fields updated)
+        assert session.segments_json
+
+    def test_raw_reanalyze_updates_distance_and_gps_quality(
+            self, db_session, tmp_path, monkeypatch):
+        from tests.helpers import build_trackpoints
+
+        monkeypatch.setattr("src.analysis.fetch_weather", lambda *a, **k: None)
+        user = _user(db_session, 4)
+        tps = build_trackpoints(training_type='tempo', distance_km=6.0)
+        raw = tmp_path / "run.tcx"
+        raw.write_text(_render_tcx(tps))
+        session = build_training_session(
+            db_session, user.id,
+            begin_ts=tps[0]['time'],
+            total_distance_km=99.0,            # заведомо мусорное старое значение
+            trackpoints_json=None,
+            raw_file_path=str(raw),
+            source_brand='manual',
+            gps_quality=None,
+        )
+
+        result = reanalyze_training(db_session, session.id, user.id)
+
+        assert result is not None
+        db_session.refresh(session)
+        # от сырья дистанция и квалиметрия пересчитаны (raw path rewrites them)
+        assert session.total_distance_km == result['total_distance_km']
+        assert abs(session.total_distance_km - 6.0) < 0.3
+        assert session.gps_quality is not None
+        assert session.gps_quality['unreliable'] is False

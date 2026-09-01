@@ -272,7 +272,36 @@ def render_review(sr: SkillResult) -> str:
     """Детерминированный разбор тренировки (deterministic workout review) — fallback."""
     icon = _STATUS_ICON.get(sr.status, "⚪")
     lines = [f"{icon} *Разбор тренировки*", sr.message.replace("; ", "\n")]
+    if sr.status == "warning" and sr.evidence:
+        # Данные под вопросом — причина обязана дойти до пользователя, не только до LLM
+        # (suspect data: the reason must reach the user, not just the LLM context)
+        lines.append(f"_Данные под вопросом: {sr.evidence}_")
     return "\n".join(lines)
+
+
+def render_gps_warning(gps_quality: dict | None) -> str | None:
+    """Предупреждение о недостоверном GPS: числа рендерит детерминированный код,
+    не проза LLM (инвариант DEV_PLAN §1). None — GPS в порядке.
+    (GPS-unreliable warning; numbers come from deterministic render, not LLM prose.)"""
+    if not gps_quality or not gps_quality.get("unreliable"):
+        return None
+    first = gps_quality.get("bad_first_min")
+    last = gps_quality.get("bad_last_min")
+    span_min = round(last - first) if first is not None and last is not None else None
+    prefix = f"⚠️ GPS сбоил ~{span_min} мин" if span_min and span_min >= 1 else "⚠️ GPS сбоил"
+    # Пользователю сопоставляем число, которое он видел на часах (device), а не
+    # внутреннюю пост-очистку (contrast with the number the user saw on the watch)
+    device_km = gps_quality.get("device_distance_km")
+    dist = gps_quality.get("distance") or {}
+    if dist.get("source") == "cadence_estimate" and dist.get("estimated_km"):
+        line = f"{prefix}: дистанция ~`{dist['estimated_km']:.1f} км` — оценка по шагам"
+        if device_km:
+            line += f" (часы намерили {device_km:.1f} км)"
+    else:
+        line = f"{prefix}: дистанция и темп этой тренировки ненадёжны"
+        if device_km:
+            line += f" (часы намерили {device_km:.1f} км)"
+    return line
 
 
 def render_weekly(summary: dict) -> str:

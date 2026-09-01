@@ -247,3 +247,48 @@ def test_plan_vs_actual_absent_without_recommendation(db_session):
     computed = upsert_workout_insights(user.id, s.id, db=db_session)
     assert computed["plan_vs_actual"]["available"] is False
     assert computed["plan_vs_actual"]["reason"] == "no_plan"
+
+
+def test_gps_unreliable_gates_pace_blocks_keeps_hr(db_session):
+    """v4: GPS недостоверен → pace-производные блоки честно недоступны с
+    reason='gps_unreliable', HR-блоки (time_in_zones) считаются; флаг — первым."""
+    from src.services.workout_insights import compute_workout_metrics
+
+    user = _user(db_session)
+    s = _session_with_track(
+        db_session, user.id, hr=140,
+        gps_quality={"unreliable": True,
+                     "distance": {"quality": "estimate", "estimated_km": 6.5}})
+    computed = compute_workout_metrics(
+        s, max_hr=177, plan={"type": "easy", "max_zone": 3, "duration_min": 45})
+
+    assert computed["inputs"]["gps_quality"]["unreliable"] is True
+    assert computed["gap"] == {"available": False, "reason": "gps_unreliable"}
+    assert computed["drift"]["applicable"] is False
+    assert computed["drift"]["reason"] == "gps_unreliable"
+    assert computed["hr_vs_baseline"]["reason"] == "gps_unreliable"
+    assert computed["pace_stability"] == {"available": False,
+                                          "reason": "gps_unreliable"}
+    assert computed["quality_volume"] == {"available": False,
+                                          "reason": "gps_unreliable"}
+    # HR-производные метрики не гейтятся (HR-derived blocks still computed)
+    assert computed["time_in_zones"]["available"] is True
+    assert computed["hr_stability"]["available"] is True
+    # объём в plan_vs_actual помечен «по оценке» (volume marked as estimate)
+    assert computed["plan_vs_actual"]["distance_quality"] == "estimate"
+    assert "gps_unreliable" in computed["flags"]
+    assert computed["flags"][0] == "gps_unreliable"
+    json.dumps(computed)
+
+
+def test_gps_reliable_does_not_gate(db_session):
+    """unreliable=False → gap/pace_stability считаются как обычно."""
+    from src.services.workout_insights import compute_workout_metrics
+
+    user = _user(db_session)
+    s = _session_with_track(db_session, user.id,
+                            gps_quality={"unreliable": False})
+    computed = compute_workout_metrics(s, max_hr=177)
+    assert computed["gap"]["available"] is True
+    assert computed["pace_stability"]["available"] is True
+    assert "gps_unreliable" not in computed["flags"]

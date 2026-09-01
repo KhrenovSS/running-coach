@@ -2,6 +2,9 @@
 # Integration tests for the full analysis pipeline
 
 from datetime import datetime, timezone
+
+import pytest
+
 from src.analysis import process_trackpoints
 from src.parsers.gps import clean_trackpoints
 from tests.helpers import (
@@ -9,6 +12,7 @@ from tests.helpers import (
     build_tempo_trackpoints,
     build_long_trackpoints,
     build_recovery_trackpoints,
+    build_gps_glitch_trackpoints,
 )
 
 
@@ -116,7 +120,11 @@ class TestSuspectFlags:
             result = process_trackpoints(tps, tps[0]['time'], max_hr=177, pace_gap=1.0)
             assert result is not None
             assert 'suspect_flags' in result
-            assert len(result['suspect_flags']) == len(cleaning_log)
+            # suspect_flags — уникальные строки-причины из cleaning_log (не dict'ы)
+            # (suspect_flags are unique reason strings, not raw log dicts)
+            expected = {r for entry in cleaning_log for r in entry['reason']}
+            assert set(result['suspect_flags']) >= expected
+            assert all(isinstance(f, str) for f in result['suspect_flags'])
 
     def test_too_short_flag_applied_regardless_of_cleaning_log(self):
         """too_short устанавливается независимо от cleaning_log"""
@@ -133,3 +141,50 @@ class TestSuspectFlags:
         result = process_trackpoints(tps, tps[0]['time'], max_hr=177, pace_gap=1.0)
         assert result is not None
         assert 'suspect_flags' not in result
+
+
+class TestGpsUnreliablePipeline:
+    """Кейс-42 (01.09.2026): 15 мин GPS-сбоя → пайплайн честно помечает трек
+    недостоверным и подменяет дистанцию оценкой по шагам."""
+
+    @pytest.fixture(autouse=True)
+    def _no_weather(self, monkeypatch):
+        # офлайн: погодный API не дёргаем (offline: no weather API calls)
+        monkeypatch.setattr("src.analysis.fetch_weather", lambda *a, **k: None)
+
+    def test_case42_distance_replaced_by_cadence_estimate(self):
+        tps = build_gps_glitch_trackpoints()   # 15' сбой (5.7 м/с) + 30' чисто
+        device_km = tps[-1]['dist'] / 1000     # раздутая device-дистанция ~9.5 км
+
+        result = process_trackpoints(tps, tps[0]['time'], max_hr=177, pace_gap=1.0)
+
+        assert result is not None
+        gq = result['gps_quality']
+        assert gq is not None and gq['unreliable'] is True
+        assert 'gps_unreliable' in result['suspect_flags']
+        # дистанция — оценка по шагам, не мусор часов и не урезанный GPS
+        est = gq['distance']
+        assert est['source'] == 'cadence_estimate'
+        assert est['quality'] == 'estimate'
+        assert result['total_distance_km'] == est['estimated_km']
+        assert result['total_distance_km'] < device_km * 0.8
+        assert gq['gps_distance_km'] < est['estimated_km']  # урезанный GPS сохранён
+        # темп пересчитан от оценки (pace recomputed from the estimate)
+        assert result['avg_pace'] == pytest.approx(
+            result['duration_minutes'] / est['estimated_km'], rel=0.02)
+        # темповые сигналы мусорные → классификация не «интервалы»
+        assert result['training_type'] != 'interval'
+
+    def test_clean_track_distance_not_replaced(self):
+        tps = build_gps_glitch_trackpoints(glitch_min=0, clean_min=45,
+                                           clean_pace=7.0)
+        device_km = tps[-1]['dist'] / 1000
+
+        result = process_trackpoints(tps, tps[0]['time'], max_hr=177, pace_gap=1.0)
+
+        assert result is not None
+        gq = result['gps_quality']
+        assert gq is not None and gq['unreliable'] is False
+        assert 'distance' not in gq                       # оценка не подмешана
+        assert result['total_distance_km'] == pytest.approx(device_km, rel=0.01)
+        assert 'gps_unreliable' not in result.get('suspect_flags', [])

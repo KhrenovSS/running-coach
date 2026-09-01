@@ -53,7 +53,7 @@ from src.utils.logger import get_logger
 
 logger = get_logger("services.workout_insights")
 
-INSIGHTS_SCHEMA_VERSION = 3  # версия содержимого computed_json (bump при смене схемы)
+INSIGHTS_SCHEMA_VERSION = 4  # версия содержимого computed_json (bump при смене схемы; v4 — gps_quality)
 
 _EMPTY_DRIFT = {"applicable": False, "reason": "no_trackpoints", "drift_pct": None,
                 "first_half_ef": None, "second_half_ef": None, "gap_adjusted": None,
@@ -99,6 +99,10 @@ def compute_workout_metrics(session: TrainingSession, *,
     """
     times_sec, dists, hrs, alts = _parse_trackpoints(session.trackpoints_json)
     ttype = effective_training_type(session)
+    # Квалиметрия GPS: количественный ущерб для LLM; unreliable гейтит pace-блоки
+    # (GPS quality: quantitative damage for the LLM; unreliable gates pace-derived blocks)
+    gps_quality = session.gps_quality if isinstance(session.gps_quality, dict) else None
+    gps_unreliable = bool(gps_quality and gps_quality.get("unreliable"))
     computed: dict = {
         "schema_version": INSIGHTS_SCHEMA_VERSION,
         "computed_at": datetime.now(timezone.utc).isoformat(),
@@ -106,6 +110,7 @@ def compute_workout_metrics(session: TrainingSession, *,
             "trackpoint_count": len(times_sec),
             "has_hr": any(h is not None for h in hrs),
             "has_alt": any(a is not None for a in alts),
+            "gps_quality": gps_quality,
         },
     }
     if not times_sec:
@@ -134,15 +139,23 @@ def compute_workout_metrics(session: TrainingSession, *,
         computed["flags"] = sm.collect_flags(computed)
         return computed
 
-    gap = compute_gap(times_sec, dists, hrs, alts)
-    alts_smoothed = smooth_altitudes(alts)
-    factors = local_grade_factors(dists, alts_smoothed) if alts_smoothed else None
-    drift = compute_cardiac_drift(times_sec, dists, hrs, training_type=ttype,
-                                  grade_factors=factors,
-                                  per_km=gap.get("per_km"))
-    deviation = (baseline_deviation(baseline, gap["per_km"])
-                 if gap.get("available") else
-                 {"available": False, "reason": "no_gap"})
+    if gps_unreliable:
+        # Дистанции/темпы в trackpoints_json — мусор: pace-производные блоки честно
+        # недоступны, а gap.available=false заодно исключает сессию из HR-baseline
+        # (pace-derived blocks honestly unavailable; also drops session from HR baseline)
+        gap = {"available": False, "reason": "gps_unreliable"}
+        drift = {**_EMPTY_DRIFT, "reason": "gps_unreliable"}
+        deviation = {"available": False, "reason": "gps_unreliable"}
+    else:
+        gap = compute_gap(times_sec, dists, hrs, alts)
+        alts_smoothed = smooth_altitudes(alts)
+        factors = local_grade_factors(dists, alts_smoothed) if alts_smoothed else None
+        drift = compute_cardiac_drift(times_sec, dists, hrs, training_type=ttype,
+                                      grade_factors=factors,
+                                      per_km=gap.get("per_km"))
+        deviation = (baseline_deviation(baseline, gap["per_km"])
+                     if gap.get("available") else
+                     {"available": False, "reason": "no_gap"})
     computed["gap"] = gap
     computed["drift"] = drift
     computed["hr_vs_baseline"] = deviation
@@ -159,15 +172,18 @@ def compute_workout_metrics(session: TrainingSession, *,
         cv = pace_cv(gap.get("per_km"))
         cv = round(cv, 3) if cv is not None else None
     computed["pace_stability"] = (
+        {"available": False, "reason": "gps_unreliable"} if gps_unreliable else
         {"available": True, "cv": cv, "flag": cv > DRIFT_MAX_PACE_CV}
         if cv is not None else {"available": False, "reason": "few_km"})
     computed["hr_stability"] = hr_stability(times_sec, dists, hrs)
     computed["load_points"] = sm.load_points(zones, POINTS_PER_MIN)
-    computed["quality_volume"] = sm.quality_volume(
-        gap.get("per_km"), zones, week_km, max_hr,
-        interval_max_pct=INTERVAL_MAX_PCT_WEEK, interval_max_km=INTERVAL_MAX_KM,
-        threshold_max_pct=THRESHOLD_MAX_PCT_WEEK, threshold_max_km=THRESHOLD_MAX_KM,
-        segment_max_min=INTERVAL_SEGMENT_MAX_MIN)
+    computed["quality_volume"] = (
+        {"available": False, "reason": "gps_unreliable"} if gps_unreliable else
+        sm.quality_volume(
+            gap.get("per_km"), zones, week_km, max_hr,
+            interval_max_pct=INTERVAL_MAX_PCT_WEEK, interval_max_km=INTERVAL_MAX_KM,
+            threshold_max_pct=THRESHOLD_MAX_PCT_WEEK, threshold_max_km=THRESHOLD_MAX_KM,
+            segment_max_min=INTERVAL_SEGMENT_MAX_MIN))
     computed["long_run"] = sm.long_run_share(
         session.total_distance_km, session.duration_minutes, week_km, ttype,
         max_pct=LONG_RUN_MAX_PCT_WEEK, max_min=LONG_RUN_MAX_MIN)
@@ -185,7 +201,9 @@ def compute_workout_metrics(session: TrainingSession, *,
     computed["plan_vs_actual"] = sm.plan_vs_actual(
         plan, ttype, session.total_distance_km, session.duration_minutes,
         zones, volume_tol=PLAN_VOLUME_TOLERANCE_PCT,
-        intensity_tol=PLAN_INTENSITY_TOLERANCE_PCT)
+        intensity_tol=PLAN_INTENSITY_TOLERANCE_PCT,
+        distance_quality=((gps_quality.get("distance") or {}).get("quality")
+                          if gps_unreliable else None))
     computed["flags"] = sm.collect_flags(computed)
     return computed
 

@@ -155,3 +155,11 @@ def test_merged_flags_unit():
                       "rpe_elevated"]                     # cap 4, subjective вытеснены
     assert orchestrator._merged_flags(["pain"], None) == ["pain"]
     assert orchestrator._merged_flags(["pain"], {"flags": []}) == ["pain"]
+
+
+def test_merged_flags_maps_gps_unreliable_to_suspect_data():
+    """gps_unreliable из computed.flags → suspect_data в enum assessment,
+    детерминированный флаг — первым (перед субъективными LLM)."""
+    merged = orchestrator._merged_flags(["pain"], {"flags": ["gps_unreliable"]})
+    assert merged[0] == "suspect_data"
+    assert merged == ["suspect_data", "pain"]

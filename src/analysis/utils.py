@@ -45,6 +45,7 @@ class AnalysisResult(TypedDict, total=False):
     cleaning_log: list[dict] | None
     suspect_flags: list[str] | None
     avg_pace: float | None
+    gps_quality: dict | None
 
 _tf = TimezoneFinder()
 

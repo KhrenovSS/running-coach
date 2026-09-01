@@ -55,6 +55,7 @@ class TrainingSession(Base):
     source_brand = Column(String(50), nullable=True)  # 'coros'/'garmin'/... или 'manual' для ручных загрузок
     file_sha256 = Column(String(64), nullable=True)  # SHA256 исходного файла — ключ дедупа ручных загрузок
     raw_file_path = Column(String(255), nullable=True)  # путь к исходному FIT/TCX (raw file path — BACKLOG #229)
+    gps_quality = Column(JSON, nullable=True)  # квалиметрия GPS + оценка дистанции по шагам; NULL у legacy/коротких (GPS quality block; NULL for legacy/short tracks)
 
     user = relationship("User", back_populates="training_sessions")
 

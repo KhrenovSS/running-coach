@@ -14,6 +14,19 @@ BIN_SIZE_M: Final[int] = 200
 MAX_GPS_JUMP_M: Final[float] = 100.0
 MIN_DISTANCE_FOR_VALID_SEGMENT_M: Final[float] = 50.0
 
+# Квалиметрия GPS и оценка дистанции по шагам (GPS quality & cadence-based distance estimate)
+# Пороги откалиброваны на кейсе №42 (01.09.2026: 25% без координат, 24% невозможных скоростей,
+# 47% выброшенной дистанции) против нормальных тренировок (№40/41: ~0.2% выброшено).
+GPS_QUALITY_MIN_POINTS: Final[int] = 30            # короче — квалиметрию не считаем (too short to assess)
+GPS_NO_POSITION_FLAG_PCT: Final[float] = 0.15      # доля записей без координат выше → недостоверно
+GPS_NO_POSITION_TREADMILL_PCT: Final[float] = 0.95  # почти нет координат → дорожка/footpod, НЕ флаг
+GPS_IMPOSSIBLE_SPEED_FLAG_PCT: Final[float] = 0.10  # доля дельт быстрее max_credible_pace выше → недостоверно
+GPS_DROPPED_DIST_FLAG_PCT: Final[float] = 0.20     # доля выброшенной пайплайном дистанции выше → недостоверно
+STRIDE_CALIB_MIN_CLEAN_S: Final[int] = 300         # минимум чистого времени для калибровки длины шага
+STRIDE_SANITY_MIN_M: Final[float] = 0.5            # длина шага вне диапазона → калибровка отвергается
+STRIDE_SANITY_MAX_M: Final[float] = 1.6
+STRIDE_DEFAULT_M: Final[float] = 1.0               # fallback-шаг без калибровки → quality="rough"
+
 # Период синхронизации метрик здоровья (Health sync days)
 HEALTH_SYNC_DAYS: Final[int] = 180
 
