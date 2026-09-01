@@ -162,3 +162,16 @@ class InsightRepository:
             WorkoutInsight.user_id == user_id,
             WorkoutInsight.session_id == session_id,
         ).first()
+
+    @staticmethod
+    def recent_flag(user_id: int, flag: str, *, db: Session, days: int) -> bool:
+        """Есть ли флаг в computed.flags недавних разборов (F3 → сигнал safety).
+
+        JSON-фильтр переносим между PG/SQLite делаем в Python — строк мало.
+        (Whether a recent computed_json carries the flag; Python-side JSON check.)"""
+        cutoff = _utcnow() - timedelta(days=days)
+        rows = db.query(WorkoutInsight.computed_json).filter(
+            WorkoutInsight.user_id == user_id,
+            WorkoutInsight.created_at >= cutoff,
+        ).all()
+        return any(flag in ((r[0] or {}).get("flags") or []) for r in rows)

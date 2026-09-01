@@ -10,6 +10,7 @@ from __future__ import annotations
 from statistics import median
 
 from src.analysis.hr_zones import get_zone
+from src.config.constants import RECORDING_GAP_MAX_SEC
 
 # Единый словарь имён детерминированных флагов (METRICS_GUIDE §6.1).
 # Значения обязаны существовать в enum FlagValue (src/coach/llm/schemas.py) либо
@@ -25,6 +26,8 @@ FLAG_NO_WARMUP = "no_warmup"
 FLAG_PLAN_INTENSITY = "plan_intensity_exceeded"
 FLAG_PLAN_VOLUME = "plan_volume_exceeded"
 FLAG_GPS_UNRELIABLE = "gps_unreliable"
+FLAG_DEVICE_MISMATCH = "device_mismatch"
+FLAG_POOR_INTERVAL_RECOVERY = "poor_interval_recovery"  # F3: HRR60 ниже порога
 
 # Маппинг computed-флагов в значения enum assessment (§6.2, зафиксирован кодом:
 # enum append-only, переименовывать decoupling_* задним числом нельзя).
@@ -32,6 +35,7 @@ FLAG_TO_ASSESSMENT = {
     "decoupling_high": "hr_drift_high",
     "decoupling_moderate": "hr_drift_high",
     FLAG_GPS_UNRELIABLE: "suspect_data",
+    FLAG_DEVICE_MISMATCH: "suspect_data",
 }
 
 EASY_TYPES_M1 = ("easy", "recovery", "long")      # M1.1: где лёгкость обязательна
@@ -52,22 +56,29 @@ def time_in_zones(times_sec: list[float], hrs: list[int | None],
         return {"available": False, "reason": "no_hr"}
     minutes = {f"z{i}": 0.0 for i in range(1, 6)}
     z4_segments: list[dict] = []
-    seg_min, seg_hr_sum, seg_n = 0.0, 0.0, 0
+    seg_min, seg_hr_sum = 0.0, 0.0
     for i in range(1, len(times_sec)):
         dt_min = (times_sec[i] - times_sec[i - 1]) / 60.0
         hr = hrs[i - 1]
-        if dt_min <= 0 or hr is None:
+        if dt_min <= 0 or hr is None or dt_min * 60 > RECORDING_GAP_MAX_SEC:
+            # Разрыв записи или HR-дропаут РАЗРЫВАЕТ Z4-отрезок (#279): иначе
+            # дропаут поверх настоящего восстановления склеивал два интервала
+            # в один → ложный interval_segment_too_long
+            # (gap/HR dropout breaks the Z4 segment — no more merged intervals)
+            if seg_min > 0:
+                z4_segments.append({"duration_min": round(seg_min, 1),
+                                    "avg_hr": round(seg_hr_sum / seg_min)})
+                seg_min, seg_hr_sum = 0.0, 0.0
             continue
         zone = get_zone(hr, max_hr)
         minutes[f"z{zone}"] += dt_min
         if zone >= 4:
             seg_min += dt_min
             seg_hr_sum += hr * dt_min
-            seg_n += 1
         elif seg_min > 0:
             z4_segments.append({"duration_min": round(seg_min, 1),
                                 "avg_hr": round(seg_hr_sum / seg_min)})
-            seg_min, seg_hr_sum, seg_n = 0.0, 0.0, 0
+            seg_min, seg_hr_sum = 0.0, 0.0
     if seg_min > 0:
         z4_segments.append({"duration_min": round(seg_min, 1),
                             "avg_hr": round(seg_hr_sum / seg_min)})
@@ -121,9 +132,15 @@ def quality_volume(per_km: list[dict] | None, zones: dict, week_km: float | None
         return {"available": False, "reason": "no_per_km" if max_hr else "no_max_hr"}
     if week_km is None or week_km <= 0:
         return {"available": False, "reason": "no_week_volume"}
-    interval_km = sum(1.0 for r in per_km
+    # Фактическая длина строки (#283): хвост 200–1000 м — не полный км;
+    # legacy-строки без km_len_m считаем полным км (обратная совместимость)
+    # (actual row length; legacy rows without km_len_m count as a full km)
+    def _row_km(r: dict) -> float:
+        return (r.get("km_len_m") or 1000.0) / 1000.0
+
+    interval_km = sum(_row_km(r) for r in per_km
                       if r.get("avg_hr") and get_zone(r["avg_hr"], max_hr) >= 4)
-    threshold_km = sum(1.0 for r in per_km
+    threshold_km = sum(_row_km(r) for r in per_km
                        if r.get("avg_hr") and get_zone(r["avg_hr"], max_hr) == 3)
     interval_cap = min(week_km * interval_max_pct, interval_max_km)
     threshold_cap = min(week_km * threshold_max_pct, threshold_max_km)
@@ -304,6 +321,8 @@ def collect_flags(computed: dict) -> list[str]:
     # (GPS unreliable goes first: the review must lead with data honesty)
     if (computed.get("inputs", {}).get("gps_quality") or {}).get("unreliable"):
         flags.append(FLAG_GPS_UNRELIABLE)
+    if (computed.get("inputs", {}).get("device_check") or {}).get("mismatch"):
+        flags.append(FLAG_DEVICE_MISMATCH)
     drift = computed.get("drift", {})
     if drift.get("flag") == "high":
         flags.append("decoupling_high")
@@ -330,4 +349,6 @@ def collect_flags(computed: dict) -> list[str]:
         flags.append(FLAG_RPE_ELEVATED)
     if computed.get("warmup", {}).get("flag"):
         flags.append(FLAG_NO_WARMUP)
+    if computed.get("interval_recovery", {}).get("flag"):
+        flags.append(FLAG_POOR_INTERVAL_RECOVERY)
     return flags

@@ -68,6 +68,56 @@ def test_easy_run_sliding_into_z3_flagged():
     assert easy_discipline(z, "tempo", tolerance=0.10)["applicable"] is False
 
 
+# --- F0 #279: разрывы записи и HR-дропауты в time_in_zones ---
+
+def _z4_block(minutes=3.0):
+    return _ramp(minutes, 160)  # 160 при max_hr=177 → Z4
+
+
+def test_time_in_zones_recording_gap_excluded():
+    """5-минутный разрыв записи: не в total_min и не в зону последнего HR."""
+    t1, h1 = _z4_block(3.0)
+    t2, _ = _z4_block(3.0)
+    times = t1 + [x + t1[-1] + 300.0 for x in t2]      # дельта через разрыв 300с
+    hrs = h1 + [160] * len(t2)
+    z = time_in_zones(times, hrs, MAX_HR)
+    assert z["available"] is True
+    assert abs(z["total_min"] - 6.0) < 0.2             # НЕ 11 минут
+    assert abs(z["minutes"]["z4"] - 6.0) < 0.2
+
+
+def test_time_in_zones_recording_gap_breaks_z4_segment():
+    """Разрыв записи посреди Z4-блока → два отрезка, не один склеенный."""
+    t1, h1 = _z4_block(3.0)
+    t2, _ = _z4_block(3.0)
+    times = t1 + [x + t1[-1] + 300.0 for x in t2]
+    hrs = h1 + [160] * len(t2)
+    segs = time_in_zones(times, hrs, MAX_HR)["z4_plus_segments"]
+    assert len(segs) == 2
+    assert all(2.5 <= s["duration_min"] <= 3.5 for s in segs)
+
+
+def test_time_in_zones_hr_dropout_breaks_z4_segment():
+    """#279: Z4 3 мин + дыра hr=None 20с + Z4 3 мин → ДВА z4_plus_segments.
+    Раньше дропаут склеивал два интервала в один 6-минутный →
+    ложный interval_segment_too_long."""
+    times, hrs = _z4_block(3.0)
+    for _ in range(2):                                  # 20с без пульса
+        times.append(times[-1] + 10.0)
+        hrs.append(None)
+    t2, h2 = _z4_block(3.0)
+    offset = times[-1] + 10.0
+    times += [x + offset for x in t2]
+    hrs += h2
+
+    z = time_in_zones(times, hrs, MAX_HR)
+    segs = z["z4_plus_segments"]
+    assert len(segs) == 2
+    # ни один отрезок не «6-минутный склеенный» → флаг длинного сегмента не ложный
+    assert all(s["duration_min"] < 5.0 for s in segs)
+    assert all(s["avg_hr"] == 160 for s in segs)
+
+
 # --- M1.4: load_points ---
 
 def test_load_points_weighted_by_zone():
@@ -107,6 +157,30 @@ def test_quality_volume_within_caps_no_flags():
                         threshold_max_pct=0.10, threshold_max_km=24.0,
                         segment_max_min=5.0)
     assert qv["available"] is True and qv["flags"] == []
+
+
+def test_quality_volume_counts_fractional_tail_km():
+    """#283: хвостовая строка per_km с km_len_m=300 весит 0.3 км, не 1.0.
+    2 полных км + хвост 300 м в Z4 = 2.3 км < потолка 2.4 → флага нет
+    (legacy-подсчёт «3 строки = 3 км» флаговал бы)."""
+    times, hrs = _ramp(4, 160)                     # Z4-отрезок 4 мин < 5 — не флаг
+    z = time_in_zones(times, hrs, MAX_HR)
+    per_km = [{"pace_min_km": 5.0, "avg_hr": 160, "km_len_m": 1000},
+              {"pace_min_km": 5.0, "avg_hr": 160, "km_len_m": 1000},
+              {"pace_min_km": 5.0, "avg_hr": 160, "km_len_m": 300}]
+    qv = quality_volume(per_km, z, 30.0, MAX_HR,
+                        interval_max_pct=0.08, interval_max_km=10.0,
+                        threshold_max_pct=0.10, threshold_max_km=24.0,
+                        segment_max_min=5.0)
+    assert qv["available"] is True
+    assert FLAG_QUALITY_VOLUME not in qv["flags"]  # 2.3 < 2.4
+    # legacy-строки без km_len_m считаются полным км → 3.0 > 2.4 → флаг
+    legacy = [{"pace_min_km": 5.0, "avg_hr": 160} for _ in range(3)]
+    qv_legacy = quality_volume(legacy, z, 30.0, MAX_HR,
+                               interval_max_pct=0.08, interval_max_km=10.0,
+                               threshold_max_pct=0.10, threshold_max_km=24.0,
+                               segment_max_min=5.0)
+    assert FLAG_QUALITY_VOLUME in qv_legacy["flags"]
 
 
 def test_quality_volume_empty_week_degrades():

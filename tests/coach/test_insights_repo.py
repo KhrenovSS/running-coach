@@ -176,3 +176,44 @@ def test_release_does_not_touch_done(athlete_with_history, db_session):
     db_session.expire_all()
     row = InsightRepository.for_session(athlete_with_history.id, sid, db=db_session)
     assert row.status == "done"
+
+
+# --- recent_flag (F3): флаг недавнего разбора → сигнал safety --------------------
+
+def test_recent_flag_true_within_window(athlete_with_history, db_session):
+    """Свежая строка с флагом в computed.flags → True (окно 4 дня)."""
+    from src.coach.config import HRR_POOR_RECOVERY_LOOKBACK_DAYS
+
+    sid = _session_id(athlete_with_history.id, db_session)
+    InsightRepository.upsert(
+        athlete_with_history.id, sid, db=db_session,
+        computed={"flags": ["heat", "poor_interval_recovery"]}, schema_version=6)
+    assert InsightRepository.recent_flag(
+        athlete_with_history.id, "poor_interval_recovery", db=db_session,
+        days=HRR_POOR_RECOVERY_LOOKBACK_DAYS) is True
+
+
+def test_recent_flag_false_when_stale(athlete_with_history, db_session):
+    """Строка старше окна → False (флаг «протухает»)."""
+    sid = _session_id(athlete_with_history.id, db_session)
+    row = InsightRepository.upsert(
+        athlete_with_history.id, sid, db=db_session,
+        computed={"flags": ["poor_interval_recovery"]}, schema_version=6)
+    row.created_at = datetime.now(timezone.utc) - timedelta(days=10)
+    db_session.commit()
+    assert InsightRepository.recent_flag(
+        athlete_with_history.id, "poor_interval_recovery",
+        db=db_session, days=4) is False
+
+
+def test_recent_flag_false_without_flag_or_computed(athlete_with_history, db_session):
+    """Флага нет в flags / computed_json пуст → False (без исключений)."""
+    ids = [s.id for s in db_session.query(TrainingSession).filter_by(
+        user_id=athlete_with_history.id).order_by(TrainingSession.id).all()]
+    InsightRepository.upsert(athlete_with_history.id, ids[0], db=db_session,
+                             computed={"flags": ["heat"]}, schema_version=6)
+    InsightRepository.upsert(athlete_with_history.id, ids[1], db=db_session,
+                             computed=None)
+    assert InsightRepository.recent_flag(
+        athlete_with_history.id, "poor_interval_recovery",
+        db=db_session, days=4) is False

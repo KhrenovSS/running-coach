@@ -7,20 +7,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
 from src.analysis import session_metrics as sm
 from src.analysis.effort import compute_cardiac_drift, heat_block, hr_stability, pace_cv
+from src.analysis.data_checks import device_check, lap_check
+from src.analysis.intervals import interval_recovery
 from src.analysis.gap import compute_gap, local_grade_factors, smooth_altitudes
-from src.analysis.hr_baseline import (
-    baseline_deviation,
-    fit_hr_pace_baseline,
-    hr_at_pace_band,
-    km_points,
-    pace_at_hr_band,
-)
+from src.analysis.hr_baseline import baseline_deviation
 from src.coach.config import (
     CADENCE_LOW_SPM,
     CADENCE_SANITY_MIN_SPM,
@@ -45,30 +41,38 @@ from src.coach.config import (
 )
 from src.coach.util import effective_training_type
 from src.config import settings
-from src.config.constants import BASELINE_TYPES, BASELINE_WINDOW_DAYS, DRIFT_MAX_PACE_CV
-from src.models import TrainingSession, User, UserModel, WorkoutInsight
+from src.config.constants import BASELINE_TYPES, DRIFT_MAX_PACE_CV
+from src.models import TrainingSession, User
 from src.services.repositories import FeedbackRepository, TrainingRepository
+from src.services.insights_baseline import (  # noqa: F401 — реэкспорт для потребителей
+    ensure_baseline,
+    expected_hr_at_pace,
+    expected_pace_at_hr,
+    refresh_hr_pace_baseline,
+    stored_baseline as _stored_baseline,
+)
 from src.services.repositories_insights import InsightRepository
 from src.utils.logger import get_logger
 
 logger = get_logger("services.workout_insights")
 
-INSIGHTS_SCHEMA_VERSION = 4  # версия содержимого computed_json (bump при смене схемы; v4 — gps_quality)
+INSIGHTS_SCHEMA_VERSION = 6  # версия computed_json (v4 — gps_quality; v5 — F0-фиксы усреднений; v6 — F3: interval_recovery/HRR)
 
 _EMPTY_DRIFT = {"applicable": False, "reason": "no_trackpoints", "drift_pct": None,
                 "first_half_ef": None, "second_half_ef": None, "gap_adjusted": None,
                 "window_min": None, "flag": None}
 
 
-def _parse_trackpoints(raw: list[dict] | None) -> tuple[list, list, list, list]:
-    """trackpoints_json → (times_sec, dists, hrs, alts); time ISO/datetime-совместимо."""
+def _parse_trackpoints(raw: list[dict] | None) -> tuple[list, list, list, list, datetime | None]:
+    """trackpoints_json → (times_sec, dists, hrs, alts, t0); time ISO/datetime-совместимо.
+    t0 — datetime первой точки: нужен для сопоставления lap-границ (F3)."""
     times_sec: list[float] = []
     dists: list[float] = []
     hrs: list[int | None] = []
     alts: list[float | None] = []
-    if not raw:
-        return times_sec, dists, hrs, alts
     t0: datetime | None = None
+    if not raw:
+        return times_sec, dists, hrs, alts, t0
     for tp in raw:
         t = tp.get("time")
         d = tp.get("dist")
@@ -82,7 +86,7 @@ def _parse_trackpoints(raw: list[dict] | None) -> tuple[list, list, list, list]:
         dists.append(float(d))
         hrs.append(tp.get("hr"))
         alts.append(tp.get("alt"))
-    return times_sec, dists, hrs, alts
+    return times_sec, dists, hrs, alts, t0
 
 
 def compute_workout_metrics(session: TrainingSession, *,
@@ -97,7 +101,7 @@ def compute_workout_metrics(session: TrainingSession, *,
     БД-входы (max_hr, week_km, rpe_history={"rpe","peers"}, plan — назначение
     на день сессии) резолвит upsert_workout_insights; None → available=false.
     """
-    times_sec, dists, hrs, alts = _parse_trackpoints(session.trackpoints_json)
+    times_sec, dists, hrs, alts, tp_t0 = _parse_trackpoints(session.trackpoints_json)
     ttype = effective_training_type(session)
     # Квалиметрия GPS: количественный ущерб для LLM; unreliable гейтит pace-блоки
     # (GPS quality: quantitative damage for the LLM; unreliable gates pace-derived blocks)
@@ -111,6 +115,12 @@ def compute_workout_metrics(session: TrainingSession, *,
             "has_hr": any(h is not None for h in hrs),
             "has_alt": any(a is not None for a in alts),
             "gps_quality": gps_quality,
+            # F2 (#286): кросс-чек пайплайна с эталоном часов; при gps_unreliable
+            # эталон часов сам мусорный — не считаем
+            # (pipeline vs watch cross-check; skipped when the watch data is garbage)
+            "device_check": (device_check(session.device_summary, session.total_distance_km,
+                             session.duration_minutes)
+                 if not gps_unreliable else None),
         },
     }
     if not times_sec:
@@ -136,6 +146,7 @@ def compute_workout_metrics(session: TrainingSession, *,
             plan, ttype, session.total_distance_km, session.duration_minutes,
             {"available": False}, volume_tol=PLAN_VOLUME_TOLERANCE_PCT,
             intensity_tol=PLAN_INTENSITY_TOLERANCE_PCT)
+        computed["interval_recovery"] = {"available": False, "reason": "no_trackpoints"}
         computed["flags"] = sm.collect_flags(computed)
         return computed
 
@@ -159,6 +170,10 @@ def compute_workout_metrics(session: TrainingSession, *,
     computed["gap"] = gap
     computed["drift"] = drift
     computed["hr_vs_baseline"] = deviation
+    # F7: телеметрия-сверка per_km с авто-лапами часов (без флагов)
+    computed["inputs"]["lap_check"] = lap_check(
+        session.laps_json if isinstance(session.laps_json, list) else None,
+        gap.get("per_km"))
     computed["heat"] = heat_block(session.avg_temperature)
 
     # --- M1: детерминированные метрики сессии (METRICS_GUIDE §4) ---
@@ -204,6 +219,15 @@ def compute_workout_metrics(session: TrainingSession, *,
         intensity_tol=PLAN_INTENSITY_TOLERANCE_PCT,
         distance_quality=((gps_quality.get("distance") or {}).get("quality")
                           if gps_unreliable else None))
+    # F3 (M2.1 разбора): восстановление между интервалами — HRR по времени и пульсу,
+    # поэтому работает и при gps_unreliable; мусорные dists при этом не передаём,
+    # чтобы fallback-осцилляции не строились по фейковому темпу
+    # (HRR uses time+HR so it survives bad GPS; garbage dists are withheld from the fallback)
+    computed["interval_recovery"] = interval_recovery(
+        times_sec, hrs, max_hr,
+        dists=None if gps_unreliable else dists,
+        laps=session.laps_json if isinstance(session.laps_json, list) else None,
+        t0=tp_t0, ttype=ttype)
     computed["flags"] = sm.collect_flags(computed)
     return computed
 
@@ -243,13 +267,6 @@ def get_or_compute(user_id: int, session_id: int, *, db: Session) -> dict | None
             and row.schema_version == INSIGHTS_SCHEMA_VERSION:
         return row.computed_json
     return upsert_workout_insights(user_id, session_id, db=db)
-
-
-def _stored_baseline(user_id: int, *, db: Session) -> dict | None:
-    um = db.query(UserModel).filter(UserModel.user_id == user_id).first()
-    if um and um.params_json:
-        return um.params_json.get("hr_pace_baseline")
-    return None
 
 
 def _user_max_hr(user_id: int, *, db: Session) -> int:
@@ -305,123 +322,3 @@ def _rpe_history(user_id: int, session: TrainingSession, *,
              if r.get("rating") is not None and r["session_id"] != session.id
              and (r.get("training_type_override") or r.get("training_type")) == ttype]
     return {"rpe": rpe, "peers": peers}
-
-
-def _bootstrap_window_insights(user_id: int, *, db: Session) -> list[int]:
-    """Досчитать insights steady-тренировок окна, у которых их ещё нет.
-
-    (Compute missing insights for steady sessions of the window.) Возвращает
-    id досчитанных сессий; повторные вызовы дёшевы (две лёгкие выборки id).
-    """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=BASELINE_WINDOW_DAYS)
-    # только id/типы — trackpoints_json тяжёлый, тянем его лишь в upsert по одной
-    rows = db.query(TrainingSession.id, TrainingSession.training_type,
-                    TrainingSession.training_type_override).filter(
-        TrainingSession.user_id == user_id,
-        TrainingSession.begin_ts >= cutoff,
-        TrainingSession.trackpoints_json.isnot(None),
-    ).all()
-    have = {sid for (sid,) in db.query(WorkoutInsight.session_id).filter(
-        WorkoutInsight.user_id == user_id)}
-    missing = [r.id for r in rows
-               if (r.training_type_override or r.training_type) in BASELINE_TYPES
-               and r.id not in have]
-    if missing:
-        logger.info("Insights bootstrap for user=%s: computing %s sessions",
-                    user_id, len(missing))
-    for session_id in missing:
-        upsert_workout_insights(user_id, session_id, db=db)
-    return missing
-
-
-def ensure_baseline(user_id: int, *, db: Session) -> dict | None:
-    """Базовая линия с ленивым бутстрапом (lazy-bootstrap the HR↔pace baseline).
-
-    Сохранённая есть → вернуть. Иначе досчитать недостающие insights окна и
-    пересчитать линию. Данных мало → None.
-    """
-    baseline = _stored_baseline(user_id, db=db)
-    if baseline is not None:
-        return baseline
-    if not _bootstrap_window_insights(user_id, db=db):
-        return refresh_hr_pace_baseline(user_id, db=db)
-    # upsert steady-типа сам вызывает refresh после каждой сессии
-    return _stored_baseline(user_id, db=db)
-
-
-def expected_pace_at_hr(user_id: int, hr_ceiling: int, *, db: Session) -> dict | None:
-    """Эмпирический темп на пульсе: медиана км-точек insights окна в полосе
-    под потолком (+ ленивый бутстрап недостающих insights).
-
-    (Empirical pace at HR from window km-points; lazy insights bootstrap.)
-    Мало точек в полосе → None. Возвращает {"pace_min_km", "n_points"}.
-    """
-    _bootstrap_window_insights(user_id, db=db)
-    points, _ = _collect_window_points(user_id, db=db)
-    return pace_at_hr_band(points, hr_ceiling)
-
-
-def expected_hr_at_pace(user_id: int, pace_min_km: float, *, db: Session) -> dict | None:
-    """Эмпирический пульс на темпе: медиана HR км-точек insights окна в полосе
-    вокруг темпа (+ ленивый бутстрап недостающих insights).
-
-    (Empirical HR at pace from window km-points; lazy insights bootstrap.)
-    Мало точек в полосе → None. Возвращает {"hr_bpm", "n_points"}.
-    """
-    _bootstrap_window_insights(user_id, db=db)
-    points, _ = _collect_window_points(user_id, db=db)
-    return hr_at_pace_band(points, pace_min_km)
-
-
-def _collect_window_points(user_id: int, *, db: Session
-                           ) -> tuple[list[tuple[float, float]], int]:
-    """Км-точки (gap_pace, hr) steady-тренировок окна из готовых insights.
-
-    (Window km-points from stored insights.) Возвращает (points, n_sessions).
-    """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=BASELINE_WINDOW_DAYS)
-    rows = db.query(WorkoutInsight, TrainingSession).join(
-        TrainingSession, WorkoutInsight.session_id == TrainingSession.id,
-    ).filter(
-        WorkoutInsight.user_id == user_id,
-        TrainingSession.begin_ts >= cutoff,
-    ).all()
-    points: list[tuple[float, float]] = []
-    n_sessions = 0
-    for insight, session in rows:
-        if effective_training_type(session) not in BASELINE_TYPES:
-            continue
-        gap = (insight.computed_json or {}).get("gap") or {}
-        if not gap.get("available"):
-            continue
-        session_points = km_points(gap.get("per_km") or [])
-        if session_points:
-            n_sessions += 1
-            points.extend(session_points)
-    return points, n_sessions
-
-
-def refresh_hr_pace_baseline(user_id: int, *, db: Session) -> dict | None:
-    """Пересчитать базовую линию HR↔GAP-темп по insights steady-тренировок окна.
-
-    Хранение — UserModel.params_json['hr_pace_baseline'] (merge: initiative и
-    прочие ключи не затираются). Мало данных → ключ удаляется (нет ложной точности).
-    """
-    points, n_sessions = _collect_window_points(user_id, db=db)
-    baseline = fit_hr_pace_baseline(points, n_sessions)
-    if baseline is not None:
-        baseline["computed_at"] = datetime.now(timezone.utc).date().isoformat()
-        baseline["window_days"] = BASELINE_WINDOW_DAYS
-
-    um = db.query(UserModel).filter(UserModel.user_id == user_id).first()
-    if um is None:
-        um = UserModel(user_id=user_id, params_json={})
-        db.add(um)
-    params = dict(um.params_json or {})
-    if baseline is not None:
-        params["hr_pace_baseline"] = baseline
-    else:
-        params.pop("hr_pace_baseline", None)
-    um.params_json = params
-    db.commit()
-    return baseline

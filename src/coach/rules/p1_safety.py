@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from src.coach.config import (
     ATI_CTI_HIGH,
     HARD_TYPES,
+    HRR_POOR_RECOVERY_EXTRA_H,
     INJURY_RISK_THRESHOLDS,
     PAIN_CAUTION_LEVEL,
     PAIN_PERSIST_DAYS,
@@ -124,6 +125,19 @@ def evaluate_safety(state: AthleteState, *, now: datetime | None = None) -> Safe
         earliest_next_hard = now + timedelta(hours=left)
         reasons.append(_step("интенсив не раньше чем",
                              f"до восстановления после последней тренировки {left:.0f} ч"))
+
+    # 11. Плохое восстановление между интервалами (F3, §7 METRICS_GUIDE):
+    # пульс не падал между повторами — признак недовосстановления, следующий
+    # качественный день консервативно отодвигается
+    # (poor HRR between reps → push the next hard day further out)
+    if sig.get("poor_interval_recovery"):
+        triggered.append("poor_interval_recovery")
+        hrr_earliest = now + timedelta(hours=HRR_POOR_RECOVERY_EXTRA_H)
+        if earliest_next_hard is None or hrr_earliest > earliest_next_hard:
+            earliest_next_hard = hrr_earliest
+        reasons.append(_step("интенсив не раньше чем",
+                             "пульс плохо падал между повторами последней интервальной — "
+                             f"минимум {HRR_POOR_RECOVERY_EXTRA_H} ч до следующего качественного дня"))
 
     allowed_types: tuple[str, ...] = ()
     if forbidden:

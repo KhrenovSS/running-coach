@@ -11,6 +11,7 @@ from src.coach.config import (
     CONFIDENCE_MIN_DAYS,
     CONFIDENCE_MIN_SESSIONS,
     FATIGUE_WEIGHTS,
+    HRR_POOR_RECOVERY_LOOKBACK_DAYS,
     HRV_SD_FALLBACK_FACTOR,
     INJURY_RISK_THRESHOLDS,
     READINESS_WEIGHTS,
@@ -20,8 +21,10 @@ from src.coach.skills import distribution, fatigue, load, pain, progress, recove
 from src.coach.util import clamp_value, effective_training_type, safe_div
 from src.models import User
 from src.services.recovery_view import hrv_status, rhr_anomaly
+from src.analysis.session_metrics import FLAG_POOR_INTERVAL_RECOVERY
 from src.services.repositories import FeedbackRepository, TrainingRepository
 from src.services.repositories_coach import CoachRepository
+from src.services.repositories_insights import InsightRepository
 from src.utils.timeutils import WEEKDAYS_RU, session_local_dt, user_now
 
 # Маппинги компонент → скор 0..1 (component score maps; 1.0 = лучший для readiness)
@@ -217,6 +220,11 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
         "consecutive_hard_days": hard_days,
         "pain_level": pain_res.value,
         "pain_days": pain.consecutive_pain_days(user_id, db=db) if pain_res.value is not None else 0,
+        # F3 (§7): плохое восстановление между интервалами в недавнем разборе
+        # (poor interval recovery seen in a recent review → safety gets more conservative)
+        "poor_interval_recovery": InsightRepository.recent_flag(
+            user_id, FLAG_POOR_INTERVAL_RECOVERY, db=db,
+            days=HRR_POOR_RECOVERY_LOOKBACK_DAYS),
     }
 
     return AthleteState(

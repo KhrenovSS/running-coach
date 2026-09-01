@@ -27,6 +27,28 @@ STRIDE_SANITY_MIN_M: Final[float] = 0.5            # длина шага вне 
 STRIDE_SANITY_MAX_M: Final[float] = 1.6
 STRIDE_DEFAULT_M: Final[float] = 1.0               # fallback-шаг без калибровки → quality="rough"
 
+# Корректность усреднений (аудит 01.09.2026, F0 — BACKLOG #277–#283)
+RECORDING_GAP_MAX_SEC: Final[int] = 30       # дельта длиннее → разрыв записи/пауза: не тренировка,
+                                             # в зоны/длительность не зачисляется (recording gap)
+BASELINE_MIN_KM_LEN_M: Final[float] = 500.0  # км-точка короче → не в HR-baseline (шумный хвост)
+DEVICE_MISMATCH_PCT: Final[float] = 0.05     # расхождение пайплайна с эталоном часов выше → флаг
+                                             # качества данных (F2; при gps_unreliable не считается)
+
+# HRR — восстановление между интервалами (F3, METRICS_GUIDE §5 M2.1; Дэниелс: «полное
+# восстановление между повторами») (interval recovery / heart-rate recovery)
+HRR_MIN_RECOVERY_S: Final[int] = 75      # отдых короче — HRR60 не измерить честно
+HRR_WINDOW_S: Final[int] = 60            # окно падения ЧСС (классический HRR60)
+HRR_PEAK_WINDOW_S: Final[int] = 15       # пик = max HR последних N секунд работы...
+HRR_PEAK_LAG_S: Final[int] = 15          # ...плюс N секунд после границы: пульс пикует с лагом
+HRR_FLAG_MIN_PEAK_ZONE: Final[int] = 4   # флаг «плохое восстановление» — только по повторам
+                                         # с пиком Z4+ (после Z3-стрид падение естественно мало)
+HRR_SEARCH_TOL_S: Final[int] = 10        # допуск поиска точки HR у границы окна
+HRR_MIN_PEAK_ZONE: Final[int] = 3        # пик ниже Z3 — не «работа», граница пропускается
+HRR_MIN_REPS: Final[int] = 2             # меньше валидных отдыхов → блок недоступен
+HRR_TREND_MIN_REPS: Final[int] = 3       # минимум повторов для тренда пиков
+HRR60_LOW_BPM: Final[int] = 12           # медиана HRR60 ниже → poor_interval_recovery
+                                         # (стартово из литературы; калибруется по данным)
+
 # Период синхронизации метрик здоровья (Health sync days)
 HEALTH_SYNC_DAYS: Final[int] = 180
 

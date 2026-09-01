@@ -1,7 +1,7 @@
 # Интеграционные тесты полного пайплайна анализа
 # Integration tests for the full analysis pipeline
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -188,3 +188,92 @@ class TestGpsUnreliablePipeline:
         assert 'distance' not in gq                       # оценка не подмешана
         assert result['total_distance_km'] == pytest.approx(device_km, rel=0.01)
         assert 'gps_unreliable' not in result.get('suspect_flags', [])
+
+
+class TestAveragingFixesF0:
+    """F0 — аудит усреднений (BACKLOG #277/#280/#282): время выброшенных
+    GPS-дельт не размывает avg_pace; одиночный HR-спайк не становится
+    максимумом; cad=0 (стояние) не входит в средний каденс."""
+
+    @pytest.fixture(autouse=True)
+    def _no_weather(self, monkeypatch):
+        # офлайн: погодный API не дёргаем (offline: no weather API calls)
+        monkeypatch.setattr("src.analysis.fetch_weather", lambda *a, **k: None)
+
+    @staticmethod
+    def _tps_with_fast_gps_deltas(n_clean_before=240, n_fast=12, n_clean_after=96):
+        """Чистый бег 6:00/км (дельты 5с) с врезкой быстрых GPS-дельт 30 м/5с
+        (implied pace 2.78 < max_credible_pace=3.0). HR=140 ≥ 130 → очистка
+        точки НЕ удаляет, дистанцию выбрасывает пересборка (#277).
+        Доля мусора мала → gps_quality остаётся reliable."""
+        start = datetime(2026, 7, 1, 8, 0, 0, tzinfo=timezone.utc)
+        tps = []
+        state = {'t': start, 'dist': 0.0, 'lat': 55.75}
+
+        def add(dd):
+            state['dist'] += dd
+            tps.append({'time': state['t'], 'hr': 140, 'dist': state['dist'],
+                        'alt': 150.0, 'lat': state['lat'], 'lon': 37.62, 'cad': 170})
+            state['t'] += timedelta(seconds=5)
+            state['lat'] += 0.00001
+
+        clean_dd = 5 / 60 / 6.0 * 1000            # 13.89 м за 5с при 6:00/км
+        for _ in range(n_clean_before):
+            add(clean_dd)
+        for _ in range(n_fast):
+            add(30.0)                              # 2.78 мин/км — GPS-мусор
+        for _ in range(n_clean_after):
+            add(clean_dd)
+        return tps
+
+    def test_dropped_gps_deltas_time_excluded_from_avg_pace(self):
+        """#277: время выброшенных дельт не входит в avg_pace —
+        чистое время / чистая дистанция, а не полное время / дистанция."""
+        tps = self._tps_with_fast_gps_deltas()
+        result = process_trackpoints(tps, tps[0]['time'], max_hr=177, pace_gap=1.0)
+
+        assert result is not None
+        gq = result['gps_quality']
+        assert gq is not None and gq['unreliable'] is False   # мусора мало
+        # 12 быстрых дельт × 5с = 1.0 мин выброшенного времени
+        dropped_min = 12 * 5 / 60
+        expected = (result['duration_minutes'] - dropped_min) / result['total_distance_km']
+        naive = result['duration_minutes'] / result['total_distance_km']
+        assert result['avg_pace'] == pytest.approx(expected, abs=0.03)
+        assert result['avg_pace'] == pytest.approx(6.0, abs=0.1)  # честный темп бега
+        assert result['avg_pace'] < naive - 0.15   # старое поведение — медленнее
+
+    def test_single_hr_spike_not_session_max(self):
+        """#280: одиночный спайк 230 на 1 сэмпл не становится max_heart_rate —
+        максимум берётся из сглаженного пика (медиана 5)."""
+        tps = build_tempo_trackpoints(pace=5.0, distance_km=5.0, hr=140)
+        tps[len(tps) // 2]['hr'] = 230
+        result = process_trackpoints(tps, tps[0]['time'], max_hr=177, pace_gap=1.0)
+
+        assert result is not None
+        assert result['max_heart_rate'] < 230
+        assert result['max_heart_rate'] <= 150       # рядом с фоном 140–145
+        assert result['max_heart_rate'] == result['hr_peak_smoothed']
+
+    def test_avg_cadence_ignores_zero_samples(self):
+        """#282: cad=0 (стояние на месте) исключается из среднего каденса —
+        и в итоговом avg_cadence, и в км-сегментах (_build_segment_stats)."""
+        tps = build_tempo_trackpoints(pace=5.0, distance_km=5.0, hr=140)  # cad=175
+        for tp in tps[::3]:
+            tp['cad'] = 0
+        result = process_trackpoints(tps, tps[0]['time'], max_hr=177, pace_gap=1.0)
+
+        assert result is not None
+        assert result['avg_cadence'] == 175          # нули не размыли среднее
+        seg_cads = [s['avg_cadence'] for s in result['segments_json']
+                    if s.get('avg_cadence') is not None]
+        assert seg_cads and all(c == 175 for c in seg_cads)
+
+    def test_avg_cadence_none_when_all_zero(self):
+        """#282 edge: каденс весь нулевой → честный None, не 0."""
+        tps = build_tempo_trackpoints(pace=6.0, distance_km=2.0, hr=140)
+        for tp in tps:
+            tp['cad'] = 0
+        result = process_trackpoints(tps, tps[0]['time'], max_hr=177, pace_gap=1.0)
+        assert result is not None
+        assert result['avg_cadence'] is None

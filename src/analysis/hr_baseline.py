@@ -11,6 +11,7 @@ from src.config.constants import (
     BASELINE_HR_AT_PACE_BAND_MIN_KM,
     BASELINE_HR_PREDICT_MAX,
     BASELINE_HR_PREDICT_MIN,
+    BASELINE_MIN_KM_LEN_M,
     BASELINE_MIN_POINTS,
     BASELINE_MIN_SESSIONS,
     BASELINE_PACE_BAND_MIN_POINTS,
@@ -25,9 +26,16 @@ BASELINE_VERSION = 1
 
 
 def km_points(per_km: list[dict]) -> list[tuple[float, float]]:
-    """Км-точки (gap_pace, hr) одной тренировки; первый км исключён (разогрев/колено)."""
+    """Км-точки (gap_pace, hr) одной тренировки; первый км исключён (разогрев/колено).
+
+    Хвостовой огрызок < BASELINE_MIN_KM_LEN_M — шумная точка полным весом в OLS
+    (вклад в занижённый наклон #259) — исключается (#283); legacy-строки без
+    km_len_m считаются полным км. (Short tail rows are excluded from the baseline.)
+    """
     points = []
     for row in per_km[BASELINE_SKIP_FIRST_KM:]:
+        if (row.get("km_len_m") or 1000.0) < BASELINE_MIN_KM_LEN_M:
+            continue
         pace = row.get("gap_min_km") or row.get("pace_min_km")
         hr = row.get("avg_hr")
         if pace is not None and hr is not None:

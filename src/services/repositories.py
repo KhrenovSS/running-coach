@@ -85,8 +85,27 @@ class TrainingRepository:
             TrainingSession.begin_ts >= since,
         ).all()
 
+        # Посекундные зоны из workout_insights, если посчитаны (#281): сегментное
+        # «вся длительность в зону среднего пульса» кладёт пограничный км целиком
+        # в одну зону и маркирует recovery интервальной как hard
+        # (prefer per-second zones from computed insights over segment-avg buckets)
+        from src.models import WorkoutInsight
+        session_ids = [s.id for s in sessions]
+        insights = {}
+        if session_ids:
+            rows = db.query(WorkoutInsight).filter(
+                WorkoutInsight.session_id.in_(session_ids)).all()
+            insights = {r.session_id: r.computed_json or {} for r in rows}
+
         zone_minutes = {"z1": 0.0, "z2": 0.0, "z3": 0.0, "z4": 0.0, "z5": 0.0}
         for session in sessions:
+            tz = insights.get(session.id, {}).get("time_in_zones") or {}
+            if tz.get("available") and tz.get("minutes"):
+                for zone_key, minutes in tz["minutes"].items():
+                    if zone_key in zone_minutes:
+                        zone_minutes[zone_key] += minutes or 0.0
+                continue
+            # Fallback — сегментное приближение (нет computed_json у сессии)
             if not session.segments_json:
                 continue
             for segment in session.segments_json:

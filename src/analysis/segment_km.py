@@ -71,7 +71,7 @@ def _build_segment_stats(chunk_points: list[dict], max_hr: int) -> dict | None:
         sub_dist += p['dist_delta']
         if p['hr'] is not None:
             sub_hrs.append((p['hr'], p['time_delta_sec'] / 60))
-        if p['cad'] is not None:
+        if p['cad']:  # cad==0 — стояние, в средний каденс не входит (#282)
             sub_cads.append((p['cad'], p['time_delta_sec'] / 60))
         if p['alt'] is not None:
             sub_alts.append(p['alt'])

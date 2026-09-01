@@ -69,3 +69,39 @@ def test_gap_factor_monotonic():
     """Фактор растёт с уклоном: подъём > плоскость > лёгкий спуск."""
     assert gap_factor(0.05) > gap_factor(0.0) > gap_factor(-0.05)
     assert abs(gap_factor(0.0) - 1.0) < 1e-9
+
+
+# --- F0 #278/#283: дистанционно-взвешенные средние + km_len_m в per_km ---
+
+def _flat_series(km_paces, step_m=20.0):
+    """Ряд (times, dists, hrs, alts): ровная высота, по-км заданный темп.
+
+    km_paces — список (длина_м, темп мин/км); шаг дистанции 20 м.
+    """
+    times, dists = [0.0], [0.0]
+    for length_m, pace in km_paces:
+        dt = pace * 60 / 1000 * step_m          # секунд на шаг 20 м
+        for _ in range(int(length_m / step_m)):
+            dists.append(dists[-1] + step_m)
+            times.append(times[-1] + dt)
+    n = len(times)
+    return times, dists, [140] * n, [150.0] * n
+
+
+def test_avg_pace_distance_weighted_audit_case():
+    """#278 (кейс аудита): км 4:00 + км 6:00 равной длины → среднее 5:00.
+    Прежнее взвешивание темпа самим темпом давало Σp²/Σp = 5.2."""
+    gap = compute_gap(*_flat_series([(1000, 4.0), (1000, 6.0)]))
+    assert gap["available"] is True
+    assert abs(gap["avg_pace_min_km"] - 5.0) <= 0.05
+    assert abs(gap["gap_avg_min_km"] - 5.0) <= 0.05   # плоско → GAP == темп
+    assert [r["pace_min_km"] for r in gap["per_km"]] == [4.0, 6.0]
+
+
+def test_per_km_rows_carry_km_len_m_including_tail():
+    """#283: строки per_km несут фактическую длину; хвост 500 м — не полный км."""
+    gap = compute_gap(*_flat_series([(1000, 4.0), (1000, 6.0), (500, 6.0)]))
+    lens = [r["km_len_m"] for r in gap["per_km"]]
+    assert lens == [1000, 1000, 500]
+    # средний темп взвешен длиной строки: (4·1000 + 6·1000 + 6·500) / 2500 = 5.2
+    assert abs(gap["avg_pace_min_km"] - 5.2) <= 0.05

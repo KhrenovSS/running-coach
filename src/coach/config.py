@@ -80,6 +80,9 @@ PAIN_STOP_LEVEL = 5            # боль ≥ 5 → тренировка зап�
 PAIN_PERSIST_DAYS = 3          # боль N дней подряд → осторожный режим даже при низком уровне
 SAFETY_MAX_ZONE_DEFAULT = 5    # потолок зоны по умолчанию (нет ограничений)
 SAFETY_MAX_DURATION_CAUTION_MIN = 40  # потолок длительности в осторожном режиме, мин
+# F3 (§7 METRICS_GUIDE): плохое восстановление между интервалами → следующий интенсив позже
+HRR_POOR_RECOVERY_EXTRA_H = 48        # минимум часов до следующего качественного дня
+HRR_POOR_RECOVERY_LOOKBACK_DAYS = 4   # окно поиска флага в недавних разборах
 
 # Лестница интенсивности — порядок = порядок опасности; clamp() двигает только ВНИЗ.
 # (Intensity ladder — order equals danger order; clamp() only moves DOWN.)

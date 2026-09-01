@@ -68,7 +68,7 @@ OUTPUT_CONTRACT = """ФОРМАТ ОТВЕТА — ровно один JSON-об
   "assessment": {
     "effort_match": "ok|harder|easier|unknown",
     "causes": ["heat|cold|wind|elevation|terrain|poor_sleep|fatigue|pace_too_fast|illness|recovery_good|other"],
-    "flags": ["hr_drift_high|pain|pace_hr_mismatch|suspect_data|overreaching_sign|great_session|easy_run_too_hard|pace_unstable|quality_volume_exceeded|interval_segment_too_long|long_run_share_high|low_cadence|rpe_elevated|no_warmup|plan_intensity_exceeded|plan_volume_exceeded"],
+    "flags": ["hr_drift_high|pain|pace_hr_mismatch|suspect_data|overreaching_sign|great_session|easy_run_too_hard|pace_unstable|quality_volume_exceeded|interval_segment_too_long|long_run_share_high|low_cadence|rpe_elevated|no_warmup|plan_intensity_exceeded|plan_volume_exceeded|poor_interval_recovery"],
     "carry_forward": "короткая заметка себе на завтра или null"
   }
 }

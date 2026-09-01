@@ -4,6 +4,8 @@
 import json
 from datetime import timedelta
 
+import pytest
+
 from src.coach import orchestrator
 from src.coach.tools.registry import run_tool
 from src.domain.models.base import utcnow
@@ -80,6 +82,42 @@ def test_no_metrics_day_graceful(empty_user, db_session):
     detail = run_tool("get_workout_detail", {"session_id": s.id},
                       user_id=empty_user.id, db=db_session)
     assert detail["daily_metrics_morning"] is None
+
+
+def test_zone_minutes_from_insight_per_second_zones(empty_user, db_session):
+    """#281: при наличии computed_json.time_in_zones зоны/полосы берутся
+    посекундные, а не сегментное приближение по среднему пульсу сегмента."""
+    from src.models import WorkoutInsight
+
+    s = _rich_session(db_session, empty_user.id)
+    minutes = {"z1": 1.0, "z2": 9.0, "z3": 5.0, "z4": 2.5, "z5": 0.5}
+    db_session.add(WorkoutInsight(
+        user_id=empty_user.id, session_id=s.id, status="done",
+        computed_json={"time_in_zones": {"available": True, "minutes": minutes}}))
+    db_session.commit()
+
+    detail = run_tool("get_workout_detail", {"session_id": s.id},
+                      user_id=empty_user.id, db=db_session)
+    assert detail["zone_minutes"] == minutes
+    # band = группировка зон: easy=Z1–2, moderate=Z3, hard=Z4–5
+    assert detail["band_minutes"] == {"easy": 10.0, "moderate": 5.0, "hard": 3.0}
+    # сегменты не задваиваются и по-прежнему доезжают до LLM
+    assert len(detail["segments"]) == 3
+    json.dumps(detail)
+
+
+def test_zone_minutes_segment_fallback_without_insight(empty_user, db_session):
+    """#281: без insight — прежнее сегментное приближение (обратная
+    совместимость): 135/139 → Z2, 142 → Z3 при max_hr=177."""
+    s = _rich_session(db_session, empty_user.id)
+    detail = run_tool("get_workout_detail", {"session_id": s.id},
+                      user_id=empty_user.id, db=db_session)
+    zm = detail["zone_minutes"]
+    assert zm["z2"] == pytest.approx(11.8)     # 6.0 + 5.8
+    assert zm["z3"] == pytest.approx(6.2)
+    assert zm["z4"] == 0.0 and zm["z5"] == 0.0
+    assert detail["band_minutes"]["easy"] == pytest.approx(11.8)
+    assert detail["band_minutes"]["moderate"] == pytest.approx(6.2)
 
 
 def test_review_extras_include_workout_computed(empty_user, db_session):

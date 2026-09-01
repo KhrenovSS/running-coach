@@ -82,11 +82,30 @@ def get_workout_detail(ctx: ToolContext, args: dict) -> dict:
     band_minutes = {"easy": 0.0, "moderate": 0.0, "hard": 0.0}
     segments = []
     prev_temp = prev_code = None
+    # Зоны — посекундные из computed_json, если посчитаны (#281): сегментное
+    # приближение кладёт весь сегмент в зону его СРЕДНЕГО пульса
+    # (prefer per-second zones over segment-average buckets)
+    from src.models import WorkoutInsight
+    insight = ctx.db.query(WorkoutInsight).filter(
+        WorkoutInsight.session_id == session_id).first()
+    tz = ((insight.computed_json or {}).get("time_in_zones") or {}) if insight else {}
+    zones_exact = bool(tz.get("available") and tz.get("minutes"))
+    if zones_exact:
+        for zone_key, minutes in tz["minutes"].items():
+            if zone_key in zone_minutes:
+                zone_minutes[zone_key] += minutes or 0.0
+        # band = группировка зон: easy=Z1–2, moderate=Z3, hard=Z4–5 (как get_band)
+        band_minutes["easy"] = zone_minutes["z1"] + zone_minutes["z2"]
+        band_minutes["moderate"] = zone_minutes["z3"]
+        band_minutes["hard"] = zone_minutes["z4"] + zone_minutes["z5"]
+
     for i, seg in enumerate(session.segments_json or [], 1):
         avg_hr = seg.get("avg_hr") or 0
         dur = seg.get("duration_min", 0) or 0
-        zone_minutes[f"z{get_zone(avg_hr, max_hr)}"] += dur
-        band_minutes[get_band(avg_hr, max_hr)] += dur
+        if not zones_exact:
+            # Fallback — сегментное приближение (segment-average fallback)
+            zone_minutes[f"z{get_zone(avg_hr, max_hr)}"] += dur
+            band_minutes[get_band(avg_hr, max_hr)] += dur
         if len(segments) < MAX_SEGMENTS:
             # D4: полный сегмент — рельеф/каденс/длительность; погода дельтой
             # (full segment; weather delta-encoded — it rarely changes mid-run)

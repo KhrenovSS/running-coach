@@ -75,6 +75,7 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
     # (Cumulative distance with anomalous jump filtering)
     orig_dists = [tp['dist'] for tp in trackpoints]
     cumulative = 0.0
+    dropped_time_min = 0.0  # время выброшенных дельт — исключается из avg_pace (#277)
     for i, tp in enumerate(trackpoints):
         if orig_dists[i] is None:
             continue
@@ -90,6 +91,11 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
                 pace = t_delta / (raw_delta / 1000)
                 if pace >= max_credible_pace:
                     cumulative += raw_delta
+                else:
+                    # Дистанция выброшена как GPS-мусор → её время тоже не должно
+                    # попадать в темп, иначе avg_pace медленнее реальности (кейс №37)
+                    # (dropped distance must drop its time too, or pace skews slow)
+                    dropped_time_min += t_delta
             elif raw_delta > 0:
                 cumulative += raw_delta
         tp['dist'] = cumulative
@@ -162,6 +168,12 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
         oscillation_count = 0
         hr_correlated = False
 
+    # Время для темпа: выброшенные GPS-дельты исключены (#277, кейс №37 7.61→8.06);
+    # при gps_unreliable оценка по шагам покрывает всю тренировку — полное время
+    # (pace time excludes dropped-GPS deltas; the cadence estimate spans full duration)
+    pace_time_min = (total_duration_min if gps_unreliable
+                     else max(total_duration_min - dropped_time_min, 0.0))
+
     t_type, segments_count = classify_training(
         var_count, time_in_zone, total_duration_min, max_hr,
         z4_plus_segments, avg_hr,
@@ -169,7 +181,7 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
         hr_correlated=hr_correlated,
         min_oscillations=interval_min_oscillations,
         segments_len=len(segments),
-        avg_pace=(round(total_duration_min / total_dist_km, 2)
+        avg_pace=(round(pace_time_min / total_dist_km, 2)
                   if total_dist_km > 0 and not gps_unreliable else None),
     )
 
@@ -215,7 +227,8 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
                 seg['weather_code'] = get_weather_code_at_time(weather, seg_dt)
                 cumul_min += seg['duration_min']
 
-    all_cads = [tp['cad'] for tp in trackpoints if tp['cad'] is not None]
+    # cad==0 — стояние: в средний каденс не входит (#282, единый контракт с cadence_block)
+    all_cads = [tp['cad'] for tp in trackpoints if tp['cad']]
     avg_cadence = round(sum(all_cads) / len(all_cads)) if all_cads else None
 
     # GPS недостоверен → дистанция заменяется оценкой по шагам (решение владельца 01.09.2026),
@@ -228,14 +241,17 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
         else:
             gps_quality['distance'] = {'source': 'gps', 'quality': 'unknown'}
 
+    # Пик по скользящей медиане: и для адаптивного max_hr, и для UI (#280 —
+    # одиночный спайк датчика не должен становиться «максимумом» тренировки)
+    # (rolling-median peak feeds both adaptive max HR and the UI max)
+    hr_peak = smoothed_hr_peak(hr_values)
+
     result = {
         'begin_ts': begin_ts,
         'total_distance_km': total_dist_km,
         'avg_heart_rate': avg_hr,
-        'max_heart_rate': max_hr_val,
-        # Пик по скользящей медиане — для адаптивного max_hr (spike-фильтр)
-        # (Rolling-median peak — feeds adaptive max HR, filters sensor spikes)
-        'hr_peak_smoothed': smoothed_hr_peak(hr_values),
+        'max_heart_rate': hr_peak or max_hr_val,
+        'hr_peak_smoothed': hr_peak,
         'training_type': t_type,
         'segments_count': segments_count,
         'duration_minutes': round(total_duration_min, 1),
@@ -248,7 +264,7 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
         'avg_cadence': avg_cadence,
         'timezone': tz_name,
         'trackpoints_json': serialize_trackpoints(trackpoints),
-        'avg_pace': round(total_duration_min / total_dist_km, 2) if total_dist_km > 0 else None,
+        'avg_pace': round(pace_time_min / total_dist_km, 2) if total_dist_km > 0 else None,
         'gps_quality': gps_quality,
     }
 

@@ -56,6 +56,8 @@ class TrainingSession(Base):
     file_sha256 = Column(String(64), nullable=True)  # SHA256 исходного файла — ключ дедупа ручных загрузок
     raw_file_path = Column(String(255), nullable=True)  # путь к исходному FIT/TCX (raw file path — BACKLOG #229)
     gps_quality = Column(JSON, nullable=True)  # квалиметрия GPS + оценка дистанции по шагам; NULL у legacy/коротких (GPS quality block; NULL for legacy/short tracks)
+    laps_json = Column(JSON, nullable=True)  # lap-сообщения часов: авто-км + ручные круги — разметка структуры (watch laps; F1 #285)
+    device_summary = Column(JSON, nullable=True)  # эталоны session-сообщения часов + паузы записи (watch summary + pauses; F1 #285)
 
     user = relationship("User", back_populates="training_sessions")
 

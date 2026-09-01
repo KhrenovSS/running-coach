@@ -13,6 +13,7 @@ from src.analysis.segment_km import (
 )
 from src.utils.logger import get_logger
 from src.config import settings
+from src.config.constants import RECORDING_GAP_MAX_SEC
 
 logger = get_logger("analysis.segment")
 
@@ -70,12 +71,31 @@ def build_time_in_zones(trackpoints: list[dict], max_hr: int) -> tuple[dict, lis
     z4_seg_hrs = []
     total_duration_min = 0.0
 
+    def _flush_z4():
+        # Закрыть текущий Z4+-отрезок (close the running Z4+ segment)
+        nonlocal in_z4, z4_seg_hrs
+        if in_z4:
+            in_z4 = False
+            seg_dur_z4 = sum(d for _, d in z4_seg_hrs)
+            seg_avg_z4 = round(sum(h * d for h, d in z4_seg_hrs) / seg_dur_z4) if seg_dur_z4 else 0
+            if seg_dur_z4 >= 0.5:
+                z4_plus_segments.append({'duration': seg_dur_z4, 'avg_hr': seg_avg_z4})
+            z4_seg_hrs = []
+
     prev = trackpoints[0]
     for tp in trackpoints[1:]:
         if not (prev['time'] and tp['time']):
             prev = tp
             continue
         delta = (tp['time'] - prev['time']).total_seconds() / 60
+        if delta * 60 > RECORDING_GAP_MAX_SEC:
+            # Разрыв записи (пауза часов/туннель) — не тренировка: не в зону,
+            # не в длительность; Z4-отрезок разрывается (#279 — иначе пауза
+            # целиком уходила в зону последнего пульса)
+            # (recording gap is not training: skip zone/duration, break Z4 segment)
+            _flush_z4()
+            prev = tp
+            continue
         total_duration_min += delta
         if prev['hr'] is not None:
             zone = get_zone(prev['hr'], max_hr)
@@ -87,20 +107,11 @@ def build_time_in_zones(trackpoints: list[dict], max_hr: int) -> tuple[dict, lis
                 else:
                     z4_seg_hrs.append((prev['hr'], delta))
             else:
-                if in_z4:
-                    in_z4 = False
-                    seg_dur_z4 = sum(d for _, d in z4_seg_hrs)
-                    seg_avg_z4 = round(sum(h * d for h, d in z4_seg_hrs) / seg_dur_z4) if seg_dur_z4 else 0
-                    if seg_dur_z4 >= 0.5:
-                        z4_plus_segments.append({'duration': seg_dur_z4, 'avg_hr': seg_avg_z4})
-                    z4_seg_hrs = []
+                _flush_z4()
         prev = tp
 
-    if in_z4 and trackpoints[-1]['time']:
-        seg_dur_z4 = sum(d for _, d in z4_seg_hrs)
-        seg_avg_z4 = round(sum(h * d for h, d in z4_seg_hrs) / seg_dur_z4) if seg_dur_z4 else 0
-        if seg_dur_z4 >= 0.5:
-            z4_plus_segments.append({'duration': seg_dur_z4, 'avg_hr': seg_avg_z4})
+    if trackpoints[-1]['time']:
+        _flush_z4()
 
     return time_in_zone, z4_plus_segments, total_duration_min
 

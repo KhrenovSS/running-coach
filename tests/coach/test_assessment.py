@@ -163,3 +163,13 @@ def test_merged_flags_maps_gps_unreliable_to_suspect_data():
     merged = orchestrator._merged_flags(["pain"], {"flags": ["gps_unreliable"]})
     assert merged[0] == "suspect_data"
     assert merged == ["suspect_data", "pain"]
+
+
+def test_merged_flags_passes_poor_interval_recovery():
+    """F3: poor_interval_recovery из computed.flags проходит в assessment
+    без маппинга (значение есть в enum FlagValue), детерминированный — первым."""
+    merged = orchestrator._merged_flags([], {"flags": ["poor_interval_recovery"]})
+    assert merged == ["poor_interval_recovery"]
+    merged = orchestrator._merged_flags(
+        ["pain"], {"flags": ["poor_interval_recovery"]})
+    assert merged == ["poor_interval_recovery", "pain"]

@@ -46,6 +46,8 @@ class AnalysisResult(TypedDict, total=False):
     suspect_flags: list[str] | None
     avg_pace: float | None
     gps_quality: dict | None
+    laps_json: list[dict] | None      # F1: лапы часов (добавляет parse_fit, не пайплайн)
+    device_summary: dict | None       # F1: эталоны session-сообщения + паузы записи
 
 _tf = TimezoneFinder()
 

@@ -10,26 +10,28 @@ from src.utils.logger import get_logger
 logger = get_logger("analysis.reanalyze")
 
 
-def _trackpoints_from_raw(session: TrainingSession) -> list[dict] | None:
-    """Извлечь трекпоинты из исходного FIT/TCX, если сырьё сохранено (BACKLOG #229).
-    (Extract trackpoints from the stored raw file if present.)
+def _activity_from_raw(session: TrainingSession) -> dict | None:
+    """Извлечь активность из исходного FIT/TCX, если сырьё сохранено (BACKLOG #229).
+    (Extract the activity from the stored raw file if present.)
     Сырьё содержит ВСЕ точки до GPS-очистки — пересчёт получает выгоду от
     улучшений алгоритма очистки, в отличие от кэша trackpoints_json.
+    FIT дополнительно отдаёт лапы/эталоны часов (F1, #285); TCX — только точки.
     """
     raw = resolve_raw_file(session.raw_file_path)
     if raw is None:
         return None
     try:
         if raw.suffix.lower() == '.fit':
-            from src.parsers.fit_parser import extract_fit_trackpoints
+            from src.parsers.fit_parser import extract_fit_activity
             workaround = session.source_brand == 'coros'  # каденс-фикс только для Coros
-            trackpoints, _calories = extract_fit_trackpoints(str(raw), coros_cadence_workaround=workaround)
+            activity = extract_fit_activity(str(raw), coros_cadence_workaround=workaround)
         elif raw.suffix.lower() == '.tcx':
             from src.parsers.tcx_parser import extract_tcx_trackpoints
             trackpoints, _start = extract_tcx_trackpoints(str(raw))
+            activity = {'trackpoints': trackpoints, 'laps': [], 'device_summary': {}}
         else:
             return None
-        return trackpoints or None
+        return activity if activity.get('trackpoints') else None
     except Exception:
         logger.warning("Reanalyze: ошибка чтения сырья %s — fallback на trackpoints_json (raw read failed)",
                        session.raw_file_path, exc_info=True)
@@ -65,9 +67,11 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
 
     # Сначала сырьё (полные точки до очистки), затем кэш trackpoints_json (legacy)
     # (Prefer raw file — full pre-cleaning points; fall back to the trackpoints_json cache)
-    trackpoints = _trackpoints_from_raw(session)
-    from_raw = trackpoints is not None
-    if not from_raw:
+    activity = _activity_from_raw(session)
+    from_raw = activity is not None
+    if from_raw:
+        trackpoints = activity['trackpoints']
+    else:
         if not session.trackpoints_json:
             logger.warning("Reanalyze: нет ни сырья, ни трекпоинтов для %d (No raw file nor trackpoints for %d)",
                            session_id, session_id)
@@ -126,6 +130,10 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
         session.suspect_flags = result.get('suspect_flags') or []
         session.cleaning_log = result.get('cleaning_log') or []
         session.gps_quality = result.get('gps_quality')
+        # Разметка часов (F1, #285): лапы и эталоны session — только от сырья
+        # (watch laps and summary — raw-file only, the cache does not carry them)
+        session.laps_json = activity.get('laps') or None
+        session.device_summary = activity.get('device_summary') or None
     session.segments_count = result['segments_count']
     session.segments_json = result['segments_json']
     session.hr_pace_series = result['hr_pace_series']

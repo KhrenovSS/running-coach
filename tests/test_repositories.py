@@ -51,6 +51,62 @@ def test_zone_distribution_sums_segment_minutes(db_session):
     assert round(sum(zones.values()), 1) == 30.0  # 20 + 10
 
 
+def test_zone_distribution_prefers_insight_minutes(db_session):
+    """#281: при наличии WorkoutInsight.computed_json.time_in_zones зоны берутся
+    посекундные, а не сегментное «вся длительность в зону среднего пульса»."""
+    from src.models import WorkoutInsight
+
+    user = _new_user(db_session)
+    # Сегментно 30 мин легли бы целиком в z2 (avg_hr 130 при max_hr 177)
+    s = build_training_session(
+        db_session, user.id,
+        segments_json=[{"avg_hr": 130, "duration_min": 30.0}],
+    )
+    minutes = {"z1": 5.0, "z2": 15.0, "z3": 6.0, "z4": 3.0, "z5": 1.0}
+    db_session.add(WorkoutInsight(
+        user_id=user.id, session_id=s.id, status="done",
+        computed_json={"time_in_zones": {"available": True, "minutes": minutes}}))
+    db_session.commit()
+
+    zones = TrainingRepository.zone_distribution(user.id, days=28, db=db_session)
+    assert zones == minutes                       # не {"z2": 30.0, ...}
+
+
+def test_zone_distribution_fallback_and_mix(db_session):
+    """#281: без insight (или insight без зон) — сегментный fallback;
+    посекундные и сегментные минуты суммируются по своим сессиям."""
+    from src.models import WorkoutInsight
+
+    user = _new_user(db_session)
+    # 1) сессия без insight → сегментное приближение: 130 → z2, 20 мин
+    build_training_session(
+        db_session, user.id,
+        segments_json=[{"avg_hr": 130, "duration_min": 20.0}])
+    # 2) сессия с insight, но time_in_zones недоступен → тоже сегментное: 165 → z5
+    s2 = build_training_session(
+        db_session, user.id,
+        segments_json=[{"avg_hr": 165, "duration_min": 10.0}])
+    db_session.add(WorkoutInsight(
+        user_id=user.id, session_id=s2.id, status="done",
+        computed_json={"time_in_zones": {"available": False, "reason": "no_hr"}}))
+    # 3) сессия с посекундными зонами
+    s3 = build_training_session(
+        db_session, user.id,
+        segments_json=[{"avg_hr": 150, "duration_min": 40.0}])  # сегментно всё z3
+    db_session.add(WorkoutInsight(
+        user_id=user.id, session_id=s3.id, status="done",
+        computed_json={"time_in_zones": {
+            "available": True,
+            "minutes": {"z1": 0.0, "z2": 25.0, "z3": 10.0, "z4": 5.0, "z5": 0.0}}}))
+    db_session.commit()
+
+    zones = TrainingRepository.zone_distribution(user.id, days=28, db=db_session)
+    assert zones["z2"] == 45.0   # 20 (fallback) + 25 (посекундные)
+    assert zones["z3"] == 10.0   # НЕ 50: сессия 3 не легла целиком в z3
+    assert zones["z4"] == 5.0
+    assert zones["z5"] == 10.0   # fallback сессии 2
+
+
 def test_training_type_distribution(db_session):
     user = _new_user(db_session)
     build_training_session(db_session, user.id, training_type="tempo")

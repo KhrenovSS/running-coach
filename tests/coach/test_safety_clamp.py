@@ -2,6 +2,7 @@
 import pytest
 
 from src.coach.config import (
+    HRR_POOR_RECOVERY_EXTRA_H,
     INJURY_RISK_THRESHOLDS,
     PAIN_CAUTION_LEVEL,
     PAIN_STOP_LEVEL,
@@ -334,3 +335,50 @@ def test_local_now_anchors_when_to_local_date():
     p2, _ = clamp(replace(AGGRESSIVE, for_days_ahead=1), verdict, state,
                   now=now_local)
     assert p2.when == now_local.date() + timedelta(days=1)
+
+
+# --- Правило 11 (F3): плохое восстановление между интервалами -------------------
+
+def test_poor_interval_recovery_delays_next_hard():
+    """Сигнал poor_interval_recovery → интенсив не раньше now+48ч, интервалы
+    сегодня урезаются (clamp), сам бег не запрещён."""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+    state = _state(poor_interval_recovery=True)
+    verdict = evaluate_safety(state, now=now)
+    assert "poor_interval_recovery" in verdict.triggered
+    assert verdict.earliest_next_hard == \
+        now + timedelta(hours=HRR_POOR_RECOVERY_EXTRA_H)
+    assert verdict.allow_training is True
+    p, clamped = clamp(AGGRESSIVE, verdict, state)
+    assert clamped is True
+    assert p.workout_type != "interval"
+
+
+def test_poor_interval_recovery_takes_max_with_recovery_hours():
+    """Совместно с часами восстановления действует МАКСИМУМ порогов."""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+    # часы восстановления дольше 48ч → они и определяют границу
+    state = _state(poor_interval_recovery=True)
+    state.recovery_hours_left = HRR_POOR_RECOVERY_EXTRA_H + 24.0
+    verdict = evaluate_safety(state, now=now)
+    assert {"recovery_hours", "poor_interval_recovery"} <= set(verdict.triggered)
+    assert verdict.earliest_next_hard == \
+        now + timedelta(hours=HRR_POOR_RECOVERY_EXTRA_H + 24)
+    # часы короче 48ч → границу отодвигает правило HRR
+    state2 = _state(poor_interval_recovery=True)
+    state2.recovery_hours_left = 12.0
+    verdict2 = evaluate_safety(state2, now=now)
+    assert verdict2.earliest_next_hard == \
+        now + timedelta(hours=HRR_POOR_RECOVERY_EXTRA_H)
+
+
+def test_poor_interval_recovery_absent_rule_silent():
+    """Сигнал False/отсутствует → правило молчит, границы нет."""
+    for signals in ({"poor_interval_recovery": False}, {}):
+        verdict = evaluate_safety(_state(**signals))
+        assert "poor_interval_recovery" not in verdict.triggered
+        assert verdict.earliest_next_hard is None

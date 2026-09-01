@@ -56,6 +56,26 @@ def test_full_cycle_computed_json_valid(db_session):
     assert row.schema_version == INSIGHTS_SCHEMA_VERSION
 
 
+def test_gap_per_km_rows_carry_km_len_m(db_session):
+    """F0 #278/#283 (schema v5): строки per_km несут фактическую длину строки —
+    полные км ≈ 1000 м, хвост короче; сводный темп взвешен дистанцией."""
+    assert INSIGHTS_SCHEMA_VERSION >= 5   # анти-даунгрейд: v5 = km_len_m в per_km
+    user = _user(db_session)
+    s = _session_with_track(db_session, user.id, duration_min=45.0, base_pace=6.0)
+    computed = upsert_workout_insights(user.id, s.id, db=db_session)
+    gap = computed["gap"]
+    assert gap["available"] is True
+    rows = gap["per_km"]
+    assert all("km_len_m" in r for r in rows)
+    assert all(950 <= r["km_len_m"] <= 1050 for r in rows[:-1])  # полные км
+    # 45' по 6:00 → 7.5 км: хвостовая строка ~500 м, не полный км
+    assert rows[-1]["km_len_m"] < 600
+    # взвешенное дистанцией среднее = Σ(pace·len)/Σlen
+    expected = (sum(r["pace_min_km"] * r["km_len_m"] for r in rows)
+                / sum(r["km_len_m"] for r in rows))
+    assert abs(gap["avg_pace_min_km"] - expected) <= 0.01
+
+
 def test_legacy_session_without_trackpoints(db_session):
     """Legacy-сессия без трекпоинтов → минимальный dict, без исключений."""
     user = _user(db_session)
@@ -292,3 +312,71 @@ def test_gps_reliable_does_not_gate(db_session):
     assert computed["gap"]["available"] is True
     assert computed["pace_stability"]["available"] is True
     assert "gps_unreliable" not in computed["flags"]
+
+
+def test_interval_recovery_from_laps_poor_hrr_flags(db_session):
+    """F3 (schema v6): интервальная со структурными лапами и слабым падением HR →
+    interval_recovery по лапам, флаг poor_interval_recovery в computed.flags;
+    строка сохраняется через upsert (полный БД-путь, max_hr пользователя 177)."""
+    from tests.helpers_intervals import (build_hrr_trackpoints, build_laps,
+                                         interval_workout)
+
+    assert INSIGHTS_SCHEMA_VERSION >= 6   # анти-даунгрейд: v6 = interval_recovery
+    user = _user(db_session)
+    # rest_end=135: хвост отдыха уходит в Z2 при max_hr=177 — граница
+    # отдых→работа честно пропускается гейтом зоны
+    segs, meta = interval_workout(drop60=6, rest_end=135)
+    s = build_training_session(
+        db_session, user.id, training_type='interval',
+        total_distance_km=4.0, duration_minutes=22.0,
+        trackpoints_json=build_hrr_trackpoints(segs),
+        laps_json=build_laps(meta))
+    computed = upsert_workout_insights(user.id, s.id, db=db_session)
+    ir = computed["interval_recovery"]
+    assert ir["available"] is True
+    assert ir["source"] == "laps"
+    assert ir["reps"] == 4
+    assert ir["flag"] is True
+    assert "poor_interval_recovery" in computed["flags"]
+    json.dumps(computed)
+    row = InsightRepository.for_session(user.id, s.id, db=db_session)
+    assert row.computed_json["interval_recovery"]["flag"] is True
+
+
+def test_interval_recovery_laps_survive_gps_unreliable(db_session):
+    """gps_unreliable гейтит pace-блоки, но HRR по лапам (время+пульс) считается;
+    fallback-осцилляции при этом отключены (dists не передаются)."""
+    from src.services.workout_insights import compute_workout_metrics
+    from tests.helpers_intervals import (build_hrr_trackpoints, build_laps,
+                                         interval_workout)
+
+    user = _user(db_session)
+    segs, meta = interval_workout(drop60=25)   # нормальное восстановление
+    s = build_training_session(
+        db_session, user.id, training_type='interval',
+        total_distance_km=4.0, duration_minutes=22.0,
+        trackpoints_json=build_hrr_trackpoints(segs),
+        laps_json=build_laps(meta),
+        gps_quality={"unreliable": True,
+                     "distance": {"quality": "estimate", "estimated_km": 4.0}})
+    computed = compute_workout_metrics(s, max_hr=180)
+    assert computed["gap"] == {"available": False, "reason": "gps_unreliable"}
+    ir = computed["interval_recovery"]
+    assert ir["available"] is True
+    assert ir["source"] == "laps"
+    assert ir["flag"] is False
+    assert "gps_unreliable" in computed["flags"]
+    assert "poor_interval_recovery" not in computed["flags"]
+
+
+def test_baseline_and_data_check_reexports_alive():
+    """Рефактор F3: baseline вынесен в insights_baseline, device/lap_check —
+    в analysis/data_checks; старые импорты из workout_insights живы (реэкспорт)."""
+    from src.analysis import data_checks
+    from src.services import insights_baseline, workout_insights
+
+    for name in ("ensure_baseline", "expected_hr_at_pace",
+                 "expected_pace_at_hr", "refresh_hr_pace_baseline"):
+        assert getattr(workout_insights, name) is getattr(insights_baseline, name)
+    assert workout_insights.device_check is data_checks.device_check
+    assert workout_insights.lap_check is data_checks.lap_check

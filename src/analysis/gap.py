@@ -130,6 +130,9 @@ def compute_gap(times_sec: list[float], dists: list[float],
             seg_hrs = [h for h in hrs[km_start_idx:i + 1] if h is not None]
             per_km.append({
                 "km": km_n,
+                # фактическая длина строки: хвост 200–1000 м — не полный км (#283)
+                # (actual row length: the tail row is shorter than a full km)
+                "km_len_m": round(seg_dist),
                 "grade_pct": round(grade * 100, 1),
                 "pace_min_km": round(pace, 2),
                 "gap_min_km": round(pace / gap_factor(grade), 2),
@@ -140,9 +143,10 @@ def compute_gap(times_sec: list[float], dists: list[float],
 
     if not per_km:
         return {"available": False}
-    # Средний GAP/темп — взвешены временем километра: км ≈ равные, вес = pace·1км
-    # (time-weighted averages; km segments are ~equal so weight = pace)
-    weights = [r["pace_min_km"] for r in per_km]
+    # Средний темп/GAP — взвешены ДИСТАНЦИЕЙ строки: Σ(pace·d)/Σd = общее время/дистанция.
+    # Прежнее взвешивание темпа самим темпом давало Σp²/Σp — смещение вверх (#278:
+    # км 4:00+6:00 → 5.2 вместо 5:00). (distance-weighted mean = total time / total distance)
+    weights = [r["km_len_m"] for r in per_km]
     gap_avg = sum(r["gap_min_km"] * w for r, w in zip(per_km, weights)) / sum(weights)
     pace_avg = sum(r["pace_min_km"] * w for r, w in zip(per_km, weights)) / sum(weights)
     gain_per_km = gain / total_km if total_km > 0 else 0.0

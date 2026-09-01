@@ -76,6 +76,21 @@ def test_km_points_skip_first_km():
     assert len(points) == 2
 
 
+def test_km_points_excludes_short_tail_rows():
+    """#283: хвостовой огрызок km_len_m < 500 м — шумная точка полным весом
+    в OLS — исключается; legacy-строки без km_len_m считаются полным км."""
+    per_km = [
+        {"km": 1, "km_len_m": 1000, "gap_min_km": 7.0, "avg_hr": 130},  # первый — skip
+        {"km": 2, "km_len_m": 1000, "gap_min_km": 6.0, "avg_hr": 145},
+        {"km": 3, "km_len_m": 250, "gap_min_km": 4.5, "avg_hr": 160},   # хвост → вне baseline
+        {"km": 4, "gap_min_km": 6.2, "avg_hr": 148},                    # legacy → полный км
+        {"km": 5, "km_len_m": 500, "gap_min_km": 6.1, "avg_hr": 147},   # граница → включена
+    ]
+    points = km_points(per_km)
+    assert (4.5, 160.0) not in points
+    assert points == [(6.0, 145.0), (6.2, 148.0), (6.1, 147.0)]
+
+
 def test_pace_at_hr_band_median():
     """Медиана темпа км-точек с HR в полосе [потолок−band, потолок].
 

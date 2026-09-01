@@ -1,5 +1,8 @@
 # Тесты сегментации тренировок (Segmentation tests)
 from datetime import datetime, timedelta, timezone
+
+import pytest
+
 from src.analysis.segment import (
     segment_by_pace, build_time_in_zones,
     _adaptive_min_diff, _find_change_points,
@@ -172,7 +175,7 @@ class TestBuildTimeInZones:
                 'time': t, 'hr': hr_val, 'dist': 100.0, 'alt': 150.0,
                 'lat': 55.75, 'lon': 37.62, 'cad': 170,
             })
-            t += timedelta(minutes=1)
+            t += timedelta(seconds=10)  # реалистичный шаг записи (< RECORDING_GAP_MAX_SEC)
 
         zones, z4_segs, total_min = build_time_in_zones(tps, max_hr=177)
         assert total_min > 0
@@ -190,7 +193,7 @@ class TestBuildTimeInZones:
                 'time': t, 'hr': 160, 'dist': 100.0, 'alt': 150.0,
                 'lat': 55.75, 'lon': 37.62, 'cad': 170,
             })
-            t += timedelta(minutes=1)
+            t += timedelta(seconds=10)  # реалистичный шаг записи (< RECORDING_GAP_MAX_SEC)
 
         zones, z4_segs, total_min = build_time_in_zones(tps, max_hr=177)
         assert len(z4_segs) >= 1
@@ -206,7 +209,7 @@ class TestBuildTimeInZones:
                 'time': t, 'hr': None, 'dist': 100.0, 'alt': 150.0,
                 'lat': 55.75, 'lon': 37.62, 'cad': 170,
             })
-            t += timedelta(minutes=1)
+            t += timedelta(seconds=10)  # реалистичный шаг записи (< RECORDING_GAP_MAX_SEC)
         zones, z4_segs, total_min = build_time_in_zones(tps, max_hr=177)
         assert sum(zones.values()) == 0
 
@@ -220,8 +223,56 @@ class TestBuildTimeInZones:
                 'time': t, 'hr': 165, 'dist': 100.0, 'alt': 150.0,
                 'lat': 55.75, 'lon': 37.62, 'cad': 170,
             })
-            t += timedelta(minutes=1)
+            t += timedelta(seconds=10)  # реалистичный шаг записи (< RECORDING_GAP_MAX_SEC)
         zones, z4_segs, total_min = build_time_in_zones(tps, max_hr=177)
+        assert len(z4_segs) == 1
+
+    # --- F0 #279: разрыв записи (пауза часов) — не тренировка ---
+
+    @staticmethod
+    def _z4_blocks_with_gap(gap_sec: float, block_points: int = 19, hr: int = 160):
+        """Два Z4-блока (~3 мин по 10с/точка, hr=160 → Z4 при max_hr=177)
+        с паузой gap_sec между ними."""
+        start = datetime(2026, 7, 1, 8, 0, 0, tzinfo=timezone.utc)
+        tps = []
+        t = start
+        for _ in range(block_points):
+            tps.append({'time': t, 'hr': hr, 'dist': 100.0, 'alt': 150.0,
+                        'lat': 55.75, 'lon': 37.62, 'cad': 170})
+            t += timedelta(seconds=10)
+        t += timedelta(seconds=gap_sec - 10)  # дельта через разрыв = gap_sec
+        for _ in range(block_points):
+            tps.append({'time': t, 'hr': hr, 'dist': 200.0, 'alt': 150.0,
+                        'lat': 55.76, 'lon': 37.63, 'cad': 170})
+            t += timedelta(seconds=10)
+        return tps
+
+    def test_recording_gap_excluded_from_duration_and_zones(self):
+        """5-минутный разрыв записи: не в total_duration_min и не в зону
+        последнего пульса (раньше пауза целиком уходила в Z4)."""
+        tps = self._z4_blocks_with_gap(gap_sec=300)
+        zones, z4_segs, total_min = build_time_in_zones(tps, max_hr=177)
+        # 2 блока × 18 дельт × 10с = 6.0 мин; разрыв (5 мин) не зачислен
+        assert total_min == pytest.approx(6.0, abs=0.2)
+        assert zones[4] == pytest.approx(6.0, abs=0.2)
+        assert sum(zones.values()) == pytest.approx(total_min, abs=0.01)
+
+    def test_recording_gap_breaks_z4_segment(self):
+        """Z4-отрезок с разрывом посередине → ДВА отрезка, не один склеенный."""
+        tps = self._z4_blocks_with_gap(gap_sec=300)
+        _, z4_segs, _ = build_time_in_zones(tps, max_hr=177)
+        assert len(z4_segs) == 2
+        for seg in z4_segs:
+            assert seg['duration'] == pytest.approx(3.0, abs=0.2)
+            assert seg['avg_hr'] == 160
+
+    def test_delta_at_gap_threshold_still_counted(self):
+        """Дельта ровно RECORDING_GAP_MAX_SEC — ещё запись, не разрыв (граница)."""
+        from src.config.constants import RECORDING_GAP_MAX_SEC
+        tps = self._z4_blocks_with_gap(gap_sec=RECORDING_GAP_MAX_SEC)
+        zones, z4_segs, total_min = build_time_in_zones(tps, max_hr=177)
+        # 36 дельт × 10с + 30с граничная = 6.5 мин, отрезок один
+        assert total_min == pytest.approx(6.0 + RECORDING_GAP_MAX_SEC / 60, abs=0.2)
         assert len(z4_segs) == 1
 
 
