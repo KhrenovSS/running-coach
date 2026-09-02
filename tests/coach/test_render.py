@@ -326,3 +326,33 @@ def test_render_gps_warning_none_when_reliable():
 
     assert render_gps_warning(None) is None
     assert render_gps_warning({"unreliable": False}) is None
+
+
+def test_render_week_plan_facts_mode_and_backward_compat():
+    """facts= → прошедшие дни как факт/пропуск, будущее — план; без facts всё как раньше."""
+    from datetime import date
+
+    from src.coach.render import render_week_plan
+
+    state = _state()
+    verdict = evaluate_safety(state)
+    past, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2, duration_min=40),
+                    verdict, state)
+    missed, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2, duration_min=30),
+                      verdict, state)
+    future, _ = clamp(WorkoutProposal(workout_type="long", target_zone=2, duration_min=70),
+                      verdict, state)
+    past.when, missed.when, future.when = date(2026, 8, 31), date(2026, 9, 1), date(2026, 9, 6)
+    targets = {"week_start": "2026-08-31"}
+    facts = {date(2026, 8, 31): {"duration_min": 41.0, "distance_km": 5.9, "avg_hr": 139},
+             date(2026, 9, 1): None}
+
+    text = render_week_plan([past, missed, future], targets, max_hr=177,
+                            today=date(2026, 9, 2), facts=facts)
+    assert "✓ по 31.08 — 🟢 Лёгкий бег · факт 41 мин · 5.9 км · ср. пульс 139" in text
+    assert "✗ вт 01.09 — 🟢 Лёгкий бег · 30 мин · пропущен" in text
+    assert "во 06.09 — 🟦 Длительный бег · пульс до" in text
+    assert "✓ факт · ✗ пропущен" in text
+
+    plain = render_week_plan([past, missed, future], targets, max_hr=177)
+    assert "✓" not in plain and "✗" not in plain and "пульс до" in plain

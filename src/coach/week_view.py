@@ -1,10 +1,12 @@
 # Карточка СОХРАНЁННОГО плана недели (stored week plan view) — инцидент 02.09.2026
 #
-# Read-only: строки recommendations текущей локальной недели (пн–вс), последняя на
-# дату побеждает (как planned_workouts в turn_context). Ничего не пересчитываем и не
-# re-clamp'им — показываем план записи; числа уже прошли safety при сохранении.
+# Read-only: строки recommendations текущей локальной недели (пн–вс), последняя активная
+# на дату побеждает (как planned_workouts в turn_context); superseded невидимы. Ничего не
+# пересчитываем и не re-clamp'им — показываем план записи; числа уже прошли safety при
+# сохранении. Прошедшие дни — ФАКТ из связанной тренировки (linked_session_id ставит разбор),
+# а не «план с сегодняшними зонами» (потолок пульса дрейфует со сменой якоря зон, F4).
 # Точки входа: команда /week, флаг show_week_plan в ходе LLM, weekly_plan в чате.
-# (Read-only view of the persisted weekly plan; no LLM, no writes, no re-clamp.)
+# (Read-only view of the persisted weekly plan; past days rendered as facts.)
 
 from __future__ import annotations
 
@@ -18,11 +20,23 @@ from src.coach.prescriber import user_max_hr
 from src.coach.render import render_week_plan
 from src.coach.safety import rehydrate
 from src.config.constants import RECOMMENDATION_STATUS_SUPERSEDED
-from src.models import Recommendation, User, UserModel
+from src.models import Recommendation, TrainingSession, User, UserModel
 from src.services.repositories import latest_lthr
 from src.utils.timeutils import user_now
 
 NO_PLAN_TEXT = "На эту неделю плана нет — составить: /plan"
+
+
+def _active_rows(user_id: int, *, db: Session,
+                 week_start: date) -> dict[date, Recommendation]:
+    """Последняя активная строка recommendations на каждую дату недели пн–вс."""
+    rows = db.query(Recommendation).filter(
+        Recommendation.user_id == user_id,
+        Recommendation.for_date >= week_start,
+        Recommendation.for_date <= week_start + timedelta(days=6),
+        Recommendation.status != RECOMMENDATION_STATUS_SUPERSEDED,
+    ).order_by(Recommendation.id.asc()).all()
+    return {r.for_date: r for r in rows if r.for_date is not None}
 
 
 def stored_week_prescriptions(user_id: int, *, db: Session,
@@ -31,16 +45,30 @@ def stored_week_prescriptions(user_id: int, *, db: Session,
 
     (Latest recommendation row per date of the current local week.)
     """
-    week_start = _monday_of(today)
-    rows = db.query(Recommendation).filter(
-        Recommendation.user_id == user_id,
-        Recommendation.for_date >= week_start,
-        Recommendation.for_date <= week_start + timedelta(days=6),
-        Recommendation.status != RECOMMENDATION_STATUS_SUPERSEDED,
-    ).order_by(Recommendation.id.asc()).all()
-    latest_by_date = {r.for_date: r for r in rows if r.for_date is not None}
+    rows = _active_rows(user_id, db=db, week_start=_monday_of(today))
     # Конструктор Prescription — только в safety.py (гвард test_no_prescription_bypass)
-    return [rehydrate(r) for _, r in sorted(latest_by_date.items())]
+    return [rehydrate(r) for _, r in sorted(rows.items())]
+
+
+def week_facts(rows: dict[date, Recommendation], *, db: Session,
+               today: date) -> dict[date, dict | None]:
+    """Факт по прошедшим дням плана: связанная тренировка → минуты/км/ср. пульс;
+    связи нет → None (день пропущен). Связь ставит разбор — тот же источник
+    «выполнено», что у planning.week_plan_review. (Past-day facts via linked session.)
+    """
+    facts: dict[date, dict | None] = {}
+    for d, r in rows.items():
+        if d >= today:
+            continue
+        session = (db.query(TrainingSession).filter(
+            TrainingSession.id == r.linked_session_id).first()
+            if r.linked_session_id else None)
+        facts[d] = None if session is None else {
+            "duration_min": session.duration_minutes,
+            "distance_km": session.total_distance_km,
+            "avg_hr": session.avg_heart_rate,
+        }
+    return facts
 
 
 def week_targets_stored(user_id: int, *, db: Session, week_start: date) -> dict:
@@ -61,9 +89,12 @@ def render_stored_week_plan(user_id: int, *, db: Session) -> str:
     """Текст карточки сохранённого плана текущей недели или подсказка /plan."""
     user = db.query(User).filter(User.id == user_id).first()
     today = user_now(user).date()
-    prescriptions = stored_week_prescriptions(user_id, db=db, today=today)
-    if not prescriptions:
+    week_start = _monday_of(today)
+    rows = _active_rows(user_id, db=db, week_start=week_start)
+    if not rows:
         return NO_PLAN_TEXT
-    targets = week_targets_stored(user_id, db=db, week_start=_monday_of(today))
+    prescriptions = [rehydrate(r) for _, r in sorted(rows.items())]
+    targets = week_targets_stored(user_id, db=db, week_start=week_start)
     return render_week_plan(prescriptions, targets, max_hr=user_max_hr(user),
-                            lthr=latest_lthr(user_id, db=db), today=today)
+                            lthr=latest_lthr(user_id, db=db), today=today,
+                            facts=week_facts(rows, db=db, today=today))

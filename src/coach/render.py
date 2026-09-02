@@ -199,14 +199,37 @@ def render_prescription_short(p: Prescription, max_hr: int | None = None,
     return prefix + " · ".join(parts)
 
 
+def _fact_line(day: str, p: Prescription, fact: dict | None) -> str:
+    """Прошедший день: факт связанной тренировки (✓) или пропуск (✗) — без потолка
+    пульса и ≈км плана, которые дрейфуют со сменой якоря зон (past day as fact)."""
+    label = _TYPE_LABEL.get(p.workout_type, p.workout_type)
+    if fact is None:
+        parts = [label]
+        if p.volume.get("duration_min") is not None:
+            parts.append(f"{p.volume['duration_min']:.0f} мин")
+        parts.append("пропущен")
+        return f"✗ {day} — " + " · ".join(parts)
+    parts = [label]
+    if fact.get("duration_min"):
+        parts.append(f"факт {fact['duration_min']:.0f} мин")
+    if fact.get("distance_km"):
+        parts.append(f"{fact['distance_km']:.1f} км")
+    if fact.get("avg_hr"):
+        parts.append(f"ср. пульс {fact['avg_hr']}")
+    return f"✓ {day} — " + " · ".join(parts)
+
+
 def render_week_plan(prescriptions: list[Prescription], targets: dict,
                      max_hr: int | None = None, lthr: int | None = None,
-                     today: date | None = None) -> str:
+                     today: date | None = None,
+                     facts: dict[date, dict | None] | None = None) -> str:
     """Сводная карточка недельного плана — числа только из клэмпленных
     Prescription и детерминированных targets (weekly plan card).
 
     targets без мезоцикла (сохранённая неделя, week_view) → строка сводки
-    опускается; today → маркер «▶» у сегодняшнего дня. (Tolerant header.)
+    опускается; today → маркер «▶» у сегодняшнего дня; facts (дата → факт или None)
+    → прошедшие дни рендерятся как ✓ факт / ✗ пропущен (02.09.2026: план прошедших
+    дней не «меняется», он выполнен). (Tolerant header; past days as facts.)
     """
     start = date.fromisoformat(targets["week_start"])
     end = start + timedelta(days=6)
@@ -216,7 +239,13 @@ def render_week_plan(prescriptions: list[Prescription], targets: dict,
             f"Неделя {targets['mesocycle_week']}/{targets['mesocycle_length']} "
             f"мезоцикла ({'разгрузочная' if targets['phase'] == 'deload' else 'рост'}) "
             f"· цель ~{targets['target_km']:.0f} км")
+    has_facts = False
     for p in sorted(prescriptions, key=lambda x: x.when):
+        if facts is not None and today is not None and p.when < today:
+            has_facts = True
+            lines.append(_fact_line(
+                f"{_WEEKDAYS_RU[p.when.weekday()][:2]} {p.when:%d.%m}", p, facts.get(p.when)))
+            continue
         mark = "▶ " if today is not None and p.when == today else ""
         day = f"{mark}{_WEEKDAYS_RU[p.when.weekday()][:2]} {p.when:%d.%m}"
         parts = [_TYPE_LABEL.get(p.workout_type, p.workout_type)]
@@ -240,7 +269,8 @@ def render_week_plan(prescriptions: list[Prescription], targets: dict,
         lines.append(f"{day} — " + " · ".join(parts))
     if any(p.clamped for p in prescriptions):
         lines.append("⚠️ Часть дней урезана границами безопасности.")
-    lines.append("Остальные дни — отдых. Перепланировать: /plan")
+    legend = "✓ факт · ✗ пропущен · " if has_facts else ""
+    lines.append(f"{legend}Остальные дни — отдых. Перепланировать: /plan")
     return "\n".join(lines)
 
 

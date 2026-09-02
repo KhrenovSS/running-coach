@@ -83,3 +83,38 @@ def test_superseded_rows_are_invisible(empty_user, db_session):
     _rec(db_session, empty_user.id, saturday, "tempo", 3, 45.0, status="superseded")
     text = render_stored_week_plan(empty_user.id, db=db_session)
     assert "Темповая" not in text and "45 мин" not in text
+
+
+def test_past_days_render_as_facts(empty_user, db_session):
+    """Прошедшие дни — факт связанной тренировки (✓) или пропуск (✗); потолок пульса
+    плана для них не печатается (он дрейфует со сменой якоря зон — жалоба 02.09.2026)."""
+    from datetime import datetime, timedelta as td, timezone
+
+    from tests.helpers import build_training_session
+
+    today = user_now(empty_user).date()
+    if today.weekday() < 2:                      # нужны два прошедших дня недели
+        import pytest
+        pytest.skip("понедельник/вторник — в текущей неделе мало прошедших дней")
+    monday = _monday(today)
+    done_row = _rec(db_session, empty_user.id, monday, "easy", 2, 38.0, "confirmed")
+    _rec(db_session, empty_user.id, monday + timedelta(days=1), "easy", 2, 35.0, "confirmed")
+    _rec(db_session, empty_user.id, today, "easy", 2, 35.0, "confirmed")
+    s = build_training_session(
+        db_session, empty_user.id, total_distance_km=5.4, duration_minutes=38.2,
+        avg_heart_rate=137, training_type="tempo",     # классификатор — не наш ярлык
+        begin_ts=datetime.combine(monday, datetime.min.time(), tzinfo=timezone.utc) + td(hours=9))
+    done_row.linked_session_id = s.id
+    db_session.commit()
+
+    text = render_stored_week_plan(empty_user.id, db=db_session)
+    lines = text.splitlines()
+    mon = next(l for l in lines if f" {monday:%d.%m} — " in l)            # не заголовок
+    tue = next(l for l in lines if f" {monday + timedelta(days=1):%d.%m} — " in l)
+    assert mon.startswith("✓") and "факт 38 мин" in mon and "5.4 км" in mon \
+        and "ср. пульс 137" in mon
+    assert "Лёгкий бег" in mon and "Темповая" not in mon     # плановый ярлык, не классификатор
+    assert "пульс до" not in mon
+    assert tue.startswith("✗") and "пропущен" in tue and "35 мин" in tue
+    assert any(l.startswith("▶") and "пульс до" in l for l in lines)   # сегодня — план
+    assert "✓ факт · ✗ пропущен" in lines[-1]
