@@ -1,61 +1,42 @@
 # Рекомендации по написанию кода (Code Guidelines)
 
-> Практическое руководство: как писать код, чтобы даже слабая модель делала качественно.  
-> Много примеров "❌ До" → "✅ После".
+> Практическое руководство «как писать код в этом проекте». Правила-инварианты — в `CLAUDE.md`
+> («Дисциплина», «Golden rules»); здесь — как их применять, с примерами **из реального кода**.
+> Где писать код и как устроены модули — `docs/ARCHITECTURE.md`; ошибки — `docs/ERROR_HANDLING.md`;
+> логи — `docs/LOGGING.md`; тесты — `docs/TESTING.md`; чеклист перед коммитом — `docs/CHECKLIST_FEATURE.md`.
 
 ## Содержание
 
 1. [Константы — никаких magic numbers](#1-константы--никаких-magic-numbers)
-2. [Архитектура: где писать код](#2-архитектура-где-писать-код)
-3. [API endpoints: тонкие роуты](#3-api-endpoints-тонкие-роуты)
+2. [Тонкие роуты и сервисы-функции](#2-тонкие-роуты-и-сервисы-функции)
+3. [Валидация входа](#3-валидация-входа)
 4. [База данных и миграции](#4-база-данных-и-миграции)
-5. [Валидация через Pydantic](#5-валидация-через-pydantic)
-6. [Обработка ошибок](#6-обработка-ошибок)
-7. [Логирование](#7-логирование)
-8. [Комментарии и докстринги](#8-комментарии-и-докстринги)
-9. [Импорты](#9-импорты)
-10. [Чеклисты перед коммитом](#10-чеклисты-перед-коммитом)
+5. [Ошибки и логирование — кратко](#5-ошибки-и-логирование--кратко)
+6. [Комментарии и докстринги](#6-комментарии-и-докстринги)
+7. [Импорты](#7-импорты)
+8. [Именование](#8-именование)
+9. [Action-проверка перед опасным рефакторингом](#9-action-проверка-перед-опасным-рефакторингом)
 
 ---
 
 ## 1. Константы — никаких magic numbers
 
-### Правило
-
-**Все** числа, строки, URL, пороги — через `from src.config import settings` (env-настройки) или `from src.config.constants import NAME` (фиксированные константы).
-
-### ❌ До
+**Все** числа, строки, URL, пороги — через `from src.config import settings` (env-настройки) или
+`from src.config.constants import NAME` (фиксированные). Пороги коуча и readiness — **только**
+`src/coach/config.py` (человекочитаемый источник — `docs/coros_health_metrics.md`, метрики разбора —
+`docs/coach/METRICS_GUIDE.md`; согласованность констант проверяет `tests/test_coach_config.py`).
 
 ```python
-def classify_hr(hr: int) -> str:
-    if hr < 106:
-        return "Z1"
-    elif hr < 124:
-        return "Z2"
-    elif hr < 142:
-        return "Z3"
-    elif hr < 154:
-        return "Z4"
-    else:
-        return "Z5"
-
-# Где-то в коде:
+# ❌
+if hr < 142: ...
 resp = httpx.get(url, timeout=15)
-```
 
-### ✅ После
-
-```python
+# ✅
 from src.config import settings
-from src.config.constants import HR_ZONE_1_MAX_PCT, HR_ZONE_2_MAX_PCT
-
-def classify_hr(hr: int, max_hr: int) -> str:
-    return get_hr_zone(hr, max_hr)  # пороги из constants.py
-
+from src.analysis.hr_zones import get_zone
+zone = get_zone(hr, max_hr, lthr)          # границы зон — из constants / LTHR
 resp = httpx.get(url, timeout=settings.http_timeout)
 ```
-
-### Где брать константы
 
 | Вместо | Используй |
 |--------|-----------|
@@ -69,511 +50,163 @@ resp = httpx.get(url, timeout=settings.http_timeout)
 | `7` (TTL сессии) | `settings.session_ttl_days` |
 | `"UTC"` | `settings.timezone` |
 
-### Когда добавлять новую константу
-
-Если значение:
-1. Используется больше 1 раза
-2. Может меняться (настройка, env)
-3. Неочевидно без контекста
-
-→ добавляй в `src/config/constants.py` (фиксированные) или `src/config/settings.py` (env).
+Новая константа нужна, если значение используется больше одного раза, может меняться или неочевидно
+без контекста. Именованная константа с bilingual-комментарием рядом; для порогов коуча — плюс
+строка в человекочитаемом документе (см. `CHECKLIST_FEATURE.md`).
 
 ---
 
-## 2. Архитектура: где писать код
+## 2. Тонкие роуты и сервисы-функции
 
-### Золотое правило
+Роут: принять запрос → валидировать → вызвать сервис → вернуть ответ. Никакого парсинга файлов,
+SQL, внешних API и бизнес-правил внутри. Роут ~80 строк максимум, файл ~400.
 
-| Что | Где |
-|-----|-----|
-| HTTP endpoint | `src/api/routes/<domain>.py` |
-| Бизнес-логика | `src/services/<domain>/` |
-| SQLAlchemy модели | `src/domain/models/<domain>.py` |
-| Константы | `src/config/constants.py` |
-| Настройки из env | `src/config/settings.py` |
-| Исключения | `src/exceptions.py` |
-| Утилиты общего назначения | `src/utils/` |
-
-### ❌ До — всё в main.py
+Приложение — **Jinja2-формы** (`Form(...)`) и редиректы, не JSON-REST. Реальный роут
+(`src/web/routes/pages/session.py`):
 
 ```python
-# main.py — 300+ строк
-@app.post("/upload")
-async def upload(file: UploadFile, db: Session = Depends(get_db)):
-    # 1. Парсинг XML
-    tree = ET.parse(file.file)
-    # 2. Очистка GPS
-    # 3. Сегментация
-    # 4. Сохранение в БД
-    # 5. Возврат
+@router.post('/session/{session_id}/delete')
+async def session_delete(session_id: int, db: Session = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    delete_training(db, current_user.id, session_id)
+    return RedirectResponse(url='/', status_code=303)
 ```
 
-### ✅ После — разделение ответственности
+Сервисы — **функции модульного уровня**, `db: Session` приходит параметром (владение сессией —
+`CLAUDE.md` §8, гвард `tests/test_session_ownership.py`). Единственный класс-сервис — `AuditService`.
+`src/services/training_service.py`:
 
 ```python
-# src/web/routes/uploads.py (тонкий роут — вызов парсера и анализа)
-from src.analysis import process_trackpoints
-from src.parsers.tcx_parser import parse_tcx
-from src.parsers.fit_parser import parse_fit
-
-@router.post("/upload")
-async def upload(file: UploadFile, db: Session = Depends(get_db)):
-    """Загрузить тренировку (Upload training)"""
-    data = parse_tcx(file.file) if file.filename.endswith('.tcx') else parse_fit(file.file)
-    result = process_trackpoints(data, user_settings)
-    training = TrainingSession(**result)
-    db.add(training)
-    db.commit()
-    return {"status": "ok", "training_id": training.id}
-
-# Логика в src/analysis/__init__.py :: process_trackpoints()
-# и сервисах src/services/ (reanalyze, training_service)
+def delete_training(db: Session, user_id: int, session_id: int) -> bool:
+    """Удалить тренировку: метаданные → DeletedTraining, сессию удалить.
+    Delete training: move metadata to DeletedTraining, remove the session.
+    Возвращает True если удалено, False если не найдено."""
 ```
 
-### Размер файла
-
-- **Максимум ~400 строк**. Если больше — разбивай на модули.
-- **Роут — максимум ~80 строк**. Если больше — логика уходит в сервис.
+`get_db` один — `src/domain/models/base.py` (`src/api/deps.py` только реэкспортирует).
+Подключение роутеров — `docs/ARCHITECTURE.md` «Принцип тонких роутов».
 
 ---
 
-## 3. API endpoints: тонкие роуты
+## 3. Валидация входа
 
-### Шаблон роута
+Формы валидируются типами параметров FastAPI (`max_hr: int | None = Form(None)`) и явными
+проверками диапазонов в сервисе/роуте с понятным ответом пользователю
+(`src/web/routes/pages/settings.py::settings_save` — 15 полей формы). Pydantic-моделей запроса в
+проекте нет; вводить их ради одного роута не нужно. Границы значений — из `constants.py`
+(например, `HR_MAX_SANITY_*`), не литералами.
 
-```python
-# src/api/routes/auth.py
-from fastapi import APIRouter, Depends, status
-from sqlalchemy.orm import Session
-
-from src.api.deps import get_db
-from src.services.auth import AuthService
-from src.exceptions import AuthenticationError
-
-router = APIRouter(prefix="/auth", tags=["auth"])
-
-@router.post("/login", status_code=status.HTTP_200_OK)
-async def login(
-    data: LoginRequest,
-    db: Session = Depends(get_db),
-):
-    """
-    Вход по email+паролю
-    Login with email+password
-    """
-    service = AuthService(db)
-    token = service.login(data.email, data.password)
-    return {"status": "ok", "token": token}
-```
-
-### Что должен делать роут
-
-1. Принять запрос
-2. Валидировать вход (Pydantic / FastAPI автоматически)
-3. Вызвать сервис
-4. Вернуть ответ
-
-### Что роут НЕ должен делать
-
-- Парсить XML / FIT напрямую
-- Строить SQL
-- Ходить во внешние API
-- Содержать бизнес-правила
-- Содержать длинные if/else цепочки
-
-### Статус-коды
-
-```python
-from fastapi import status
-
-# GET — 200 (default)
-# POST create — 201
-# DELETE — 204
-# Validation error — 400
-# Not found — 404
-# Server error — 500
-
-@router.delete("/{training_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_training(training_id: int, db: Session = Depends(get_db)):
-    """Удалить тренировку (Delete training)"""
-    service = TrainingService(db)
-    await service.delete(training_id)
-    return None
-```
-
-### Зависимости
-
-```python
-# src/api/deps.py
-from typing import Generator
-from fastapi import Depends
-from sqlalchemy.orm import Session
-from src.domain.models.base import SessionLocal
-
-def get_db() -> Generator[Session, None, None]:
-    """Сессия БД (DB session)"""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-```
+Данные с часов/из файлов **не доверяем**: парсеры и `src/analysis/gps_quality.py` помечают
+недостоверное (`suspect_flags`, `gps_quality.unreliable`), а не отбрасывают молча.
 
 ---
 
 ## 4. База данных и миграции
 
-### Правила работы с БД
-
-1. **Только Alembic** для изменения схемы
-2. **Параметризованные запросы** — никаких f-string в SQL
-3. **Модели в `src/domain/models/`** (по доменам: user.py, training.py, health.py и т.д.)
-4. **Индексы** для частых `WHERE`/`JOIN`
-
-### ❌ До
-
-```python
-# НЕПРАВИЛЬНО — SQL injection!
-result = db.execute(f"SELECT * FROM training_sessions WHERE user_id = {user_id}")
-
-# НЕПРАВИЛЬНО — ALTER TABLE в коде
-@app.on_event("startup")
-def startup():
-    db.execute("ALTER TABLE daily_metrics ADD COLUMN recovery_pct INTEGER")
-```
-
-### ✅ После
+1. Схема меняется **только** через Alembic (`alembic revision --autogenerate -m "..."`), миграции
+   применяются при старте `app`. Чеклист и прод-порядок (`stop bot` перед ALTER) —
+   `docs/CHECKLIST_MIGRATION.md`; data-safety — `CLAUDE.md` §5–7.
+2. Запросы — ORM или параметризованные; никаких f-string в SQL.
+3. Модели — `src/domain/models/<domain>.py`; `src/models.py` — shim для обратной совместимости,
+   новый код туда не добавлять.
+4. Индексы для частых `WHERE`/`JOIN`; уникальность данных — через частичные UNIQUE в БД
+   (`uq_training_user_brand_extid`), не через проверку в коде.
 
 ```python
-# Правильно — ORM
-sessions = db.query(TrainingSession).filter(
-    TrainingSession.user_id == user_id
-).all()
+# ❌ ALTER TABLE в startup, f-string SQL
+db.execute(f"SELECT * FROM training_sessions WHERE user_id = {user_id}")
 
-# Правильно — Alembic миграция
-# alembic/versions/xxxx_add_recovery_pct.py
-op.add_column('daily_metrics', sa.Column('recovery_pct', sa.Integer(), nullable=True))
-```
-
-### Создание миграции
-
-```bash
-alembic revision --autogenerate -m "add recovery_pct to daily_metrics"
-alembic upgrade head
-```
-
-### Идемпотентность (safe to rerun)
-
-```python
-# alembic/versions/xxxx_add_index.py
-from alembic import op
-import sqlalchemy as sa
-
-def upgrade():
-    # CREATE INDEX IF NOT EXISTS
-    op.create_index(
-        'ix_training_sessions_user_id',
-        'training_sessions',
-        ['user_id'],
-        if_not_exists=True,
-    )
-
-def downgrade():
-    op.drop_index(
-        'ix_training_sessions_user_id',
-        'training_sessions',
-        if_exists=True,
-    )
+# ✅
+db.query(TrainingSession).filter(TrainingSession.user_id == user_id).all()
+op.add_column('daily_metrics', sa.Column('recovery_pct', sa.Integer(), nullable=True))  # в миграции
 ```
 
 ---
 
-## 5. Валидация через Pydantic
+## 5. Ошибки и логирование — кратко
 
-### Правило
-
-Все входные данные API — Pydantic модели.
-
-### ❌ До
-
-```python
-@app.post("/settings")
-async def save_settings(request: Request, db: Session = Depends(get_db)):
-    data = await request.json()
-    max_hr = data.get("max_hr")
-    if not isinstance(max_hr, int) or max_hr < 100 or max_hr > 220:
-        return {"error": "invalid max_hr"}
-```
-
-### ✅ После
-
-```python
-# src/web/routes/pages/settings.py (Pydantic внутри роута или отдельно)
-from pydantic import BaseModel, Field
-
-class SettingsUpdate(BaseModel):
-    """Обновление настроек (Settings update)"""
-    max_hr: int = Field(ge=100, le=220)
-    weight_kg: float = Field(ge=30, le=300)
-
-@router.post("/")
-async def save_settings(
-    data: SettingsUpdate,
-    db: Session = Depends(get_db),
-):
-    """Сохранить настройки (Save settings)"""
-    service = SettingsService(db)
-    service.update(data)
-    return {"status": "ok"}
-```
-
-### Правила Pydantic
-
-- `Field(ge=, le=, min_length=, max_length=, pattern=)` для ограничений
-- `@field_validator` для кросс-полевой логики
-- `response_model=` для типизации ответов
+- `except: pass` запрещён (CI-гвард). Ловим конкретный тип, логируем, поднимаем исключение проекта
+  из `src/exceptions.py` (иерархия, коды HTTP и примеры — `docs/ERROR_HANDLING.md`).
+- Логгер — `get_logger("<module.path>")` из `src.utils.logger` (иерархические имена `coach.*`,
+  `telegram.handlers.*`; см. `docs/LOGGING.md`). `print()` не используется. Не логировать пароли,
+  токены, персональные данные.
 
 ---
 
-## 6. Обработка ошибок
+## 6. Комментарии и докстринги
 
-### Главное правило
-
-**Запрещён `except: pass`. Всегда указывай тип исключения и логируй.**
-
-### ❌ До
+Комментарии писать **сразу**, bilingual (русский + английский), у каждой функции/класса — докстринг
+с назначением и контрактом возврата; сложный блок — комментарий «почему», а не «что».
 
 ```python
-try:
-    result = requests.get(url, timeout=15)
-except:
-    pass
-```
-
-### ✅ После
-
-```python
-import httpx
-from src.config import settings
-from src.exceptions import WatchAPIError
-from src.utils.logger import logger
-
-try:
-    result = await httpx.AsyncClient().get(url, timeout=settings.http_timeout)
-    result.raise_for_status()
-except httpx.HTTPStatusError as e:
-    logger.error(f"Watch API error: {url} → {e.response.status_code}")
-    raise WatchAPIError(str(e), brand=brand, status=e.response.status_code)
-except httpx.RequestError as e:
-    logger.error(f"Watch API network error: {url} → {e}")
-    raise WatchAPIError(str(e), brand=brand)
-```
-
-### Исключения проекта
-
-```python
-from src.exceptions import (
-    NotFoundError,      # 404
-    ValidationError,    # 400
-    WatchAPIError,      # 502
-    WatchAuthError,     # 401
-    AuthenticationError,# 401
-    DatabaseError,      # 500
-    FileProcessingError,# 422
-)
-
-# Примеры использования:
-raise NotFoundError("training", training_id)
-raise ValidationError("max_hr", "must be between 100 and 220")
-raise WatchAPIError("Not authenticated", brand="coros")
-```
-
-### Обработка в сервисах
-
-```python
-# src/services/training_service.py
-from sqlalchemy.orm import Session
-from src.domain.models.training import TrainingSession
-from src.exceptions import NotFoundError
-
-
-def delete_training(db: Session, user_id: int, session_id: int) -> None:
-    """Удалить тренировку пользователя (Delete user's training session)."""
-    session = db.query(TrainingSession).filter(
-        TrainingSession.id == session_id,
-        TrainingSession.user_id == user_id,
-    ).first()
-    if not session:
-        raise NotFoundError("training", session_id)
-    db.delete(session)
-    db.commit()
-```
-
----
-
-## 7. Логирование
-
-### Правило
-
-Используй `logger` из `src.utils.logger`. Никакого `print()`.
-
-### ❌ До
-
-```python
-print("Sync started")
-print(f"Found {count} activities")
-```
-
-### ✅ После
-
-```python
-from src.utils.logger import logger
-
-logger.info("Coros sync started")
-logger.info(f"Coros sync completed: {count} activities processed")
-logger.warning(f"Slow query detected: {duration_ms}ms")
-logger.error(f"Failed to parse file {filename}: {error}")
-```
-
-### Что логировать
-
-| Уровень | Когда |
-|---------|-------|
-| DEBUG | Детали разработки, дампы данных |
-| INFO | Ключевые операции (sync, upload, delete) |
-| WARNING | Аномалии, fallback'ы, медленные запросы |
-| ERROR | Сбои, исключения |
-
-### Что НЕ логировать
-
-- Пароли
-- API токены
-- Refresh tokens
-- Персональные данные пользователя
-
----
-
-## 8. Комментарии и докстринги
-
-### Правило
-
-**Комментарии писать СРАЗУ, не позже.** Каждая функция/класс — докстринг. Сложные блоки — комментарий. Язык: русский + английский в скобках.
-
-### Обязательно
-
-```python
-# Расчёт среднего темпа по сегменту (Calculate average pace for segment)
-def calc_avg_pace(distance_km: float, duration_min: float) -> float:
+def delete_training(db: Session, user_id: int, session_id: int) -> bool:
     """
-    Рассчитать средний темп в мин/км
-    Calculate average pace in min/km
-    
-    Args:
-        distance_km: дистанция в км (distance in km)
-        duration_min: длительность в минутах (duration in minutes)
-    
-    Returns:
-        Темп в мин/км (pace in min/km)
+    Удалить тренировку: переместить метаданные в DeletedTraining, удалить сессию.
+    Delete training: move metadata to DeletedTraining, remove the session.
+
+    Возвращает True если удалено, False если не найдено.
+    Returns True if deleted, False if not found.
     """
-    return duration_min / distance_km
 ```
 
-### Необязательно
-
-```python
-# ✅ Не нужен комментарий
-x = x + 1
-
-# ✅ Не нужен комментарий
-return result
-```
+Ссылки на документы в комментариях — по имени файла и §: `# DEV_PLAN §4`, `# METRICS_GUIDE §6`
+(нумерация этих секций стабильна и не меняется при правках документов).
 
 ---
 
-## 9. Импорты
-
-### Порядок
+## 7. Импорты
 
 ```python
 # 1. Стандартная библиотека
 import os
-import json
 from datetime import datetime
 
 # 2. Сторонние библиотеки
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Form
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
 
 # 3. Внутренние модули
 from src.config import settings
 from src.config.constants import HEALTH_SYNC_DAYS
-from src.domain.models.training import TrainingSession
 from src.domain.models.base import get_db
-from src.utils.logger import logger
+from src.domain.models.training import TrainingSession
+from src.utils.logger import get_logger
 ```
 
-### Импорт настроек и констант
+`from src.database import ...` запрещён (модуль удалён, CI-гвард). Константы и настройки — только
+через `src.config` (§1).
+
+---
+
+## 8. Именование
+
+Общее — PEP 8: `snake_case` функции/переменные/модули, `PascalCase` классы, `UPPER_SNAKE` константы,
+`is_/has_/should_` для boolean, функция = глагол + объект (`save_daily_metrics`, `parse_tcx`).
+Специфика проекта — единицы измерения в имени:
 
 ```python
-# ✅ Правильно (env-настройки)
-from src.config import settings
-
-timeout = settings.http_timeout
-
-# ✅ Правильно (фиксированные константы)
-from src.config.constants import HEALTH_SYNC_DAYS, MAX_CREDIBLE_PACE
-
-days = HEALTH_SYNC_DAYS
-
-# ❌ Неправильно — старый способ, используйте settings / constants
-timeout = 15
-max_hr = 177
+# ✅                                  # ❌
+hr_zone = "Z2"                       zone = "Z2"          # чья зона?
+max_hr, avg_heart_rate               maximumHeartRate, avgHR
+pace_min_per_km = 5.5                pace = 5.5           # единицы?
+distance_km, duration_minutes        dist, dur
+lthr_bpm, ltsp_s_per_km              lthr, ltsp           # в constants/config — с единицей
 ```
 
----
-
-## 10. Чеклисты перед коммитом
-
-### Любой код
-
-- [ ] Нет `except: pass`
-- [ ] Нет `print()` — используется `logger`
-- [ ] Нет hardcoded значений — используются `settings.*` / `constants.*`
-- [ ] Комментарии bilingual (RU/EN)
-- [ ] Типизация (type hints)
-- [ ] Тесты проходят: `pytest tests/ -v`
-
-### API endpoint
-
-- [ ] Роут в `src/api/routes/<domain>.py`
-- [ ] `response_model` указан
-- [ ] Бизнес-логика в `src/services/<domain>/`
-- [ ] Обработка ошибок через `src/exceptions.py`
-
-### Миграция
-
-- [ ] Создана через `alembic revision --autogenerate`
-- [ ] Есть `downgrade()`
-- [ ] Идемпотентна
-- [ ] Тестирован `upgrade`/`downgrade`
-
-### Безопасность данных
-
-- [ ] Правка не удаляет и не переименовывает колонки без миграции
-- [ ] Изменение сигнатуры функции, вызываемой в `startup.py`, проверено на всех местах вызова
-- [ ] Если правка затрагивает `startup.py`, `models.py` (shim), `src/domain/models/base.py` — проверен сценарий первого запуска на пустой БД
-- [ ] Есть fallback / возможность отката для пользовательских данных
-
-### Action-проверка перед опасным рефакторингом
-
-Если изменение может затронуть существующие данные в БД (переименование функции, смена аргументов, удаление колонки, рефакторинг startup):
-
-1. **Остановись** — не применяй автоматически
-2. **Опиши пользователю**: какие данные под угрозой, что будет после рефакторинга, есть ли миграция
-3. **Получи подтверждение** — только после явного `да» применяй
-4. **Пример:** рефакторинг `get_settings()` без параметра → `get_settings(user_id)` в PREP-11 потребовал обновления `startup.py:45` и `uploads.py:79`. Без этого при рестарте контейнера `TypeError` в startup приводил к потере пользователя и всех его данных.
+Исключения — `<Domain>Error` (`WatchAPIError`, `LLMUnavailableError`); модули часов —
+`src/watch/<brand>.py`; тесты — `tests/test_<module>.py`, `tests/coach/test_<module>.py`.
+Мульти-брендовость: не хардкодить «coros» в именах общих функций (`sync_activities_for_user`, не `sync_coros`).
 
 ---
 
-**Последнее обновление:** 16.07.2026 (Sprint 20c)
+## 9. Action-проверка перед опасным рефакторингом
+
+Если изменение может затронуть данные в БД или старт приложения (переименование функции, смена
+аргументов, удаление колонки, правка `startup.py`/`domain/models/base.py`/`alembic/`):
+
+1. **Остановись** — не применяй автоматически.
+2. **Опиши пользователю**: какие данные под угрозой, что будет после, есть ли миграция/откат.
+3. **Получи подтверждение** — применяй только после явного «да» (`CLAUDE.md` §5, субагент `db-safety-reviewer`).
+4. **Урок PREP-11:** рефакторинг `get_settings()` → `get_settings(user_id)` потребовал обновить
+   `startup.py` и `uploads.py`. Без этого `TypeError` в startup при рестарте контейнера приводил
+   к потере пользователя и всех его данных.

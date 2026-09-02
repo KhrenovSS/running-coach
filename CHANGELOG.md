@@ -2,6 +2,19 @@
 
 All notable changes to this project are tracked here.
 
+## [02.09.2026] — Рефакторинг документации, шаг 3/6: CODE_GUIDELINES переписан, NAMING влит
+
+### Changed
+- **`docs/CODE_GUIDELINES.md`** 579 → ~190 строк. Убраны примеры несуществующего кода
+  (`AuthService`/`service.login`, Pydantic-модели в роутах, `response_model`, `@router.delete`,
+  `TrainingService`, `src/services/<domain>/`, `delete_training -> None`); примеры — из реального
+  кода (`session_delete`, `delete_training -> bool`, `Form(...)`). Секции-дубли CLAUDE.md /
+  ARCHITECTURE / ERROR_HANDLING / LOGGING заменены ссылками; оставлены таблица констант,
+  комментарии, импорты, урок PREP-11.
+- **`docs/NAMING_CONVENTIONS.md` удалён**: общий PEP-8 не нуждается в отдельном документе, специфика
+  проекта (единицы в именах, `<Domain>Error`, мульти-брендовость) — раздел «Именование» в
+  CODE_GUIDELINES.
+
 ## [02.09.2026] — Рефакторинг документации, шаг 2/6: AGENTS.md → заглушка, одно дерево `src/`
 
 ### Changed

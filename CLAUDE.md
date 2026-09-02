@@ -166,10 +166,9 @@
 ## Документация
 | Тема | Файл |
 |------|------|
-| Правила кода | `docs/CODE_GUIDELINES.md` |
+| Правила кода и именование | `docs/CODE_GUIDELINES.md` |
 | Архитектура/структура | `docs/ARCHITECTURE.md` |
 | Ошибки | `docs/ERROR_HANDLING.md` |
-| Именование | `docs/NAMING_CONVENTIONS.md` |
 | Тесты | `docs/TESTING.md` |
 | Логирование/аудит | `docs/LOGGING.md` |
 | Чеклисты | `docs/CHECKLIST_FEATURE.md`, `docs/CHECKLIST_MIGRATION.md`, `docs/CHECKLIST_NEW_PROVIDER.md` |
