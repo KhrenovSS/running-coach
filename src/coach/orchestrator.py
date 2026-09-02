@@ -50,7 +50,9 @@ from src.coach.tools.registry import run_tool
 from src.coach.tools.serialize import jsonable
 from src.coach.turn_context import build_extras as _build_extras
 from src.coach.turn_context import history as _history
+from src.coach.turn_context import profile as _profile
 from src.coach.turn_context import unchanged_today as _unchanged_today
+from src.coach.week_view import render_stored_week_plan
 from src.exceptions import CoachError, LLMTransientError, LLMUnavailableError
 from src.models import TrainingFeedback, User, UserModel, WellnessReport
 from src.services.repositories import latest_lthr
@@ -111,16 +113,6 @@ def morning_verdict(user_id: int, *, db: Session) -> str:
                                   lthr=latest_lthr(user_id, db=db)))
 
 
-def _profile(user: User) -> dict:
-    """Стабильный профиль для кэшируемого system-блока (stable cached profile)."""
-    return {
-        "age": user.age, "max_hr": user.max_hr, "sport_level": user.sport_level,
-        "goal_type": user.goal_type, "goal_target": user.goal_target,
-        "weight_kg": user.weight_kg,
-        "injuries": "колено — возврат после травмы (беречь)",
-    }
-
-
 def _llm_chat_turn(user_id: int, message: str, *, db: Session,
                    llm: CoachLLM, kind: str, extras: dict | None = None,
                    allow_proposal: bool = True,
@@ -151,7 +143,14 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
     text = turn.message
     max_hr = user_max_hr(user)
     lthr = latest_lthr(user_id, db=db)  # зоны/потолки от порога (F4/M3.1)
-    if turn.weekly_plan is not None:
+    week_card: str | None = None
+    if kind == "chat" and (turn.show_week_plan or turn.weekly_plan is not None):
+        # Вопрос «какой план на неделю»: план в чате не персистится (решение
+        # 29.08) — показываем СОХРАНЁННЫЙ (инцидент 02.09: молчаливый дроп → «общие слова»)
+        logger.info("Week plan card requested in chat user=%s (weekly_plan=%s)",
+                    user_id, turn.weekly_plan is not None)
+        week_card = render_stored_week_plan(user_id, db=db)
+    elif turn.weekly_plan is not None:
         # Недельный план строится только отдельным ходом kind='plan' (weekly_plan.py)
         logger.warning("Unexpected weekly_plan for kind=%s user=%s — dropped",
                        kind, user_id)
@@ -194,6 +193,8 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
         else:
             save_prescription(card, state, db=db)
             text += "\n\n" + render_prescription(card, max_hr=max_hr, user=user, lthr=lthr)
+    if week_card is not None:
+        text += "\n\n" + week_card
     if turn.followup_question:
         text += "\n\n" + turn.followup_question
     if suffix:

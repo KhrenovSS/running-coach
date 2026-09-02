@@ -200,18 +200,25 @@ def render_prescription_short(p: Prescription, max_hr: int | None = None,
 
 
 def render_week_plan(prescriptions: list[Prescription], targets: dict,
-                     max_hr: int | None = None, lthr: int | None = None) -> str:
+                     max_hr: int | None = None, lthr: int | None = None,
+                     today: date | None = None) -> str:
     """Сводная карточка недельного плана — числа только из клэмпленных
     Prescription и детерминированных targets (weekly plan card).
+
+    targets без мезоцикла (сохранённая неделя, week_view) → строка сводки
+    опускается; today → маркер «▶» у сегодняшнего дня. (Tolerant header.)
     """
     start = date.fromisoformat(targets["week_start"])
     end = start + timedelta(days=6)
-    lines = [f"*План на неделю ({start:%d.%m}–{end:%d.%m})*",
-             f"Неделя {targets['mesocycle_week']}/{targets['mesocycle_length']} "
-             f"мезоцикла ({'разгрузочная' if targets['phase'] == 'deload' else 'рост'}) "
-             f"· цель ~{targets['target_km']:.0f} км"]
+    lines = [f"*План на неделю ({start:%d.%m}–{end:%d.%m})*"]
+    if targets.get("mesocycle_week") is not None:
+        lines.append(
+            f"Неделя {targets['mesocycle_week']}/{targets['mesocycle_length']} "
+            f"мезоцикла ({'разгрузочная' if targets['phase'] == 'deload' else 'рост'}) "
+            f"· цель ~{targets['target_km']:.0f} км")
     for p in sorted(prescriptions, key=lambda x: x.when):
-        day = f"{_WEEKDAYS_RU[p.when.weekday()][:2]} {p.when:%d.%m}"
+        mark = "▶ " if today is not None and p.when == today else ""
+        day = f"{mark}{_WEEKDAYS_RU[p.when.weekday()][:2]} {p.when:%d.%m}"
         parts = [_TYPE_LABEL.get(p.workout_type, p.workout_type)]
         if p.target.get("pace_min_km") is not None:
             parts.append(f"темп {format_pace(p.target['pace_min_km'])}/км")

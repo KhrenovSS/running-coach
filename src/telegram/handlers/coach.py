@@ -138,6 +138,35 @@ def _plan_blocking(user_id: int) -> str | None:
         db.close()
 
 
+async def cmd_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /week — показать СОХРАНЁННЫЙ план текущей недели (read-only, без LLM).
+
+    (Stored weekly plan card; no LLM turn, no daily-budget spend — 02.09.2026.)
+    """
+    user = get_user(update.effective_chat.id)
+    if not user:
+        await update.message.reply_text(
+            "❌ Сначала используй /start чтобы зарегистрироваться.")
+        return
+    try:
+        text = await asyncio.to_thread(_week_blocking, user.id)
+        await send_md_safe(update.message.reply_text, text)
+    except (CoachError, telegram.error.TelegramError) as e:
+        logger.error("Week view error for user=%s: %s", user.id, e, exc_info=True)
+        await update.message.reply_text("😔 Не удалось показать план недели.")
+
+
+def _week_blocking(user_id: int) -> str:
+    """Sync-обёртка карточки недели: сессия живёт только внутри этого треда."""
+    from src.coach.week_view import render_stored_week_plan
+
+    db = SessionLocal()
+    try:
+        return render_stored_week_plan(user_id, db=db)
+    finally:
+        db.close()
+
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Роутер свободного текста: вес (приоритет старого флоу) → коуч (text router)."""
     chat_id = update.effective_chat.id

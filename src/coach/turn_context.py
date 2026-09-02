@@ -23,6 +23,19 @@ from src.services.repositories_coach import CoachRepository
 from src.utils.timeutils import WEEKDAYS_RU, local_dt, user_now
 
 
+def profile(user: User) -> dict:
+    """Стабильный профиль для кэшируемого system-блока (stable cached profile).
+
+    Перенесён из orchestrator.py (лимит ~400 строк/файл, 02.09.2026).
+    """
+    return {
+        "age": user.age, "max_hr": user.max_hr, "sport_level": user.sport_level,
+        "goal_type": user.goal_type, "goal_target": user.goal_target,
+        "weight_kg": user.weight_kg,
+        "injuries": "колено — возврат после травмы (беречь)",
+    }
+
+
 def build_extras(user_id: int, *, db: Session,
                  weeks: int = COACH_ENRICH_WEEKS,
                  limit: int = COACH_ENRICH_RECENT_LIMIT,

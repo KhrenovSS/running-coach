@@ -76,8 +76,10 @@ def test_generate_weekly_plan_empty_list_returns_none(athlete_with_history,
 
 
 def test_weekly_plan_field_dropped_in_chat(athlete_with_history, db_session):
-    """weekly_plan в обычном чате дропается (как assessment вне разбора)."""
+    """weekly_plan в обычном чате НЕ персистится, но вместо молчаливого дропа
+    показывается сохранённый план недели (инцидент 02.09.2026: «общие слова»)."""
     from src.coach import orchestrator
+    from src.coach.week_view import NO_PLAN_TEXT
 
     llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=PLAN_TURN)])
     uid = athlete_with_history.id
@@ -86,3 +88,4 @@ def test_weekly_plan_field_dropped_in_chat(athlete_with_history, db_session):
     assert reply.source == "llm"
     assert db_session.query(Recommendation).filter_by(
         user_id=uid).count() == before                    # план не записан
+    assert NO_PLAN_TEXT in reply.text                     # плана нет → подсказка /plan

@@ -150,6 +150,10 @@ class CoachTurn(BaseModel):
     # Недельный план (решение владельца 29.08.2026): только для kind='plan',
     # for_days_ahead элемента = день; дубли/rest/день-0 чистит weekly_plan.py
     weekly_plan: list[WorkoutProposalIn] | None = Field(default=None, max_length=8)
+    # Подопечный спрашивает, какой у него план недели → система рендерит
+    # СОХРАНЁННЫЙ план (week_view), LLM ничего не составляет (инцидент 02.09.2026)
+    # (Athlete asks to see the week plan → deterministic stored-plan card.)
+    show_week_plan: bool = False
 
 
 def _strictify(schema: dict) -> dict:

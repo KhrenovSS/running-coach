@@ -270,3 +270,31 @@ def test_history_filters_kinds_and_uses_prose(athlete_with_history, db_session):
     assert "[утренний вердикт]" in contents                     # метка вместо промпта
     # fallback-строка без prose деградирует на полный текст — без исключений
     assert any("вердикт-проза" in c for c in contents)
+
+
+def test_show_week_plan_flag_appends_stored_card(athlete_with_history, db_session):
+    """show_week_plan=true → к прозе добавляется карточка СОХРАНЁННОГО плана недели;
+    новых строк recommendations нет, LLM ничего не составляла (инцидент 02.09.2026)."""
+    from datetime import timedelta
+
+    from src.utils.timeutils import user_now
+
+    uid = athlete_with_history.id
+    today = user_now(athlete_with_history).date()
+    sunday = today - timedelta(days=today.weekday()) + timedelta(days=6)
+    db_session.add(Recommendation(user_id=uid, for_date=sunday, workout_type="long",
+                                  target_json={"max_zone": 2},
+                                  volume_json={"duration_min": 80.0, "distance_km": 9.0},
+                                  status="proposed", source="llm", clamped=False))
+    db_session.commit()
+    before = db_session.query(Recommendation).filter_by(user_id=uid).count()
+
+    turn = {"message": "Неделя спокойная, воскресенье — с компанией.", "proposal": None,
+            "followup_question": None, "log_suggestion": None, "show_week_plan": True}
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
+    reply = orchestrator.handle_chat(uid, "какой план на неделю?", db=db_session, llm=llm)
+
+    assert reply.source == "llm"
+    assert "План на неделю" in reply.text
+    assert "80 мин" in reply.text and "≈9.0 км" in reply.text
+    assert db_session.query(Recommendation).filter_by(user_id=uid).count() == before

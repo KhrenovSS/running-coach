@@ -116,7 +116,9 @@
   tool-цикл неактивен) → NullLLM/fallback. Решения и причины — `docs/coach/ARCHITECTURE.md`.
 - **Недельный план** (`weekly_plan.py` + детерминированные числа `planning.py`, вс 19:00 после
   отчёта, команда `/plan`): строки `recommendations` со `status` planned→confirmed/adjusted;
-  утренний вердикт подтверждает план дня. **Метрики разбора — insights v7**: `workout_insights.py`
+  утренний вердикт подтверждает план дня. **Показ сохранённого плана — read-only**
+  (`week_view.py`, `/week`, флаг `show_week_plan`; `weekly_plan` в чате не персистится,
+  а рендерится сохранённый план — инцидент 02.09.2026). **Метрики разбора — insights v7**: `workout_insights.py`
   композирует `session_metrics` (M1) + `effort`/`gap` + `hr_baseline` + `data_checks`
   (кросс-чеки с часами) + `intervals` (HRR) + `week_structure`/downhill/session_rpe (M4);
   baseline — `services/insights_baseline.py`; флаги — только из `computed.flags`,

@@ -215,3 +215,24 @@ def clamp(proposal: WorkoutProposal | None, verdict: SafetyVerdict,
         source=source,
         proposal=proposal,
     ), clamped
+
+
+def rehydrate(row) -> Prescription:
+    """Восстановить Prescription из УЖЕ клэмпленной строки recommendations.
+
+    Числа строки прошли clamp() при записи (save_prescription), поэтому это не
+    обход границы, а чтение её результата: вердикт — пустой SafetyVerdict
+    (исходный лежит в safety_json как метрика дрейфа). Никаких пересчётов.
+    Используется read-only карточкой сохранённого плана недели (week_view).
+    (Rehydrate a persisted, already-clamped prescription; no recomputation.)
+    """
+    return Prescription(
+        safety=SafetyVerdict(),
+        workout_type=row.workout_type,
+        when=row.for_date,
+        target=dict(row.target_json or {}),
+        volume=dict(row.volume_json or {}),
+        predicted=dict(row.predicted_json or {}),
+        clamped=bool(row.clamped),
+        source=row.source or "plan",
+    )

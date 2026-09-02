@@ -131,7 +131,7 @@ def generate_weekly_plan(user_id: int, *, db: Session,
 
 
 def _profile(user: User) -> dict:
-    from src.coach.orchestrator import _profile as profile
+    from src.coach.turn_context import profile
     return profile(user)
 
 
