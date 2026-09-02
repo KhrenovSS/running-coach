@@ -456,8 +456,24 @@ def test_week_card_and_short_card_show_compact_structure():
                             facts={date(2026, 9, 1): {"duration_min": 46.2, "distance_km": 6.7,
                                                       "pace_min_km": 46.2 / 6.7, "avg_hr": 140}})
     assert "детали в дне" not in text
-    assert "✓ вт 01.09 — 🟢 Лёгкий бег · 25 мин Z2 + 7×18 сек Z3 + зам 5 мин · факт 46 мин" in text
-    assert "▶ ср 02.09 — " in text and "разм 5 мин + 25 мин Z2 + зам 5 мин" in text
+    # ускорения — структура в уд/мин (177: Z2→141, Z3→153, Z1→123)
+    assert ("✓ вт 01.09 — 🟢 Лёгкий бег · 25 мин до 141 + 7×18 сек до 153 + зам 5 мин до 123"
+            " · факт 46 мин") in text
+    # ровная пробежка (разм/бег/зам) — без структуры и без зон (решение владельца 02.09)
+    wed = next(l for l in text.splitlines() if l.startswith("▶ ср 02.09"))
+    assert "разм" not in wed and "Z" not in wed and "пульс до 141" in wed
 
     short = render_prescription_short(today_p, max_hr=177, today=date(2026, 9, 2))
-    assert short.endswith("разм 5 мин + 25 мин Z2 + зам 5 мин")
+    assert "разм" not in short and short.endswith("пульс до 141 · 35 мин")   # без структуры
+    short_strides = render_prescription_short(past, max_hr=177, today=date(2026, 9, 1))
+    assert short_strides.endswith("25 мин до 141 + 7×18 сек до 153 + зам 5 мин до 123")
+
+
+def test_hr_lead_line_is_bpm_first():
+    """Полная карточка: «пульс до N уд/мин» без ярлыка зоны; зона — только без max_hr."""
+    state = _state()
+    p, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2, duration_min=45),
+                 evaluate_safety(state), state)
+    with_hr = render_prescription(p, max_hr=177)
+    assert "пульс до 141 уд/мин" in with_hr and "Z2 и ниже" not in with_hr
+    assert "Z2 и ниже" in render_prescription(p)

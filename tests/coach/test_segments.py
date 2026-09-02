@@ -2,7 +2,7 @@
 # Числа проставляет детерминированный код; при нехватке данных — честная пометка.
 
 from src.coach.contracts import (Prescription, RecoverySpec, SafetyVerdict,
-                                 WorkoutSegment)
+                                 WorkoutProposal, WorkoutSegment)
 from src.coach.render import render_prescription
 from src.coach.segments import (enrich_and_clamp_segments, segments_from_schema,
                                 segments_from_target)
@@ -92,10 +92,11 @@ def test_render_segments_compact_and_clear():
     """Компактный формат: заголовок с итогом, понятные строки, без загромождения."""
     text = render_prescription(_owner_example_prescription(), max_hr=180)
     assert "*🟢 Лёгкий бег с ускорениями* · ~46 мин" in text   # итог из сегментов
-    assert "Разминка: 25 мин · пульс ≤144 (Z2)" in text
-    assert "Ускорения ×7: 18 сек · пульс ≤167 (Z4) · свободно — не на пределе" in text
+    assert "Разминка: 25 мин · пульс до 144" in text                 # уд/мин, без (Z2)
+    assert "Ускорения ×7: 18 сек · пульс до 167 · свободно — не на пределе" in text
     assert "отдых между: 2 мин трусцой или до пульса ≤130" in text
-    assert "Заминка: 5 мин · пульс ≤144 (Z2)" in text
+    assert "Заминка: 5 мин · пульс до 144" in text
+    assert "(Z" not in text
     # загромождающие/честные-но-шумные пометки убраны из компактного формата
     assert "мало данных" not in text
 
@@ -183,6 +184,49 @@ def test_compact_segments_one_line():
                {"role": "work", "repeat": 7, "amount_kind": "sec", "amount_value": 18.0,
                 "target_zone": 3, "recovery": {"duration_min": 2.0, "until_hr": 125}},
                {"role": "cooldown", "amount_kind": "min", "amount_value": 5.0, "target_zone": 1}]
-    assert compact_segments(today) == "разм 5 мин + 25 мин Z2 + зам 5 мин"
-    assert compact_segments(strides) == "25 мин Z2 + 7×18 сек Z3 + зам 5 мин"
+    # без max_hr пульс неизвестен → зона как fallback
+    assert compact_segments(today) == "разм 5 мин Z1 + 25 мин Z2 + зам 5 мин Z1"
+    assert compact_segments(strides) == "25 мин Z2 + 7×18 сек Z3 + зам 5 мин Z1"
+    # с max_hr — пульс в уд/мин от текущего якоря зон (пожелание владельца 02.09)
+    assert compact_segments(strides, max_hr=180) == "25 мин до 144 + 7×18 сек до 156 + зам 5 мин до 125"
     assert compact_segments([]) == "" and compact_segments(None) == ""
+
+
+def test_is_monotone_and_visible_segments():
+    """Ровная пробежка (разм/бег/зам, один блок) — без структуры; ускорения и два ровных
+    блока с разным пульсом — структура остаётся (решение владельца 02.09.2026)."""
+    from src.coach.render_segments import is_monotone, visible_segments
+
+    plain = [{"role": "warmup", "amount_kind": "min", "amount_value": 5.0, "target_zone": 1},
+             {"role": "steady", "amount_kind": "min", "amount_value": 25.0, "target_zone": 2},
+             {"role": "cooldown", "amount_kind": "min", "amount_value": 5.0, "target_zone": 1}]
+    two_blocks = [{"role": "steady", "amount_kind": "min", "amount_value": 40.0, "target_zone": 1},
+                  {"role": "steady", "amount_kind": "min", "amount_value": 20.0, "target_zone": 2}]
+    strides = plain[:2] + [{"role": "work", "repeat": 6, "amount_kind": "sec",
+                            "amount_value": 20.0, "target_zone": 3}]
+    assert is_monotone(plain) and is_monotone([plain[1]])
+    assert not is_monotone(two_blocks) and not is_monotone(strides) and not is_monotone([])
+    assert visible_segments({"segments": plain}) == []
+    assert visible_segments({"segments": two_blocks}) == two_blocks
+    assert visible_segments({}) == [] and visible_segments(None) == []
+    assert is_monotone([_seg(role="warmup"), _seg(), _seg(role="cooldown")])   # WorkoutSegment
+
+
+def test_finalize_drops_monotone_segments(db_session):
+    """finalize: ровная структура не сохраняется в target — карточка одной строкой."""
+    from src.coach.prescriber import finalize
+    from src.coach.state import assess_state
+    from tests.coach.conftest import _unique_user
+
+    user = _unique_user(db_session)
+    state = assess_state(user.id, db=db_session)
+    plain = [_seg(role="warmup", amount_value=5, target_zone=1), _seg(target_zone=2),
+             _seg(role="cooldown", amount_value=5, target_zone=1)]
+    p = finalize(WorkoutProposal(workout_type="easy", target_zone=2, duration_min=40,
+                                 segments=plain), state, db=db_session, persist=False)
+    assert not p.target.get("segments")
+    strides = [_seg(target_zone=2), _seg(role="work", repeat=6, amount_kind="sec",
+                                         amount_value=20, target_zone=3)]
+    p2 = finalize(WorkoutProposal(workout_type="easy", target_zone=3, duration_min=40,
+                                  segments=strides), state, db=db_session, persist=False)
+    assert p2.target.get("segments")

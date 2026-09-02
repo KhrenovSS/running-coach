@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from src.analysis.utils import format_pace
 from src.coach.contracts import Prescription
 from src.coach.render import _WEEKDAYS_RU, _TYPE_LABEL, _hr_ceiling, _predicted_estimate
-from src.coach.render_segments import compact_segments
+from src.coach.render_segments import compact_segments, visible_segments
 
 
 def _distance_hint_km(p: Prescription) -> float | None:
@@ -51,12 +51,14 @@ def _pace_hint(p: Prescription) -> float | None:
 
 
 
-def _fact_line(day: str, p: Prescription, fact: dict | None) -> str:
+def _fact_line(day: str, p: Prescription, fact: dict | None,
+               max_hr: int | None = None, lthr: int | None = None) -> str:
     """Прошедший день: факт связанной тренировки (✓) или пропуск (✗) — без потолка
     пульса и ≈км плана, которые дрейфуют со сменой якоря зон (past day as fact)."""
     label = _TYPE_LABEL.get(p.workout_type, p.workout_type)
     # Плановая структура прошедшего дня (ускорения и т.п.) — рядом с фактом
-    structure = compact_segments(p.target.get("segments")) if p.target.get("segments") else ""
+    segs = visible_segments(p.target)
+    structure = compact_segments(segs, max_hr, lthr) if segs else ""
     head = [label, structure] if structure else [label]
     if fact is None:
         parts = list(head)
@@ -105,7 +107,8 @@ def render_week_plan(prescriptions: list[Prescription], targets: dict,
         if facts is not None and today is not None and p.when < today:
             has_facts = True
             lines.append(_fact_line(
-                f"{_WEEKDAYS_RU[p.when.weekday()][:2]} {p.when:%d.%m}", p, facts.get(p.when)))
+                f"{_WEEKDAYS_RU[p.when.weekday()][:2]} {p.when:%d.%m}", p, facts.get(p.when),
+                max_hr, lthr))
             continue
         mark = "▶ " if today is not None and p.when == today else ""
         day = f"{mark}{_WEEKDAYS_RU[p.when.weekday()][:2]} {p.when:%d.%m}"
@@ -126,9 +129,10 @@ def render_week_plan(prescriptions: list[Prescription], targets: dict,
         km = _distance_hint_km(p)
         if km is not None:
             parts.append(f"≈{km:.1f} км")
-        if p.target.get("segments"):
+        segs = visible_segments(p.target)
+        if segs:
             # Структура — компактной строкой прямо здесь (02.09: «детали в дне» не было)
-            parts.append(compact_segments(p.target["segments"]))
+            parts.append(compact_segments(segs, max_hr, lthr))
         elif p.target.get("structure"):
             parts.append(p.target["structure"])
         lines.append(f"{day} — " + " · ".join(parts))

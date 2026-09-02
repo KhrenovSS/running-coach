@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from src.analysis.hr_zones import zone_ceiling_hr
 from src.analysis.utils import format_pace
 
 _SEG_ROLE = {"warmup": "Разминка", "steady": "Бег", "cooldown": "Заминка"}
@@ -100,10 +101,10 @@ def render_segment_lines(segments: list[dict]) -> list[str]:
             parts.append(amt)
         zone = seg.get("target_zone")
         if seg.get("hr_ceiling") is not None:
-            z = f" (Z{zone})" if zone is not None else ""
-            parts.append(f"пульс ≤{seg['hr_ceiling']}{z}")
+            # Пульс в уд/мин, без ярлыка зоны (пожелание владельца 02.09.2026)
+            parts.append(f"пульс до {seg['hr_ceiling']}")
         elif zone is not None:
-            parts.append(f"Z{zone}")
+            parts.append(f"Z{zone}")            # зона — только когда пульс неизвестен
         if seg.get("pace_target_min_km") is not None:
             parts.append(f"темп {format_pace(seg['pace_target_min_km'])}/км")
         elif seg.get("pace_hint_min_km") is not None:
@@ -121,25 +122,61 @@ def render_segment_lines(segments: list[dict]) -> list[str]:
 
 
 _COMPACT_ROLE = {"warmup": "разм", "cooldown": "зам"}
+_MONOTONE_ROLES = {"warmup", "steady", "cooldown"}
 
 
-def compact_segments(segments: list[dict] | None) -> str:
+def _role_of(seg) -> str | None:
+    return seg.get("role") if isinstance(seg, dict) else getattr(seg, "role", None)
+
+
+def is_monotone(segments) -> bool:
+    """Ровная пробежка: только разминка/бег/заминка и не больше одного ровного блока.
+
+    Решение владельца 02.09.2026: такую тренировку не делим на сущности — она целиком
+    «пульс до N · время». Структура остаётся при работе/восстановлении (ускорения,
+    интервалы) и при двух ровных блоках с разным пульсом («до 130, потом 130–140»).
+    Принимает dict-сегменты и WorkoutSegment. (Monotone run → no segment structure.)
+    """
+    roles = [_role_of(s) for s in (segments or [])]
+    return bool(roles) and set(roles) <= _MONOTONE_ROLES and roles.count("steady") <= 1
+
+
+def visible_segments(target: dict | None) -> list[dict]:
+    """Сегменты для показа: монотонная структура скрывается (и для уже сохранённых строк)."""
+    segs = (target or {}).get("segments") or []
+    return [] if is_monotone(segs) else segs
+
+
+def _seg_bpm(seg: dict, max_hr: int | None, lthr: int | None) -> int | None:
+    """Потолок пульса сегмента: от текущего якоря зон (согласованно с потолком строки),
+    иначе сохранённый hr_ceiling, иначе None (segment bpm ceiling)."""
+    zone = seg.get("target_zone")
+    if max_hr and zone is not None:
+        bpm = zone_ceiling_hr(zone, max_hr, lthr)
+        if bpm is not None:
+            return bpm
+    return seg.get("hr_ceiling")
+
+
+def compact_segments(segments: list[dict] | None, max_hr: int | None = None,
+                     lthr: int | None = None) -> str:
     """Структура тренировки одной строкой для карточки недели / короткой карточки дня:
-    «разм 5 мин + 25 мин Z2 + зам 5 мин», «25 мин Z2 + 7×18 сек Z3 + зам 5 мин».
-    Восстановление и подсказки темпа — в полной раскладке, не здесь. (One-line structure.)
+    «25 мин до 138 + 7×18 сек до 156 + зам 5 мин до 126». Пульс — в уд/мин; зона (Z2) —
+    только когда пульс посчитать нельзя. Восстановление и подсказки темпа — в полной
+    раскладке. (One-line structure, bpm-first.)
     """
     parts: list[str] = []
     for seg in segments or []:
         amt = _fmt_amount(seg.get("amount_kind"), seg.get("amount_value"))
         role, zone = seg.get("role"), seg.get("target_zone")
         rep = seg.get("repeat", 1) or 1
+        bpm = _seg_bpm(seg, max_hr, lthr)
+        intensity = f"до {bpm}" if bpm is not None else (f"Z{zone}" if zone is not None else "")
         if role in _COMPACT_ROLE:
-            parts.append(f"{_COMPACT_ROLE[role]} {amt}" if amt else _COMPACT_ROLE[role])
-            continue
-        body = amt or "—"
-        if rep > 1:
-            body = f"{rep}×{body}"
-        if zone is not None:
-            body += f" Z{zone}"
-        parts.append(body)
+            body = f"{_COMPACT_ROLE[role]} {amt}" if amt else _COMPACT_ROLE[role]
+        else:
+            body = amt or "—"
+            if rep > 1:
+                body = f"{rep}×{body}"
+        parts.append(f"{body} {intensity}".rstrip())
     return " + ".join(parts)

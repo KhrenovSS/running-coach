@@ -135,7 +135,11 @@ def finalize(proposal: WorkoutProposal | None, state: AthleteState, *,
             lthr=latest_lthr(state.user_id, db=db),
             ltsp_s_km=latest_ltsp(state.user_id, db=db),
             user_id=state.user_id, db=db)
-        if seg_dicts:
+        from src.coach.render_segments import is_monotone
+        # Ровная пробежка (разминка/бег/заминка, один ровный блок) — без сущностей:
+        # целиком «пульс до N · время» (решение владельца 02.09.2026). Ускорения и блоки
+        # с разным пульсом сохраняются. (Monotone structure is not persisted.)
+        if seg_dicts and not is_monotone(seg_dicts):
             prescription.target["segments"] = seg_dicts
     if persist and db is not None:
         save_prescription(prescription, state, db=db)

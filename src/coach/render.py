@@ -13,7 +13,7 @@ from src.analysis.hr_zones import zone_ceiling_hr
 from src.analysis.utils import format_pace
 from src.coach.contracts import AthleteState, Prescription, SafetyVerdict, SkillResult
 from src.coach.render_segments import (compact_segments, render_segment_lines,
-                                       segments_total_min)
+                                       segments_total_min, visible_segments)
 from src.config.constants import HR_DISPLAY_UNIT
 from src.utils.timeutils import WEEKDAYS_RU as _WEEKDAYS_RU
 from src.utils.timeutils import local_dt
@@ -83,10 +83,10 @@ def _hr_lead_lines(p: Prescription, max_hr: int | None,
     (HR-lead card lines: zone/HR+time are the goal, pace and km are estimates.)
     """
     estimate = _predicted_estimate(p)
-    parts = [f"Z{p.target['max_zone']} и ниже"]
     ceiling = _hr_ceiling(p, max_hr, lthr)
-    if ceiling is not None:
-        parts.append(f"пульс до {ceiling} {HR_DISPLAY_UNIT}")
+    # Пульс в уд/мин; ярлык зоны — только когда потолок посчитать нельзя (02.09.2026)
+    parts = ([f"пульс до {ceiling} {HR_DISPLAY_UNIT}"] if ceiling is not None
+             else [f"Z{p.target['max_zone']} и ниже"])
     if p.volume.get("duration_min") is not None:
         parts.append(f"{p.volume['duration_min']:.0f} мин")
     if p.volume.get("distance_km") is not None and estimate is None:
@@ -115,7 +115,7 @@ def render_prescription(p: Prescription, max_hr: int | None = None,
     """
     day = _day_label(p.when, today)
     title = _TYPE_LABEL.get(p.workout_type, p.workout_type)
-    segments = p.target.get("segments") or []
+    segments = visible_segments(p.target)     # ровная пробежка — без разбивки (02.09.2026)
     if (segments and any(s.get("role") == "work" for s in segments)
             and p.workout_type in ("easy", "long", "recovery")):
         title += " с ускорениями"
@@ -180,9 +180,10 @@ def render_prescription_short(p: Prescription, max_hr: int | None = None,
         if estimate is not None:
             pace, km = estimate
             parts.append(f"~{format_pace(pace)}/км ≈ {km:.1f} км")
-        if p.target.get("segments"):
+        segs = visible_segments(p.target)
+        if segs:
             # «Детали в дне» должны быть и в короткой карточке (02.09.2026)
-            parts.append(compact_segments(p.target["segments"]))
+            parts.append(compact_segments(segs, max_hr, lthr))
     return prefix + " · ".join(parts)
 
 
