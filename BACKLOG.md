@@ -85,7 +85,6 @@
 | # | Тег | Описание | Файл / Источник | Статус |
 |---|-----|----------|-----------------|--------|
 | 158 | [Bug] | **Coros не синхронизируется после пересоздания БД** — таблица `watch_credentials` пуста, пользователю нужно заново ввести email/пароль от Coros Training Hub на странице `/settings`. | `src/web/templates/settings.html` (форма ввода credentials) | ⬜ |
-| 164 | [Docs] | **Документация не соответствовала проекту** — частично fixed (TESTING.md, API_ROUTES_GUIDE.md, ARCHITECTURE.md, AGENTS.md, CHECKLIST_API.md). Остались замечания #189–#197. | `docs/*`, `AGENTS.md`, `README.md` | ⬜ |
 
 ## 🟡 P2 — Подготовка к модулю аналитики (аудит 14.07.2026 — Sprint 20c)
 
