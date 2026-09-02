@@ -26,6 +26,7 @@ from src.coach.config import (
     THRESHOLD_MAX_PCT_WEEK,
 )
 from src.coach.contracts import AthleteState, Prescription, WorkoutProposal
+from src.coach.planning_window import plan_window, week_done
 from src.coach.prescriber import finalize, save_prescription
 from src.coach.turn_context import unchanged_today
 from src.config.constants import RECOMMENDATION_STATUS_SUPERSEDED
@@ -57,15 +58,20 @@ def _week_plan_meta(user_id: int, *, db: Session) -> dict:
     return {}
 
 
-def week_targets(user_id: int, *, db: Session) -> dict:
-    """Числа следующей планируемой недели — LLM получает их как факты.
+def week_targets(user_id: int, *, db: Session, today: date | None = None) -> dict:
+    """Числа планируемой недели — LLM получает их как факты.
 
-    Планируемая неделя — та, что содержит завтрашний локальный день
-    (вс вечером → следующая неделя; /plan среди недели → остаток текущей).
+    Вс вечером → следующая неделя целиком (plan_scope="week"); /plan среди недели →
+    ОСТАТОК текущей (plan_scope="rest_of_week", #293): полные недельные числа плюс блок
+    remaining_* с вычетом уже сделанного и окно days_ahead_allowed. today — DI для тестов.
     """
     user = db.query(User).filter(User.id == user_id).first()
-    today = user_now(user).date()
-    week_start = _monday_of(today + timedelta(days=1))
+    today = today or user_now(user).date()
+    done = week_done(user_id, db=db, week_start=_monday_of(today), today=today)
+    week_start, first_offset, last_offset = plan_window(today, done["trained_today"])
+    if week_start != _monday_of(today):
+        # Воскресенье: планируем следующую неделю — сделанного в ней ещё нет
+        done = {"km": 0.0, "runs": 0, "quality_runs": 0, "trained_today": False}
 
     weeks = TrainingRepository.weekly_volume(user_id, weeks=4, db=db)
     prev = [w for w in weeks if w["week_start"] < week_start]
@@ -118,6 +124,14 @@ def week_targets(user_id: int, *, db: Session) -> dict:
         # Беговых дней ≤ и дней полного отдыха ≥ (решение владельца 02.09.2026)
         "run_days_max": run_days_max,
         "rest_days_min": 7 - run_days_max,
+        # Остаток недели (#293): что уже сделано и что осталось распределить
+        "plan_scope": "week" if first_offset == 1 and last_offset == 7 else "rest_of_week",
+        "days_ahead_allowed": list(range(first_offset, last_offset + 1)),
+        "done_km": done["km"], "done_runs": done["runs"],
+        "done_quality": done["quality_runs"],
+        "remaining_km": round(max(0.0, target_km - done["km"]), 1),
+        "remaining_run_days_max": max(0, run_days_max - done["runs"]),
+        "remaining_hard_days_max": max(0, PLAN_QUALITY_DAYS_MAX - done["quality_runs"]),
     }
 
 

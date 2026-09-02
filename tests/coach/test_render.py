@@ -356,3 +356,20 @@ def test_render_week_plan_facts_mode_and_backward_compat():
 
     plain = render_week_plan([past, missed, future], targets, max_hr=177)
     assert "✓" not in plain and "✗" not in plain and "пульс до" in plain
+
+
+def test_render_week_plan_rest_of_week_summary():
+    """plan_scope=rest_of_week → в шапке «сделано X км, осталось ~Y км»."""
+    from datetime import date
+
+    from src.coach.render import render_week_plan
+
+    state = _state()
+    easy, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2, duration_min=40),
+                    evaluate_safety(state), state)
+    easy.when = date(2026, 9, 4)
+    targets = {"week_start": "2026-08-31", "mesocycle_week": 1, "mesocycle_length": 4,
+               "phase": "build", "target_km": 28.0, "plan_scope": "rest_of_week",
+               "done_km": 12.1, "remaining_km": 15.9}
+    text = render_week_plan([easy], targets, max_hr=177, today=date(2026, 9, 2))
+    assert "цель ~28 км · сделано 12.1 км, осталось ~15.9 км" in text

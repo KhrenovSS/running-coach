@@ -120,7 +120,9 @@
   (`week_view.py`, `/week`, флаг `show_week_plan`; `weekly_plan` в чате не персистится,
   а рендерится сохранённый план — инцидент 02.09.2026; прошедшие дни — ✓ факт связанной
   тренировки / ✗ пропущен, не «план с сегодняшними зонами»). `/plan` гасит будущие строки
-  прежнего плана (`status='superseded'`, читатели фильтруют); беговых дней ≤ `run_days_max`
+  прежнего плана (`status='superseded'`, читатели фильтруют); **среди недели `/plan` = остаток
+  текущей недели** (с сегодня, если не бегали, по вс; `planning_window.py`, `remaining_*`,
+  `days_ahead_allowed`, #293); беговых дней ≤ `run_days_max`
   (адаптивно: max за прошлые недели + 1, в [3, 6], `enforce_run_days`). **Метрики разбора — insights v7**: `workout_insights.py`
   композирует `session_metrics` (M1) + `effort`/`gap` + `hr_baseline` + `data_checks`
   (кросс-чеки с часами) + `intervals` (HRR) + `week_structure`/downhill/session_rpe (M4);

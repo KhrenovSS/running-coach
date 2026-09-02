@@ -235,10 +235,14 @@ def render_week_plan(prescriptions: list[Prescription], targets: dict,
     end = start + timedelta(days=6)
     lines = [f"*План на неделю ({start:%d.%m}–{end:%d.%m})*"]
     if targets.get("mesocycle_week") is not None:
-        lines.append(
-            f"Неделя {targets['mesocycle_week']}/{targets['mesocycle_length']} "
-            f"мезоцикла ({'разгрузочная' if targets['phase'] == 'deload' else 'рост'}) "
-            f"· цель ~{targets['target_km']:.0f} км")
+        summary = (f"Неделя {targets['mesocycle_week']}/{targets['mesocycle_length']} "
+                   f"мезоцикла ({'разгрузочная' if targets['phase'] == 'deload' else 'рост'}) "
+                   f"· цель ~{targets['target_km']:.0f} км")
+        if targets.get("plan_scope") == "rest_of_week":
+            # Остаток недели (#293): сколько уже сделано и что распределяли
+            summary += (f" · сделано {targets['done_km']:.1f} км, "
+                        f"осталось ~{targets['remaining_km']:.1f} км")
+        lines.append(summary)
     has_facts = False
     for p in sorted(prescriptions, key=lambda x: x.when):
         if facts is not None and today is not None and p.when < today:

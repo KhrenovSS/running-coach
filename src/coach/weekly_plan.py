@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -27,12 +27,15 @@ from src.coach.llm.prompts import (
 from src.coach.prescriber import finalize, save_prescription, user_max_hr
 from src.services.repositories import latest_lthr
 from src.coach.render import render_week_plan
+from src.coach.safety import rehydrate
+from src.coach.week_view import _active_rows, week_facts
+from src.config.constants import RECOMMENDATION_STATUS_SUPERSEDED
 from src.coach.rules.p1_safety import evaluate_safety
 from src.coach.state import assess_state
 from src.coach.tools.serialize import jsonable
 from src.coach.turn_context import build_extras
 from src.exceptions import CoachError, LLMUnavailableError
-from src.models import User
+from src.models import Recommendation, User
 from src.services.repositories_coach import CoachRepository
 from src.utils.logger import get_logger
 from src.utils.timeutils import fmt_local, local_dt, user_now
@@ -40,13 +43,17 @@ from src.utils.timeutils import fmt_local, local_dt, user_now
 logger = get_logger("coach.weekly_plan")
 
 
-def _clean_days(items: list[WorkoutProposal]) -> list[WorkoutProposal]:
-    """Фильтр элементов плана: день 1..7, без rest, последний на день побеждает."""
+def _clean_days(items: list[WorkoutProposal],
+                allowed: list[int] | None = None) -> list[WorkoutProposal]:
+    """Фильтр элементов плана: только дни из окна allowed (по умолчанию 1..7),
+    без rest, последний на день побеждает. День 0 (сегодня) допустим только когда
+    он в окне — остаток недели без пробежки сегодня (#293)."""
+    allowed_set = set(allowed if allowed is not None else range(1, 8))
     by_day: dict[int, WorkoutProposal] = {}
     for it in items:
         if it.workout_type == "rest":
             continue  # пропуск дня = отдых (решение: rest не персистится)
-        if not 1 <= it.for_days_ahead <= 7:
+        if it.for_days_ahead not in allowed_set:
             logger.info("Weekly plan item skipped: for_days_ahead=%s",
                         it.for_days_ahead)
             continue
@@ -55,10 +62,13 @@ def _clean_days(items: list[WorkoutProposal]) -> list[WorkoutProposal]:
 
 
 def generate_weekly_plan(user_id: int, *, db: Session,
-                         llm: CoachLLM | None = None) -> str | None:
+                         llm: CoachLLM | None = None,
+                         now: datetime | None = None) -> str | None:
     """Составить и записать план недели; вернуть текст карточки или None.
 
     None — бюджет ходов исчерпан, LLM недоступна или план пуст.
+    Среди недели — остаток текущей недели с вычетом сделанного (#293, решение
+    владельца 02.09.2026); now — локальное «сейчас» (DI для тестов).
     """
     if CoachRepository.turns_today(user_id, db=db) >= COACH_MAX_TURNS_PER_DAY:
         logger.info("Weekly plan skipped: turn budget exhausted user=%s", user_id)
@@ -66,7 +76,9 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     llm = llm if llm is not None else get_llm()
 
     user = db.query(User).filter(User.id == user_id).first()
-    targets = planning.week_targets(user_id, db=db)
+    now_local = now or user_now(user)
+    today = now_local.date()
+    targets = planning.week_targets(user_id, db=db, today=today)
     review = planning.week_plan_review(user_id, db=db)
     state = assess_state(user_id, db=db)
     verdict = evaluate_safety(state)
@@ -101,30 +113,42 @@ def generate_weekly_plan(user_id: int, *, db: Session,
         duration_min=p.duration_min, distance_km=p.distance_km,
         target_pace_min_km=p.target_pace_min_km, structure=p.structure,
         rationale=list(p.rationale), for_days_ahead=p.for_days_ahead,
-    ) for p in (turn.weekly_plan or [])])
+    ) for p in (turn.weekly_plan or [])], allowed=targets["days_ahead_allowed"])
     if not items:
         logger.warning("Weekly plan empty for user=%s", user_id)
         return None
-    # Потолок беговых дней — детерминированно (решение владельца 02.09.2026)
-    items, dropped_days = planning.enforce_run_days(items, targets["run_days_max"])
+    # Потолок беговых дней на ОСТАТОК недели — детерминированно (решение владельца 02.09.2026)
+    run_days_cap = targets["remaining_run_days_max"]
+    items, dropped_days = planning.enforce_run_days(items, run_days_cap)
 
-    now_local = user_now(user)
-    # Прежний план на будущие даты гасим ДО записи нового (инцидент 02.09.2026:
+    first_offset = targets["days_ahead_allowed"][0]
+    # День 0 при уже данном назначении на сегодня — осознанная замена (adjusted),
+    # как утренний вердикт; проверяем ДО гашения. (Day-0 replaces today's row → adjusted.)
+    had_today_row = first_offset == 0 and db.query(Recommendation).filter(
+        Recommendation.user_id == user_id, Recommendation.for_date == today,
+        Recommendation.status != RECOMMENDATION_STATUS_SUPERSEDED).first() is not None
+    # Прежний план с первого планируемого дня гасим ДО записи нового (инцидент 02.09.2026:
     # строки первого /plan «ожили» после перепланирования). (Supersede before saving.)
     superseded = planning.supersede_future_rows(
-        user_id, db=db, from_date=now_local.date() + timedelta(days=1))
+        user_id, db=db, from_date=today + timedelta(days=first_offset))
     prescriptions: list[Prescription] = []
     for proposal in items:
         p = finalize(proposal, state, db=db, persist=False, source="llm",
                      now=now_local)
-        save_prescription(p, state, db=db, status="planned")
+        status = "adjusted" if (proposal.for_days_ahead == 0 and had_today_row) else "planned"
+        save_prescription(p, state, db=db, status=status)
         prescriptions.append(p)
 
+    # Карточка — одна картина недели: прошедшие дни фактом (week_view) + новый остаток
+    week_start = date.fromisoformat(targets["week_start"])
+    rows = _active_rows(user_id, db=db, week_start=week_start)
+    past = [rehydrate(r) for d, r in sorted(rows.items()) if d < today]
     text = (turn.message + "\n\n"
-            + render_week_plan(prescriptions, targets, max_hr=user_max_hr(user),
-                               lthr=latest_lthr(user_id, db=db)))
+            + render_week_plan(past + prescriptions, targets, max_hr=user_max_hr(user),
+                               lthr=latest_lthr(user_id, db=db), today=today,
+                               facts=week_facts(rows, db=db, today=today)))
     if dropped_days:
-        text += (f"\n⚠️ Беговых дней урезано до {targets['run_days_max']}: "
+        text += (f"\n⚠️ Беговых дней урезано до {run_days_cap}: "
                  "частота растёт не быстрее +1 в неделю.")
     CoachRepository.save_message(user_id, "user", PLAN_PROMPT, db=db, kind="plan")
     CoachRepository.save_message(

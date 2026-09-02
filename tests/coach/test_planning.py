@@ -180,3 +180,71 @@ def test_supersede_future_rows_only_unlinked_future(db_session):
         db_session.refresh(r)
     assert future.status == "superseded"
     assert past.status == "planned" and linked.status == "planned"
+
+
+def test_plan_window_sunday_and_midweek():
+    """Вс → следующая неделя 1..7; будни → остаток текущей: с 0 (не бегали) или 1 (бегали)."""
+    from datetime import date
+
+    from src.coach.planning_window import plan_window
+
+    assert plan_window(date(2026, 8, 30), False) == (date(2026, 8, 31), 1, 7)   # вс
+    assert plan_window(date(2026, 8, 30), True) == (date(2026, 8, 31), 1, 7)
+    assert plan_window(date(2026, 9, 2), False) == (date(2026, 8, 31), 0, 4)    # ср, не бегали
+    assert plan_window(date(2026, 9, 2), True) == (date(2026, 8, 31), 1, 4)     # ср, бегали
+    assert plan_window(date(2026, 9, 5), False) == (date(2026, 8, 31), 0, 1)    # сб
+
+
+def test_week_done_counts_by_local_date_and_quality(db_session):
+    """week_done: км/пробежки недели по локальной дате, качество по пульсу, «бегали сегодня»."""
+    from datetime import datetime, timezone
+
+    from src.coach.planning_window import monday_of, week_done
+
+    user = _unique_user(db_session)
+    today = planning.user_now(user).date()
+    monday = monday_of(today)
+    anchor = datetime.combine(monday, datetime.min.time(), tzinfo=timezone.utc)
+    build_training_session(db_session, user.id, total_distance_km=5.4, training_type="easy",
+                           avg_heart_rate=137, begin_ts=anchor + timedelta(hours=9))
+    build_training_session(db_session, user.id, total_distance_km=6.0, training_type="interval",
+                           avg_heart_rate=165, begin_ts=anchor + timedelta(hours=9)
+                           + timedelta(days=(today - monday).days))            # сегодня
+    build_training_session(db_session, user.id, total_distance_km=9.0, training_type="long",
+                           begin_ts=anchor - timedelta(days=3))                # прошлая неделя
+
+    done = week_done(user.id, db=db_session, week_start=monday, today=today)
+    assert done["runs"] == 2 and abs(done["km"] - 11.4) < 0.05
+    assert done["quality_runs"] == 1                       # interval — всегда качество
+    assert done["trained_today"] is True
+
+
+def test_week_targets_midweek_exposes_remaining(db_session):
+    """Среди недели: plan_scope=rest_of_week, окно, remaining_* с вычетом сделанного."""
+    from datetime import datetime, timezone
+
+    from src.coach.planning_window import monday_of
+
+    user = _unique_user(db_session)
+    real_today = planning.user_now(user).date()
+    wed = real_today + timedelta(days=((2 - real_today.weekday()) % 7 or 7))   # будущая среда
+    monday = monday_of(wed)
+    anchor = datetime.combine(monday, datetime.min.time(), tzinfo=timezone.utc)
+    for w in (1, 2):                                                           # история: 4 пробежки/нед
+        for _ in range(4):
+            _week_of_km(db_session, user.id, 5.0, w)
+    build_training_session(db_session, user.id, total_distance_km=5.0, training_type="easy",
+                           avg_heart_rate=135, begin_ts=anchor + timedelta(hours=9))   # пн
+
+    t = planning.week_targets(user.id, db=db_session, today=wed)
+    assert t["plan_scope"] == "rest_of_week"
+    assert t["week_start"] == monday.isoformat()
+    assert t["days_ahead_allowed"] == [0, 1, 2, 3, 4]      # в среду не бегали
+    assert t["done_runs"] == 1 and abs(t["done_km"] - 5.0) < 0.05
+    assert t["remaining_run_days_max"] == t["run_days_max"] - 1
+    assert abs(t["remaining_km"] - max(0.0, t["target_km"] - 5.0)) < 0.05
+
+    sunday = monday - timedelta(days=1)
+    full = planning.week_targets(user.id, db=db_session, today=sunday)
+    assert full["plan_scope"] == "week" and full["days_ahead_allowed"] == list(range(1, 8))
+    assert full["done_km"] == 0.0 and full["remaining_km"] == full["target_km"]
