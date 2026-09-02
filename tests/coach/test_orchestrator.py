@@ -298,3 +298,24 @@ def test_show_week_plan_flag_appends_stored_card(athlete_with_history, db_sessio
     assert "План на неделю" in reply.text
     assert "80 мин" in reply.text and "≈9.0 км" in reply.text
     assert db_session.query(Recommendation).filter_by(user_id=uid).count() == before
+
+
+def test_unchanged_today_ignores_superseded(athlete_with_history, db_session):
+    """Дедуп назначения не сравнивает с погашенной строкой (иначе карточка глушится)."""
+    from src.coach.contracts import WorkoutProposal
+    from src.coach.rules.p1_safety import evaluate_safety
+    from src.coach.safety import clamp
+    from src.coach.state import assess_state
+    from src.coach.turn_context import unchanged_today
+    from src.utils.timeutils import user_now
+
+    uid = athlete_with_history.id
+    state = assess_state(uid, db=db_session)
+    p, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2, duration_min=40),
+                 evaluate_safety(state), state)
+    p.when = user_now(athlete_with_history).date()
+    db_session.add(Recommendation(user_id=uid, for_date=p.when, workout_type="easy",
+                                  target_json=dict(p.target), volume_json=dict(p.volume),
+                                  status="superseded", source="llm"))
+    db_session.commit()
+    assert unchanged_today(p, uid, db=db_session) is False

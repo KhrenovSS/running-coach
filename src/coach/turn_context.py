@@ -18,6 +18,7 @@ from src.coach.llm.config import (
     COACH_RECENT_REVIEWS_LIMIT,
 )
 from src.coach.tools.registry import run_tool
+from src.config.constants import RECOMMENDATION_STATUS_SUPERSEDED
 from src.models import Recommendation, User
 from src.services.repositories_coach import CoachRepository
 from src.utils.timeutils import WEEKDAYS_RU, local_dt, user_now
@@ -75,6 +76,7 @@ def build_extras(user_id: int, *, db: Session,
     recs = db.query(Recommendation).filter(
         Recommendation.user_id == user_id,
         Recommendation.for_date >= today_local,
+        Recommendation.status != RECOMMENDATION_STATUS_SUPERSEDED,
     ).order_by(Recommendation.id.asc()).all()
     if recs:
         # Действующие назначения по дням: наутро модель видит, что уже назначала
@@ -163,6 +165,7 @@ def unchanged_today(p: Prescription, user_id: int, *, db: Session) -> bool:
     rec = db.query(Recommendation).filter(
         Recommendation.user_id == user_id,
         Recommendation.for_date == p.when,
+        Recommendation.status != RECOMMENDATION_STATUS_SUPERSEDED,
     ).order_by(Recommendation.id.desc()).first()
     if rec is None:
         return False

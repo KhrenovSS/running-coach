@@ -118,7 +118,9 @@
   отчёта, команда `/plan`): строки `recommendations` со `status` planned→confirmed/adjusted;
   утренний вердикт подтверждает план дня. **Показ сохранённого плана — read-only**
   (`week_view.py`, `/week`, флаг `show_week_plan`; `weekly_plan` в чате не персистится,
-  а рендерится сохранённый план — инцидент 02.09.2026). **Метрики разбора — insights v7**: `workout_insights.py`
+  а рендерится сохранённый план — инцидент 02.09.2026). `/plan` гасит будущие строки
+  прежнего плана (`status='superseded'`, читатели фильтруют); беговых дней ≤ `run_days_max`
+  (адаптивно: max за прошлые недели + 1, в [3, 6], `enforce_run_days`). **Метрики разбора — insights v7**: `workout_insights.py`
   композирует `session_metrics` (M1) + `effort`/`gap` + `hr_baseline` + `data_checks`
   (кросс-чеки с часами) + `intervals` (HRR) + `week_structure`/downhill/session_rpe (M4);
   baseline — `services/insights_baseline.py`; флаги — только из `computed.flags`,

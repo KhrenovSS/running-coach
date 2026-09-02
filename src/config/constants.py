@@ -207,3 +207,8 @@ REVIEW_WAIT_MAX_MIN: Final[int] = 30         # таймаут ожидания �
 REVIEW_AFTER_RPE_DELAY_SEC: Final[int] = 120  # грейс после RPE-тапа на тап боли (post-RPE grace)
 REVIEW_PENDING_TTL_H: Final[int] = 24        # старше → expired молча (pending TTL)
 REVIEW_STALE_RUNNING_MIN: Final[int] = 15    # зависший running → re-claim (stale running)
+
+# Строки плана (recommendations.status): перепланирование гасит будущие строки прежнего
+# плана — читатели их игнорируют (инцидент 02.09.2026: строки первого /plan «ожили»).
+# (Superseded plan rows are invisible to every reader; set on re-plan, never renamed.)
+RECOMMENDATION_STATUS_SUPERSEDED: Final[str] = "superseded"

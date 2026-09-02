@@ -398,3 +398,22 @@ def test_baseline_and_data_check_reexports_alive():
         assert getattr(workout_insights, name) is getattr(insights_baseline, name)
     assert workout_insights.device_check is data_checks.device_check
     assert workout_insights.lap_check is data_checks.lap_check
+
+
+def test_plan_vs_actual_ignores_superseded_recommendation(db_session):
+    """Погашенная перепланированием строка не линкуется к факту (02.09.2026)."""
+    from src.models import Recommendation
+
+    user = _user(db_session)
+    s = _session_with_track(db_session, user.id, hr=150, ttype='easy')
+    stale = Recommendation(user_id=user.id, for_date=s.begin_ts.date(),
+                           workout_type="tempo", target_json={"max_zone": 3},
+                           volume_json={"duration_min": 45.0},
+                           status="superseded", source="llm")
+    db_session.add(stale)
+    db_session.commit()
+
+    computed = upsert_workout_insights(user.id, s.id, db=db_session)
+    assert computed["plan_vs_actual"]["available"] is False
+    db_session.refresh(stale)
+    assert stale.linked_session_id is None

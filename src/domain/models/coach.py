@@ -25,7 +25,7 @@ class Recommendation(Base):
     rationale_json = Column(JSON, nullable=True)            # трасса рассуждений (ReasoningTrace)
     predicted_json = Column(JSON, nullable=True)            # прогноз effort/HR/load
     confidence = Column(Float, nullable=True)
-    status = Column(String(20), default='proposed')         # proposed/accepted/done/skipped
+    status = Column(String(20), default='proposed')         # proposed/planned/confirmed/adjusted/superseded
     linked_session_id = Column(Integer, ForeignKey('training_sessions.id', ondelete='SET NULL'), nullable=True)
     # C3 (DEV_PLAN §6): наблюдаемость гибрида — предложение LLM ДО урезания + вердикт.
     # (Hybrid observability: the raw proposal BEFORE clamp + the safety verdict.)

@@ -89,3 +89,45 @@ def test_weekly_plan_field_dropped_in_chat(athlete_with_history, db_session):
     assert db_session.query(Recommendation).filter_by(
         user_id=uid).count() == before                    # план не записан
     assert NO_PLAN_TEXT in reply.text                     # плана нет → подсказка /plan
+
+
+def test_replan_supersedes_previous_future_rows(athlete_with_history, db_session):
+    """Повторный /plan гасит будущие строки прежнего плана (инцидент 02.09.2026:
+    строки первого плана «ожили» и дали 7 беговых дней в /week)."""
+    uid = athlete_with_history.id
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=PLAN_TURN),
+                       LLMResponse(stop_reason="end_turn", parsed=PLAN_TURN)])
+    assert generate_weekly_plan(uid, db=db_session, llm=llm) is not None
+    first_ids = {r.id for r in db_session.query(Recommendation).filter_by(
+        user_id=uid, status="planned").all()}
+    assert len(first_ids) == 3
+
+    assert generate_weekly_plan(uid, db=db_session, llm=llm) is not None
+    rows = db_session.query(Recommendation).filter_by(user_id=uid).all()
+    by_id = {r.id: r for r in rows}
+    assert all(by_id[i].status == "superseded" for i in first_ids)
+    active = [r for r in rows if r.status == "planned"]
+    assert len(active) == 3 and not (first_ids & {r.id for r in active})
+    msg = db_session.query(CoachMessage).filter_by(
+        user_id=uid, kind="plan", role="assistant").order_by(CoachMessage.id.desc()).first()
+    assert msg.meta_json["superseded"] == 3
+
+
+def test_run_day_cap_trims_plan_and_notes_it(athlete_with_history, db_session):
+    """LLM вернула больше беговых дней, чем run_days_max → лишние лёгкие урезаны,
+    под карточкой — пометка; каркас (long) сохранён."""
+    from src.coach import planning
+
+    seven = {**PLAN_TURN, "weekly_plan": [
+        {"workout_type": "easy", "target_zone": 2, "duration_min": 30 + d,
+         "for_days_ahead": d} for d in range(1, 7)] + [
+        {"workout_type": "long", "target_zone": 2, "duration_min": 70, "for_days_ahead": 7}]}
+    uid = athlete_with_history.id
+    cap = planning.week_targets(uid, db=db_session)["run_days_max"]
+    assert cap < 7
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=seven)])
+    text = generate_weekly_plan(uid, db=db_session, llm=llm)
+    rows = db_session.query(Recommendation).filter_by(user_id=uid, status="planned").all()
+    assert len(rows) == cap
+    assert any(r.workout_type == "long" for r in rows)
+    assert f"Беговых дней урезано до {cap}" in text

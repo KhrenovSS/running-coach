@@ -148,7 +148,8 @@ def save_prescription(p: Prescription, state: AthleteState, *, db: Session,
 
     proposal_json — предложение ДО урезания, safety_json — вердикт: метрика
     дрейфа LLM (DEV_PLAN §1.6). status: proposed (день) | planned (вс-план) |
-    adjusted (замена планового дня); confirmed ставится UPDATE'ом в planning.
+    adjusted (замена планового дня); confirmed ставится UPDATE'ом в planning;
+    superseded — UPDATE при перепланировании (planning.supersede_future_rows).
     """
     from src.coach.tools.serialize import jsonable
 

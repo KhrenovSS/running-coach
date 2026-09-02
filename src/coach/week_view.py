@@ -17,6 +17,7 @@ from src.coach.planning import _MESO_LEN, _monday_of
 from src.coach.prescriber import user_max_hr
 from src.coach.render import render_week_plan
 from src.coach.safety import rehydrate
+from src.config.constants import RECOMMENDATION_STATUS_SUPERSEDED
 from src.models import Recommendation, User, UserModel
 from src.services.repositories import latest_lthr
 from src.utils.timeutils import user_now
@@ -35,6 +36,7 @@ def stored_week_prescriptions(user_id: int, *, db: Session,
         Recommendation.user_id == user_id,
         Recommendation.for_date >= week_start,
         Recommendation.for_date <= week_start + timedelta(days=6),
+        Recommendation.status != RECOMMENDATION_STATUS_SUPERSEDED,
     ).order_by(Recommendation.id.asc()).all()
     latest_by_date = {r.for_date: r for r in rows if r.for_date is not None}
     # Конструктор Prescription — только в safety.py (гвард test_no_prescription_bypass)

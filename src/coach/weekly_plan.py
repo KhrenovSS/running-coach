@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from sqlalchemy.orm import Session
 
 from src.coach import planning
@@ -103,8 +105,14 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     if not items:
         logger.warning("Weekly plan empty for user=%s", user_id)
         return None
+    # Потолок беговых дней — детерминированно (решение владельца 02.09.2026)
+    items, dropped_days = planning.enforce_run_days(items, targets["run_days_max"])
 
     now_local = user_now(user)
+    # Прежний план на будущие даты гасим ДО записи нового (инцидент 02.09.2026:
+    # строки первого /plan «ожили» после перепланирования). (Supersede before saving.)
+    superseded = planning.supersede_future_rows(
+        user_id, db=db, from_date=now_local.date() + timedelta(days=1))
     prescriptions: list[Prescription] = []
     for proposal in items:
         p = finalize(proposal, state, db=db, persist=False, source="llm",
@@ -115,18 +123,23 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     text = (turn.message + "\n\n"
             + render_week_plan(prescriptions, targets, max_hr=user_max_hr(user),
                                lthr=latest_lthr(user_id, db=db)))
+    if dropped_days:
+        text += (f"\n⚠️ Беговых дней урезано до {targets['run_days_max']}: "
+                 "частота растёт не быстрее +1 в неделю.")
     CoachRepository.save_message(user_id, "user", PLAN_PROMPT, db=db, kind="plan")
     CoachRepository.save_message(
         user_id, "assistant", text, db=db, kind="plan",
         meta={"days": len(prescriptions),
               "clamped": sum(1 for p in prescriptions if p.clamped),
+              "superseded": superseded, "dropped_days": dropped_days,
               "prose": turn.message,   # #258: история берёт прозу без карточки
               "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0)},
         tokens_in=usage.get("input_tokens"), tokens_out=usage.get("output_tokens"),
         cost_usd=estimate_cost_usd(usage))
     planning.advance_mesocycle(user_id, db=db, targets=targets)
-    logger.info("Weekly plan saved: user=%s days=%s week=%s",
-                user_id, len(prescriptions), targets["week_start"])
+    logger.info("Weekly plan saved: user=%s days=%s week=%s superseded=%s dropped=%s",
+                user_id, len(prescriptions), targets["week_start"], superseded,
+                dropped_days)
     return text
 
 

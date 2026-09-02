@@ -5,7 +5,6 @@ source: конспект книги «fitzgerald_80_20»
 status: distilled
 tags: мезоцикл, тяжелые и легкие дни, типы тренировок, восстановительная неделя, тейпер, фазы плана
 key_rules:
-  target_runs_per_week: 7
   hard_days_per_week: 3
   mesocycle_length_weeks_short: 3
   mesocycle_length_weeks_long: 4

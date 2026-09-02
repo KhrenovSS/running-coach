@@ -113,3 +113,70 @@ def test_week_plan_review_done_missed(db_session):
         assert review["missed"] == 1
     assert planning.week_plan_review(_unique_user(db_session).id,
                                      db=db_session) is None
+
+
+def test_run_days_cap_adaptive():
+    """Потолок беговых дней: max за прошлые недели + 1, в границах [3, 6]."""
+    assert planning.run_days_cap([]) == 3                 # нет истории → пол
+    assert planning.run_days_cap([1]) == 3                # 1+1 < пола
+    assert planning.run_days_cap([2, 4]) == 5             # 4+1 (решение владельца 02.09)
+    assert planning.run_days_cap([6, 5]) == 6             # потолок
+    assert planning.run_days_cap([7]) == 6
+
+
+def test_week_targets_expose_run_days(db_session):
+    """week_targets отдаёт run_days_max/rest_days_min — факты для LLM."""
+    user = _unique_user(db_session)
+    for w in (1, 2):
+        for _ in range(4):
+            _week_of_km(db_session, user.id, 5.0, w)
+    t = planning.week_targets(user.id, db=db_session)
+    assert t["run_days_max"] == 5
+    assert t["rest_days_min"] == 2
+
+
+def test_enforce_run_days_drops_shortest_easy():
+    """Обрезка до потолка: уходят самые короткие лёгкие, каркас (long/tempo) остаётся."""
+    from src.coach.contracts import WorkoutProposal as WP
+
+    items = [WP(workout_type="easy", target_zone=2, duration_min=30, for_days_ahead=1),
+             WP(workout_type="tempo", target_zone=3, duration_min=45, for_days_ahead=2),
+             WP(workout_type="recovery", target_zone=1, duration_min=25, for_days_ahead=3),
+             WP(workout_type="easy", target_zone=2, duration_min=40, for_days_ahead=4),
+             WP(workout_type="easy", target_zone=2, duration_min=35, for_days_ahead=5),
+             WP(workout_type="easy", target_zone=2, duration_min=50, for_days_ahead=6),
+             WP(workout_type="long", target_zone=2, duration_min=70, for_days_ahead=7)]
+    kept, dropped = planning.enforce_run_days(items, 5)
+    assert dropped == 2
+    assert [it.for_days_ahead for it in kept] == [1, 2, 4, 5, 7] or \
+           [it.for_days_ahead for it in kept] == [2, 4, 5, 6, 7]
+    assert {it.workout_type for it in kept} >= {"tempo", "long"}
+    assert not any(it.duration_min == 25 for it in kept)   # самый короткий ушёл первым
+    same, zero = planning.enforce_run_days(items[:4], 5)
+    assert zero == 0 and same == items[:4]
+
+
+def test_supersede_future_rows_only_unlinked_future(db_session):
+    """Гасятся только будущие строки без факта; прошлые и связанные — нетронуты."""
+    from src.models import Recommendation
+
+    user = _unique_user(db_session)
+    today = planning.user_now(user).date()
+    s = build_training_session(db_session, user.id, total_distance_km=5.0,
+                               begin_ts=utcnow() + timedelta(days=2))
+    future = Recommendation(user_id=user.id, for_date=today + timedelta(days=1),
+                            workout_type="easy", status="planned")
+    past = Recommendation(user_id=user.id, for_date=today - timedelta(days=1),
+                          workout_type="easy", status="planned")
+    linked = Recommendation(user_id=user.id, for_date=today + timedelta(days=2),
+                            workout_type="long", status="planned", linked_session_id=s.id)
+    db_session.add_all([future, past, linked])
+    db_session.commit()
+
+    n = planning.supersede_future_rows(user.id, db=db_session,
+                                       from_date=today + timedelta(days=1))
+    assert n == 1
+    for r in (future, past, linked):
+        db_session.refresh(r)
+    assert future.status == "superseded"
+    assert past.status == "planned" and linked.status == "planned"

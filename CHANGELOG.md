@@ -2,6 +2,29 @@
 
 All notable changes to this project are tracked here.
 
+## [02.09.2026] — Перепланирование гасит прежний план + адаптивный потолок беговых дней
+
+### Fixed
+- **Строки прежнего плана «оживали» после `/plan`**: 30.08 план 16:01 (пн/ср/пт/сб/вс) и
+  перепланирование 16:14 (пн–чт) сосуществовали в `recommendations`; читатели брали
+  «последнюю строку на дату» → в `/week` и контексте LLM всплыли пт/сб/вс первого плана
+  (7 беговых дней, суббота, о которой владелец не говорил). Теперь `generate_weekly_plan`
+  перед записью гасит будущие строки без факта: `status='superseded'`
+  (`planning.supersede_future_rows`, новая константа `RECOMMENDATION_STATUS_SUPERSEDED`,
+  миграция не нужна). Читатели игнорируют статус: `turn_context` (planned_workouts,
+  `unchanged_today`), `week_view`, `workout_insights._plan_for_session` (иначе устаревшая
+  строка линковалась к реальной тренировке). `PLAN_STATUSES` без изменений.
+
+### Added
+- **Адаптивный потолок беговых дней** (решение владельца 02.09): `run_days_max` =
+  max пробежек за прошлые недели + 1 в границах [3, 6] (`PLAN_RUN_DAYS_*` в `coach/config.py`,
+  `planning.run_days_cap`), `rest_days_min` = 7 − потолок; оба — факты в `week_targets`
+  и PLAN_PROMPT. `planning.enforce_run_days` детерминированно убирает лишние короткие
+  лёгкие дни (каркас long/tempo/interval держим) с пометкой под карточкой.
+  Из key_rules гайда 41 убран `target_runs_per_week: 7` (толкал LLM к ежедневному бегу).
+- Тесты: `test_planning.py` (+4), `test_weekly_plan.py` (+2), `test_week_view.py`,
+  `test_orchestrator.py`, `tests/test_workout_insights.py` — `superseded` невидим.
+
 ## [02.09.2026] — Карточка сохранённого плана недели по запросу (`/week`, `show_week_plan`)
 
 ### Fixed

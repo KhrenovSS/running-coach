@@ -73,3 +73,13 @@ def test_week_meta_of_other_week_is_ignored(empty_user, db_session):
         "target_km": 20.0}}))
     db_session.commit()
     assert "мезоцикла" not in render_stored_week_plan(empty_user.id, db=db_session)
+
+
+def test_superseded_rows_are_invisible(empty_user, db_session):
+    """Строка, погашенная перепланированием, не попадает в карточку недели."""
+    today = user_now(empty_user).date()
+    saturday = _monday(today) + timedelta(days=5)
+    _rec(db_session, empty_user.id, today, "easy", 2, 30.0)
+    _rec(db_session, empty_user.id, saturday, "tempo", 3, 45.0, status="superseded")
+    text = render_stored_week_plan(empty_user.id, db=db_session)
+    assert "Темповая" not in text and "45 мин" not in text

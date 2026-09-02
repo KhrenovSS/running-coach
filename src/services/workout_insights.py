@@ -348,9 +348,13 @@ def _plan_for_session(user_id: int, session: TrainingSession, *,
         return None
     user = db.query(User).filter(User.id == user_id).first()
     day = session_local_dt(session.begin_ts, session, user).date()
+    from src.config.constants import RECOMMENDATION_STATUS_SUPERSEDED
+
+    # Погашенные перепланированием строки не линкуем к факту (02.09.2026)
     rec = db.query(Recommendation).filter(
         Recommendation.user_id == user_id,
         Recommendation.for_date == day,
+        Recommendation.status != RECOMMENDATION_STATUS_SUPERSEDED,
     ).order_by(Recommendation.id.desc()).first()
     if rec is None:
         return None

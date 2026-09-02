@@ -19,12 +19,16 @@ from src.coach.config import (
     LONG_RUN_MAX_MIN,
     LONG_RUN_MAX_PCT_WEEK,
     PLAN_QUALITY_DAYS_MAX,
+    PLAN_RUN_DAYS_CAP,
+    PLAN_RUN_DAYS_FLOOR,
+    PLAN_RUN_DAYS_STEP,
     THRESHOLD_MAX_KM,
     THRESHOLD_MAX_PCT_WEEK,
 )
 from src.coach.contracts import AthleteState, Prescription, WorkoutProposal
 from src.coach.prescriber import finalize, save_prescription
 from src.coach.turn_context import unchanged_today
+from src.config.constants import RECOMMENDATION_STATUS_SUPERSEDED
 from src.models import Recommendation, TrainingSession, User, UserModel
 from src.services.repositories import TrainingRepository
 from src.utils.logger import get_logger
@@ -33,8 +37,11 @@ from src.utils.timeutils import user_now
 logger = get_logger("coach.planning")
 
 # Статусы строк недельного плана (статус-машина на существующей колонке):
-# planned (вс-план) → confirmed (утро подтвердило) / adjusted (заменили).
+# planned (вс-план) → confirmed (утро подтвердило) / adjusted (заменили);
+# superseded — будущая строка прежнего плана, погашенная перепланированием (02.09.2026).
 PLAN_STATUSES = ("planned", "confirmed", "adjusted")
+# Типы, которые enforce_run_days НЕ убирает (качество и длительная — каркас недели)
+_KEEP_TYPES = ("long", "tempo", "interval", "race")
 
 _MESO_LEN = CYCLE_3_1["build_weeks"] + CYCLE_3_1["deload_week"]  # 4
 
@@ -75,6 +82,7 @@ def week_targets(user_id: int, *, db: Session) -> dict:
 
     low_history = len(prev) < 2
     prev_km = prev[-1]["total_km"] if prev else 0.0
+    run_days_max = run_days_cap([w.get("session_count", 0) for w in prev])
     last_build_km = meta.get("last_build_km") or prev_km
     if low_history or prev_km <= 0:
         # Консервативный fallback: без прогрессии, от наблюдаемого
@@ -107,7 +115,58 @@ def week_targets(user_id: int, *, db: Session) -> dict:
         "long_run_km_max": round(target_km * LONG_RUN_MAX_PCT_WEEK, 1),
         "long_run_min_max": LONG_RUN_MAX_MIN,
         "hard_days_max": PLAN_QUALITY_DAYS_MAX,
+        # Беговых дней ≤ и дней полного отдыха ≥ (решение владельца 02.09.2026)
+        "run_days_max": run_days_max,
+        "rest_days_min": 7 - run_days_max,
     }
+
+
+def run_days_cap(session_counts: list[int]) -> int:
+    """Потолок беговых дней недели: max пробежек за прошлые недели + STEP,
+    в границах [FLOOR, CAP]; без истории — FLOOR (adaptive run-day cap).
+    """
+    recent_max = max(session_counts) if session_counts else 0
+    return max(PLAN_RUN_DAYS_FLOOR, min(PLAN_RUN_DAYS_CAP, recent_max + PLAN_RUN_DAYS_STEP))
+
+
+def enforce_run_days(items: list[WorkoutProposal],
+                     run_days_max: int) -> tuple[list[WorkoutProposal], int]:
+    """Урезать план до run_days_max дней: убираем самые короткие лёгкие/восстановительные,
+    каркас (длительная, качественные) держим. Возврат — (items, сколько убрано).
+    (Deterministic run-day cap: drop the shortest easy days first.)
+    """
+    if len(items) <= run_days_max:
+        return items, 0
+    droppable = sorted((it for it in items if it.workout_type not in _KEEP_TYPES),
+                       key=lambda it: (it.duration_min or 0.0, it.for_days_ahead))
+    to_drop = set()
+    for it in droppable:
+        if len(items) - len(to_drop) <= run_days_max:
+            break
+        to_drop.add(id(it))
+    kept = [it for it in items if id(it) not in to_drop]
+    if len(kept) > run_days_max:
+        logger.warning("Run-day cap %s unreachable: %s non-droppable days",
+                       run_days_max, len(kept))
+    return kept, len(items) - len(kept)
+
+
+def supersede_future_rows(user_id: int, *, db: Session, from_date: date) -> int:
+    """Погасить будущие строки прежнего плана перед записью нового (02.09.2026).
+
+    Строки с for_date >= from_date без факта (linked_session_id IS NULL) →
+    status='superseded'; читатели их не видят. Возврат — число строк.
+    (Mark future rows of the previous plan superseded; linked rows stay.)
+    """
+    n = db.query(Recommendation).filter(
+        Recommendation.user_id == user_id,
+        Recommendation.for_date >= from_date,
+        Recommendation.status != RECOMMENDATION_STATUS_SUPERSEDED,
+        Recommendation.linked_session_id.is_(None),
+    ).update({Recommendation.status: RECOMMENDATION_STATUS_SUPERSEDED},
+             synchronize_session="fetch")
+    db.commit()
+    return int(n or 0)
 
 
 def advance_mesocycle(user_id: int, *, db: Session, targets: dict) -> None:
