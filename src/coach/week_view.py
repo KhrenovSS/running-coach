@@ -63,9 +63,14 @@ def week_facts(rows: dict[date, Recommendation], *, db: Session,
         session = (db.query(TrainingSession).filter(
             TrainingSession.id == r.linked_session_id).first()
             if r.linked_session_id else None)
-        facts[d] = None if session is None else {
-            "duration_min": session.duration_minutes,
-            "distance_km": session.total_distance_km,
+        if session is None:
+            facts[d] = None
+            continue
+        dur, km = session.duration_minutes, session.total_distance_km
+        facts[d] = {
+            "duration_min": dur,
+            "distance_km": km,
+            "pace_min_km": (dur / km) if (dur and km and km > 0) else None,
             "avg_hr": session.avg_heart_rate,
         }
     return facts

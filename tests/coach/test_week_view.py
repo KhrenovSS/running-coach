@@ -112,7 +112,7 @@ def test_past_days_render_as_facts(empty_user, db_session):
     mon = next(l for l in lines if f" {monday:%d.%m} — " in l)            # не заголовок
     tue = next(l for l in lines if f" {monday + timedelta(days=1):%d.%m} — " in l)
     assert mon.startswith("✓") and "факт 38 мин" in mon and "5.4 км" in mon \
-        and "ср. пульс 137" in mon
+        and "7:04/км" in mon and "ср. пульс 137" in mon              # фактический темп
     assert "Лёгкий бег" in mon and "Темповая" not in mon     # плановый ярлык, не классификатор
     assert "пульс до" not in mon
     assert tue.startswith("✗") and "пропущен" in tue and "35 мин" in tue

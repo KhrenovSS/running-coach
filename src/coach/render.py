@@ -54,19 +54,38 @@ def _predicted_estimate(p: Prescription) -> tuple[float, float] | None:
 
 
 def _distance_hint_km(p: Prescription) -> float | None:
-    """Примерная дистанция для карточки: объём → прогноз → темп×время (or None).
+    """Примерная дистанция для карточки: прогноз → объём → темп×время (or None).
 
-    (Approximate distance for a card: volume, else prediction, else pace×duration.)
+    Прогноз первым — как в дневной карточке (`_hr_lead_lines`): при наличии истории
+    километры расчётные, а не число LLM (02.09.2026: вс 9.0 vs ≈11.3).
+    (Prediction first, like the day card; then volume, then pace×duration.)
     """
-    km = p.volume.get("distance_km")
-    if km is not None:
-        return km
     est = _predicted_estimate(p)          # (pace, km) из p.predicted
     if est is not None:
         return est[1]
+    km = p.volume.get("distance_km")
+    if km is not None:
+        return km
     pace, dur = p.target.get("pace_min_km"), p.volume.get("duration_min")
     if pace and dur:
         return dur / pace
+    return None
+
+
+def _pace_hint(p: Prescription) -> float | None:
+    """Ориентир темпа (мин/км) для строки недели: прогноз по истории → подсказка
+    самого длинного основного сегмента → None (нет данных — темп не печатаем).
+    Целевой темп (pace_min_km) сюда не входит — он печатается как «темп X/км».
+    (Pace hint: prediction, else the main segment's hint, else None.)
+    """
+    predicted = p.predicted or {}
+    if predicted.get("pace_min_km"):
+        return float(predicted["pace_min_km"])
+    main = [s for s in (p.target.get("segments") or [])
+            if s.get("role") in ("steady", "work") and s.get("pace_hint_min_km")]
+    if main:
+        longest = max(main, key=lambda s: float(s.get("amount_value") or 0))
+        return float(longest["pace_hint_min_km"])
     return None
 
 
@@ -214,6 +233,8 @@ def _fact_line(day: str, p: Prescription, fact: dict | None) -> str:
         parts.append(f"факт {fact['duration_min']:.0f} мин")
     if fact.get("distance_km"):
         parts.append(f"{fact['distance_km']:.1f} км")
+    if fact.get("pace_min_km"):
+        parts.append(f"{format_pace(fact['pace_min_km'])}/км")
     if fact.get("avg_hr"):
         parts.append(f"ср. пульс {fact['avg_hr']}")
     return f"✓ {day} — " + " · ".join(parts)
@@ -261,6 +282,9 @@ def render_week_plan(prescriptions: list[Prescription], targets: dict,
                 parts.append(f"пульс до {ceiling}")
             elif p.target.get("max_zone") is not None:
                 parts.append(f"Z{p.target['max_zone']} и ниже")
+            pace_hint = _pace_hint(p)     # ориентир темпа по истории (02.09.2026)
+            if pace_hint is not None:
+                parts.append(f"~{format_pace(pace_hint)}/км")
         if p.volume.get("duration_min") is not None:
             parts.append(f"{p.volume['duration_min']:.0f} мин")
         km = _distance_hint_km(p)

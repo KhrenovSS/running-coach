@@ -373,3 +373,53 @@ def test_render_week_plan_rest_of_week_summary():
                "done_km": 12.1, "remaining_km": 15.9}
     text = render_week_plan([easy], targets, max_hr=177, today=date(2026, 9, 2))
     assert "цель ~28 км · сделано 12.1 км, осталось ~15.9 км" in text
+
+
+def test_render_week_plan_shows_pace_hint_and_predicted_km():
+    """Строка недели: ~темп из прогноза; ≈км — из прогноза, а не из числа LLM (02.09.2026);
+    fallback темпа — подсказка основного сегмента; без данных темпа нет."""
+    from datetime import date
+
+    from src.coach.render import render_week_plan
+
+    state = _state()
+    verdict = evaluate_safety(state)
+    long, _ = clamp(WorkoutProposal(workout_type="long", target_zone=2, duration_min=80,
+                                    distance_km=9.0), verdict, state)
+    long.when = date(2026, 9, 6)
+    long.predicted = {"pace_min_km": 7.06, "distance_km": 11.3}
+    seg, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2, duration_min=35),
+                   verdict, state)
+    seg.when = date(2026, 9, 4)
+    seg.predicted = {}
+    seg.target["segments"] = [
+        {"role": "warmup", "amount_kind": "min", "amount_value": 5.0, "pace_hint_min_km": None},
+        {"role": "steady", "amount_kind": "min", "amount_value": 25.0, "pace_hint_min_km": 6.87}]
+    nodata, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=1, duration_min=30,
+                                      distance_km=4.0), verdict, state)
+    nodata.when = date(2026, 9, 3)
+    nodata.predicted = {}
+
+    text = render_week_plan([long, seg, nodata], {"week_start": "2026-08-31"}, max_hr=177)
+    lines = {l.split(" — ")[0][-5:]: l for l in text.splitlines() if " — " in l}
+    assert "~7:04/км" in lines["06.09"] and "≈11.3 км" in lines["06.09"]   # прогноз, не 9.0
+    assert "≈9.0 км" not in text
+    assert "~6:52/км" in lines["04.09"]                                    # подсказка сегмента
+    assert "/км" not in lines["03.09"] and "≈4.0 км" in lines["03.09"]     # нет данных → без темпа
+
+
+def test_render_week_plan_fact_line_has_pace():
+    """Факт прошедшего дня печатает фактический темп."""
+    from datetime import date
+
+    from src.coach.render import render_week_plan
+
+    state = _state()
+    p, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2, duration_min=40),
+                 evaluate_safety(state), state)
+    p.when = date(2026, 8, 31)
+    text = render_week_plan([p], {"week_start": "2026-08-31"}, max_hr=177,
+                            today=date(2026, 9, 2),
+                            facts={date(2026, 8, 31): {"duration_min": 38.2, "distance_km": 5.4,
+                                                       "pace_min_km": 38.2 / 5.4, "avg_hr": 137}})
+    assert "факт 38 мин · 5.4 км · 7:04/км · ср. пульс 137" in text

@@ -103,8 +103,13 @@ async def initiative_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.edit_message_text(f"✅ Инициатива тренера: {label}")
 
 
-_REPLAN_RE = re.compile(r"перепланируй|нов\w+ план на неделю|план на следующую неделю",
-                        re.IGNORECASE)
+# Триггер СОСТАВЛЕНИЯ плана (LLM-ход /plan): «перепланируй», «составь/сформируй … план»,
+# «новый план на неделю». Вопросы «какой план / покажи план» — показ сохранённого (чат).
+# (Compose-plan trigger; "show me the plan" stays a chat turn → stored card.)
+_REPLAN_RE = re.compile(
+    r"переплани\w+|(?:пересобери|пересостав\w*|составь|сформируй)\s+(?:\S+\s+){0,2}план"
+    r"|нов\w+ план на неделю|план на следующую неделю",
+    re.IGNORECASE)
 
 
 async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
