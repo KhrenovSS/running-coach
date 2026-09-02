@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from src.analysis import session_metrics as sm
 from src.analysis.effort import compute_cardiac_drift, heat_block, hr_stability, pace_cv
 from src.analysis.data_checks import device_check, lap_check
+from src.analysis.hr_zones import lthr_valid
 from src.analysis.week_structure import detraining, week_structure
 from src.analysis.intervals import interval_recovery
 from src.analysis.gap import compute_gap, downhill_block, local_grade_factors, smooth_altitudes
@@ -142,6 +143,9 @@ def compute_workout_metrics(session: TrainingSession, *,
             "has_hr": any(h is not None for h in hrs),
             "has_alt": any(a is not None for a in alts),
             "gps_quality": gps_quality,
+            # Якорь зон: наблюдаемость тихого fallback LTHR→%max_hr (1d, 02.09.2026)
+            # (zone anchor visibility: catches a silent LTHR→%max_hr fallback)
+            "zone_anchor": "lthr" if lthr_valid(max_hr or 0, lthr) else "max_hr",
             # F2 (#286): кросс-чек пайплайна с эталоном часов; при gps_unreliable
             # эталон часов сам мусорный — не считаем
             # (pipeline vs watch cross-check; skipped when the watch data is garbage)
@@ -303,6 +307,12 @@ def upsert_workout_insights(user_id: int, session_id: int, *, db: Session,
         rpe_history=_rpe_history(user_id, session, db=db),
         plan=_plan_for_session(user_id, session, db=db),
         history_briefs=_history_briefs(user_id, session, db=db))
+    # #246 (02.09.2026): статистика прогноз↔факт — только пишем, потребитель после M3.2
+    try:
+        from src.services.prediction_log import record_prediction_outcome
+        record_prediction_outcome(session, computed, db=db)
+    except Exception:  # статистика не должна ронять разбор (never break the review)
+        logger.warning("PredictionLog failed for session=%s", session_id, exc_info=True)
     InsightRepository.upsert(user_id, session_id, db=db, computed=computed,
                              schema_version=INSIGHTS_SCHEMA_VERSION, status=status)
     if effective_training_type(session) in BASELINE_TYPES:

@@ -369,6 +369,24 @@ def test_interval_recovery_laps_survive_gps_unreliable(db_session):
     assert "poor_interval_recovery" not in computed["flags"]
 
 
+def test_zone_anchor_visibility(db_session):
+    """1d (02.09): inputs.zone_anchor = 'lthr' при валидном LTHR, 'max_hr' при
+    отсутствии/невалидности — тихий fallback %max_hr теперь наблюдаем."""
+    from src.services.workout_insights import compute_workout_metrics
+
+    user = _user(db_session)
+    s = _session_with_track(db_session, user.id)
+    anchor = lambda **kw: compute_workout_metrics(s, **kw)["inputs"]["zone_anchor"]
+    assert anchor(max_hr=177, lthr=170) == "lthr"
+    assert anchor(max_hr=177, lthr=None) == "max_hr"
+    assert anchor(max_hr=177, lthr=180) == "max_hr"      # lthr ≥ max_hr — невалиден
+    assert anchor(max_hr=177, lthr=95) == "max_hr"       # ниже санити-минимума
+    # ветка без трекпоинтов: якорь проставлен и в раннем выходе
+    legacy = build_training_session(db_session, user.id, training_type='easy')
+    got = compute_workout_metrics(legacy, max_hr=177, lthr=170)
+    assert got["inputs"]["zone_anchor"] == "lthr"
+
+
 def test_baseline_and_data_check_reexports_alive():
     """Рефактор F3: baseline вынесен в insights_baseline, device/lap_check —
     в analysis/data_checks; старые импорты из workout_insights живы (реэкспорт)."""

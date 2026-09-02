@@ -1,10 +1,18 @@
-# Правила 12–14 p1_safety (M4.1/M4.3, F5/F6): близость качественных дней,
-# восстановление после гонки, возврат после паузы.
-# (Safety rules 12–14: quality-day spacing, post-race window, detraining.)
+# Правила 12–15 p1_safety (M4.1/M4.3, F5/F6, #254): близость качественных дней,
+# восстановление после гонки, возврат после паузы, недосып.
+# (Safety rules 12–15: quality-day spacing, post-race window, detraining, sleep.)
 
 from datetime import date, datetime, timedelta, timezone
 
-from src.coach.config import HARD_TYPES, SAFETY_MAX_ZONE_DEFAULT
+import pytest
+
+from src.coach.config import (
+    HARD_TYPES,
+    SAFETY_MAX_DURATION_CAUTION_MIN,
+    SAFETY_MAX_ZONE_DEFAULT,
+    SLEEP_SHORT_MIN,
+    SLEEP_VERY_SHORT_MIN,
+)
 from src.coach.contracts import AthleteState, WorkoutProposal
 from src.coach.rules.p1_safety import evaluate_safety
 from src.coach.safety import clamp
@@ -46,11 +54,14 @@ def test_quality_yesterday_delays_next_hard():
     assert p.workout_type == "easy"                # интенсив сегодня урезан
 
 
-def test_three_quality_days_in_week_trigger():
-    """quality_days_7d=3 (лимит недели) → правило срабатывает даже при
-    соблюдённом интервале между качественными."""
+def test_quality_days_limit_boundary():
+    """Лимит ≤3 качественных/нед: ровно 3 — правило молчит (лимит соблюдён,
+    выравнено с week_structure #1c 02.09), 4 — срабатывает."""
     verdict = evaluate_safety(
         _state(days_since_quality=3, quality_days_7d=3), now=NOW)
+    assert "hard_days_too_close" not in verdict.triggered
+    verdict = evaluate_safety(
+        _state(days_since_quality=3, quality_days_7d=4), now=NOW)
     assert "hard_days_too_close" in verdict.triggered
     assert verdict.earliest_next_hard == NOW + timedelta(days=1)  # max(1, 2-3)
 
@@ -106,6 +117,58 @@ def test_days_off_five_rule_silent():
     verdict = evaluate_safety(_state(days_off=5), now=NOW)
     assert "detraining" not in verdict.triggered
     assert verdict.max_zone == SAFETY_MAX_ZONE_DEFAULT
+
+
+# --- Правило 15 (#254): недосып из скриншота сна ----------------------------------
+
+# (sleep_duration_min, ожидаемый триггер или None-«молчит»)
+SLEEP_CASES = [
+    (None, None),                          # скриншота нет → не наказываем
+    (400, None),                           # 6ч40м — норм
+    (SLEEP_SHORT_MIN, None),               # ровно 6 ч — граница, молчит
+    (340, "sleep_short"),                  # 5ч40м → без интенсива
+    (SLEEP_VERY_SHORT_MIN, "sleep_short"), # ровно 5 ч → ещё не very_short
+    (280, "sleep_very_short"),             # 4ч40м → max_zone=2 + потолок 40 мин
+]
+
+
+@pytest.mark.parametrize("sleep_min,trigger", SLEEP_CASES)
+def test_sleep_rule_table(sleep_min, trigger):
+    verdict = evaluate_safety(_state(sleep_duration_min=sleep_min), now=NOW)
+    sleep_triggers = {t for t in verdict.triggered if t.startswith("sleep")}
+    assert sleep_triggers == ({trigger} if trigger else set())
+    if trigger is None:
+        assert verdict.max_zone == SAFETY_MAX_ZONE_DEFAULT
+        assert verdict.max_duration_min is None
+        assert verdict.allowed_types == ()             # запретов нет
+    else:
+        assert all(t not in verdict.allowed_types for t in HARD_TYPES)
+
+
+def test_sleep_short_forbids_hard_but_keeps_zone():
+    """340 мин → HARD_TYPES запрещены, clamp урезает interval,
+    но max_zone НЕ тронут (лёгкий длинный день разрешён)."""
+    state = _state(sleep_duration_min=340)
+    verdict = evaluate_safety(state, now=NOW)
+    assert verdict.allow_training is True
+    assert verdict.max_zone == SAFETY_MAX_ZONE_DEFAULT  # потолок зоны не опущен
+    assert verdict.max_duration_min is None
+    p, clamped = clamp(AGGRESSIVE, verdict, state, now=NOW)
+    assert clamped is True
+    assert p.workout_type not in HARD_TYPES
+
+
+def test_sleep_very_short_caps_zone_and_duration():
+    """280 мин → max_zone=2, потолок длительности 40 мин, HARD запрещены."""
+    state = _state(sleep_duration_min=280)
+    verdict = evaluate_safety(state, now=NOW)
+    assert verdict.max_zone == 2
+    assert verdict.max_duration_min == SAFETY_MAX_DURATION_CAUTION_MIN
+    p, clamped = clamp(AGGRESSIVE, verdict, state, now=NOW)
+    assert clamped is True
+    assert p.workout_type not in HARD_TYPES
+    assert p.target["max_zone"] <= 2
+    assert p.volume["duration_min"] <= SAFETY_MAX_DURATION_CAUTION_MIN
 
 
 # --- Пустые сигналы: правила 12–14 молчат ----------------------------------------

@@ -112,3 +112,83 @@ def test_assess_state_signals_include_week_signals(athlete_with_history, db_sess
     assert state.signals["quality_days_7d"] == 1
     assert state.signals["days_off"] == 0
     assert state.signals["post_race_days_left"] == 0
+
+
+# --- Свежесть боли (фикс 02.09.2026): stale-отметка не блокирует ------------------
+
+def test_stale_pain_becomes_context_not_blocker(db_session):
+    """Боль 5/10 отмечена 3 дня назад (> PAIN_FRESH_DAYS=2) → value=None,
+    status ok, факт в message/evidence; правила 8–9 p1_safety молчат."""
+    from src.coach.config import PAIN_FRESH_DAYS, PAIN_STOP_LEVEL
+    from src.coach.rules.p1_safety import evaluate_safety
+    from src.coach.skills import pain
+    from src.models import WellnessReport
+
+    user = _unique_user(db_session)
+    stale_day = utcnow().date() - timedelta(days=PAIN_FRESH_DAYS + 1)
+    db_session.add(WellnessReport(user_id=user.id, report_date=stale_day,
+                                  pain_level=PAIN_STOP_LEVEL))
+    db_session.commit()
+
+    res = pain.evaluate(user.id, db=db_session)
+    assert res.status == "ok"
+    assert res.value is None                       # не сырьё для правил 8–9
+    assert "устарела" in res.message
+    assert "спроси про колено" in res.message       # LLM получает контекст
+    assert "stale=True" in res.evidence
+    assert res.as_of == stale_day
+
+    state = assess_state(user.id, db=db_session)
+    assert state.signals["pain_level"] is None
+    assert state.signals["pain_days"] == 0
+    verdict = evaluate_safety(state)
+    assert verdict.allow_training is True
+    assert "pain_stop" not in verdict.triggered
+    assert "pain_caution" not in verdict.triggered
+
+
+def test_fresh_pain_boundary_still_blocks(db_session):
+    """Отметка ровно PAIN_FRESH_DAYS назад — ещё свежая: 5/10 → danger,
+    в signals доезжает и запрещает тренировку (прежнее поведение)."""
+    from src.coach.config import PAIN_FRESH_DAYS, PAIN_STOP_LEVEL
+    from src.coach.rules.p1_safety import evaluate_safety
+    from src.coach.skills import pain
+    from src.models import WellnessReport
+
+    user = _unique_user(db_session)
+    db_session.add(WellnessReport(
+        user_id=user.id,
+        report_date=utcnow().date() - timedelta(days=PAIN_FRESH_DAYS),
+        pain_level=PAIN_STOP_LEVEL))
+    db_session.commit()
+
+    res = pain.evaluate(user.id, db=db_session)
+    assert res.status == "danger"
+    assert res.value == PAIN_STOP_LEVEL
+    verdict = evaluate_safety(assess_state(user.id, db=db_session))
+    assert verdict.allow_training is False
+    assert "pain_stop" in verdict.triggered
+
+
+# --- Сигнал сна (#254): только скриншот за СЕГОДНЯ --------------------------------
+
+def test_sleep_signal_from_todays_metrics(db_session):
+    """DailyMetrics за сегодня (локально) со сном → signals['sleep_duration_min']."""
+    user = _unique_user(db_session)
+    today = user_now(user).date()
+    build_daily_metrics(db_session, user.id, metric_date=today,
+                        sleep_duration_min=340)
+    state = assess_state(user.id, db=db_session)
+    assert state.signals["sleep_duration_min"] == 340
+    assert "sleep" not in state.missing
+
+
+def test_sleep_signal_none_for_yesterdays_row(db_session):
+    """Свежайшая строка метрик — вчерашняя → сигнал сна None (не наказываем
+    за отсутствие сегодняшнего скриншота)."""
+    user = _unique_user(db_session)
+    yesterday = user_now(user).date() - timedelta(days=1)
+    build_daily_metrics(db_session, user.id, metric_date=yesterday,
+                        sleep_duration_min=340)
+    state = assess_state(user.id, db=db_session)
+    assert state.signals["sleep_duration_min"] is None

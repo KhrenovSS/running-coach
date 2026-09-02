@@ -8,7 +8,8 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from src.coach.config import PAIN_CAUTION_LEVEL, PAIN_PERSIST_DAYS, PAIN_STOP_LEVEL
+from src.coach.config import (PAIN_CAUTION_LEVEL, PAIN_FRESH_DAYS,
+                              PAIN_PERSIST_DAYS, PAIN_STOP_LEVEL)
 from src.coach.contracts import SkillResult
 from src.coach.skills.base import unknown_result
 from src.models import TrainingFeedback, WellnessReport
@@ -61,6 +62,25 @@ def evaluate(user_id: int, *, db: Session) -> SkillResult:
     latest_day = max(by_day)
     latest = by_day[latest_day]
     streak = consecutive_pain_days(user_id, db=db)
+
+    # Свежесть (фикс 02.09.2026): отметка старше PAIN_FRESH_DAYS не блокирует
+    # тренировки (один тап «мешало» держал «Отдых» до 14 дней — вечерний
+    # вопрос-сброс гейтится initiative). value=None → правила 8–9 молчат;
+    # факт остаётся в message/evidence — LLM спросит, как колено.
+    # (Stale pain must not lock training; keep it as LLM context only.)
+    age_days = (datetime.now(timezone.utc).date() - latest_day).days
+    if age_days > PAIN_FRESH_DAYS:
+        return SkillResult(
+            key="pain",
+            status="ok",
+            value=None,
+            confidence=0.5,
+            message=(f"последняя отметка боли {latest}/10 — {age_days} дн. назад "
+                     f"(устарела, не ограничивает; спроси про колено)"),
+            evidence=f"days_reported={len(by_day)}; latest={latest_day.isoformat()}; stale=True",
+            unit="0-10",
+            as_of=latest_day,
+        )
 
     if latest >= PAIN_STOP_LEVEL:
         status = "danger"

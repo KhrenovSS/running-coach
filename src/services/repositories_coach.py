@@ -21,7 +21,7 @@ from src.coach.config import (
 )
 from src.coach.util import effective_training_type
 from src.models import (CoachMessage, DailyMetrics, TrainingFeedback,
-                        TrainingSession, WeightMeasurement)
+                        TrainingSession, User, WeightMeasurement)
 
 # Whitelist полей DailyMetrics для рядов — никакого getattr по строке от LLM.
 # (Whitelist of DailyMetrics fields for series — never getattr on an LLM string.)
@@ -107,17 +107,27 @@ class CoachRepository:
     def consecutive_hard_days(user_id: int, *, db: Session) -> int:
         """Подряд идущие «тяжёлые» дни, начиная с сегодня (consecutive hard days).
 
-        День тяжёлый, если есть сессия с эффективным типом из HARD_TYPES.
+        День тяжёлый, если есть сессия с эффективным типом из HARD_TYPES;
+        residual-«tempo» без подтверждения интенсивности пульсом тяжёлой не считается
+        (фикс 02.09.2026 — тот же гейт, что у правила 12/`is_quality_session`).
         День без тяжёлой сессии (или вообще без сессий) обрывает серию.
         """
+        from src.analysis.week_structure import is_quality_session
+        from src.services.repositories import latest_lthr
+
         since = datetime.now(timezone.utc) - timedelta(days=14)
         sessions = db.query(TrainingSession).filter(
             TrainingSession.user_id == user_id,
             TrainingSession.begin_ts >= since,
         ).all()
+        user = db.query(User).filter(User.id == user_id).first()
+        max_hr_val = user.max_hr if user and user.max_hr else None
+        lthr = latest_lthr(user_id, db=db)
         hard_days = {
             s.begin_ts.date() for s in sessions
-            if s.begin_ts is not None and effective_training_type(s) in HARD_TYPES
+            if s.begin_ts is not None
+            and is_quality_session(effective_training_type(s),
+                                   s.avg_heart_rate, max_hr_val, lthr)
         }
         streak = 0
         day = datetime.now(timezone.utc).date()

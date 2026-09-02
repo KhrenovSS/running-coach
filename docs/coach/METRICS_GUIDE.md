@@ -224,6 +224,7 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
 | `rpe_elevated` | carry_forward → утренний вердикт (механизм D7 уже есть) |
 | `low_cadence` + боль | только интерпретация LLM (совет, не ограничение) |
 | `gps_unreliable`, `device_mismatch` | честность данных (→ `suspect_data` в assessment); ограничений safety сознательно нет |
+| недосып (#254, не флаг разбора — сигнал сна) | ✅ правило 15 p1_safety: <6 ч без интенсива, <5 ч max_zone=2 (v1 — абсолютные пороги) |
 | `hard_days_too_close` (M4.1) | ✅ правило 12 p1_safety: `earliest_next_hard` ≥ +1–2 дня |
 | `post_race_recovery_violated` (M4.1) | ✅ правило 13 p1_safety: `max_zone=2` + запрет hard на период 1 день/3 км |
 | `downhill_load_high` (M4.2) | ⬜ пока только интерпретация LLM; P1-сигнал — #289 |

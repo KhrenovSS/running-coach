@@ -266,6 +266,10 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
         # M4.1/M4.3 (F5/F6): структура недели и пауза — сырьё правил 12–14 p1_safety
         # (weekly-structure and layoff signals for the safety rules)
         **_week_signals(user_id, today_local, user_row, db=db),
+        # #254: сон прошлой ночи — только если скриншот за СЕГОДНЯ (иначе молчим:
+        # нет данных — не наказываем) (last night's sleep, today's screenshot only)
+        "sleep_duration_min": (dm.sleep_duration_min
+                               if dm is not None and dm.date == today_local else None),
     }
 
     return AthleteState(

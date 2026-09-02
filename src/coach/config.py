@@ -77,9 +77,14 @@ def recovery_hours_for(training_type: str | None) -> int:
 PAIN_SCALE_MAX = 10            # шкала боли 0..10 (pain scale)
 PAIN_CAUTION_LEVEL = 3         # боль ≥ 3 → осторожный режим (caution mode)
 PAIN_STOP_LEVEL = 5            # боль ≥ 5 → тренировка запрещена (no training)
+PAIN_FRESH_DAYS = 2            # отметка боли старше → не блокирует (остаётся контекстом LLM)
 PAIN_PERSIST_DAYS = 3          # боль N дней подряд → осторожный режим даже при низком уровне
 SAFETY_MAX_ZONE_DEFAULT = 5    # потолок зоны по умолчанию (нет ограничений)
 SAFETY_MAX_DURATION_CAUTION_MIN = 40  # потолок длительности в осторожном режиме, мин
+# #254 (02.09.2026): недосып → осторожнее (v1 — абсолютные пороги, решение владельца;
+# перейти на личную медиану после накопления скриншотов сна)
+SLEEP_SHORT_MIN = 360          # сон < 6 ч → без интенсива (лёгкий день)
+SLEEP_VERY_SHORT_MIN = 300     # сон < 5 ч → max_zone=2 + потолок длительности
 # F3 (§7 METRICS_GUIDE): плохое восстановление между интервалами → следующий интенсив позже
 HRR_POOR_RECOVERY_EXTRA_H = 48        # минимум часов до следующего качественного дня
 HRR_POOR_RECOVERY_LOOKBACK_DAYS = 4   # окно поиска флага в недавних разборах

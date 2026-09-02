@@ -132,8 +132,10 @@
 | 12 | `days_since_quality < QUALITY_MIN_GAP_DAYS` или `quality_days_7d ≥ QUALITY_MAX_PER_WEEK` (M4.1) | `earliest_next_hard` ≥ +1–2 дня |
 | 13 | `post_race_days_left > 0` — восстановление после гонки, 1 лёгкий день/3 км (M4.1) | `max_zone=2`, без `HARD_TYPES` |
 | 14 | `days_off ≥ DETRAINING_MIN_DAYS_OFF` (6) — возврат после паузы (M4.3) | `max_zone=2`, без `HARD_TYPES` |
+| 15 | `sleep_duration_min` < `SLEEP_SHORT_MIN`/`SLEEP_VERY_SHORT_MIN` (#254, скриншот сна за сегодня; нет данных → молчит) | без `HARD_TYPES`; при <5 ч ещё `max_zone=2`, ≤40 мин |
 
-Константы правил 11–14: `HRR_POOR_RECOVERY_EXTRA_H/LOOKBACK_DAYS` — `coach/config.py`;
+Константы правил 11–15: `HRR_POOR_RECOVERY_EXTRA_H/LOOKBACK_DAYS`, `SLEEP_SHORT_MIN`,
+`SLEEP_VERY_SHORT_MIN`, `PAIN_FRESH_DAYS` (свежесть боли — фикс 02.09) — `coach/config.py`;
 `QUALITY_MAX_PER_WEEK`, `QUALITY_MIN_GAP_DAYS`, `POST_RACE_KM_PER_EASY_DAY`,
 `DETRAINING_MIN_DAYS_OFF` — `src/config/constants.py` (чистая математика M4).
 Константы границы в `coach/config.py`: `PAIN_SCALE_MAX=10`, `PAIN_CAUTION_LEVEL=3`,

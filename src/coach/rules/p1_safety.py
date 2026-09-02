@@ -17,6 +17,8 @@ from src.coach.config import (
     ATI_CTI_HIGH,
     HARD_TYPES,
     HRR_POOR_RECOVERY_EXTRA_H,
+    SLEEP_SHORT_MIN,
+    SLEEP_VERY_SHORT_MIN,
     INJURY_RISK_THRESHOLDS,
     PAIN_CAUTION_LEVEL,
     PAIN_PERSIST_DAYS,
@@ -149,7 +151,7 @@ def evaluate_safety(state: AthleteState, *, now: datetime | None = None) -> Safe
     # (quality days too close: at least one easy day between, ≤3 per week)
     dsq = sig.get("days_since_quality")
     if ((dsq is not None and dsq < QUALITY_MIN_GAP_DAYS)
-            or (sig.get("quality_days_7d") or 0) >= QUALITY_MAX_PER_WEEK):
+            or (sig.get("quality_days_7d") or 0) > QUALITY_MAX_PER_WEEK):
         triggered.append("hard_days_too_close")
         gap_earliest = now + timedelta(days=max(1, QUALITY_MIN_GAP_DAYS - (dsq or 0)))
         if earliest_next_hard is None or gap_earliest > earliest_next_hard:
@@ -177,6 +179,23 @@ def evaluate_safety(state: AthleteState, *, now: datetime | None = None) -> Safe
         forbidden |= set(HARD_TYPES)
         reasons.append(_step("max_zone=2",
                              f"пауза {days_off} дн. — форма просела, возвращаемся мягко"))
+
+    # 15. Недосып (#254, v1 — абсолютные пороги; данные — скриншот сна за сегодня)
+    # (short sleep last night → easier day; silent when no screenshot)
+    sleep_min = sig.get("sleep_duration_min")
+    if sleep_min is not None and sleep_min < SLEEP_VERY_SHORT_MIN:
+        triggered.append("sleep_very_short")
+        max_zone = min(max_zone, 2)
+        max_duration = (min(max_duration, SAFETY_MAX_DURATION_CAUTION_MIN)
+                        if max_duration else SAFETY_MAX_DURATION_CAUTION_MIN)
+        forbidden |= set(HARD_TYPES)
+        reasons.append(_step(f"max_zone=2, ≤{SAFETY_MAX_DURATION_CAUTION_MIN} мин",
+                             f"сон {sleep_min / 60:.1f} ч — сильный недосып, только лёгкое и коротко"))
+    elif sleep_min is not None and sleep_min < SLEEP_SHORT_MIN:
+        triggered.append("sleep_short")
+        forbidden |= set(HARD_TYPES)
+        reasons.append(_step("без интенсива",
+                             f"сон {sleep_min / 60:.1f} ч — недосып, качественную не сегодня"))
 
     allowed_types: tuple[str, ...] = ()
     if forbidden:

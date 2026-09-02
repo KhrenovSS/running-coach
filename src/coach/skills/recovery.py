@@ -18,12 +18,28 @@ _STATUS_MAP = {"recovered": "ok", "partial": "warning", "needs_rest": "danger"}
 
 
 def hours_left(user_id: int, *, db: Session) -> float:
-    """Часы до восстановления после последней тренировки, ≥ 0 (hours until recovered)."""
+    """Часы до восстановления после последней тренировки, ≥ 0 (hours until recovered).
+
+    Residual-«tempo» (умеренная пробежка без подтверждения интенсивности пульсом)
+    восстанавливается как easy — иначе `earliest_next_hard` держится 36 ч после
+    каждой обычной пробежки (фикс 02.09.2026, симметрично гейту правила 12).
+    (Residual tempo recovers like easy — same quality gate as safety rule 12.)"""
+    from src.analysis.week_structure import is_quality_session
+    from src.models import User
+    from src.services.repositories import latest_lthr
+
     sessions = CoachRepository.last_sessions(user_id, n=1, db=db)
     if not sessions or sessions[0].begin_ts is None:
         return 0.0
     last = sessions[0]
-    need = recovery_hours_for(effective_training_type(last))
+    ttype = effective_training_type(last)
+    if ttype == "tempo":
+        user = db.query(User).filter(User.id == user_id).first()
+        if not is_quality_session(ttype, last.avg_heart_rate,
+                                  user.max_hr if user else None,
+                                  latest_lthr(user_id, db=db)):
+            ttype = "easy"
+    need = recovery_hours_for(ttype)
     begin = last.begin_ts
     if begin.tzinfo is None:  # SQLite отдаёт naive datetime (naive under SQLite)
         begin = begin.replace(tzinfo=timezone.utc)
