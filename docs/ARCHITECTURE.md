@@ -4,7 +4,7 @@
 
 ## Текущий стек (Current stack)
 
-- **Backend:** Python 3.13+, FastAPI
+- **Backend:** Python 3.12+ (прод — `python:3.13-slim`), FastAPI
 - **База данных:** PostgreSQL 16 + SQLAlchemy ORM
 - **Миграции:** Alembic (автоматически при старте контейнера `app`)
 - **Тесты:** pytest (SQLite in-memory по умолчанию; opt-in PG через TEST_PG_URL)
@@ -23,10 +23,12 @@ running-coach/
 │   ├── versions/               # Файлы миграций
 │   └── env.py                  # Конфигурация Alembic
 ├── bin/                        # Ops-скрипты и рантайм-компоненты хоста
-│   ├── docker.sh               # Защищённая обёртка docker compose
+│   ├── docker.sh               # Защищённая обёртка docker compose (700, вне git — создать вручную)
 │   ├── backup_db.sh            # Бэкап БД (обязателен перед деплоем)
-│   ├── backfill_*.py           # Разовые backfill-скрипты (external_ids, raw_fits, avg_pace)
-│   └── coach_llm_bridge.py     # LLM-мост коуча: headless Claude Code по подписке (systemd, :8765)
+│   ├── backfill_*.py           # Разовые backfill-скрипты (external_ids, raw_fits, avg_pace; --dry-run по умолчанию)
+│   ├── distill_books.py        # Дистилляция книг → guides (E1; читает books/, пишет books/_distilled)
+│   ├── coach_llm_bridge.py     # НЕ backfill — рантайм прода: LLM-мост коуча (systemd :8765, /complete + /vision)
+│   └── sudoers-bridge-restart + install_bridge_sudoers.sh  # рестарт моста агентом без пароля (ставится под root один раз)
 ├── docs/                       # Документация — индекс: таблица в CLAUDE.md;
 │   ├── coach/                  #   DEV_PLAN (норматив), ARCHITECTURE (ADR), METRICS_GUIDE, TASK_*, DESIGN_*
 │   └── archive/                #   исторические документы, не ведутся (см. archive/README.md)
@@ -94,17 +96,15 @@ running-coach/
 │   │   ├── analytics_helpers.py# compute_slope, compute_ewma, compute_moving_average
 │   │   ├── repositories_coach.py # CoachRepository: выборки для скиллов/state, честный ACWR, coach_messages
 │   │   ├── hr_max.py           # Адаптивный max_hr (авто-повышение по пикам, предложение снижения)
-│   │   └── user_service.py     # get_user_settings(db, ...) — сессию владеет вызывающий код
-│   ├── coach/                  # Гибридный ИИ-коуч (в проде; полная карта — docs/coach/ARCHITECTURE.md)
-│   │   ├── config.py           # ЕДИНСТВЕННЫЙ исполняемый источник порогов
-│   │   ├── contracts.py        # SkillResult, AthleteState, SafetyVerdict, WorkoutProposal, Prescription
-│   │   ├── state.py            # assess_state → AthleteState (скиллы + скоры + signals)
-│   │   ├── rules/p1_safety.py + safety.py  # граница: evaluate_safety + clamp (единств. конструктор Prescription)
-│   │   ├── prescriber.py / render.py / fallback.py / orchestrator.py / util.py
-│   │   ├── skills/             # fatigue, recovery, load, distribution, progress, pain + workout
-│   │   ├── tools/              # 7 read-only tools для LLM (registry + handlers)
-│   │   ├── knowledge/          # loader + guides/*.md (12 руководств)
-│   │   └── llm/                # CoachLLM: anthropic_client / bridge_client (мост подписки) / null + agent
+│   │   ├── user_service.py     # get_user_settings(db, ...) — сессию владеет вызывающий код
+│   │   ├── workout_insights.py # Разбор тренировки: computed_json (insights v7) из session_metrics/effort/gap/…
+│   │   ├── insights_baseline.py# Базовая линия HR↔GAP-темп и ожидаемый темп на пульсе (окно 120 дн)
+│   │   ├── repositories_insights.py # InsightRepository: очередь разборов (claim/finish), флаги для safety
+│   │   ├── prediction_log.py   # Продюсер residuals прогноз↔факт (идемпотентно по session_id; #246)
+│   │   └── sleep_ingest.py     # Сон из скриншота: vision → DailyMetrics.sleep_*
+│   ├── coach/                  # Гибридный ИИ-коуч (в проде). Карта модулей и ADR — docs/coach/ARCHITECTURE.md;
+│   │                           #   config.py — единственный исполняемый источник порогов; knowledge/guides/*.md —
+│   │                           #   runtime-данные (loader + тесты), не документация
 │   ├── telegram/               # Пакет Telegram-бота
 │   │   ├── __init__.py         #   экспорт run_bot
 │   │   ├── main.py             #   run_bot, Application сборка
@@ -176,7 +176,7 @@ running-coach/
 | Что делаешь | Куда класть | Пример |
 |-------------|-------------|--------|
 | Новый API endpoint | `src/api/routes/<domain>.py` | `src/api/routes/auth.py` |
-| Бизнес-логика | `src/services/<domain>/` | `src/services/sync/orchestrator.py` |
+| Бизнес-логика | `src/services/<module>.py` (плоские модули; пакет — только `sync/`) | `src/services/training_service.py` |
 | SQLAlchemy модель | `src/domain/models/<domain>.py` | `src/domain/models/user.py` |
 | Новая константа | `src/config/constants.py` | `DEFAULT_PACE_THRESHOLD` |
 | Настройка из env | `src/config/settings.py` | `class Settings(BaseSettings)` |
