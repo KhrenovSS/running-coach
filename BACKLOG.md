@@ -12,10 +12,10 @@
 | 1 | [Фикс] | AUDIT-006 Telegram TODO: `sync_runner.py` вызывает `sync_activities_for_user`/`sync_health_for_user` напрямую вместо `run_sync_for_user`. Миграция на `run_sync_for_user_all_brands(chat_id)`. | `src/telegram/sync_runner.py:8-12` | ⬜ Sprint 12b |
 | 5 | [Фикс] | AUDIT-008: Threading + asyncio anti-pattern. Scheduler — daemon thread, sync_service — `asyncio.run()` внутри синхронных функций. Планируется выделение sync в отдельный процесс. | `src/scheduler.py`, `src/services/sync_service.py` | ⬜ Отложено |
 | 6 | [Фикс] | AUDIT-012: Type hints не везде. `mypy src/ --strict` не проходит. | Весь `src/` | ⬜ Отложено |
-| 8 | [Идея] | Sprint 7: Admin panel — дашборд, управление пользователями, просмотр аудита, принудительный sync. Отложено до >1 пользователя. | docs/archive/PROJECT_AUDIT_2026-07.md | ⬜ Отложено |
-| 10 | [Идея] | Фильтр по типу тренировки на главной, общая дистанция/время за неделю/месяц. | docs/archive/PROJECT_AUDIT_2026-07.md | ⬜ Заморожено (после C8/C9 DEV_PLAN) |
-| 11 | [Идея] | Sprint 14: Multi-brand onboarding — выбор бренда при `/start`, заглушки для Polar/Garmin/Suunto. | docs/archive/PROJECT_AUDIT_2026-07.md | ⬜ Sprint 14 (заморожен) |
-| 12 | [Идея] | Факторы самочувствия — multi-select (ноги, дыхание, пульс, жара, недосып, стресс), адаптивные подсказки. | docs/archive/PROJECT_AUDIT_2026-07.md | 🔶 Частично закрыт C3/C4 23.08.2026 (`wellness_reports`: боль/крепатура/настроение/сон + вечерний опрос); полный multi-select открыт |
+| 8 | [Идея] | Sprint 7: Admin panel — дашборд, управление пользователями, просмотр аудита, принудительный sync. Отложено до >1 пользователя. | аудит 07.2026 (PROJECT_AUDIT, удалён; git) | ⬜ Отложено |
+| 10 | [Идея] | Фильтр по типу тренировки на главной, общая дистанция/время за неделю/месяц. | аудит 07.2026 (PROJECT_AUDIT, удалён; git) | ⬜ Заморожено (после C8/C9 DEV_PLAN) |
+| 11 | [Идея] | Sprint 14: Multi-brand onboarding — выбор бренда при `/start`, заглушки для Polar/Garmin/Suunto. | аудит 07.2026 (PROJECT_AUDIT, удалён; git) | ⬜ Sprint 14 (заморожен) |
+| 12 | [Идея] | Факторы самочувствия — multi-select (ноги, дыхание, пульс, жара, недосып, стресс), адаптивные подсказки. | аудит 07.2026 (PROJECT_AUDIT, удалён; git) | 🔶 Частично закрыт C3/C4 23.08.2026 (`wellness_reports`: боль/крепатура/настроение/сон + вечерний опрос); полный multi-select открыт |
 | 13 | [Идея] | Мобильное PWA (Progressive Web App). | README.md | ⬜ Идея |
 | 15 | [Вопрос] | AUDIT-008: выделять ли sync в отдельный процесс/контейнер или оставить `run_async_in_thread`? | `src/services/sync_service.py` | ⬜ Вопрос |
 | 16 | [Фикс] | Telegram `sync_runner.py`: нужен `run_sync_for_user_all_brands(chat_id)` для объединения отчёта по всем брендам. | `src/telegram/sync_runner.py` | ⬜ Sprint 12b |

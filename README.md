@@ -550,7 +550,7 @@ insights v7). Нормативная дорожная карта коуча и �
 
 ## 🧹 Технический долг
 
-> Открытые пункты — [`BACKLOG.md`](BACKLOG.md); закрытые и исторический аудит — `docs/archive/`.
+> Открытые пункты — [`BACKLOG.md`](BACKLOG.md); закрытые — `docs/archive/BACKLOG_closed.md`.
 
 ---
 

@@ -1,8 +1,8 @@
 # Дизайн персонализации и обучения коуча (спека для BACKLOG #244 / #246)
 
 > Статус: **не реализовано** (DEV_PLAN §9 «Дальше» п. 3 — «когда накопятся insights»).
-> Происхождение — decision_module_design §7/§13 (29.06.2026, архив:
-> `docs/archive/decision_module_design_2026-06.md`). Имена модулей (`predictor.py`, `calibration.py`,
+> Происхождение — decision_module_design §7/§13 (29.06.2026; файл удалён 02.09.2026,
+> история git — `git show ff22334:docs/archive/decision_module_design_2026-06.md`). Имена модулей (`predictor.py`, `calibration.py`,
 > `lessons.py`, правило P5) — из отменённой rules-first-архитектуры; при реализации адаптировать
 > под гибрид: LLM предлагает, числа считает детерминированный код, запись — только через
 > репозитории (инварианты DEV_PLAN §1).

@@ -10,5 +10,5 @@ Telegram-бот и гибридный ИИ-коуч (LLM рассуждает, �
 индекс документации. Этот файл — только точка входа для инструментов, читающих `AGENTS.md`.
 
 - Карта `src/` и потоки данных — `docs/ARCHITECTURE.md`; модуль коуча — `docs/coach/ARCHITECTURE.md`.
-- История изменений — `CHANGELOG.md`; история спринтов до 09.2026 — `docs/archive/AGENTS_sprint_history_2026-06-09.md`.
+- История изменений и спринтов — `CHANGELOG.md`.
 - Открытые задачи — `BACKLOG.md`.

@@ -22,7 +22,7 @@
 
 Принцип: **LLM владеет рассуждением; детерминированный код владеет фактами (tools), границами
 (safety) и числами, которые видит пользователь.** Это сознательная замена rules-first из
-прежний rules-first дизайн (архив: `docs/archive/decision_module_design_2026-06.md`; решение владельца 23.08.2026).
+прежний rules-first дизайн decision_module_design (06.2026, удалён — история git; решение владельца 23.08.2026).
 
 1. **Два типа.** `WorkoutProposal` — предложение (от LLM или fallback). `Prescription` — только
    результат `safety.clamp()`; поле `safety: SafetyVerdict` обязательное, без дефолта.
@@ -245,7 +245,7 @@ base64 → temp-файл на хосте → `claude -p --allowedTools Read --ad
 
 - ✅ **C0 — этот документ + сверка руководящих md.** `docs/coach/DEV_PLAN.md`; правка секции коуча
   в `CLAUDE.md`; `AGENTS.md` («следующий шаг» → ссылка сюда); `README.md` (секция прежнего поэтапного плана →
-  3–5 строк + ссылка); дисклеймер SUPERSEDED в decision_module_design (ныне `docs/archive/decision_module_design_2026-06.md`); BACKLOG #9.
+  3–5 строк + ссылка); дисклеймер SUPERSEDED в decision_module_design (файл удалён 02.09.2026, история git); BACKLOG #9.
   Проверка: grep-набор из §11.3; `pytest -q` зелёный.
 - ✅ **C1 — Фундамент** (без LLM/Telegram): `contracts.py`, `config.py` (+константы §4),
   `skills/base.py`, скиллы `fatigue/recovery/load/distribution/progress/workout` на
@@ -578,7 +578,7 @@ CoachError → сообщение погибло. Исправлено: `send_md
 2. **Секреты (перед C7):** ключ только от владельца, плейсхолдеры запрещены (§3 CLAUDE.md).
 3. **Гвард «один план»** — с 02.09.2026 автоматический: `tests/test_docs_links.py` проверяет, что
    формулировки отменённого rules-first плана (список `FORBIDDEN_PHRASES` в тесте) не встречаются в
-   `*.md` вне `docs/archive/` и CHANGELOG, что баннер SUPERSEDED в архивном дизайне ровно один, что все
+   `*.md` вне `docs/archive/` и CHANGELOG, что все
    ссылки на документы резолвятся и каждый файл `docs/` есть в таблице CLAUDE.md. «rules-first» в
    набор не входит: допустим в контексте «пересмотрен/отменён».
 

@@ -2,6 +2,17 @@
 
 All notable changes to this project are tracked here.
 
+## [02.09.2026] — Рефакторинг документации, шаг 7: удалены три архивных дубля
+
+### Removed
+- `docs/archive/PROJECT_AUDIT_2026-07.md`, `docs/archive/decision_module_design_2026-06.md`,
+  `docs/archive/AGENTS_sprint_history_2026-06-09.md` — уникального содержимого не осталось (ARC-таблица
+  в `docs/ARCHITECTURE.md`, §7 дизайна в `docs/coach/DESIGN_personalization.md`, история — CHANGELOG).
+  Восстановление: `git show ff22334:docs/archive/<файл>`. Оставлены `AUDIT_averaging_2026-09-01.md`
+  (измерения) и `BACKLOG_closed.md` (нумерация). Ссылки (CLAUDE, AGENTS, README, BACKLOG, ARCHITECTURE,
+  DEV_PLAN, coach/ARCHITECTURE, DESIGN_personalization, комментарий `domain/models/coach.py`) обновлены;
+  в `test_docs_links.py` снята проверка SUPERSEDED-баннера.
+
 ## [02.09.2026] — Рефакторинг документации, шаг 6/6: тест целостности документации
 
 ### Added

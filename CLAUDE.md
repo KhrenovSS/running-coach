@@ -104,7 +104,7 @@
 ## Модуль коуча (гибридный ИИ-тренер) — при работе над ним
 - **Нормативный план — `docs/coach/DEV_PLAN.md`** (единственный источник дорожной карты; чек-листы
   C0–C9, агент обновляет статусы в том же коммите, что и код). Прежний rules-first дизайн —
-  SUPERSEDED, в архиве (`docs/archive/decision_module_design_2026-06.md`); его §7 — `docs/coach/DESIGN_personalization.md`.
+  SUPERSEDED и удалён (06.2026, история git); его §7 — `docs/coach/DESIGN_personalization.md`.
 - Архитектура — **гибрид** (решение владельца 23.08.2026): LLM рассуждает и предлагает, скиллы —
   детерминированные read-only tools, safety — жёсткий фильтр поверх. Инварианты (DEV_PLAN §1):
   `Prescription` создаётся только через `safety.clamp()` (обязательное поле `safety`); числа для
@@ -172,5 +172,5 @@
 | Открытое задание: ориентир темпа/дистанции (#264) | `docs/coach/TASK_pace_estimate_fallback.md` |
 | Метрики разбора и физиология (#268, F-серия: §6.1 GPS/§7 замыкания/§10/§11 M4) | `docs/coach/METRICS_GUIDE.md` |
 | Дизайн персонализации (#244/#246, не реализовано) | `docs/coach/DESIGN_personalization.md` |
-| Архив (аудит проекта 07.2026, rules-first дизайн, аудит усреднений) — не ведётся | `docs/archive/README.md` |
-| История изменений (источник) / история спринтов до 09.2026 | `CHANGELOG.md` / `docs/archive/AGENTS_sprint_history_2026-06-09.md` |
+| Архив (аудит усреднений 01.09, закрытые пункты BACKLOG) — не ведётся | `docs/archive/README.md` |
+| История изменений и спринтов (источник) | `CHANGELOG.md` |

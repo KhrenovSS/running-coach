@@ -4,7 +4,7 @@
 #   1) ссылка на *.md (в бэктиках или markdown-ссылке) указывает на несуществующий файл;
 #   2) файл в docs/ не упомянут в индексе — таблице «Документация» в CLAUDE.md (сирота);
 #   3) отменённая дорожная карта («8 этапов» rules-first) снова всплыла вне архива
-#      (бывший ручной grep-набор DEV_PLAN §11.3).
+#      (бывший ручной grep-набор DEV_PLAN §11.3; сам rules-first дизайн удалён 02.09.2026, история git).
 # (Docs are prose only; this guard catches dangling paths, orphan docs and resurrected
 #  superseded roadmap wording outside docs/archive.)
 
@@ -77,5 +77,3 @@ def test_superseded_roadmap_wording_only_in_archive():
             if phrase in text:
                 hits.append(f"{rel}: «{phrase}»")
     assert not hits, "Отменённая дорожная карта вне архива (superseded roadmap wording):\n" + "\n".join(hits)
-    superseded = (ARCHIVE / "decision_module_design_2026-06.md").read_text(encoding="utf-8")
-    assert superseded.count("SUPERSEDED") == 1
