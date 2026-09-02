@@ -147,3 +147,19 @@ def test_hr_at_pace_band_none_branches():
     assert hr_at_pace_band(absurd, 5.5) is None
     outside = [(7.0, 135.0)] * 10                  # весь темп вне полосы ±0.25
     assert hr_at_pace_band(outside, 5.5) is None
+
+
+def test_deviation_temperature_shift_moves_expectation():
+    """Сдвиг от температуры входит в ожидание: жара не должна давать hr_above_baseline
+    (temperature shift is added to expected HR; z shrinks accordingly)."""
+    baseline = {"a": 200.0, "b": -10.0, "rmse_bpm": 4.0, "n_sessions": 6}
+    per_km = [{"km": 1, "gap_min_km": 6.0, "avg_hr": 140},
+              {"km": 2, "gap_min_km": 6.0, "avg_hr": 146},
+              {"km": 3, "gap_min_km": 6.0, "avg_hr": 146}]
+    plain = baseline_deviation(baseline, per_km)
+    hot = baseline_deviation(baseline, per_km, temp_shift_bpm=6)
+    assert plain["expected_hr"] == 140.0 and plain["delta_bpm"] == 6.0
+    assert hot["expected_hr"] == 146.0 and hot["delta_bpm"] == 0.0
+    assert hot["temp_shift_bpm"] == 6 and plain["temp_shift_bpm"] == 0
+    # None/0 — без поправки (no shift when temperature unknown)
+    assert baseline_deviation(baseline, per_km, temp_shift_bpm=None)["expected_hr"] == 140.0

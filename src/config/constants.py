@@ -200,6 +200,16 @@ BASELINE_HR_PREDICT_MAX: Final[int] = 200       # прогноз пульса в
 
 # Жара (heat)
 HEAT_TEMP_THRESHOLD_C: Final[int] = 20       # температура старта выше → heat_flag (heat threshold)
+# Ожидаемый сдвиг пульса от температуры на равном GAP-темпе — исследование 02.09.2026 на
+# 39 тренировках: +0.5 уд/мин на °C воздуха (Open-Meteo), опорная точка 15 °C
+# (expected HR shift per °C of air temperature at equal GAP pace; reference temperature)
+HEAT_HR_BPM_PER_C: Final[float] = 0.5
+HEAT_REF_TEMP_C: Final[int] = 15
+# Границы диапазона исследования: вне 10–30 °C линейная формула не экстраполируется (зимой
+# пульс на равном темпе не снижается — одежда, снег, холодовой стресс); сдвиг зажимается
+# на граничном значении (clamp: no extrapolation of the linear shift beyond the studied range)
+HEAT_SHIFT_TEMP_MIN_C: Final[int] = 10
+HEAT_SHIFT_TEMP_MAX_C: Final[int] = 30
 
 # Отложенный разбор тренировки (Deferred workout review — DEV_PLAN §9 D5)
 REVIEW_JOB_INTERVAL_MIN: Final[int] = 10     # период джобы pending-разборов (job interval)

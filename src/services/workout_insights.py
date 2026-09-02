@@ -186,6 +186,9 @@ def compute_workout_metrics(session: TrainingSession, *,
         computed["flags"] = sm.collect_flags(computed)
         return computed
 
+    # Жара — до отклонения от базовой линии: её ожидаемый сдвиг пульса входит в ожидание
+    # (heat first: its expected HR shift feeds the baseline expectation)
+    heat = heat_block(session.avg_temperature)
     if gps_unreliable:
         # Дистанции/темпы в trackpoints_json — мусор: pace-производные блоки честно
         # недоступны, а gap.available=false заодно исключает сессию из HR-baseline
@@ -200,7 +203,8 @@ def compute_workout_metrics(session: TrainingSession, *,
         drift = compute_cardiac_drift(times_sec, dists, hrs, training_type=ttype,
                                       grade_factors=factors,
                                       per_km=gap.get("per_km"))
-        deviation = (baseline_deviation(baseline, gap["per_km"])
+        deviation = (baseline_deviation(baseline, gap["per_km"],
+                                        temp_shift_bpm=heat.get("expected_hr_shift_bpm"))
                      if gap.get("available") else
                      {"available": False, "reason": "no_gap"})
     computed["gap"] = gap
@@ -210,7 +214,7 @@ def compute_workout_metrics(session: TrainingSession, *,
     computed["inputs"]["lap_check"] = lap_check(
         session.laps_json if isinstance(session.laps_json, list) else None,
         gap.get("per_km"))
-    computed["heat"] = heat_block(session.avg_temperature)
+    computed["heat"] = heat
 
     # --- M1: детерминированные метрики сессии (METRICS_GUIDE §4) ---
     zones = sm.time_in_zones(times_sec, hrs, max_hr, lthr)

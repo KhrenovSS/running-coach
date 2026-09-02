@@ -108,14 +108,23 @@ def hr_at_pace_band(points: list[tuple[float, float]],
     return {"hr_bpm": int(round(hr)), "n_points": len(band)}
 
 
-def baseline_deviation(baseline: dict | None, per_km: list[dict]) -> dict:
-    """Отклонение сегодняшней тренировки от базовой линии (today vs baseline)."""
+def baseline_deviation(baseline: dict | None, per_km: list[dict],
+                       temp_shift_bpm: int | None = None) -> dict:
+    """Отклонение сегодняшней тренировки от базовой линии (today vs baseline).
+
+    temp_shift_bpm — ожидаемый сдвиг пульса от температуры (heat.expected_hr_shift_bpm):
+    прибавляется к ожиданию, чтобы жара/прохлада не превращались в hr_above/below_baseline
+    (исследование 02.09.2026: ~7 уд/мин между прохладным и тёплым днём на равном GAP-темпе).
+    (Temperature shift is added to the expectation so weather does not masquerade as form.)
+    """
     if not baseline:
         return {"available": False, "reason": "no_baseline"}
     points = km_points(per_km)
     if not points:
         return {"available": False, "reason": "no_km_points"}
     expected = sum(baseline["a"] + baseline["b"] * p for p, _ in points) / len(points)
+    if temp_shift_bpm:
+        expected += temp_shift_bpm
     actual = sum(h for _, h in points) / len(points)
     delta = actual - expected
     rmse = baseline.get("rmse_bpm") or 0.0
@@ -125,6 +134,7 @@ def baseline_deviation(baseline: dict | None, per_km: list[dict]) -> dict:
         "expected_hr": round(expected, 1), "actual_hr": round(actual, 1),
         "delta_bpm": round(delta, 1), "z": z,
         "baseline_rmse_bpm": rmse,
+        "temp_shift_bpm": temp_shift_bpm if temp_shift_bpm else 0,
         "baseline_n_sessions": baseline.get("n_sessions"),
         "baseline_computed_at": baseline.get("computed_at"),
     }

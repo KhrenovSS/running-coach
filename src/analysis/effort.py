@@ -19,6 +19,10 @@ from src.config.constants import (
     DRIFT_MIN_STEADY_MIN,
     DRIFT_MODERATE_PCT,
     DRIFT_WARMUP_MIN,
+    HEAT_HR_BPM_PER_C,
+    HEAT_REF_TEMP_C,
+    HEAT_SHIFT_TEMP_MAX_C,
+    HEAT_SHIFT_TEMP_MIN_C,
     HEAT_TEMP_THRESHOLD_C,
 )
 
@@ -192,7 +196,19 @@ def compute_cardiac_drift(times_sec: list[float], dists: list[float],
 
 
 def heat_block(temp_c: int | None) -> dict:
-    """Heat-блок: флаг жары по температуре старта (интерпретация — LLM)."""
+    """Heat-блок: флаг жары по температуре старта + ожидаемый сдвиг пульса.
+
+    expected_hr_shift_bpm — на сколько уд/мин пульс на равном GAP-темпе ожидаемо выше (+)
+    или ниже (−) опорной температуры HEAT_REF_TEMP_C (линейно, HEAT_HR_BPM_PER_C на °C;
+    исследование 02.09.2026). Температура для сдвига зажата в [HEAT_SHIFT_TEMP_MIN_C,
+    HEAT_SHIFT_TEMP_MAX_C] — диапазон исследования; при −20 °C сдвиг тот же, что при +10
+    (мороз пульс на равном темпе не снижает). temp_c в блоке — сырой.
+    Интерпретация — LLM; число уходит в hr_vs_baseline.
+    (Heat flag plus the expected temperature-driven HR shift at equal GAP pace; the
+    temperature is clamped to the studied range — no extrapolation into frost or extreme heat.)
+    """
     if temp_c is None:
-        return {"temp_c": None, "heat_flag": None}
-    return {"temp_c": temp_c, "heat_flag": temp_c >= HEAT_TEMP_THRESHOLD_C}
+        return {"temp_c": None, "heat_flag": None, "expected_hr_shift_bpm": None}
+    t = max(HEAT_SHIFT_TEMP_MIN_C, min(HEAT_SHIFT_TEMP_MAX_C, temp_c))
+    return {"temp_c": temp_c, "heat_flag": temp_c >= HEAT_TEMP_THRESHOLD_C,
+            "expected_hr_shift_bpm": round(HEAT_HR_BPM_PER_C * (t - HEAT_REF_TEMP_C))}

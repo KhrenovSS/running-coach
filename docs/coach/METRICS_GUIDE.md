@@ -60,7 +60,7 @@
 | Aerobic decoupling (Pa:HR, GAP-корректированный) | `analysis/effort.py::compute_cardiac_drift` | `drift{drift_pct, flag}` → флаги `decoupling_high/moderate` |
 | Темп↔HR против личной нормы | `analysis/hr_baseline.py::hr_vs_baseline` (OLS HR↔GAP, окно 120 дн) | `hr_vs_baseline{expected_hr, delta_bpm, z}` → `hr_above/below_baseline` |
 | GAP по-км (рельеф) | `analysis/gap.py` | `gap.per_km[]` |
-| Жара | `heat_block` | `heat` |
+| Жара | `heat_block` | `heat{temp_c, heat_flag, expected_hr_shift_bpm}` — сдвиг `HEAT_HR_BPM_PER_C·(t−HEAT_REF_TEMP_C)` входит в ожидание `hr_vs_baseline` (`temp_shift_bpm`); t зажата в 10–30 °C (диапазон данных, мороз ≠ −18 уд/мин); исследование 02.09.2026: +0.5 уд/мин/°C, ~7 уд/мин между <16 и ≥24 °C на равном GAP-темпе |
 | Время в HR-зонах (посекундно из `computed_json`; сегментное приближение — fallback, F0/#281) | `history_tools.py::get_workout_detail` | `zone_minutes`, `band_minutes` |
 | Недельный баланс 80/20, прогрессия, ACWR, подряд-тяжёлые | skills | `state.skills`, `zone_balance` |
 

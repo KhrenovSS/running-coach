@@ -85,7 +85,30 @@ def test_heat_block_threshold():
     """heat_flag по порогу из констант; None-температура → None-флаг."""
     assert heat_block(HEAT_TEMP_THRESHOLD_C)["heat_flag"] is True
     assert heat_block(HEAT_TEMP_THRESHOLD_C - 1)["heat_flag"] is False
-    assert heat_block(None) == {"temp_c": None, "heat_flag": None}
+    assert heat_block(None) == {"temp_c": None, "heat_flag": None,
+                                "expected_hr_shift_bpm": None}
+
+
+def test_heat_block_expected_hr_shift():
+    """Ожидаемый сдвиг пульса: линейно от опорной температуры, 0 в опорной точке,
+    отрицательный в прохладу (expected HR shift is linear around the reference)."""
+    from src.config.constants import HEAT_HR_BPM_PER_C, HEAT_REF_TEMP_C
+    assert heat_block(HEAT_REF_TEMP_C)["expected_hr_shift_bpm"] == 0
+    hot = heat_block(HEAT_REF_TEMP_C + 10)["expected_hr_shift_bpm"]
+    assert hot == round(HEAT_HR_BPM_PER_C * 10) and hot > 0
+    assert heat_block(HEAT_REF_TEMP_C - 4)["expected_hr_shift_bpm"] < 0
+
+
+def test_heat_block_shift_clamped_outside_studied_range():
+    """Вне 10–30 °C сдвиг не экстраполируется: мороз = граница, экстремальная жара = граница;
+    temp_c и heat_flag при этом сырые (clamp of the shift, raw temp/flag preserved)."""
+    from src.config.constants import HEAT_SHIFT_TEMP_MAX_C, HEAT_SHIFT_TEMP_MIN_C
+    frost, edge_low = heat_block(-20), heat_block(HEAT_SHIFT_TEMP_MIN_C)
+    assert frost["expected_hr_shift_bpm"] == edge_low["expected_hr_shift_bpm"] < 0
+    assert frost["temp_c"] == -20 and frost["heat_flag"] is False
+    hot, edge_high = heat_block(40), heat_block(HEAT_SHIFT_TEMP_MAX_C)
+    assert hot["expected_hr_shift_bpm"] == edge_high["expected_hr_shift_bpm"] > 0
+    assert hot["temp_c"] == 40 and hot["heat_flag"] is True
 
 
 def test_drift_v2_reports_bpm_and_pace_cv():
