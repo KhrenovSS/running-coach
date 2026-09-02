@@ -268,7 +268,7 @@ def test_render_week_plan_shows_distance():
     """
     from datetime import date
 
-    from src.coach.render import render_week_plan
+    from src.coach.render_week import render_week_plan
 
     state = _state()
     verdict = evaluate_safety(state)
@@ -332,7 +332,7 @@ def test_render_week_plan_facts_mode_and_backward_compat():
     """facts= → прошедшие дни как факт/пропуск, будущее — план; без facts всё как раньше."""
     from datetime import date
 
-    from src.coach.render import render_week_plan
+    from src.coach.render_week import render_week_plan
 
     state = _state()
     verdict = evaluate_safety(state)
@@ -362,7 +362,7 @@ def test_render_week_plan_rest_of_week_summary():
     """plan_scope=rest_of_week → в шапке «сделано X км, осталось ~Y км»."""
     from datetime import date
 
-    from src.coach.render import render_week_plan
+    from src.coach.render_week import render_week_plan
 
     state = _state()
     easy, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2, duration_min=40),
@@ -380,7 +380,7 @@ def test_render_week_plan_shows_pace_hint_and_predicted_km():
     fallback темпа — подсказка основного сегмента; без данных темпа нет."""
     from datetime import date
 
-    from src.coach.render import render_week_plan
+    from src.coach.render_week import render_week_plan
 
     state = _state()
     verdict = evaluate_safety(state)
@@ -412,7 +412,7 @@ def test_render_week_plan_fact_line_has_pace():
     """Факт прошедшего дня печатает фактический темп."""
     from datetime import date
 
-    from src.coach.render import render_week_plan
+    from src.coach.render_week import render_week_plan
 
     state = _state()
     p, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2, duration_min=40),
@@ -423,3 +423,41 @@ def test_render_week_plan_fact_line_has_pace():
                             facts={date(2026, 8, 31): {"duration_min": 38.2, "distance_km": 5.4,
                                                        "pace_min_km": 38.2 / 5.4, "avg_hr": 137}})
     assert "факт 38 мин · 5.4 км · 7:04/км · ср. пульс 137" in text
+
+
+def test_week_card_and_short_card_show_compact_structure():
+    """Строка недели и короткая карточка печатают структуру сегментов компактно;
+    у прошедшего дня — плановая структура рядом с фактом (жалоба владельца 02.09)."""
+    from datetime import date
+
+    from src.coach.render import render_prescription_short
+    from src.coach.render_week import render_week_plan
+
+    state = _state()
+    verdict = evaluate_safety(state)
+    strides = [{"role": "steady", "amount_kind": "min", "amount_value": 25.0, "target_zone": 2},
+               {"role": "work", "repeat": 7, "amount_kind": "sec", "amount_value": 18.0,
+                "target_zone": 3},
+               {"role": "cooldown", "amount_kind": "min", "amount_value": 5.0, "target_zone": 1}]
+    past, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=3, duration_min=35),
+                    verdict, state)
+    past.when = date(2026, 9, 1)
+    past.target["segments"] = strides
+    today_p, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2, duration_min=35),
+                       verdict, state)
+    today_p.when = date(2026, 9, 2)
+    today_p.target["segments"] = [
+        {"role": "warmup", "amount_kind": "min", "amount_value": 5.0, "target_zone": 1},
+        {"role": "steady", "amount_kind": "min", "amount_value": 25.0, "target_zone": 2},
+        {"role": "cooldown", "amount_kind": "min", "amount_value": 5.0, "target_zone": 1}]
+
+    text = render_week_plan([past, today_p], {"week_start": "2026-08-31"}, max_hr=177,
+                            today=date(2026, 9, 2),
+                            facts={date(2026, 9, 1): {"duration_min": 46.2, "distance_km": 6.7,
+                                                      "pace_min_km": 46.2 / 6.7, "avg_hr": 140}})
+    assert "детали в дне" not in text
+    assert "✓ вт 01.09 — 🟢 Лёгкий бег · 25 мин Z2 + 7×18 сек Z3 + зам 5 мин · факт 46 мин" in text
+    assert "▶ ср 02.09 — " in text and "разм 5 мин + 25 мин Z2 + зам 5 мин" in text
+
+    short = render_prescription_short(today_p, max_hr=177, today=date(2026, 9, 2))
+    assert short.endswith("разм 5 мин + 25 мин Z2 + зам 5 мин")

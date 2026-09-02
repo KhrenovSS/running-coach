@@ -26,7 +26,7 @@ from src.coach.llm.prompts import (
 )
 from src.coach.prescriber import finalize, save_prescription, user_max_hr
 from src.services.repositories import latest_lthr
-from src.coach.render import render_week_plan
+from src.coach.render_week import render_week_plan
 from src.coach.safety import rehydrate
 from src.coach.week_view import _active_rows, week_facts
 from src.config.constants import RECOMMENDATION_STATUS_SUPERSEDED

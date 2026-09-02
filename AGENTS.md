@@ -163,7 +163,8 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
     `Prescription(kw_only)`, `ReasoningStep` (строковая `WorkoutProposal.structure` — legacy, читается для совместимости)
   - `rules/p1_safety.py` + `safety.py` — граница: evaluate_safety + clamp (единственный
     конструктор Prescription; `for_days_ahead` → назначение на будущий день); `state.py`,
-    `prescriber.py`, `render.py`, `render_segments.py` (рендер сегментов + общий итог из них),
+    `prescriber.py`, `render.py`, `render_segments.py` (рендер сегментов + общий итог + compact_segments),
+    `render_week.py` (карточка недели), `week_view.py` (показ сохранённого плана), `planning_window.py`,
     `segments.py` (`enrich_and_clamp_segments` — числа сегментам из зон/истории, per-segment clamp, M2.1),
     `fallback.py`, `orchestrator.py`, `review_flow.py` (pending-разборы: ensure/run/due),
     `util.py`

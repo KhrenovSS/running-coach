@@ -140,7 +140,10 @@ coach/
 ├── prescriber.py      # finalize(): proposal → evaluate_safety → clamp → persist(status)
 ├── fallback.py        # табличное предложение без LLM (readiness → easy/recovery/rest)
 ├── render.py          # детерминированный рендер карточек + render_week_plan (недельный план)
-├── render_segments.py # рендер посегментной раскладки + segments_total_min (общий итог из сегментов, M2.1)
+├── render_segments.py # рендер посегментной раскладки + segments_total_min + compact_segments (структура одной строкой)
+├── render_week.py     # карточка недели (render_week_plan: план/факт по дням, ~темп, ≈км из прогноза)
+├── week_view.py       # read-only показ сохранённого плана недели (/week, show_week_plan)
+├── planning_window.py # окно планирования (остаток недели) + week_done (факт недели по локальной дате)
 ├── segments.py        # enrich_and_clamp_segments: числа сегментам из зон/истории, per-segment clamp (M2.1)
 ├── orchestrator.py    # morning_verdict (подтверждает план дня), handle_chat, on_workout_completed
 ├── review_flow.py     # ensure_insights_for_batch, run_pending_review, due_review_sessions

@@ -118,3 +118,28 @@ def render_segment_lines(segments: list[dict]) -> list[str]:
         if seg.get("recovery"):
             lines.append("   отдых между: " + _fmt_recovery(seg["recovery"]))
     return lines
+
+
+_COMPACT_ROLE = {"warmup": "разм", "cooldown": "зам"}
+
+
+def compact_segments(segments: list[dict] | None) -> str:
+    """Структура тренировки одной строкой для карточки недели / короткой карточки дня:
+    «разм 5 мин + 25 мин Z2 + зам 5 мин», «25 мин Z2 + 7×18 сек Z3 + зам 5 мин».
+    Восстановление и подсказки темпа — в полной раскладке, не здесь. (One-line structure.)
+    """
+    parts: list[str] = []
+    for seg in segments or []:
+        amt = _fmt_amount(seg.get("amount_kind"), seg.get("amount_value"))
+        role, zone = seg.get("role"), seg.get("target_zone")
+        rep = seg.get("repeat", 1) or 1
+        if role in _COMPACT_ROLE:
+            parts.append(f"{_COMPACT_ROLE[role]} {amt}" if amt else _COMPACT_ROLE[role])
+            continue
+        body = amt or "—"
+        if rep > 1:
+            body = f"{rep}×{body}"
+        if zone is not None:
+            body += f" Z{zone}"
+        parts.append(body)
+    return " + ".join(parts)

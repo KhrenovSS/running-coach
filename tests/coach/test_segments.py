@@ -170,3 +170,19 @@ def test_segments_from_schema():
     segs = segments_from_schema(prop.segments)
     assert len(segs) == 1 and segs[0].role == "work" and segs[0].repeat == 6
     assert segs[0].recovery.until_hr == 130
+
+
+def test_compact_segments_one_line():
+    """Компактная структура одной строкой — для карточки недели и короткой карточки дня."""
+    from src.coach.render_segments import compact_segments
+
+    today = [{"role": "warmup", "amount_kind": "min", "amount_value": 5.0, "target_zone": 1},
+             {"role": "steady", "amount_kind": "min", "amount_value": 25.0, "target_zone": 2},
+             {"role": "cooldown", "amount_kind": "min", "amount_value": 5.0, "target_zone": 1}]
+    strides = [{"role": "steady", "amount_kind": "min", "amount_value": 25.0, "target_zone": 2},
+               {"role": "work", "repeat": 7, "amount_kind": "sec", "amount_value": 18.0,
+                "target_zone": 3, "recovery": {"duration_min": 2.0, "until_hr": 125}},
+               {"role": "cooldown", "amount_kind": "min", "amount_value": 5.0, "target_zone": 1}]
+    assert compact_segments(today) == "разм 5 мин + 25 мин Z2 + зам 5 мин"
+    assert compact_segments(strides) == "25 мин Z2 + 7×18 сек Z3 + зам 5 мин"
+    assert compact_segments([]) == "" and compact_segments(None) == ""

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from src.coach.contracts import Prescription
 from src.coach.planning import _MESO_LEN, _monday_of
 from src.coach.prescriber import user_max_hr
-from src.coach.render import render_week_plan
+from src.coach.render_week import render_week_plan
 from src.coach.safety import rehydrate
 from src.config.constants import RECOMMENDATION_STATUS_SUPERSEDED
 from src.models import Recommendation, TrainingSession, User, UserModel
