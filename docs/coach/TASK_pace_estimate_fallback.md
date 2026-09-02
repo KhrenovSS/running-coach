@@ -11,7 +11,7 @@
 оценки НЕ в safety-clamp» должен покрывать и `ltsp`-ступень (сейчас она только в сегментах,
 `_pace_clamp_context` остаётся на уровне A).
 **BACKLOG:** #264. **Приоритет:** высокий (влияет на ежедневное использование).
-**Затрагивает:** `src/analysis/hr_baseline.py`, `src/services/workout_insights.py`,
+**Затрагивает:** `src/analysis/hr_baseline.py`, `src/services/insights_baseline.py` (с 01.09, #270; ранее `workout_insights.py`),
 `src/coach/prescriber.py`, `src/coach/render.py`, `src/config/constants.py`.
 
 ---
@@ -37,7 +37,7 @@ Z1 и ниже · пульс до 125 уд/мин · 30 мин
 
 1. `predict_volume()` — `src/coach/prescriber.py` (HR-ветка): зона → `zone_ceiling_hr` →
    `expected_pace_at_hr(user_id, ceiling, db)` → `predicted = {pace_min_km, distance_km, …}`.
-2. `expected_pace_at_hr()` — `src/services/workout_insights.py`: ленивый бутстрап insights
+2. `expected_pace_at_hr()` — `src/services/insights_baseline.py`: ленивый бутстрап insights
    + `_collect_window_points()` (км-точки `(gap_pace, hr)` steady-типов
    `BASELINE_TYPES = easy/long/recovery` за `BASELINE_WINDOW_DAYS = 120` дней).
 3. `pace_at_hr_band(points, hr_ceiling)` — `src/analysis/hr_baseline.py`: медиана темпа
@@ -104,7 +104,7 @@ db.close()"
 - `typical_pace_median(paces) -> dict | None` в `hr_baseline.py`: фильтр входа по санити,
   ≥`BASELINE_TYPICAL_MIN_SESSIONS` значений, медиана →
   `{"pace_min_km", "n_sessions", "quality": "typical"}`.
-- `_typical_pace(user_id, workout_type, *, db)` в `workout_insights.py`: медиана
+- `_typical_pace(user_id, workout_type, *, db)` в `insights_baseline.py`: медиана
   `training_sessions.avg_pace` за окно — сначала сессии того же
   `effective_training_type` (`src/coach/util.py`), при нехватке — все `BASELINE_TYPES`.
   Запрос лёгкий: только id/тип/avg_pace, **без `trackpoints_json`**.
@@ -198,7 +198,7 @@ Z1 и ниже · пульс до 125 уд/мин · 30 мин
 ## 10. Порядок шагов
 
 1. Константы. 2. Математика в `hr_baseline.py` + unit-тесты (самодостаточно).
-3. Композиция в `workout_insights.py` + сервисные тесты. 4. `predict_volume`
+3. Композиция в `insights_baseline.py` + сервисные тесты. 4. `predict_volume`
 (`degraded_ok=True`, `workout_type`, `quality`) + тесты, включая safety-гвард.
 5. Рендер + тесты. 6. `CHANGELOG.md`, статус здесь и в `BACKLOG.md` (#264).
 

@@ -2,6 +2,24 @@
 
 All notable changes to this project are tracked here.
 
+## [02.09.2026] — Рефакторинг документации, шаг 4/6: точечный дрейф живых документов
+
+### Fixed
+- `CLAUDE.md`: абзац статусов C/D/F (вторая копия DEV_PLAN §9) → 4 строки «статусы только в
+  DEV_PLAN §9» + список открытого (#243/#244/#246/#254/#264/#289, M3.2); заявление
+  «анти-дрейф-тесты сверяют док↔config» переформулировано (тест документ не читает).
+- `docs/coros_health_metrics.md`: та же формулировка в шапке; §11–§20 помечены как «Часть C —
+  справочник EvoLab, в проекте не реализовано» (кроме §12/§13/§18).
+- `docs/coach/DEV_PLAN.md`: #293 снят из хвостов (закрыт 02.09); «334 теста» → «на момент C8»;
+  «гвард ≤50» → ориентир без автоматики; `FlagValue` — Literal, не Enum. Нумерация § не тронута.
+- `docs/coach/ARCHITECTURE.md`: Решение 3 сжато до «почему» (детали — DEV_PLAN §8); заголовок
+  карты модулей и счётчик тестов (34).
+- `docs/coach/TASK_pace_estimate_fallback.md`: `expected_pace_at_hr` → `services/insights_baseline.py` (#270).
+- `docs/LOGGING.md`: `audit.log.YYYY-MM-DD` (было два разных имени), строка `app.error`, `lines=100`.
+- `docs/TESTING.md`: 34 модуля coach-тестов. `docs/CHECKLIST_FEATURE.md`: плоские `services/`.
+- `docs/CHECKLIST_NEW_PROVIDER.md`: `resume_session`/`session_token` (кэш токена), smoke с kwargs.
+- `docs/CHECKLIST_MIGRATION.md`: идемпотентность помечена как рекомендация (в 25 миграциях не применяется).
+
 ## [02.09.2026] — Рефакторинг документации, шаг 3/6: CODE_GUIDELINES переписан, NAMING влит
 
 ### Changed

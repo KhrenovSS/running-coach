@@ -49,13 +49,14 @@ logger.info("Sync completed", extra={"count": 5})
 
 ## Аудит-события (Audit events)
 
-Аудит пишется в таблицу `audit_events` и параллельно в `logs/audit_*.log`.
+Аудит пишется в таблицу `audit_events` и параллельно в `logs/audit.log` (ротация — `audit.log.YYYY-MM-DD`).
 
 ### Типы событий (Event types)
 
 | Тип | Описание | Источники |
 |-----|----------|-----------|
 | `app.startup` | Приложение запущено | `src/startup.py` |
+| `app.error` | Ошибка, зафиксированная `AuditService.log_error` | сервисы, middleware |
 | `training.uploaded` | Тренировка загружена | `/upload`, `/upload/confirm`, `/upload/confirm_deleted`, Coros sync |
 | `training.deleted` | Тренировка удалена | `/session/{id}/delete` |
 | `training.delete_failed` | Ошибка удаления тренировки | `/session/{id}/delete` |
@@ -91,7 +92,7 @@ audit.log_settings_changed(user_id=1, changes={"max_hr": {"old": 170, "new": 175
 ## Чтение логов через веб-интерфейс (View logs via web UI)
 
 ```
-GET /logs?lines=200
+GET /logs?lines=100
 ```
 
 Показывает последние N строк из текущего лог-файла приложения.

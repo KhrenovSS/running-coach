@@ -56,6 +56,11 @@ class PolarWatchClient(BaseWatchClient):
         ...
 ```
 
+**Кэш токена (необязательно, но иначе логин на каждый синк):** `BaseWatchClient` имеет неабстрактные
+`resume_session(access_token, api_user_id) -> bool` и `session_token() -> (access_token, api_user_id)`;
+`services/sync/utils.py::_make_client` вызывает их для повторного использования токена из
+`watch_credentials`. Бренд, который их не переопределяет, работает, но логинится каждый раз.
+
 **Требования к формату данных** (см. `CorosWatchClient` как референс):
 
 | Метод | Формат возврата |
@@ -114,7 +119,7 @@ raise WatchAuthError(message="...", brand="polar")
 
 ```bash
 # Проверка импорта и фабрики
-python -c "from src.watch.factory import get_watch_client; c = get_watch_client('polar'); print(type(c).__name__)"
+python -c "from src.watch.factory import get_watch_client; c = get_watch_client('polar', email='x', password='y'); print(type(c).__name__)"  # kwargs — как требует __init__ бренда
 # Ожидаемый вывод: PolarWatchClient
 
 # Проверка списка брендов

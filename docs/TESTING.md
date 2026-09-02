@@ -12,7 +12,7 @@ tests/
 ├── helpers_intervals.py     # Фабрики HRR-синтетики: build_hr_series/build_laps/interval_workout/build_hrr_trackpoints
 ├── fixtures/                # TCX/FIT файлы для тестов (tempo_run.tcx, short_walk.tcx)
 ├── skills/                  # Фикстуры каркаса коуча (conftest + scaffold-гейт)
-├── coach/                   # Тесты гибридного коуча (31 модуль): скиллы, state, safety/clamp (табличный),
+├── coach/                   # Тесты гибридного коуча (~34 модуля): скиллы, state, safety/clamp (табличный),
 │                            #   source-гварды (Prescription только из clamp; tools read-only),
 │                            #   tools, agent (ScriptedLLM), промпт-стабильность, оркестратор,
 │                            #   pain-флоу, рендер, BridgeLLM (httpx.MockTransport); fakes.py;

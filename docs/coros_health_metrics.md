@@ -2,8 +2,8 @@
 > **Исполняемые зеркала — `src/coach/config.py` (пороги коуча) и `src/config/constants.py`
 > (зоны от LTHR, HRR, M4)**: пороги из этого документа живут в коде
 > именованными константами (потребители: `recovery_view`, skills, safety). Правка порога здесь
-> требует правки `config.py` и анти-дрейф-тестов `tests/test_coach_config.py` — иначе док и
-> поведение разъедутся.
+> требует правки `config.py` (документ и код сверяются вручную; `tests/test_coach_config.py`
+> проверяет только согласованность самих констант, документ не читает).
 
 Источник: официальная документация COROS (Training Hub / EvoLab).
 
@@ -298,7 +298,11 @@ def anomaly(rhr, rhr_baseline):
 
 ---
 
-# Дополнительные метрики EvoLab (из официальной документации COROS)
+# Часть C. Справочник метрик EvoLab (из документации COROS) — в проекте НЕ реализовано
+
+> Реализованы только: §12 Recovery % (шкала в коде 30/70 расходится с 20/70/90 — BACKLOG #249),
+> §13 Training Effect (колонки `training_effect`/`anaerobic_training_effect`), §18 пороги LTHR/LTSP
+> (зоны и нормативные темпы, F4). §11, §14–§17, §19–§20 — справочник без кода.
 
 Источник: https://support.coros.com/hc/en-us/articles/360061452651-EvoLab-Metrics
           https://coros.com/stories/coros-metrics/c/your-coros-recovery-metrics-explained

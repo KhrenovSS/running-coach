@@ -32,24 +32,15 @@ host-сервис `bin/coach_llm_bridge.py` (systemd `running-coach-llm-bridge.s
 - `cost_usd` в `coach_messages` считается по ценам opus — в мосте величина условная,
   реальная цена — лимиты подписки (`BRIDGE_MODEL=sonnet` по умолчанию их бережёт).
 **25.08.2026 — мост утверждён владельцем как постоянный режим** (корпоративная подписка,
-маржинальная стоимость токенов нулевая): ограничения компенсированы обогащением D-серии
-(workout_detail/computed/daily_metrics_morning/recent_reviews инлайнятся в каждый ход),
-латентность до 150 с спрятана в фоновые треды/джобы. Остаточный зазор — проза guides
-доезжает только дайджестом (search_guides простаивает) → инлайн чанков, BACKLOG #242.
-Переезд на личный ключ = `ANTHROPIC_API_KEY` в `.env` (#241 ⏸ опция) — код не меняется.
-**30.08.2026 — второй endpoint моста `/vision` (#257):** картинка (base64) → temp-файл на
-хосте (0700) → `claude -p --output-format json --max-turns 3 --allowedTools Read --add-dir
-<tmp>` → JSON. Это осознанное исключение из «no tools»: Read-tool включён и ограничен
-temp-каталогом, `--max-turns ≥2` (ход на Read + ход на ответ), файл удаляется в `finally`.
-Нужен для распознавания сна из скриншота БЕЗ API-ключа (мультимодальность подписки через файл).
-Рестарт моста агентом — без пароля (sudoers `bin/sudoers-bridge-restart`).
-**01.09.2026 — устойчивость к транзиентному сбою моста** (инцидент утра: `502 claude CLI exit=1`):
-транзиентные ответы (5xx/timeout/сеть) → `LLMTransientError(LLMUnavailableError)` и ретрай с backoff
-`post_with_retry` (`llm/bridge_client.py`, применён и в `vision.py`; `COACH_BRIDGE_RETRIES` в
-`llm/config.py`); постоянные (401/400, нет ключа) — обычный `LLMUnavailableError`. Утренний вердикт
-при недоступности моста — детерминированный со назначением (`handle_chat` kind="morning" →
-`morning_verdict()`), не generic-«базовый режим»; при транзиентном сбое `morning_verdict_job` ставит
-отложенный `_morning_upgrade_job` (`run_once`, добор LLM-вердикта после восстановления моста).
+маржинальная стоимость токенов нулевая); ограничения компенсированы обогащением контекста
+(D-серия), латентность до 150 с спрятана в фоновые треды/джобы. Остаток: проза guides доезжает
+дайджестом — BACKLOG #242; личный ключ = `ANTHROPIC_API_KEY` в `.env` (#241 ⏸), код не меняется.
+**30.08.2026 — `/vision`** — осознанное исключение из «no tools» ради сна из скриншота без
+API-ключа: Read-tool ограничен temp-каталогом (`--add-dir`), файл удаляется в `finally`.
+Альтернатива (перехват трафика приложения COROS) отвергнута владельцем.
+**01.09.2026 — устойчивость к транзиентному сбою моста** (инцидент 502 утром): транзиентные
+ответы → `LLMTransientError` + ретрай с backoff; утренний вердикт без моста — детерминированный
+со назначением, добор LLM-вердикта отложенной джобой. Реализация и константы — DEV_PLAN §8.
 
 ## Решение 4: отложенный разбор — статус в БД, не очередь в памяти (D-серия, 24.08.2026)
 
@@ -125,7 +116,7 @@ M4 — interval/race либо tempo с avg_hr ≥95%·lthr. Нормативны
 `gps_unreliable`/`device_mismatch` идут в assessment как `suspect_data`, ограничений safety
 сознательно не дают. Хвосты замыканий — BACKLOG #289.
 
-## Карта модулей `src/coach/` (фактическая, C0–C8 + сессии 28–30.08 и 01.09)
+## Карта модулей `src/coach/` (фактическая, на 02.09.2026)
 
 ```
 coach/
@@ -178,4 +169,4 @@ hr_baseline}.py` — Minetti-GAP, decoupling Pa:HR, базовая линия HR
 `src/services/sync/activities.py::_coach_reviews` (post-sync разборы в daemon-треде:
 гейт initiative, LLM только для самой свежей тренировки батча),
 `src/domain/models/coach.py` (6 таблиц, включая `WorkoutInsight`) + `WellnessReport` в
-`health.py`, миграции `p9q0r1s2t3u4`/`q0r1s2t3u4v5`, `tests/coach/` (31 модуль + fakes).
+`health.py`, миграции `p9q0r1s2t3u4`/`q0r1s2t3u4v5`, `tests/coach/` (~34 модуля + fakes).
