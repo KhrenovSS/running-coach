@@ -22,7 +22,7 @@
 
 Принцип: **LLM владеет рассуждением; детерминированный код владеет фактами (tools), границами
 (safety) и числами, которые видит пользователь.** Это сознательная замена rules-first из
-`decision_module_design.md` (решение владельца 23.08.2026).
+`decision_module_design.md` (архив: `docs/archive/decision_module_design_2026-06.md`; решение владельца 23.08.2026).
 
 1. **Два типа.** `WorkoutProposal` — предложение (от LLM или fallback). `Prescription` — только
    результат `safety.clamp()`; поле `safety: SafetyVerdict` обязательное, без дефолта.
@@ -245,7 +245,7 @@ base64 → temp-файл на хосте → `claude -p --allowedTools Read --ad
 
 - ✅ **C0 — этот документ + сверка руководящих md.** `docs/coach/DEV_PLAN.md`; правка секции коуча
   в `CLAUDE.md`; `AGENTS.md` («следующий шаг» → ссылка сюда); `README.md` (секция «8 этапов» →
-  3–5 строк + ссылка); дисклеймер SUPERSEDED в `decision_module_design.md`; BACKLOG #9.
+  3–5 строк + ссылка); дисклеймер SUPERSEDED в decision_module_design (ныне `docs/archive/decision_module_design_2026-06.md`); BACKLOG #9.
   Проверка: grep-набор из §11.3; `pytest -q` зелёный.
 - ✅ **C1 — Фундамент** (без LLM/Telegram): `contracts.py`, `config.py` (+константы §4),
   `skills/base.py`, скиллы `fatigue/recovery/load/distribution/progress/workout` на
@@ -430,7 +430,7 @@ PDF-текст). Книги → конспекты-гайды своими сл�
 
 ### F-серия — сырые данные и физиология (утв. 01.09.2026)
 
-Итог аудита сырых данных 01.09.2026 (`docs/AUDIT_averaging_2026-09-01.md` + эмпирика
+Итог аудита сырых данных 01.09.2026 (`docs/archive/AUDIT_averaging_2026-09-01.md` + эмпирика
 40 raw-FIT): COROS PACE 4 отдаёт мощность/running dynamics (METRICS_GUIDE §10 исправлен),
 lap-сообщения (готовая разметка интервалов) и timer-события (точный moving-time)
 игнорируются, `lthr`/`ltsp` уже в БД, но зоны — от %max_hr. Решения владельца 01.09:
@@ -578,8 +578,9 @@ CoachError → сообщение погибло. Исправлено: `send_md
    о боли. Пересборка при правке models/services: `app` + `bot`.
 2. **Секреты (перед C7):** ключ только от владельца, плейсхолдеры запрещены (§3 CLAUDE.md).
 3. **Grep-набор «один план» (гоняется в C0 и C9; перекалиброван в C9):**
-   `grep -rn "LLM — только интерфейс\|Следующий шаг — Этап 1\|8 этапов" CLAUDE.md AGENTS.md README.md` → 0;
-   `grep -c "SUPERSEDED" decision_module_design.md` → 1.
+   `grep -rln "LLM — только интерфейс\|Следующий шаг — Этап 1\|8 этапов" --include=*.md . | grep -v "docs/archive\|CHANGELOG\|.venv"` → пусто;
+   `grep -c "SUPERSEDED" docs/archive/decision_module_design_2026-06.md` → 1.
+   С 02.09.2026 набор автоматизирован — `tests/test_docs_links.py`.
    «rules-first» из набора исключён: паттерн ловил собственные тексты об отмене; допустим
    ТОЛЬКО в контексте «пересмотрен/отменён».
 

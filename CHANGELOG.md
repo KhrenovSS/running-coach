@@ -2,6 +2,31 @@
 
 All notable changes to this project are tracked here.
 
+## [02.09.2026] — Рефакторинг документации, шаг 1/6: архив и удаление сирот
+
+Аудит 26 документов (три обзора: корень, `docs/`, `docs/coach/`): ни один не читается программно;
+~40 % объёма — дубли (правила ×4, дерево `src/` ×3, дорожная карта ×5, история спринтов ×3) и
+заморозка. Решения владельца: заморозку — в `docs/archive/`, `AGENTS.md` — заглушка, тест ссылок.
+
+### Removed
+- `docs/API_ROUTES_GUIDE.md` — описывал REST/Pydantic/`response_model`/`@router.delete`, которых
+  в коде нет (0 использований), 21 из 24 реальных эндпоинтов не описаны; актуальный §7 (подключение
+  роутеров) — в `docs/ARCHITECTURE.md` «Принцип тонких роутов» (пример теперь из реального кода).
+- `docs/CHECKLIST_API.md` — строгое подмножество `CHECKLIST_FEATURE.md`, сирота.
+- `docs/DEVELOPMENT_GUIDELINES.md` — устаревший индекс 16.07, сирота; заменён таблицей в CLAUDE.md.
+
+### Changed
+- **`docs/archive/`** (+ `README.md`): `PROJECT_AUDIT.md` → `archive/PROJECT_AUDIT_2026-07.md`
+  (заморожен с 03.08; трижды утверждал отменённые «8 этапов»), `decision_module_design.md` →
+  `archive/decision_module_design_2026-06.md`, `docs/AUDIT_averaging_2026-09-01.md` → `archive/`.
+  Баннеры «АРХИВ» в шапках; все ссылки (CLAUDE, README, AGENTS, BACKLOG, DEV_PLAN, METRICS_GUIDE,
+  coach/ARCHITECTURE, комментарий `domain/models/coach.py`) обновлены.
+- **`docs/coach/DESIGN_personalization.md`** (новый): §7 + §13 rules-first дизайна как спека
+  для BACKLOG #244/#246 с пометкой, что уже есть в коде (`prediction_log.py`, `hr_baseline`).
+- `docs/ARCHITECTURE.md`: таблица отклонённых предложений внешнего аудита (ARC) — чтобы не
+  пересматривать заново; подсписок `docs/` свёрнут (индекс — CLAUDE.md).
+- DEV_PLAN §11.3: grep-набор «один план» расширен на все `*.md` вне архива.
+
 ## [02.09.2026] — Температура в ожидании пульса; рельеф и жара в промпте разбора
 
 Исследование на 39 тренировках прода (пульс ~ GAP-скорость + время + уклон + температура):

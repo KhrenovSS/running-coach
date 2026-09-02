@@ -101,8 +101,8 @@
 
 ## Модуль коуча (гибридный ИИ-тренер) — при работе над ним
 - **Нормативный план — `docs/coach/DEV_PLAN.md`** (единственный источник дорожной карты; чек-листы
-  C0–C9, агент обновляет статусы в том же коммите, что и код). `decision_module_design.md` —
-  SUPERSEDED (историческая деривация порогов/скиллов, не руководство).
+  C0–C9, агент обновляет статусы в том же коммите, что и код). Прежний rules-first дизайн —
+  SUPERSEDED, в архиве (`docs/archive/decision_module_design_2026-06.md`); его §7 — `docs/coach/DESIGN_personalization.md`.
 - Архитектура — **гибрид** (решение владельца 23.08.2026): LLM рассуждает и предлагает, скиллы —
   детерминированные read-only tools, safety — жёсткий фильтр поверх. Инварианты (DEV_PLAN §1):
   `Prescription` создаётся только через `safety.clamp()` (обязательное поле `safety`); числа для
@@ -168,16 +168,16 @@
 |------|------|
 | Правила кода | `docs/CODE_GUIDELINES.md` |
 | Архитектура/структура | `docs/ARCHITECTURE.md` |
-| API endpoints | `docs/API_ROUTES_GUIDE.md` |
 | Ошибки | `docs/ERROR_HANDLING.md` |
 | Именование | `docs/NAMING_CONVENTIONS.md` |
 | Тесты | `docs/TESTING.md` |
 | Логирование/аудит | `docs/LOGGING.md` |
 | Чеклисты | `docs/CHECKLIST_FEATURE.md`, `docs/CHECKLIST_MIGRATION.md`, `docs/CHECKLIST_NEW_PROVIDER.md` |
 | Метрики здоровья (пороги) | `docs/coros_health_metrics.md` |
-| Аудит/бэклог | `PROJECT_AUDIT.md`, `BACKLOG.md` |
+| Бэклог (открытые пункты) | `BACKLOG.md` |
 | План и архитектура коуча | `docs/coach/DEV_PLAN.md`, `docs/coach/ARCHITECTURE.md` |
 | Открытое задание: ориентир темпа/дистанции (#264) | `docs/coach/TASK_pace_estimate_fallback.md` |
 | Метрики разбора и физиология (#268, F-серия: §6.1 GPS/§7 замыкания/§10/§11 M4) | `docs/coach/METRICS_GUIDE.md` |
-| Аудит усреднений темпа/пульса (исторический, только чтение) | `docs/AUDIT_averaging_2026-09-01.md` |
+| Дизайн персонализации (#244/#246, не реализовано) | `docs/coach/DESIGN_personalization.md` |
+| Архив (аудит проекта 07.2026, rules-first дизайн, аудит усреднений) — не ведётся | `docs/archive/README.md` |
 | Расширенный контекст + история спринтов + карта `src/` | `AGENTS.md` |

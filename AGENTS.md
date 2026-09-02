@@ -81,7 +81,6 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 |--------|--------------|
 | Общие правила написания кода | [`docs/CODE_GUIDELINES.md`](docs/CODE_GUIDELINES.md) |
 | Архитектура и структура проекта | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
-| Как писать API endpoints | [`docs/API_ROUTES_GUIDE.md`](docs/API_ROUTES_GUIDE.md) |
 | Обработка ошибок | [`docs/ERROR_HANDLING.md`](docs/ERROR_HANDLING.md) |
 | Соглашения об именовании | [`docs/NAMING_CONVENTIONS.md`](docs/NAMING_CONVENTIONS.md) |
 | Как писать тесты | [`docs/TESTING.md`](docs/TESTING.md) |
@@ -89,7 +88,7 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 | Code review / самопроверка | [`docs/CHECKLIST_FEATURE.md`](docs/CHECKLIST_FEATURE.md) |
 | Миграции БД | [`docs/CHECKLIST_MIGRATION.md`](docs/CHECKLIST_MIGRATION.md) |
 | Новый бренд часов | [`docs/CHECKLIST_NEW_PROVIDER.md`](docs/CHECKLIST_NEW_PROVIDER.md) |
-| Полный аудит проекта | [`PROJECT_AUDIT.md`](PROJECT_AUDIT.md) |
+| Полный аудит проекта | [`docs/archive/PROJECT_AUDIT_2026-07.md`](docs/archive/PROJECT_AUDIT_2026-07.md) |
 
 ## Золотые правила (кратко)
 1. **Константы** — используй `from src.config import settings` / `from src.config.constants import NAME`. Никаких magic numbers.
@@ -250,7 +249,7 @@ Python + FastAPI + PostgreSQL 16 (Docker Compose), написано через �
 - **Квалиметрия GPS + оценка дистанции по шагам** (кейс №42: 15 мин GPS-сбоя → часы 15.65 км,
   очистка 4.58 → честная оценка 6.7 км): `src/analysis/gps_quality.py`, колонка `gps_quality`,
   флаг `gps_unreliable`→`suspect_data`, `render_gps_warning`; №42 пересчитана, разбор перегенерирован.
-- **Аудит усреднений темпа/пульса** (`docs/AUDIT_averaging_2026-09-01.md`): км-числа = lap'ам
+- **Аудит усреднений темпа/пульса** (`docs/archive/AUDIT_averaging_2026-09-01.md`): км-числа = lap'ам
   часов (корректны); системные перекосы #277–#284 применены той же ночью в F0.
 
 **Session 01.09.2026 (ночь) — F-серия «сырые данные и физиология» ЗАКРЫТА ✅

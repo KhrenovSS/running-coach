@@ -425,16 +425,13 @@ running-coach/
 ├── docs/                            # Документация (см. таблицу в CLAUDE.md)
 │   ├── coach/                       #   DEV_PLAN.md (нормативный план) + ARCHITECTURE.md (ADR коуча)
 │   │                                #   + METRICS_GUIDE.md (метрики разбора) + TASK_pace_estimate_fallback.md (#264)
-│   ├── AUDIT_averaging_2026-09-01.md #  Аудит усреднений (F-серия)
+│   ├── archive/                     #   исторические документы (не ведутся)
 │   ├── ARCHITECTURE.md
 │   ├── CODE_GUIDELINES.md
-│   ├── API_ROUTES_GUIDE.md
 │   ├── ERROR_HANDLING.md
 │   ├── NAMING_CONVENTIONS.md
 │   ├── TESTING.md
 │   ├── LOGGING.md
-│   ├── DEVELOPMENT_GUIDELINES.md
-│   ├── CHECKLIST_API.md
 │   ├── CHECKLIST_FEATURE.md
 │   ├── CHECKLIST_MIGRATION.md
 │   ├── CHECKLIST_NEW_PROVIDER.md    # Чеклист: новый бренд часов
@@ -452,8 +449,7 @@ running-coach/
 ├── CHANGELOG.md
 ├── AGENTS.md                        # Контекст для ИИ‑агента
 ├── BACKLOG.md                       # Парковка TODO/идей/вопросов
-├── PROJECT_AUDIT.md                 # Аудит и план рефакторинга
-└── decision_module_design.md        # SUPERSEDED — историческая деривация (норматив: docs/coach/DEV_PLAN.md)
+└── AGENTS.md                        # см. выше
 ```
 
 ---
@@ -747,14 +743,14 @@ schema v7; история пересчитана. Актуальные стат�
 
 > **Единственный нормативный план разработки — [`docs/coach/DEV_PLAN.md`](docs/coach/DEV_PLAN.md)**
 > (инварианты, чек-листы C0–C9, статусы). Дорожная карта здесь не дублируется.
-> Прежний дизайн «движок правил решает всё» (`decision_module_design.md`) — SUPERSEDED, сохранён как
+> Прежний дизайн «движок правил решает всё» (`docs/archive/decision_module_design_2026-06.md`) — SUPERSEDED, сохранён как
 > историческая деривация порогов и скиллов.
 
 ---
 
 ## 🧹 Технический долг
 
-> Полный список технического долга, план рефакторинга и статус спринтов — в [`PROJECT_AUDIT.md`](PROJECT_AUDIT.md).
+> Полный список технического долга, план рефакторинга и статус спринтов — в [`BACKLOG.md`](BACKLOG.md) (исторический аудит — `docs/archive/PROJECT_AUDIT_2026-07.md`).
 
 ---
 

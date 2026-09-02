@@ -1,5 +1,5 @@
 # Модели модуля аналитики/коучинга (Coach module models — Этап 0)
-# По decision_module_design.md §11. Все таблицы per-user (FK user_id, CASCADE).
+# По decision_module_design §11 (архив: docs/archive/decision_module_design_2026-06.md). Все таблицы per-user (FK user_id, CASCADE).
 
 from sqlalchemy import (
     Column, Integer, Float, String, Text, DateTime, Date, JSON, Boolean,

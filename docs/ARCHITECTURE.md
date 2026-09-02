@@ -27,23 +27,9 @@ running-coach/
 │   ├── backup_db.sh            # Бэкап БД (обязателен перед деплоем)
 │   ├── backfill_*.py           # Разовые backfill-скрипты (external_ids, raw_fits, avg_pace)
 │   └── coach_llm_bridge.py     # LLM-мост коуча: headless Claude Code по подписке (systemd, :8765)
-├── docs/                       # Документация
-│   ├── ARCHITECTURE.md
-│   ├── CODE_GUIDELINES.md
-│   ├── API_ROUTES_GUIDE.md
-│   ├── ERROR_HANDLING.md
-│   ├── NAMING_CONVENTIONS.md
-│   ├── TESTING.md
-│   ├── LOGGING.md
-│   ├── CHECKLIST_API.md
-│   ├── CHECKLIST_FEATURE.md
-│   ├── CHECKLIST_MIGRATION.md
-│   ├── CHECKLIST_NEW_PROVIDER.md
-│   ├── DEVELOPMENT_GUIDELINES.md
-│   ├── coros_health_metrics.md
-│   ├── AUDIT_averaging_2026-09-01.md  # Аудит усреднений (F-серия)
-│   └── coach/                  # DEV_PLAN.md (нормативный план) + ARCHITECTURE.md (ADR коуча)
-│                               #   + METRICS_GUIDE.md (метрики разбора) + TASK_pace_estimate_fallback.md (#264)
+├── docs/                       # Документация — индекс: таблица в CLAUDE.md;
+│   ├── coach/                  #   DEV_PLAN (норматив), ARCHITECTURE (ADR), METRICS_GUIDE, TASK_*, DESIGN_*
+│   └── archive/                #   исторические документы, не ведутся (см. archive/README.md)
 ├── main.py                     # 7 строк: create_app() + uvicorn.run()
 ├── run_telegram_bot.py         # Запуск Telegram-бота (pip install -e .)
 ├── src/                        # Исходный код
@@ -177,10 +163,8 @@ running-coach/
 ├── alembic.ini
 ├── pytest.ini
 ├── CHANGELOG.md
-├── AGENTS.md                   # Контекст для ИИ-агента
-├── BACKLOG.md                  # Парковка TODO/идей
-├── PROJECT_AUDIT.md            # Аудит и план рефакторинга
-├── decision_module_design.md   # SUPERSEDED — историческая деривация (норматив: docs/coach/DEV_PLAN.md)
+├── AGENTS.md                   # Заглушка → CLAUDE.md (конвенция инструментов)
+├── BACKLOG.md                  # Открытые TODO/идеи (закрытые — docs/archive/BACKLOG_closed.md)
 ├── .env.example                # Шаблон переменных окружения
 └── README.md                   # Описание проекта
 ```
@@ -204,19 +188,16 @@ running-coach/
 
 ### Принцип тонких роутов
 
-**API endpoint должен быть коротким:**
+Роут: валидация → вызов сервиса → ответ. Приложение — Jinja2-формы (`Form(...)`), не JSON-REST:
+Pydantic-моделей в роутах нет, `response_model`/`@router.delete` не используются (удаление —
+`POST /session/{id}/delete`). Пример реального роута — `src/web/routes/pages/session.py`
+(`session_delete` → `training_service.delete_training(db, user_id, session_id) -> bool`).
+Сервисы — функции модульного уровня (например, `src/services/auth.py::authenticate_user`);
+единственный класс-сервис — `AuditService`.
 
-```python
-# src/api/routes/auth.py — ПРАВИЛЬНО
-@router.post("/login")
-async def login(data: LoginRequest, db: Session = Depends(get_db)):
-    """Вход по email+пароль (Login with email+password)"""
-    service = AuthService(db)
-    token = await service.login(data.email, data.password)
-    return {"token": token}
-```
-
-**Неправильно** — весь SQL, парсинг и бизнес-логика внутри роута.
+Подключение роутеров (`src/startup.py::create_app`): `health_router`, `auth_router`, `web_router`;
+`web_router` собирается в `src/web/routes/__init__.py` из `pages`, `uploads`, `sync`, `logs`.
+Полный список эндпоинтов — по `@router.` в `src/api/routes/` и `src/web/routes/`.
 
 ### Принцип DRY
 
@@ -253,6 +234,18 @@ async def login(data: LoginRequest, db: Session = Depends(get_db)):
 - Дедуп активностей: primary — `external_activity_id` (частичный UNIQUE в БД),
   окно ±120с — только fallback для legacy-строк без ID (`src/services/sync/dedup.py`).
 - Пороги коуча/readiness — **только** из `src/coach/config.py` (анти-дрейф-тесты сверяют).
+
+### Отклонённые архитектурные предложения (внешний аудит, 07.2026)
+
+Из `docs/archive/PROJECT_AUDIT_2026-07.md` §3 — чтобы не пересматривать заново:
+
+| Предложение | Решение | Почему |
+|---|---|---|
+| DDD / отдельный Domain Layer, Event System | ❌ отклонено | premature для проекта на одного пользователя; достаточно `domain/models` + сервисы-функции |
+| Scheduler в отдельный процесс/контейнер | ❌ отклонено | тонкая обёртка; sync и так в двух процессах (app-scheduler + bot); открытый вопрос — BACKLOG #5/#15 |
+| Изолировать COROS / парсеры | ✅ уже сделано | `BaseWatchClient` + `factory.py`; парсеры — функции над `common` |
+| Батчинг уведомлений | ⏸ P2 | имеет смысл, не приоритет |
+| Разбить God-object'ы (`models.py`, `sync_service.py`, `pages.py`) | ✅ сделано | `domain/models/*`, `services/sync/*`, `web/routes/pages/*` |
 
 ### Legacy-код
 
