@@ -10,8 +10,36 @@ from datetime import date, timedelta
 
 from src.analysis.utils import format_pace
 from src.coach.contracts import Prescription
-from src.coach.render import _WEEKDAYS_RU, _TYPE_LABEL, _hr_ceiling, _predicted_estimate
+from src.coach.render import _TYPE_LABEL, _hr_ceiling, _predicted_estimate
 from src.coach.render_segments import compact_segments, visible_segments
+from src.utils.timeutils import WEEKDAYS_RU_SHORT
+
+
+def _day_label(d: date) -> str:
+    """«Вс 06.09» — короткий день + дата (short weekday + date)."""
+    return f"{WEEKDAYS_RU_SHORT[d.weekday()]} {d:%d.%m}"
+
+
+def _change_label(workout_type: str | None, volume: dict | None) -> str:
+    """«🟦 Длительный бег · 80 мин»; у отдыха минут нет (type label + minutes)."""
+    label = _TYPE_LABEL.get(workout_type, workout_type or "—")
+    minutes = (volume or {}).get("duration_min")
+    if minutes and workout_type != "rest":
+        label += f" · {minutes:.0f} мин"
+    return label
+
+
+def plan_change_line(when: date, new: Prescription, old) -> str:
+    """Строка о замене назначения дня (решение владельца 03.09.2026):
+    «Изменил план на Вс 06.09: 🛌 Отдых (было: 🟦 Длительный бег · 80 мин)»;
+    назначения на день не было → «Поставил на Вс 06.09: …». Числа — из клэмпленной
+    Prescription и сохранённой строки recommendations. (Plan-change line, deterministic.)
+    """
+    new_label = _change_label(new.workout_type, new.volume)
+    if old is None:
+        return f"Поставил на {_day_label(when)}: {new_label}"
+    old_label = _change_label(old.workout_type, old.volume_json)
+    return f"Изменил план на {_day_label(when)}: {new_label} (было: {old_label})"
 
 
 def _distance_hint_km(p: Prescription) -> float | None:
@@ -107,11 +135,11 @@ def render_week_plan(prescriptions: list[Prescription], targets: dict,
         if facts is not None and today is not None and p.when < today:
             has_facts = True
             lines.append(_fact_line(
-                f"{_WEEKDAYS_RU[p.when.weekday()][:2]} {p.when:%d.%m}", p, facts.get(p.when),
+                _day_label(p.when), p, facts.get(p.when),
                 max_hr, lthr))
             continue
         mark = "▶ " if today is not None and p.when == today else ""
-        day = f"{mark}{_WEEKDAYS_RU[p.when.weekday()][:2]} {p.when:%d.%m}"
+        day = f"{mark}{_day_label(p.when)}"
         parts = [_TYPE_LABEL.get(p.workout_type, p.workout_type)]
         if p.target.get("pace_min_km") is not None:
             parts.append(f"темп {format_pace(p.target['pace_min_km'])}/км")

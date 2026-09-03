@@ -1,7 +1,7 @@
 # Тесты оркестратора с фейковыми LLM (Orchestrator tests) — DEV_PLAN §10
 from src.coach import orchestrator
 from src.coach.llm.client import LLMResponse
-from src.models import CoachMessage, Recommendation
+from src.models import CoachMessage, Recommendation, TrainingSession
 from tests.coach.fakes import FailingLLM, ScriptedLLM
 
 TURN_WITH_PROPOSAL = {
@@ -319,3 +319,71 @@ def test_unchanged_today_ignores_superseded(athlete_with_history, db_session):
                                   status="superseded", source="llm"))
     db_session.commit()
     assert unchanged_today(p, uid, db=db_session) is False
+
+
+def test_unavailable_days_cancel_planned_rows(athlete_with_history, db_session):
+    """unavailable_days_ahead → строки плана на эти даты погашены, записан отдых
+    (инцидент 03.09.2026: «воскресную отменяем» осталось прозой, коуч дальше ждал воскресную).
+    Строки с фактом (linked_session_id) не трогаются."""
+    from datetime import timedelta
+
+    from src.coach.turn_context import build_extras
+    from src.utils.timeutils import WEEKDAYS_RU_SHORT, user_now
+
+    uid = athlete_with_history.id
+    today = user_now(athlete_with_history).date()
+    d1, d3 = today + timedelta(days=1), today + timedelta(days=3)
+    done = db_session.query(TrainingSession).filter_by(user_id=uid).first()
+    db_session.add_all([
+        Recommendation(user_id=uid, for_date=d1, workout_type="easy", status="planned",
+                       target_json={"max_zone": 2}, volume_json={"duration_min": 35.0}),
+        Recommendation(user_id=uid, for_date=d3, workout_type="long", status="proposed",
+                       target_json={"max_zone": 2}, volume_json={"duration_min": 80.0}),
+        Recommendation(user_id=uid, for_date=today, workout_type="easy", status="confirmed",
+                       linked_session_id=done.id,
+                       target_json={"max_zone": 2}, volume_json={"duration_min": 40.0}),
+    ])
+    db_session.commit()
+
+    turn = {"message": "Понял, эти дни снимаю.", "proposal": None,
+            "followup_question": None, "log_suggestion": None,
+            "unavailable_days_ahead": [1, 3, 3]}
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
+    reply = orchestrator.handle_chat(uid, "завтра и в воскресенье бежать не смогу",
+                                     db=db_session, llm=llm)
+
+    assert reply.source == "llm"
+    # Строка изменения (решение владельца 03.09.2026): что стало и что было
+    assert f"Изменил план на {WEEKDAYS_RU_SHORT[d1.weekday()]} {d1:%d.%m}: 🛌 Отдых (было: 🟢 Лёгкий бег · 35 мин)" in reply.text
+    assert f"Изменил план на {WEEKDAYS_RU_SHORT[d3.weekday()]} {d3:%d.%m}: 🛌 Отдых (было: 🟦 Длительный бег · 80 мин)" in reply.text
+    rows = {(r.for_date, r.workout_type, r.status)
+            for r in db_session.query(Recommendation).filter_by(user_id=uid)}
+    assert (d1, "easy", "superseded") in rows and (d3, "long", "superseded") in rows
+    assert (d1, "rest", "adjusted") in rows and (d3, "rest", "adjusted") in rows
+    assert (today, "easy", "confirmed") in rows          # факт не трогаем
+    planned = build_extras(uid, db=db_session)["planned_workouts (recommendations)"]
+    by_days = {p["days_ahead"]: p["type"] for p in planned}
+    assert by_days[1] == "rest" and by_days[3] == "rest"
+
+
+def test_chat_replacing_today_row_shows_change_line(athlete_with_history, db_session):
+    """Чат даёт другое назначение на день, где уже есть строка → над карточкой строка
+    «Изменил план на … (было: …)»; без прежней строки — строки изменения нет."""
+    from src.utils.timeutils import WEEKDAYS_RU_SHORT, user_now
+
+    uid = athlete_with_history.id
+    today = user_now(athlete_with_history).date()
+    db_session.add(Recommendation(user_id=uid, for_date=today, workout_type="easy",
+                                  status="planned", target_json={"max_zone": 2},
+                                  volume_json={"duration_min": 30.0}))
+    db_session.commit()
+    turn = {"message": "Сегодня лучше отдых.", "followup_question": None,
+            "log_suggestion": None,
+            "proposal": {"workout_type": "rest", "target_zone": 1, "duration_min": None,
+                         "distance_km": None, "segments": [], "rationale": ["усталость"],
+                         "for_days_ahead": 0}}
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
+    reply = orchestrator.handle_chat(uid, "что сегодня?", db=db_session, llm=llm)
+    day = f"{WEEKDAYS_RU_SHORT[today.weekday()]} {today:%d.%m}"
+    assert f"Изменил план на {day}: 🛌 Отдых (было: 🟢 Лёгкий бег · 30 мин)" in reply.text
+    assert reply.text.index("Изменил план") < reply.text.index("Отдых*")   # строка над карточкой

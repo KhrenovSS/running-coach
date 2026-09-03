@@ -33,6 +33,7 @@ from src.config.constants import RECOMMENDATION_STATUS_SUPERSEDED
 from src.models import Recommendation, TrainingSession, User, UserModel
 from src.services.repositories import TrainingRepository
 from src.utils.logger import get_logger
+from src.coach.render_week import plan_change_line
 from src.utils.timeutils import user_now
 
 logger = get_logger("coach.planning")
@@ -165,6 +166,64 @@ def enforce_run_days(items: list[WorkoutProposal],
     return kept, len(items) - len(kept)
 
 
+def supersede_rows_for_dates(user_id: int, *, db: Session, dates: list[date]) -> int:
+    """Погасить назначения на КОНКРЕТНЫЕ даты (подопечный не сможет бегать, 03.09.2026).
+
+    Строки без факта (linked_session_id IS NULL) → status='superseded'; возврат — число.
+    (Supersede rows for the given dates; rows linked to a real workout stay.)
+    """
+    if not dates:
+        return 0
+    n = db.query(Recommendation).filter(
+        Recommendation.user_id == user_id,
+        Recommendation.for_date.in_(dates),
+        Recommendation.status != RECOMMENDATION_STATUS_SUPERSEDED,
+        Recommendation.linked_session_id.is_(None),
+    ).update({Recommendation.status: RECOMMENDATION_STATUS_SUPERSEDED},
+             synchronize_session="fetch")
+    db.commit()
+    return n
+
+
+def latest_rows_for_dates(user_id: int, *, db: Session,
+                          dates: list[date]) -> dict[date, Recommendation]:
+    """Последняя действующая строка recommendations на каждую из дат
+    (status != superseded; тот же принцип, что week_view._active_rows).
+    (Latest non-superseded row per date.)"""
+    if not dates:
+        return {}
+    rows = db.query(Recommendation).filter(
+        Recommendation.user_id == user_id,
+        Recommendation.for_date.in_(dates),
+        Recommendation.status != RECOMMENDATION_STATUS_SUPERSEDED,
+    ).order_by(Recommendation.id.asc()).all()
+    return {r.for_date: r for r in rows}
+
+
+def cancel_days(days_ahead: list[int], user_id: int, state: AthleteState, *,
+                db: Session, now: datetime) -> str:
+    """Снять назначения на дни, когда подопечный не сможет бегать (cancel planned days).
+
+    На каждую дату: прежние строки без факта → superseded, новая строка rest
+    (status 'adjusted' — осознанная замена плана, как в утреннем вердикте).
+    Возврат — строки «Изменил план на Вс 06.09: 🛌 Отдых (было: …)» по одной на дату,
+    детерминированные, не проза LLM. (Deterministic plan-change lines.)
+    """
+    today = now.date()
+    days = sorted(set(days_ahead))
+    dates = [today + timedelta(days=d) for d in days]
+    old = latest_rows_for_dates(user_id, db=db, dates=dates)
+    n = supersede_rows_for_dates(user_id, db=db, dates=dates)
+    lines: list[str] = []
+    for d, when in zip(days, dates):
+        rest = finalize(WorkoutProposal(workout_type="rest", target_zone=1, for_days_ahead=d),
+                        state, db=db, persist=False, source="llm", now=now)
+        save_prescription(rest, state, db=db, status="adjusted")
+        lines.append(plan_change_line(when, rest, old.get(when)))
+    logger.info("Cancelled %d planned rows for user=%s, rest on %s", n, user_id, dates)
+    return "\n".join(lines)
+
+
 def supersede_future_rows(user_id: int, *, db: Session, from_date: date) -> int:
     """Погасить будущие строки прежнего плана перед записью нового (02.09.2026).
 
@@ -266,11 +325,12 @@ def _proposal_from_row(rec: Recommendation) -> WorkoutProposal:
 
 def confirm_or_adjust_morning(proposal: WorkoutProposal | None, user_id: int,
                               state: AthleteState, *, db: Session,
-                              now: datetime) -> tuple[Prescription, str] | None:
+                              now: datetime) -> tuple[Prescription, str, Recommendation] | None:
     """Утро при наличии плана дня: подтвердить или осознанно заменить.
 
     None — плановой строки на сегодня нет (оркестратор идёт старым путём).
-    Возврат (prescription, "confirmed"|"adjusted"):
+    Возврат (prescription, "confirmed"|"adjusted", plan_row) — plan_row нужна строке
+    «Изменил план на … (было: …)»:
     - confirmed — re-clamp плана по СЕГОДНЯШНЕМУ состоянию ничего не урезал и
       LLM не меняла → UPDATE status той же строки, без дубля;
     - adjusted — LLM меняет план или safety урезал → новая строка 'adjusted'.
@@ -290,6 +350,6 @@ def confirm_or_adjust_morning(proposal: WorkoutProposal | None, user_id: int,
         if plan_row.status != "confirmed":
             plan_row.status = "confirmed"
             db.commit()
-        return prescription, "confirmed"
+        return prescription, "confirmed", plan_row
     save_prescription(prescription, state, db=db, status="adjusted")
-    return prescription, "adjusted"
+    return prescription, "adjusted", plan_row

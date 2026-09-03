@@ -248,3 +248,23 @@ def test_week_targets_midweek_exposes_remaining(db_session):
     full = planning.week_targets(user.id, db=db_session, today=sunday)
     assert full["plan_scope"] == "week" and full["days_ahead_allowed"] == list(range(1, 8))
     assert full["done_km"] == 0.0 and full["remaining_km"] == full["target_km"]
+
+
+def test_latest_rows_for_dates_skips_superseded(db_session):
+    """Последняя действующая строка на дату; superseded не видна (для строки «было: …»)."""
+    from datetime import date
+
+    from src.models import Recommendation
+
+    user = _unique_user(db_session)
+    d = date(2026, 9, 6)
+    db_session.add_all([
+        Recommendation(user_id=user.id, for_date=d, workout_type="long", status="proposed",
+                       volume_json={"duration_min": 80.0}),
+        Recommendation(user_id=user.id, for_date=d, workout_type="easy", status="superseded",
+                       volume_json={"duration_min": 30.0}),
+    ])
+    db_session.commit()
+    rows = planning.latest_rows_for_dates(user.id, db=db_session, dates=[d, date(2026, 9, 5)])
+    assert set(rows) == {d} and rows[d].workout_type == "long"
+    assert planning.latest_rows_for_dates(user.id, db=db_session, dates=[]) == {}

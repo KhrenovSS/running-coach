@@ -180,7 +180,7 @@ def test_midweek_plan_covers_rest_of_week_only(athlete_with_history, db_session)
     assert all(monday <= r.for_date <= monday + timedelta(days=6) for r in rows)
     assert all(r.status == "planned" for r in rows)
     assert "сделано 0.0 км, осталось" in text
-    assert f"▶ ср {wed:%d.%m}" in text
+    assert f"▶ Ср {wed:%d.%m}" in text
 
 
 def test_midweek_day0_replaces_existing_today_row_as_adjusted(athlete_with_history, db_session):

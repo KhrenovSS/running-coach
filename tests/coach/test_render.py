@@ -349,9 +349,9 @@ def test_render_week_plan_facts_mode_and_backward_compat():
 
     text = render_week_plan([past, missed, future], targets, max_hr=177,
                             today=date(2026, 9, 2), facts=facts)
-    assert "✓ по 31.08 — 🟢 Лёгкий бег · факт 41 мин · 5.9 км · ср. пульс 139" in text
-    assert "✗ вт 01.09 — 🟢 Лёгкий бег · 30 мин · пропущен" in text
-    assert "во 06.09 — 🟦 Длительный бег · пульс до" in text
+    assert "✓ Пн 31.08 — 🟢 Лёгкий бег · факт 41 мин · 5.9 км · ср. пульс 139" in text
+    assert "✗ Вт 01.09 — 🟢 Лёгкий бег · 30 мин · пропущен" in text
+    assert "Вс 06.09 — 🟦 Длительный бег · пульс до" in text
     assert "✓ факт · ✗ пропущен" in text
 
     plain = render_week_plan([past, missed, future], targets, max_hr=177)
@@ -457,10 +457,10 @@ def test_week_card_and_short_card_show_compact_structure():
                                                       "pace_min_km": 46.2 / 6.7, "avg_hr": 140}})
     assert "детали в дне" not in text
     # ускорения — структура в уд/мин (177: Z2→141, Z3→153, Z1→123)
-    assert ("✓ вт 01.09 — 🟢 Лёгкий бег · 25 мин до 141 + 7×18 сек до 153 + зам 5 мин до 123"
+    assert ("✓ Вт 01.09 — 🟢 Лёгкий бег · 25 мин до 141 + 7×18 сек до 153 + зам 5 мин до 123"
             " · факт 46 мин") in text
     # ровная пробежка (разм/бег/зам) — без структуры и без зон (решение владельца 02.09)
-    wed = next(l for l in text.splitlines() if l.startswith("▶ ср 02.09"))
+    wed = next(l for l in text.splitlines() if l.startswith("▶ Ср 02.09"))
     assert "разм" not in wed and "Z" not in wed and "пульс до 141" in wed
 
     short = render_prescription_short(today_p, max_hr=177, today=date(2026, 9, 2))
@@ -477,3 +477,26 @@ def test_hr_lead_line_is_bpm_first():
     with_hr = render_prescription(p, max_hr=177)
     assert "пульс до 141 уд/мин" in with_hr and "Z2 и ниже" not in with_hr
     assert "Z2 и ниже" in render_prescription(p)
+
+
+def test_plan_change_line_formats():
+    """«Изменил план на Вс 06.09: 🛌 Отдых (было: 🟦 Длительный бег · 80 мин)»; без прежней
+    строки — «Поставил на …»; у отдыха минут нет (решение владельца 03.09.2026)."""
+    from datetime import date
+    from types import SimpleNamespace
+
+    from src.coach.render_week import plan_change_line
+
+    state = _state()
+    verdict = evaluate_safety(state)
+    rest, _ = clamp(WorkoutProposal(workout_type="rest", target_zone=1), verdict, state)
+    tempo, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2, duration_min=45),
+                     verdict, state)
+    old = SimpleNamespace(workout_type="long", volume_json={"duration_min": 80.0})
+    when = date(2026, 9, 6)
+    assert plan_change_line(when, rest, old) == \
+        "Изменил план на Вс 06.09: 🛌 Отдых (было: 🟦 Длительный бег · 80 мин)"
+    assert plan_change_line(when, rest, None) == "Поставил на Вс 06.09: 🛌 Отдых"
+    line = plan_change_line(date(2026, 9, 2), tempo, SimpleNamespace(
+        workout_type="rest", volume_json={}))
+    assert line.startswith("Изменил план на Ср 02.09: 🟢 Лёгкий бег · 45 мин (было: 🛌 Отдых)")

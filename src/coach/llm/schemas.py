@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, get_args
+from typing import Annotated, Literal, get_args
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -154,6 +154,11 @@ class CoachTurn(BaseModel):
     # СОХРАНЁННЫЙ план (week_view), LLM ничего не составляет (инцидент 02.09.2026)
     # (Athlete asks to see the week plan → deterministic stored-plan card.)
     show_week_plan: bool = False
+    # Дни, в которые подопечный НЕ сможет бегать (сдвиги от «Сейчас», 0..7): код сам гасит
+    # назначения на эти даты и ставит отдых — проза «отменяем воскресенье» без этого поля
+    # в БД не попадала (инцидент 03.09.2026). (Days the athlete cannot run → code cancels.)
+    unavailable_days_ahead: list[Annotated[int, Field(ge=0, le=7)]] | None = Field(
+        default=None, max_length=8)
 
 
 def _strictify(schema: dict) -> dict:

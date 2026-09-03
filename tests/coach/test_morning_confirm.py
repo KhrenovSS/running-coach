@@ -46,6 +46,7 @@ def test_morning_confirms_plan_without_new_row(athlete_with_history, db_session)
     reply = orchestrator.handle_chat(uid, "утренний вердикт", db=db_session,
                                      llm=llm, kind="morning")
     assert "Лёгкий бег" in reply.text                     # карточка плановой
+    assert "Изменил план" not in reply.text                # подтверждение — без строки замены
     db_session.refresh(rec)
     assert rec.status == "confirmed"
     assert db_session.query(Recommendation).filter_by(
@@ -60,6 +61,9 @@ def test_morning_llm_change_creates_adjusted_row(athlete_with_history, db_sessio
     reply = orchestrator.handle_chat(uid, "утренний вердикт", db=db_session,
                                      llm=llm, kind="morning")
     assert "Восстановительный" in reply.text
+    # Строка изменения над карточкой (решение владельца 03.09.2026)
+    assert "Изменил план на " in reply.text and "(было: 🟢 Лёгкий бег · 40 мин)" in reply.text
+    assert reply.text.index("Изменил план") < reply.text.index("*🚶")
     adjusted = db_session.query(Recommendation).filter_by(
         user_id=uid, status="adjusted").all()
     assert len(adjusted) == 1

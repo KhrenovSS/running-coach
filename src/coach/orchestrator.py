@@ -52,6 +52,7 @@ from src.coach.turn_context import build_extras as _build_extras
 from src.coach.turn_context import history as _history
 from src.coach.turn_context import profile as _profile
 from src.coach.turn_context import unchanged_today as _unchanged_today
+from src.coach.render_week import plan_change_line
 from src.coach.week_view import render_stored_week_plan
 from src.exceptions import CoachError, LLMTransientError, LLMUnavailableError
 from src.models import TrainingFeedback, User, UserModel, WellnessReport
@@ -175,8 +176,11 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
     if morning_result is not None:
         # План дня есть: подтверждение (UPDATE status) или осознанная замена
         # (решение владельца 29.08.2026). (Confirm or consciously adjust the plan.)
-        card, mode = morning_result
+        card, mode, plan_row = morning_result
         logger.info("Morning plan %s for user=%s", mode, user_id)
+        if mode == "adjusted":
+            # Строка «Изменил план на … (было: …)» над карточкой (решение владельца 03.09.2026)
+            text += "\n\n" + plan_change_line(card.when, card, plan_row)
         text += "\n\n" + render_prescription(card, max_hr=max_hr, user=user, lthr=lthr)
     elif proposal is not None and not allow_proposal:
         # Разбор/отчёт — про прошлое: назначение даёт утренний вердикт/чат (C8).
@@ -191,8 +195,19 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
             # (Unchanged plan → one reminder line, no duplicate recommendation row.)
             text += "\n\n" + render_prescription_short(card, max_hr=max_hr, lthr=lthr)
         else:
+            # Уже данное назначение на этот день → строка «Изменил план на …» над карточкой
+            old = planning.latest_rows_for_dates(user_id, db=db, dates=[card.when]).get(card.when)
             save_prescription(card, state, db=db)
+            if old is not None:
+                text += "\n\n" + plan_change_line(card.when, card, old)
             text += "\n\n" + render_prescription(card, max_hr=max_hr, user=user, lthr=lthr)
+    if turn.unavailable_days_ahead and kind in ("chat", "morning"):
+        # Подопечный не сможет бегать в эти дни → детерминированно гасим назначения и ставим
+        # отдых, чтобы planned_workouts и /week не «оживляли» отменённый день (инцидент
+        # 03.09.2026: «воскресную отменяем» осталось прозой, коуч дальше ждал воскресную).
+        # (Cancel planned days deterministically: supersede rows, write rest rows.)
+        text += "\n\n" + planning.cancel_days(turn.unavailable_days_ahead, user_id, state,
+                                              db=db, now=user_now(user))
     if week_card is not None:
         text += "\n\n" + week_card
     if turn.followup_question:

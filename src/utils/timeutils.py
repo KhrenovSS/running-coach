@@ -47,6 +47,9 @@ def user_now(user: Any) -> datetime:
 # (Russian weekday names — single source for prompts and cards)
 WEEKDAYS_RU = ("понедельник", "вторник", "среда", "четверг",
                "пятница", "суббота", "воскресенье")
+# Короткие дни для строк списков (карточка недели, строка «Изменил план на …»);
+# заголовки карточек дня — полные (решение владельца 03.09.2026). (Short weekday labels.)
+WEEKDAYS_RU_SHORT = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
 
 
 def fmt_local(dt: datetime) -> str:
