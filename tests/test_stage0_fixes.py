@@ -68,7 +68,8 @@ class TestReanalyze:
         assert result is not None
         assert result['training_type']
         db_session.refresh(session)
-        assert session.training_type == result['training_type']
+        # сырой ярлык — в training_type_auto; итоговый может быть переразмечен резолвером по плану (04.09.2026)
+        assert session.training_type_auto == result['training_type']
 
     def test_reanalyze_respects_user_phase_distance_threshold(self, db_session):
         # Новая колонка читается как пользовательский порог (New column is read as user threshold)

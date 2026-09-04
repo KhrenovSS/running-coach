@@ -169,6 +169,8 @@ async def session_detail(request: Request, session_id: int, db: Session = Depend
         "suspect_badge": suspect_badge,
         "suspect_detail": suspect_detail,
         "type_ru": TRAINING_TYPES_RU.get(s.training_type, s.training_type),
+        "type_source_ru": {"plan": "по плану тренера", "manual": "вручную",
+                           "auto": "авто"}.get(s.training_type_source or "auto", "авто"),
         "date": local_begin.strftime("%d.%m.%Y %H:%M") if s.begin_ts else "",
         "dist": f"{s.total_distance_km:.2f}",
         "dur": fmt_duration(s.duration_minutes),

@@ -417,3 +417,44 @@ def test_plan_vs_actual_ignores_superseded_recommendation(db_session):
     assert computed["plan_vs_actual"]["available"] is False
     db_session.refresh(stale)
     assert stale.linked_session_id is None
+
+
+# --- Ярлык с учётом плана (04.09.2026) ------------------------------------------------
+
+def test_upsert_relabels_by_plan(db_session):
+    """План long + час спокойного бега, классификатор сказал easy → long, source=plan,
+    сырой ярлык сохранён; plan_vs_actual видит совпадение типа."""
+    from src.models import Recommendation
+
+    user = _user(db_session)                                   # max_hr 177 → качество ≥ 150
+    s = _session_with_track(db_session, user.id, duration_min=60, hr=130, ttype='easy')
+    db_session.add(Recommendation(user_id=user.id, for_date=s.begin_ts.date(),
+                                  workout_type="long", target_json={"max_zone": 2},
+                                  volume_json={"duration_min": 60.0}, status="planned",
+                                  source="llm"))
+    db_session.commit()
+    computed = upsert_workout_insights(user.id, s.id, db=db_session)
+    db_session.refresh(s)
+    assert (s.training_type, s.training_type_auto, s.training_type_source) == ("long", "easy", "plan")
+    assert computed["plan_vs_actual"]["type_match"] is True
+    # идемпотентно
+    upsert_workout_insights(user.id, s.id, db=db_session)
+    db_session.refresh(s)
+    assert s.training_type == "long"
+
+
+def test_upsert_catch_all_tempo_without_plan_becomes_easy(db_session):
+    user = _user(db_session)
+    s = _session_with_track(db_session, user.id, duration_min=38, hr=137, ttype='tempo')
+    upsert_workout_insights(user.id, s.id, db=db_session)
+    db_session.refresh(s)
+    assert (s.training_type, s.training_type_auto, s.training_type_source) == ("easy", "tempo", "auto")
+
+
+def test_upsert_respects_manual_override(db_session):
+    user = _user(db_session)
+    s = _session_with_track(db_session, user.id, duration_min=38, hr=137, ttype='tempo',
+                            training_type_override='interval')
+    upsert_workout_insights(user.id, s.id, db=db_session)
+    db_session.refresh(s)
+    assert s.training_type == "tempo" and s.training_type_source == "manual"

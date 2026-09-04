@@ -28,9 +28,11 @@ def _weekly_turn_blocking(user_id: int) -> tuple[str | None, str | None]:
     try:
         if orchestrator.get_initiative(user_id, db=db) not in ("normal", "high"):
             return None, None
-        report = orchestrator.weekly_report(user_id, db=db).text
+        # Числа недели считаем один раз — и для отчёта, и для плана (C8.1)
+        numbers = orchestrator.build_week_report(user_id, db=db)
+        report = orchestrator.weekly_report(user_id, db=db, report=numbers).text
         try:
-            plan = generate_weekly_plan(user_id, db=db)
+            plan = generate_weekly_plan(user_id, db=db, week_report=numbers)
         except Exception as e:  # план не должен ронять отчёт
             logger.error("Weekly plan failed for user=%s: %s", user_id, e,
                          exc_info=True)

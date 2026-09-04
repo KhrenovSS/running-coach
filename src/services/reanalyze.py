@@ -110,12 +110,18 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
         return None
 
     # Применить override (Apply override)
+    session.training_type_auto = result['training_type']      # сырой ярлык всегда сохраняем
     if training_type_override and training_type_override in ('easy', 'interval', 'tempo', 'long', 'recovery'):
         result['training_type'] = training_type_override
         session.training_type_override = training_type_override
+        session.training_type_source = 'manual'
     elif training_type_override == '':
-        # Сброс override — вернуть к автоопределению (Reset override — back to auto)
+        # Сброс override — вернуть к автоопределению (Reset override — back to auto);
+        # резолвер по плану перепишет тип при пересчёте разбора ниже
         session.training_type_override = None
+        session.training_type_source = 'auto'
+    else:
+        session.training_type_source = 'manual' if session.training_type_override else 'auto'
 
     # Обновить сессию (Update session)
     if from_raw and result.get('trackpoints_json'):

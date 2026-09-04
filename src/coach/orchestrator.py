@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from src.coach import planning
 from src.coach.contracts import Prescription, WorkoutProposal
-from src.coach.numeric_check import check_prose
+from src.coach.numeric_check import check_prose, prose_numbers
 from src.coach.llm.agent import run_turn
 from src.coach.llm.client import CoachLLM, get_llm
 from src.coach.llm.config import (
@@ -41,18 +41,18 @@ from src.coach.render import (
     render_prescription_short,
     render_review,
     render_state_card,
-    render_weekly,
 )
 from src.coach.rules.p1_safety import evaluate_safety
 from src.coach.skills import workout
 from src.coach.state import assess_state
-from src.coach.tools.registry import run_tool
 from src.coach.tools.serialize import jsonable
 from src.coach.turn_context import build_extras as _build_extras
 from src.coach.turn_context import history as _history
 from src.coach.turn_context import profile as _profile
 from src.coach.turn_context import unchanged_today as _unchanged_today
 from src.coach.render_week import plan_change_line
+from src.coach.render_week_report import render_week_report
+from src.coach.week_report import build_week_report
 from src.coach.week_view import render_stored_week_plan
 from src.exceptions import CoachError, LLMTransientError, LLMUnavailableError
 from src.models import TrainingFeedback, User, UserModel, WellnessReport
@@ -118,8 +118,13 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
                    llm: CoachLLM, kind: str, extras: dict | None = None,
                    allow_proposal: bool = True,
                    effort: str = COACH_EFFORT_CHAT,
-                   suffix: str | None = None) -> ChatReply:
-    """LLM-ход: state+verdict в контекст → агент → clamp → рендер (one LLM turn)."""
+                   suffix: str | None = None,
+                   extra_card: str | None = None) -> ChatReply:
+    """LLM-ход: state+verdict в контекст → агент → clamp → рендер (one LLM turn).
+
+    extra_card — готовая детерминированная карточка хода (недельный отчёт, C8.1):
+    ставится после прозы, перед followup-вопросом. (Pre-rendered deterministic card.)
+    """
     user = db.query(User).filter(User.id == user_id).first()
     state = assess_state(user_id, db=db)
     verdict = evaluate_safety(state)
@@ -170,6 +175,21 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
             for_days_ahead=turn.proposal.for_days_ahead,
         )
     card: Prescription | None = None   # карточка хода — для numeric-checker (#247)
+    if turn.available_again_days_ahead and kind in ("chat", "morning"):
+        # Обратный путь отмены: «в субботу всё-таки смогу» → снимаем отдых-отмену
+        reopened = planning.reopen_days(turn.available_again_days_ahead, user_id,
+                                        db=db, now=user_now(user))
+        if reopened:
+            text += "\n\n" + reopened
+    if proposal is not None and proposal.workout_type != "rest" and kind in ("chat", "morning"):
+        # Детерминированный гвард (инцидент 04.09.2026): на день, который подопечный
+        # отменил сам, тренировку не назначаем — предложение LLM отбрасывается.
+        when = user_now(user).date() + timedelta(days=proposal.for_days_ahead or 0)
+        blocked = planning.blocked_by_unavailable(user_id, db=db, when=when)
+        if blocked:
+            logger.info("Proposal blocked: athlete unavailable on %s user=%s", when, user_id)
+            text += "\n\n" + blocked
+            proposal = None
     morning_result = (planning.confirm_or_adjust_morning(
         proposal, user_id, state, db=db, now=user_now(user))
         if kind == "morning" else None)
@@ -208,6 +228,8 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
         # (Cancel planned days deterministically: supersede rows, write rest rows.)
         text += "\n\n" + planning.cancel_days(turn.unavailable_days_ahead, user_id, state,
                                               db=db, now=user_now(user))
+    if extra_card is not None:
+        week_card = extra_card
     if week_card is not None:
         text += "\n\n" + week_card
     if turn.followup_question:
@@ -235,6 +257,12 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
             logger.warning("Numeric mismatch for kind=%s user=%s: %s",
                            kind, user_id, "; ".join(mismatches))
             meta["numeric_mismatch"] = mismatches
+    elif kind == "weekly":
+        # Числа недели даёт карточка — проза их называть не должна (C8.1; #247: лог+метка)
+        found = prose_numbers(turn.message)
+        if found:
+            logger.warning("Weekly prose carries numbers user=%s: %s", user_id, found)
+            meta["numeric_mismatch"] = found
     CoachRepository.save_message(user_id, "user", message, db=db, kind=kind)
     assistant_msg = CoachRepository.save_message(
         user_id, "assistant", text, db=db, kind=kind, meta=meta,
@@ -359,12 +387,15 @@ def on_workout_completed(user_id: int, session_id: int, *, db: Session,
 
 
 def weekly_report(user_id: int, *, db: Session,
-                  llm: CoachLLM | None = None) -> ChatReply:
-    """Недельный отчёт (weekly report, C8): итоги недели + сверка с планом.
-
-    Персистентный план следующей недели создаёт weekly_plan.generate_weekly_plan
-    (отдельный ход после отчёта — решение владельца 29.08.2026).
+                  llm: CoachLLM | None = None, report: dict | None = None) -> ChatReply:
+    """Недельный отчёт (C8 → C8.1, 03.09.2026): проза LLM (интерпретация) + детерминированная
+    карточка «Итоги недели» (числа — код). report — уже посчитанные числа (джоб считает
+    один раз для отчёта и плана). Персистентный план следующей недели создаёт
+    weekly_plan.generate_weekly_plan отдельным ходом (решение владельца 29.08.2026).
     """
+    if report is None:
+        report = build_week_report(user_id, db=db)
+    card = render_week_report(report)
     llm = llm if llm is not None else get_llm()
     try:
         if CoachRepository.turns_today(user_id, db=db) >= COACH_MAX_TURNS_PER_DAY:
@@ -373,18 +404,16 @@ def weekly_report(user_id: int, *, db: Session,
                                limit=COACH_WEEKLY_REPORT_RECENT,
                                insights_limit=COACH_WEEKLY_REVIEWS_LIMIT,
                                guides_query="объём прогрессия неделя план база")
-        review = planning.week_plan_review(user_id, db=db)
-        if review is not None:
-            # Детерминированная сверка недели с планом (числа — не от LLM)
-            extras["week_plan_review (planning)"] = review
+        # weekly_summary дублирует week_report (и считал недели по UTC) — убираем из контекста
+        extras.pop("weekly_summary (get_weekly_summary)", None)
+        extras["week_report (week_report)"] = report
         return _llm_chat_turn(
             user_id, WEEKLY_PROMPT, db=db, llm=llm, kind="weekly",
-            extras=extras, allow_proposal=False, effort=COACH_EFFORT_PLAN)
+            extras=extras, allow_proposal=False, effort=COACH_EFFORT_PLAN,
+            extra_card=card)
     except (LLMUnavailableError, CoachError) as e:
         logger.info("LLM weekly fallback for user=%s: %s", user_id, e)
-        summary = run_tool("get_weekly_summary", {"weeks": COACH_ENRICH_WEEKS},
-                           user_id=user_id, db=db)
-        text = render_weekly(summary)
+        text = "Тренер сейчас недоступен — вот цифры недели.\n\n" + card
         CoachRepository.save_message(user_id, "assistant", text, db=db,
                                      kind="weekly", meta={"fallback": True})
         return ChatReply(text=text, source="fallback")

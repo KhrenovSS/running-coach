@@ -33,6 +33,8 @@ class TrainingSession(Base):
     hr_peak_smoothed = Column(Integer, nullable=True)  # пик по скользящей медиане — база адаптивного max_hr; NULL у legacy-строк (rolling-median peak; NULL for legacy rows)
     training_type = Column(String(50))
     training_type_override = Column(String(50), nullable=True)  # Ручная установка типа (NULL = авто)
+    training_type_auto = Column(String(50), nullable=True)      # сырой ответ классификатора (raw classifier label)
+    training_type_source = Column(String(20), nullable=True)    # auto | plan | manual — кто дал training_type
     trackpoints_json = Column(JSON, nullable=True)              # Сырые трекпоинты для пересчёта
     segments_count = Column(Integer, default=1)
     duration_minutes = Column(Float, default=0)

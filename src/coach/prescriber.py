@@ -20,7 +20,7 @@ from src.coach.contracts import (
 )
 from src.coach.fallback import fallback_proposal
 from src.coach.rules.p1_safety import evaluate_safety
-from src.coach.safety import clamp
+from src.coach.safety import clamp, effective_workout_type
 from src.config import settings
 from src.config.constants import BASELINE_WINDOW_DAYS
 from src.models import Recommendation, User
@@ -129,7 +129,8 @@ def finalize(proposal: WorkoutProposal | None, state: AthleteState, *,
         seg_dicts = enrich_and_clamp_segments(
             proposal.segments,
             workout_type=prescription.workout_type,
-            proposal_type=proposal.workout_type,
+            # тип по содержимому: даунгрейд переклассифицированной работы отбрасывает сегменты
+            proposal_type=effective_workout_type(proposal),
             max_zone=prescription.target.get("max_zone", 1),
             max_hr=user_max_hr(user),
             lthr=latest_lthr(state.user_id, db=db),

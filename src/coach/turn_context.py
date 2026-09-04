@@ -94,6 +94,8 @@ def build_extras(user_id: int, *, db: Session,
             "status": r.status,
             "source": r.source, "clamped": r.clamped,
             "target": r.target_json, "volume": r.volume_json,
+            # день отменён самим подопечным — назначать на него нельзя (04.09.2026)
+            "athlete_unavailable": is_athlete_unavailable(r),
         } for r in sorted(latest_by_date.values(),
                           key=lambda r: r.for_date)[:COACH_PLANNED_DAYS]]
     if session_id is not None:
@@ -152,6 +154,15 @@ def history(user_id: int, *, db: Session) -> list[dict]:
             content = m.text
         out.append({"role": m.role, "content": content})
     return out
+
+
+def is_athlete_unavailable(row) -> bool:
+    """Строка отдыха поставлена из-за недоступности подопечного (не решение тренера)?
+    (Rest row written because the athlete cannot run that day.)"""
+    from src.coach.config import UNAVAILABLE_RATIONALE
+    proposal = getattr(row, "proposal_json", None) or {}
+    return (getattr(row, "workout_type", None) == "rest"
+            and UNAVAILABLE_RATIONALE in (proposal.get("rationale") or []))
 
 
 def unchanged_today(p: Prescription, user_id: int, *, db: Session) -> bool:

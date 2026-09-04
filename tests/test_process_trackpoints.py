@@ -277,3 +277,14 @@ class TestAveragingFixesF0:
         result = process_trackpoints(tps, tps[0]['time'], max_hr=177, pace_gap=1.0)
         assert result is not None
         assert result['avg_cadence'] is None
+
+
+def test_result_carries_type_provenance():
+    """Результат анализа несёт сырой ярлык и источник auto (резолвер по плану пишет поверх)."""
+    from src.analysis import process_trackpoints
+    from tests.helpers import build_trackpoints
+
+    tps = build_trackpoints('long', duration_min=30, base_pace=6.5, hr=135)
+    result = process_trackpoints(tps, tps[0]['time'])
+    assert result['training_type_auto'] == result['training_type']
+    assert result['training_type_source'] == 'auto'

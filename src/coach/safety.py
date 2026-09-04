@@ -15,6 +15,7 @@ from src.coach.config import (
     HARD_TYPES,
     PACE_TARGET_MAX_PER_KM,
     PACE_TARGET_MIN_PER_KM,
+    STRIDE_MAX_SEC,
     TYPE_INTENSITY_ORDER,
     TYPE_MIN_ZONE,
 )
@@ -49,6 +50,57 @@ def _downgrade(workout_type: str, allowed: tuple[str, ...], max_zone: int) -> st
     origin_rank = _LADDER.get(workout_type, len(TYPE_INTENSITY_ORDER))
     fitting = [t for t in candidates if _LADDER[t] <= origin_rank]
     return fitting[-1] if fitting else candidates[0]
+
+
+def is_stride(seg) -> bool:
+    """Короткое ускорение (гайды 45/46: 15–20 с): секунды ≤ STRIDE_MAX_SEC или минуты ≤ его доля.
+    Принимает WorkoutSegment и render-dict. (Short stride, not a quality rep.)"""
+    kind = getattr(seg, "amount_kind", None) if not isinstance(seg, dict) else seg.get("amount_kind")
+    value = getattr(seg, "amount_value", None) if not isinstance(seg, dict) else seg.get("amount_value")
+    if value is None:
+        return False
+    if kind == "sec":
+        return value <= STRIDE_MAX_SEC
+    if kind == "min":
+        return value * 60 <= STRIDE_MAX_SEC
+    return False
+
+
+def _seg_field(seg, name):
+    return seg.get(name) if isinstance(seg, dict) else getattr(seg, name, None)
+
+
+def effective_workout_type(proposal: WorkoutProposal) -> str:
+    """Тип по СОДЕРЖИМОМУ сегментов, не по ярлыку (инцидент 04.09.2026).
+
+    Рабочие отрезки в Z3+, которые не ускорения, — качественная работа: Z3 → tempo,
+    Z4+ → interval; иначе исходный тип. Тип не понижается (long с работой в Z2 остаётся long).
+    (Classify by work segments; mislabelled quality work cannot dodge the intensity gates.)
+    """
+    hard_zone = 0
+    for seg in proposal.segments or []:
+        if _seg_field(seg, "role") != "work" or is_stride(seg):
+            continue
+        zone = _seg_field(seg, "target_zone") or 0
+        if zone >= 3:
+            hard_zone = max(hard_zone, zone)
+    if hard_zone == 0:
+        return proposal.workout_type
+    eff = "tempo" if hard_zone == 3 else "interval"
+    return eff if _LADDER.get(eff, 0) > _LADDER.get(proposal.workout_type, 0) else proposal.workout_type
+
+
+def _work_summary(proposal: WorkoutProposal) -> str:
+    """«4×3 мин в Z3» — для причины переклассификации (human-readable work summary)."""
+    parts = []
+    for seg in proposal.segments or []:
+        if _seg_field(seg, "role") == "work" and not is_stride(seg) and (_seg_field(seg, "target_zone") or 0) >= 3:
+            rep = _seg_field(seg, "repeat") or 1
+            val = _seg_field(seg, "amount_value")
+            kind = _seg_field(seg, "amount_kind") or "min"
+            unit = {"min": "мин", "sec": "с", "km": "км", "m": "м"}.get(kind, kind)
+            parts.append(f"{rep}×{val:g} {unit} в Z{_seg_field(seg, 'target_zone')}")
+    return ", ".join(parts)
 
 
 def clamp(proposal: WorkoutProposal | None, verdict: SafetyVerdict,
@@ -93,6 +145,16 @@ def clamp(proposal: WorkoutProposal | None, verdict: SafetyVerdict,
         rationale.append(_step("тип → easy", f"неизвестный тип «{wtype}» отклонён"))
         wtype = "easy"
 
+    # 2b. Интенсивность — по сегментам, не по ярлыку: «лёгкий бег» с отрезками 4×3 мин в Z3
+    # — это темповая, и гейты интенсива (шаги 3–4) обязаны её видеть (инцидент 04.09.2026).
+    # (Reclassify by work segments so mislabelled quality work hits the intensity gates.)
+    effective = effective_workout_type(proposal) if wtype == proposal.workout_type else wtype
+    if effective != wtype:
+        rationale.append(_step(f"тип {wtype} → {effective}",
+                               f"отрезки {_work_summary(proposal)} — качественная работа, "
+                               "не ускорения (гайды 45/46)"))
+        wtype = effective
+
     # 3. Тип не разрешён или не вписывается в потолок зоны → даунгрейд по лестнице
     target = _downgrade(wtype, verdict.allowed_types, verdict.max_zone)
     if target != wtype:
@@ -116,6 +178,15 @@ def clamp(proposal: WorkoutProposal | None, verdict: SafetyVerdict,
                                "интенсив не раньше "
                                f"{verdict.earliest_next_hard:%d.%m %H:%M}"))
         wtype = "easy"
+
+    if effective != proposal.workout_type and wtype != effective \
+            and _LADDER.get(wtype, 0) > _LADDER.get(proposal.workout_type, 0):
+        # Даунгрейд переклассифицированной работы — не выше исходного ярлыка: «easy» с
+        # отрезками, урезанное гейтом, становится easy, а не long (лестница ниже tempo).
+        # (A gated reclassified proposal falls back to its own label, never above it.)
+        rationale.append(_step(f"тип {wtype} → {proposal.workout_type}",
+                               "урезанная качественная работа возвращается к исходному типу"))
+        wtype = proposal.workout_type
 
     # 5. Зона — не выше потолка (zone at most the cap)
     zone = proposal.target_zone

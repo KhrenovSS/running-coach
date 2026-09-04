@@ -15,6 +15,7 @@ from src.config.constants import (
 )
 from src.coach.config import (
     ATI_CTI_HIGH,
+    HARD_SHARE_OVERLOAD,
     HARD_TYPES,
     HRR_POOR_RECOVERY_EXTRA_H,
     SLEEP_SHORT_MIN,
@@ -158,7 +159,8 @@ def evaluate_safety(state: AthleteState, *, now: datetime | None = None) -> Safe
             earliest_next_hard = gap_earliest
         reasons.append(_step("интенсив не раньше чем",
                              "между качественными днями нужен минимум один лёгкий день "
-                             f"(качественных за неделю: {sig.get('quality_days_7d')})"))
+                             "(длительная — тоже качественный день, гайд 45; "
+                             f"качественных за неделю: {sig.get('quality_days_7d')})"))
 
     # 13. Восстановление после гонки (M4.1, гайд 45): 1 лёгкий день на каждые 3 км
     # (post-race recovery: one easy day per 3 km of race distance)
@@ -196,6 +198,18 @@ def evaluate_safety(state: AthleteState, *, now: datetime | None = None) -> Safe
         forbidden |= set(HARD_TYPES)
         reasons.append(_step("без интенсива",
                              f"сон {sleep_min / 60:.1f} ч — недосып, качественную не сегодня"))
+
+    # 16. Перекос последних 7 дней в интенсивность (гайд 10: Z3+ > 30% времени —
+    # неделя перегружена, следующая почти целиком лёгкая; решение владельца 04.09.2026)
+    # (weekly intensity skew → easy only until the share drops)
+    hard_share = sig.get("hard_share_7d")
+    if hard_share is not None and hard_share > HARD_SHARE_OVERLOAD:
+        triggered.append("week_intensity_overload")
+        max_zone = min(max_zone, 2)
+        forbidden |= set(HARD_TYPES)
+        reasons.append(_step("max_zone=2, без интенсива",
+                             f"за 7 дней {hard_share:.0%} времени в Z3+ — неделя перегружена "
+                             "интенсивностью, только лёгкое (гайд 10)"))
 
     allowed_types: tuple[str, ...] = ()
     if forbidden:

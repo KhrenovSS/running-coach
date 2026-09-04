@@ -152,6 +152,24 @@
   `COACH_BRIDGE_RETRIES`/`COACH_MORNING_RETRY_*` — `llm/config.py`); при недоступности моста утренний
   вердикт — детерминированный со назначением (`orchestrator.handle_chat` kind="morning"), не
   generic-«базовый режим»; отложенный upgrade-повтор `_morning_upgrade_job` (`telegram/jobs/coach_morning.py`).
+- **Ярлык тренировки (04.09.2026)**: `training_type` = `analysis/type_resolution.resolve_training_type`
+  (сырой `training_type_auto` + план дня; «план — назначение, факт — интенсивность»), применяется в
+  `workout_insights.apply_type_resolution`; `training_type_source` auto|plan|manual, override главнее;
+  история переразмечена `services/type_resolution_backfill.relabel_sessions`.
+- **Safety по содержимому (04.09.2026)**: `safety.effective_workout_type` классифицирует
+  предложение по рабочим сегментам (отрезки > `STRIDE_MAX_SEC` в Z3+ = tempo/interval), ярлык
+  «easy» гейты интенсива не обходит; длительная — качественный день для правила 12; правило 16 —
+  Z3+ > 30% времени за 7 дней → `max_zone=2`, без интенсива (`signals.hard_share_7d`).
+- **Отмена дней подопечным (03–04.09.2026)**: `CoachTurn.unavailable_days_ahead` →
+  `planning.cancel_days` (rest-строки `adjusted` с маркером `UNAVAILABLE_RATIONALE`, прежние
+  строки `superseded`); детерминированный гвард `blocked_by_unavailable` — чат/утро на такой день
+  тренировку не назначают (инцидент 04.09); обратный путь `available_again_days_ahead` →
+  `reopen_days`. Обсуждение целей недели после отчёта — не назначение (промпт `proposal`).
+- **Недельный отчёт v2 (C8.1, 03.09.2026)**: вс 19:00 и `/report` — проза LLM (интерпретация: один
+  сигнал прогресса, одно слабое место, направление) + детерминированная карточка «Итоги недели»
+  (`week_report.py` считает числа по локальной дате, `highlights`/`concerns` предвыбирает код;
+  `render_week_report.py`); те же числа получает план следующей недели. Пороги — `coach/config.py`,
+  зеркало — `docs/coach/METRICS_GUIDE.md §12`.
 - **Статусы дорожной карты — только в DEV_PLAN §9** (C0–C9, D0–D8, E0–E3, F0–F7 закрыты к 01.09.2026;
   здесь не дублируются). Открыто: персонализация #244/#246 (спека — `docs/coach/DESIGN_personalization.md`,
   ждёт накопления insights), правило «недосып→осторожнее» #254, план к цели/гонке #243, ориентир

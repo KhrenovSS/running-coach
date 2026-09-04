@@ -387,3 +387,68 @@ def test_chat_replacing_today_row_shows_change_line(athlete_with_history, db_ses
     day = f"{WEEKDAYS_RU_SHORT[today.weekday()]} {today:%d.%m}"
     assert f"Изменил план на {day}: 🛌 Отдых (было: 🟢 Лёгкий бег · 30 мин)" in reply.text
     assert reply.text.index("Изменил план") < reply.text.index("Отдых*")   # строка над карточкой
+
+
+def _cancelled_rest_row(db, uid, when):
+    from src.coach.config import UNAVAILABLE_RATIONALE
+    row = Recommendation(user_id=uid, for_date=when, workout_type="rest", status="adjusted",
+                         target_json={"max_zone": 1}, volume_json={},
+                         proposal_json={"workout_type": "rest",
+                                        "rationale": [UNAVAILABLE_RATIONALE]})
+    db.add(row)
+    db.commit()
+    return row
+
+
+def test_chat_proposal_blocked_on_cancelled_day(athlete_with_history, db_session):
+    """Инцидент 04.09.2026: день отменён подопечным → LLM-назначение на него отбрасывается,
+    в тексте строка гварда, новой строки recommendations нет; обычный rest-план гвард не трогает."""
+    from datetime import timedelta
+
+    from src.utils.timeutils import user_now
+
+    uid = athlete_with_history.id
+    today = user_now(athlete_with_history).date()
+    _cancelled_rest_row(db_session, uid, today)
+    before = db_session.query(Recommendation).filter_by(user_id=uid).count()
+    turn = {"message": "Сегодня лёгкая.", "followup_question": None, "log_suggestion": None,
+            "proposal": {"workout_type": "easy", "target_zone": 2, "duration_min": 40,
+                         "distance_km": None, "segments": [], "rationale": [],
+                         "for_days_ahead": 0}}
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
+    reply = orchestrator.handle_chat(uid, "что сегодня?", db=db_session, llm=llm)
+    assert "ты говорил, что бегать не сможешь" in reply.text
+    assert "Лёгкий бег" not in reply.text
+    assert db_session.query(Recommendation).filter_by(user_id=uid).count() == before
+    # planned_workouts несёт флаг для LLM
+    assert '"athlete_unavailable": true' in llm.calls[0]["messages"][-1]["content"]
+
+    # Отдых по решению тренера (без маркера) — назначение проходит
+    other = athlete_with_history
+    tomorrow = today + timedelta(days=1)
+    db_session.add(Recommendation(user_id=uid, for_date=tomorrow, workout_type="rest",
+                                  status="adjusted", target_json={}, volume_json={}))
+    db_session.commit()
+    turn2 = dict(turn, proposal=dict(turn["proposal"], for_days_ahead=1))
+    llm2 = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn2)])
+    reply2 = orchestrator.handle_chat(uid, "а завтра?", db=db_session, llm=llm2)
+    assert "Лёгкий бег" in reply2.text and "не сможешь" not in reply2.text
+
+
+def test_available_again_reopens_cancelled_day(athlete_with_history, db_session):
+    """«В субботу всё-таки смогу» → строка отдыха-отмены гасится, текст сообщает об этом."""
+    from datetime import timedelta
+
+    from src.utils.timeutils import user_now
+
+    uid = athlete_with_history.id
+    when = user_now(athlete_with_history).date() + timedelta(days=2)
+    row = _cancelled_rest_row(db_session, uid, when)
+    turn = {"message": "Отлично, возвращаю день.", "proposal": None,
+            "followup_question": None, "log_suggestion": None,
+            "available_again_days_ahead": [2]}
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
+    reply = orchestrator.handle_chat(uid, "послезавтра смогу побегать", db=db_session, llm=llm)
+    db_session.refresh(row)
+    assert row.status == "superseded"
+    assert "Снял отдых" in reply.text and f"{when:%d.%m}" in reply.text

@@ -177,25 +177,31 @@ def test_sync_batch_latest_pending_older_deterministic(athlete_with_history,
 
 
 def test_weekly_report_via_llm(athlete_with_history, db_session):
-    """Недельный отчёт: kind=weekly, effort=plan, weekly_summary в контексте."""
+    """Недельный отчёт (C8.1): kind=weekly, effort=plan, week_report в контексте (weekly_summary
+    убран), проза + детерминированная карточка «Итоги недели» + вопрос."""
     from src.coach.llm.config import COACH_EFFORT_PLAN
     llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=WEEKLY_TURN)])
     reply = orchestrator.weekly_report(athlete_with_history.id, db=db_session, llm=llm)
     assert reply.source == "llm"
     assert "Неделя ровная" in reply.text
+    assert "Итоги недели" in reply.text and "Объём:" in reply.text
+    assert reply.text.index("Неделя ровная") < reply.text.index("Итоги недели") \
+        < reply.text.index("Какие цели")                       # проза → карточка → вопрос
     assert llm.calls[0]["effort"] == COACH_EFFORT_PLAN
-    assert "weekly_summary" in llm.calls[0]["messages"][-1]["content"]
+    content = llm.calls[0]["messages"][-1]["content"]
+    assert "week_report" in content and "highlights" in content
+    assert "weekly_summary" not in content
     msg = db_session.query(CoachMessage).filter_by(
         user_id=athlete_with_history.id, kind="weekly", role="assistant").first()
     assert msg is not None
 
 
 def test_weekly_report_fallback_digest(athlete_with_history, db_session):
-    """LLM падает → детерминированный дайджест «Итоги недели», meta=fallback."""
+    """LLM падает → карточка «Итоги недели» без прозы, meta=fallback."""
     reply = orchestrator.weekly_report(athlete_with_history.id, db=db_session,
                                        llm=FailingLLM())
     assert reply.source == "fallback"
-    assert "Итоги недели" in reply.text
+    assert "Итоги недели" in reply.text and "Тренер сейчас недоступен" in reply.text
     msg = db_session.query(CoachMessage).filter_by(
         user_id=athlete_with_history.id, kind="weekly", role="assistant").order_by(
         CoachMessage.id.desc()).first()
@@ -209,3 +215,40 @@ def test_weekly_job_gate_below_normal(athlete_with_history, db_session):
         orchestrator.set_initiative(athlete_with_history.id, level, db=db_session)
         db_session.commit()  # вернуть соединение в пул: хелпер откроет свою сессию
         assert _weekly_turn_blocking(athlete_with_history.id) == (None, None)
+
+
+def test_weekly_prose_numbers_flagged_in_meta(athlete_with_history, db_session):
+    """Проза отчёта с числами (км/%) → лог + meta.numeric_mismatch, текст не режется (#247)."""
+    turn = dict(WEEKLY_TURN, message="Набежал 25 км, лёгкого 84% — отлично.")
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
+    reply = orchestrator.weekly_report(athlete_with_history.id, db=db_session, llm=llm)
+    assert "25 км" in reply.text
+    msg = db_session.query(CoachMessage).filter_by(
+        user_id=athlete_with_history.id, kind="weekly", role="assistant").order_by(
+        CoachMessage.id.desc()).first()
+    assert set(msg.meta_json["numeric_mismatch"]) == {"25 км", "84%"}
+
+
+def test_weekly_job_passes_numbers_to_plan(athlete_with_history, db_session, monkeypatch):
+    """Джоб считает числа недели один раз и отдаёт их и отчёту, и плану (C8.1)."""
+    from src.coach import weekly_plan
+    from src.telegram.jobs import coach_weekly
+
+    seen = {}
+    monkeypatch.setattr(orchestrator, "build_week_report",
+                        lambda uid, *, db: {"schema_version": 1, "marker": uid})
+
+    def fake_report(uid, *, db, report=None):
+        seen["report"] = report
+        return orchestrator.ChatReply(text="отчёт")
+
+    def fake_plan(uid, *, db, week_report=None):
+        seen["plan"] = week_report
+        return "план"
+
+    monkeypatch.setattr(orchestrator, "weekly_report", fake_report)
+    monkeypatch.setattr(weekly_plan, "generate_weekly_plan", fake_plan)
+    orchestrator.set_initiative(athlete_with_history.id, "normal", db=db_session)
+    db_session.commit()
+    assert coach_weekly._weekly_turn_blocking(athlete_with_history.id) == ("отчёт", "план")
+    assert seen["report"] is seen["plan"] and seen["report"]["marker"] == athlete_with_history.id

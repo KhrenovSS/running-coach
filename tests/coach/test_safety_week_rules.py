@@ -182,3 +182,20 @@ def test_default_week_signals_all_rules_silent():
     p, clamped = clamp(AGGRESSIVE, verdict, _state(), now=NOW)
     assert clamped is False
     assert p.workout_type == "interval"
+
+
+# --- Правило 16 (гайд 10, 04.09.2026): перекос 7 дней в интенсивность ------------------
+
+@pytest.mark.parametrize("share, triggered", [(0.35, True), (0.31, True), (0.30, False),
+                                              (0.2, False), (None, False)])
+def test_week_intensity_overload_rule(share, triggered):
+    from tests.coach.test_safety_clamp import _state
+
+    verdict = evaluate_safety(_state(hard_share_7d=share))
+    assert ("week_intensity_overload" in verdict.triggered) is triggered
+    if triggered:
+        assert verdict.max_zone == 2
+        assert not set(HARD_TYPES) & set(verdict.allowed_types)
+        assert "перегружена интенсивностью" in " ".join(r.reason for r in verdict.reasons)
+    else:
+        assert verdict.max_zone == SAFETY_MAX_ZONE_DEFAULT

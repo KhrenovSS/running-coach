@@ -93,6 +93,12 @@ HRR_POOR_RECOVERY_LOOKBACK_DAYS = 4   # окно поиска флага в не
 # (Intensity ladder — order equals danger order; clamp() only moves DOWN.)
 TYPE_INTENSITY_ORDER = ("rest", "recovery", "easy", "long", "tempo", "interval", "race")
 HARD_TYPES = ("tempo", "interval", "race")
+# Ускорения (strides, гайды 45/46: 15–20 с с полным восстановлением) — рабочий отрезок не длиннее
+# этого; всё длиннее в Z3+ — качественная работа: safety классифицирует предложение по сегментам,
+# а не по ярлыку (инцидент 04.09.2026: «лёгкий бег» с 4×3 мин в Z3 обошёл гейт интенсива).
+STRIDE_MAX_SEC = 30
+# Правило 16 p1_safety: доля времени Z3+ за 7 дней считается только при достаточном объёме зон
+HARD_SHARE_MIN_MINUTES_7D = 60
 EASY_TYPES = ("recovery", "easy")
 # Минимальная зона, в которой тип имеет смысл: потолок зоны ниже → тип даунгрейдится.
 # (Minimal zone a type makes sense in; a lower zone cap downgrades the type.)
@@ -129,6 +135,21 @@ LOAD_PROGRESSION = {
     "max_monthly_increase_pct": 30,
 }
 
+# Маркер строки отдыха, поставленной потому, что подопечный НЕ СМОЖЕТ бегать (не решение
+# тренера): пишется в proposal_json.rationale (planning.cancel_days), читает
+# turn_context.is_athlete_unavailable; чат/утро на такой день назначение не дают (04.09.2026).
+# (Marker of an athlete-unavailable rest row; guards chat/morning proposals.)
+UNAVAILABLE_RATIONALE = "athlete_unavailable: подопечный не сможет бегать в этот день"
+
+# --- Недельный отчёт (coach/week_report.py) — METRICS_GUIDE §12, решение владельца 03.09.2026 ---
+WEEK_REPORT_SERIES_WEEKS = 6       # ряд недель в карточке «N недель: … км»
+WEEK_REPORT_AVG_WEEKS = 4          # среднее за прошлые недели для сравнения
+EFFICIENCY_GAIN_BPM = -2.0         # средний delta пульса к базе за неделю ≤ → прогресс (гайд 00)
+EFFICIENCY_LOSS_BPM = 3.0          # ≥ → тревога (усталость/жара/недовосстановление)
+HARD_SHARE_OVERLOAD = 0.30         # доля времени Z3+ за неделю выше → перегруз (гайд 10)
+WEEK_REPORT_ACWR_HIGH = 1.3        # ACWR выше → нужна разгрузка (coros doc §7: >1.3 → −40–50%)
+EASY_TOO_HARD_WEEK_FLAGS = 2       # ≥ флагов easy_run_too_hard за неделю → тревога
+
 # --- Метрики сессии M1 (Session metrics) — docs/coach/METRICS_GUIDE.md §4 ---
 # Пороги применяет src/services/workout_insights.py; чистые формулы в
 # src/analysis/session_metrics.py принимают их параметрами (без импорта coach→analysis).
@@ -150,6 +171,9 @@ INTERVAL_SEGMENT_MAX_MIN = 5.0     # непрерывный отрезок в Z4
 # M1.6: длительная (Дэниелс, гайд 45: ≤25–30% недели или 150 мин)
 LONG_RUN_MAX_PCT_WEEK = 0.30
 LONG_RUN_MAX_MIN = 150.0
+# Длительная как качественный день для правила 12 (04.09.2026): по ярлыку long ИЛИ по
+# длительности; единый источник порога — src/config/constants.py (резолвер ярлыка)
+from src.config.constants import LONG_RUN_MIN_MINUTES  # noqa: E402,F401
 
 # M1.7: каденс (Дэниелс, гайд 46 — профилактика колена; цель ~180 spm)
 CADENCE_TARGET_SPM = 180

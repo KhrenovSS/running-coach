@@ -254,6 +254,8 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
         'max_heart_rate': hr_peak or max_hr_val,
         'hr_peak_smoothed': hr_peak,
         'training_type': t_type,
+        'training_type_auto': t_type,        # сырой ярлык — резолвер по плану пишет поверх (04.09.2026)
+        'training_type_source': 'auto',
         'segments_count': segments_count,
         'duration_minutes': round(total_duration_min, 1),
         'segments_json': segments,

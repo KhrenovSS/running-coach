@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from src.analysis.hr_zones import get_band, get_zone
+from src.analysis.week_structure import is_quality_session
 from src.coach.config import DISTRIBUTION_80_20, EASY_TYPES, LOAD_PROGRESSION
 from src.coach.skills.pain import recent_pain_by_day
 from src.coach.tools.context import ToolContext
@@ -13,7 +14,7 @@ from src.config import settings
 from src.exceptions import NotFoundError
 from src.models import TrainingSession, User
 from src.services.analytics_helpers import compute_slope, compute_trend_direction
-from src.services.repositories import FeedbackRepository, TrainingRepository
+from src.services.repositories import FeedbackRepository, TrainingRepository, latest_lthr
 from src.services.repositories_coach import CoachRepository
 from src.utils.timeutils import WEEKDAYS_RU, session_local_dt, user_now
 
@@ -22,7 +23,7 @@ MAX_POINTS = 60     # даунсэмпл рядов (series downsampling cap)
 
 
 def _session_brief(s: TrainingSession, rpe: int | None, pain: int | None,
-                   user: User | None = None) -> dict:
+                   user: User | None = None, lthr: int | None = None) -> dict:
     # Локальное время: пояс тренировки → пояс пользователя → settings
     # (local time: workout zone → user zone → settings)
     local = session_local_dt(s.begin_ts, s, user) if s.begin_ts else None
@@ -37,6 +38,11 @@ def _session_brief(s: TrainingSession, rpe: int | None, pain: int | None,
         "weekday": WEEKDAYS_RU[local.weekday()] if local else None,
         "tz": local.tzinfo.key if local else None,
         "type": effective_training_type(s),
+        # кто дал ярлык (auto/plan/manual) и была ли пробежка качественной по пульсу —
+        # интенсивность недели оценивать по is_quality, не по ярлыку (#311, 04.09.2026)
+        "type_source": s.training_type_source,
+        "is_quality": is_quality_session(effective_training_type(s), s.avg_heart_rate,
+                                         getattr(user, "max_hr", None), lthr),
         "km": s.total_distance_km,
         "duration_min": s.duration_minutes,
         "avg_pace": s.avg_pace,
@@ -58,11 +64,12 @@ def get_recent_workouts(ctx: ToolContext, args: dict) -> dict:
     limit = int(args.get("limit", 5))
     sessions = CoachRepository.last_sessions(ctx.user_id, n=limit, db=ctx.db)
     user = ctx.db.query(User).filter(User.id == ctx.user_id).first()
+    lthr = latest_lthr(ctx.user_id, db=ctx.db)
     out = []
     for s in sessions:
         _, fb = CoachRepository.session_with_feedback(ctx.user_id, s.id, db=ctx.db)
         out.append(_session_brief(s, fb.rating if fb else None,
-                                  fb.pain_level if fb else None, user=user))
+                                  fb.pain_level if fb else None, user=user, lthr=lthr))
     return {"workouts": out}
 
 
@@ -129,7 +136,8 @@ def get_workout_detail(ctx: ToolContext, args: dict) -> dict:
             segments.append({k: v for k, v in row.items() if v is not None})
 
     brief = _session_brief(session, fb.rating if fb else None,
-                           fb.pain_level if fb else None, user=user)
+                           fb.pain_level if fb else None, user=user,
+                           lthr=latest_lthr(ctx.user_id, db=ctx.db))
     # D4: метрики утра дня тренировки — состояние «на тот день», не «сегодня».
     # Дата — локальная (#265: вечерняя пробежка после 00:00 UTC подтягивала
     # утро не того дня). (Day-of-workout morning metrics by LOCAL date.)

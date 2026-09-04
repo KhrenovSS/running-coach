@@ -80,3 +80,26 @@ def test_morning_without_plan_keeps_old_behavior(athlete_with_history, db_sessio
                              llm=llm, kind="morning")
     rows = db_session.query(Recommendation).filter_by(user_id=uid).all()
     assert len(rows) == 1 and rows[0].status == "proposed"
+
+
+def test_morning_keeps_cancelled_rest_despite_llm_workout(athlete_with_history, db_session):
+    """План дня — отдых, поставленный из-за недоступности подопечного; LLM предлагает
+    пробежку → предложение отброшено, отдых подтверждён, новой строки нет (04.09.2026)."""
+    from src.coach.config import UNAVAILABLE_RATIONALE
+
+    uid = athlete_with_history.id
+    rec = Recommendation(user_id=uid, for_date=date.today(), workout_type="rest",
+                         status="adjusted", target_json={"max_zone": 1}, volume_json={},
+                         proposal_json={"workout_type": "rest",
+                                        "rationale": [UNAVAILABLE_RATIONALE]})
+    db_session.add(rec)
+    db_session.commit()
+    n_before = db_session.query(Recommendation).filter_by(user_id=uid).count()
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=CHANGE_TURN)])
+    reply = orchestrator.handle_chat(uid, "утренний вердикт", db=db_session,
+                                     llm=llm, kind="morning")
+    assert "ты говорил, что бегать не сможешь" in reply.text
+    assert "Отдых" in reply.text and "Восстановительный" not in reply.text
+    db_session.refresh(rec)
+    assert rec.status == "confirmed"
+    assert db_session.query(Recommendation).filter_by(user_id=uid).count() == n_before

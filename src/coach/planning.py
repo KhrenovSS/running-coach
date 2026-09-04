@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from src.coach.config import (
+    UNAVAILABLE_RATIONALE,
     CYCLE_3_1,
     INTERVAL_MAX_KM,
     INTERVAL_MAX_PCT_WEEK,
@@ -28,13 +29,14 @@ from src.coach.config import (
 from src.coach.contracts import AthleteState, Prescription, WorkoutProposal
 from src.coach.planning_window import plan_window, week_done
 from src.coach.prescriber import finalize, save_prescription
-from src.coach.turn_context import unchanged_today
+from src.coach.turn_context import is_athlete_unavailable, unchanged_today
+from src.coach.util import effective_training_type
 from src.config.constants import RECOMMENDATION_STATUS_SUPERSEDED
 from src.models import Recommendation, TrainingSession, User, UserModel
 from src.services.repositories import TrainingRepository
 from src.utils.logger import get_logger
 from src.coach.render_week import plan_change_line
-from src.utils.timeutils import user_now
+from src.utils.timeutils import WEEKDAYS_RU_SHORT, user_now
 
 logger = get_logger("coach.planning")
 
@@ -216,12 +218,47 @@ def cancel_days(days_ahead: list[int], user_id: int, state: AthleteState, *,
     n = supersede_rows_for_dates(user_id, db=db, dates=dates)
     lines: list[str] = []
     for d, when in zip(days, dates):
-        rest = finalize(WorkoutProposal(workout_type="rest", target_zone=1, for_days_ahead=d),
+        # Маркер «не сможет бегать» — в proposal_json.rationale; по нему чат/утро на этот
+        # день назначение не дают (is_athlete_unavailable, blocked_by_unavailable).
+        rest = finalize(WorkoutProposal(workout_type="rest", target_zone=1, for_days_ahead=d,
+                                        rationale=[UNAVAILABLE_RATIONALE]),
                         state, db=db, persist=False, source="llm", now=now)
         save_prescription(rest, state, db=db, status="adjusted")
         lines.append(plan_change_line(when, rest, old.get(when)))
     logger.info("Cancelled %d planned rows for user=%s, rest on %s", n, user_id, dates)
     return "\n".join(lines)
+
+
+def blocked_by_unavailable(user_id: int, *, db: Session, when: date) -> str | None:
+    """День отменён подопечным («не смогу бегать») → строка-отказ для текста, иначе None.
+
+    Гвард детерминированный: LLM-предложение тренировки на такой день отбрасывается
+    (инцидент 04.09.2026: чат назначил пробежку на отменённую пятницу).
+    (Athlete cancelled the day → refusal line; the proposal is dropped by the caller.)
+    """
+    row = latest_rows_for_dates(user_id, db=db, dates=[when]).get(when)
+    if row is None or not is_athlete_unavailable(row):
+        return None
+    label = f"{WEEKDAYS_RU_SHORT[when.weekday()]} {when:%d.%m}"
+    return (f"На {label} ты говорил, что бегать не сможешь — назначение не ставлю. "
+            f"Если планы изменились, напиши «в этот день смогу побегать» или /plan.")
+
+
+def reopen_days(days_ahead: list[int], user_id: int, *, db: Session, now: datetime) -> str:
+    """Подопечный снова может бегать в эти дни → гасим строки отдыха с маркером
+    (обратный путь к cancel_days). Возврат — строка для текста ('' — гасить было нечего)."""
+    today = now.date()
+    dates = [today + timedelta(days=d) for d in sorted(set(days_ahead))]
+    rows = latest_rows_for_dates(user_id, db=db, dates=dates)
+    reopened = [d for d in dates if d in rows and is_athlete_unavailable(rows[d])]
+    if not reopened:
+        return ""
+    for d in reopened:
+        rows[d].status = RECOMMENDATION_STATUS_SUPERSEDED
+    db.commit()
+    logger.info("Reopened %d cancelled days for user=%s: %s", len(reopened), user_id, reopened)
+    labels = ", ".join(f"{WEEKDAYS_RU_SHORT[d.weekday()]} {d:%d.%m}" for d in reopened)
+    return f"Снял отдых: {labels} — день снова свободен для назначения."
 
 
 def supersede_future_rows(user_id: int, *, db: Session, from_date: date) -> int:
@@ -267,15 +304,18 @@ def advance_mesocycle(user_id: int, *, db: Session, targets: dict) -> None:
     db.commit()
 
 
-def week_plan_review(user_id: int, *, db: Session) -> dict | None:
-    """Сверка текущей недели: план (строки planned/confirmed/adjusted) vs факт.
+def week_plan_review(user_id: int, *, db: Session, week_start: date | None = None,
+                     include_today: bool = False) -> dict | None:
+    """Сверка недели: план (строки planned/confirmed/adjusted) vs факт.
 
     Факт — через linked_session_id (проставляет план-vs-факт при разборе).
     None — плановых строк на неделе не было (фича только включилась).
+    week_start — по умолчанию текущая неделя; include_today — считать сегодняшний
+    невыполненный день пропущенным (недельный отчёт вс 19:00 — C8.1).
     """
     user = db.query(User).filter(User.id == user_id).first()
     today = user_now(user).date()
-    week_start = _monday_of(today)
+    week_start = week_start or _monday_of(today)
     recs = db.query(Recommendation).filter(
         Recommendation.user_id == user_id,
         Recommendation.for_date >= week_start,
@@ -293,12 +333,12 @@ def week_plan_review(user_id: int, *, db: Session) -> dict | None:
             if r.linked_session_id else None)
         if session is not None:
             done += 1
-        elif d < today:
+        elif d < today or (include_today and d == today):
             missed += 1
         days.append({
             "date": d.isoformat(), "planned_type": r.workout_type,
             "status": r.status,
-            "actual_type": session.training_type if session else None,
+            "actual_type": effective_training_type(session) if session else None,
             "actual_km": session.total_distance_km if session else None,
         })
     return {"week_start": week_start.isoformat(), "days": days,

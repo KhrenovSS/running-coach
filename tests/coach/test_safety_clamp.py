@@ -382,3 +382,59 @@ def test_poor_interval_recovery_absent_rule_silent():
         verdict = evaluate_safety(_state(**signals))
         assert "poor_interval_recovery" not in verdict.triggered
         assert verdict.earliest_next_hard is None
+
+
+# --- Интенсивность по сегментам, не по ярлыку (инцидент 04.09.2026) ---------------------
+
+def _seg(role, value, kind="min", zone=None, repeat=1):
+    from src.coach.contracts import WorkoutSegment
+    return WorkoutSegment(role=role, repeat=repeat, amount_kind=kind, amount_value=value,
+                          target_zone=zone)
+
+
+def _easy_with_work(*work):
+    return WorkoutProposal(workout_type="easy", target_zone=3, duration_min=40,
+                           segments=[_seg("warmup", 10, zone=2), *work, _seg("cooldown", 10, zone=2)])
+
+
+@pytest.mark.parametrize("work, expected", [
+    ([_seg("work", 3, zone=3, repeat=4)], "tempo"),            # 4×3 мин Z3 — пороговые
+    ([_seg("work", 90, kind="sec", zone=4, repeat=6)], "interval"),
+    ([_seg("work", 20, kind="sec", zone=3, repeat=8)], "easy"),  # ускорения 20 с — лёгкая
+    ([_seg("work", 0.5, zone=3, repeat=6)], "easy"),           # 30 с в минутах — тоже ускорения
+    ([_seg("work", 5, zone=2, repeat=3)], "easy"),             # работа в Z2 — не качество
+])
+def test_effective_workout_type_by_segments(work, expected):
+    from src.coach.safety import effective_workout_type
+    assert effective_workout_type(_easy_with_work(*work)) == expected
+
+
+def test_mislabelled_tempo_hits_intensity_gate():
+    """Регресс #38: «easy» с 4×3 мин Z3 при earliest_next_hard в будущем → easy, clamped,
+    причина — переклассификация; без гейта — честно tempo."""
+    from datetime import timedelta
+
+    from src.coach.rules.p1_safety import evaluate_safety
+
+    proposal = _easy_with_work(_seg("work", 3, zone=3, repeat=4))
+    gated = _state(recovery_hours_left=3.0)
+    gated.recovery_hours_left = 3.0
+    verdict = evaluate_safety(gated)
+    assert verdict.earliest_next_hard is not None and verdict.max_zone == 5
+    p, clamped = clamp(proposal, verdict, gated)
+    assert clamped is True and p.workout_type == "easy"
+    reasons = " ".join(f"{r.rule} {r.reason}" for r in p.rationale)
+    assert "4×3 мин в Z3" in reasons and "качественная работа" in reasons
+    assert "интенсив не раньше" in reasons
+
+    free = evaluate_safety(_state())
+    p2, clamped2 = clamp(proposal, free, _state())
+    assert p2.workout_type == "tempo" and clamped2 is False
+
+
+def test_strides_stay_easy_without_clamp():
+    proposal = _easy_with_work(_seg("work", 20, kind="sec", zone=3, repeat=8))
+    gated = _state()
+    gated.recovery_hours_left = 3.0
+    p, clamped = clamp(proposal, evaluate_safety(gated), gated)
+    assert p.workout_type == "easy" and clamped is False

@@ -159,9 +159,14 @@ def _week_signals(user_id: int, today, user, *, db: Session) -> dict:
     from src.services.repositories import latest_lthr
     lthr = latest_lthr(user_id, db=db)
     max_hr_val = user.max_hr if user and user.max_hr else None
+    # Длительная — тоже качественный день (Дэниелс, гайд 45: одна из трёх К-сессий;
+    # решение владельца 04.09.2026) — день после неё лёгкий (правило 12).
+    from src.coach.config import LONG_RUN_MIN_MINUTES
     quality = sorted({d for d, s in dated
                       if is_quality_session(effective_training_type(s),
-                                            s.avg_heart_rate, max_hr_val, lthr)})
+                                            s.avg_heart_rate, max_hr_val, lthr)
+                      or effective_training_type(s) == "long"
+                      or (s.duration_minutes or 0) >= LONG_RUN_MIN_MINUTES})
     if quality:
         out["days_since_quality"] = (today - quality[-1]).days
         out["quality_days_7d"] = sum(1 for d in quality if (today - d).days < 7)
@@ -208,6 +213,12 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
             "z1_z2": round((zones["z1"] + zones["z2"]) / total_z, 2),
             "z3_plus": round((zones["z3"] + zones["z4"] + zones["z5"]) / total_z, 2),
         }
+    # Правило 16 (гайд 10, 04.09.2026): доля Z3+ за 7 дней — при достаточном объёме зон
+    from src.coach.config import HARD_SHARE_MIN_MINUTES_7D
+    zones7 = TrainingRepository.zone_distribution(user_id, days=7, db=db)
+    total7 = sum(zones7.values())
+    hard_share_7d = (round((zones7["z3"] + zones7["z4"] + zones7["z5"]) / total7, 2)
+                     if total7 >= HARD_SHARE_MIN_MINUTES_7D else None)
 
     last_workout = None
     sessions = CoachRepository.last_sessions(user_id, n=1, db=db)
@@ -266,6 +277,8 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
         # M4.1/M4.3 (F5/F6): структура недели и пауза — сырьё правил 12–14 p1_safety
         # (weekly-structure and layoff signals for the safety rules)
         **_week_signals(user_id, today_local, user_row, db=db),
+        # правило 16: перекос последних 7 дней в интенсивность (weekly intensity skew)
+        "hard_share_7d": hard_share_7d,
         # #254: сон прошлой ночи — только если скриншот за СЕГОДНЯ (иначе молчим:
         # нет данных — не наказываем) (last night's sleep, today's screenshot only)
         "sleep_duration_min": (dm.sleep_duration_min

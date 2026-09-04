@@ -13,7 +13,7 @@ from src.telegram.handlers.stats import cmd_stats, stats_callback
 from src.telegram.handlers.trainings import cmd_trainings, trainings_callback
 from src.telegram.handlers.weight import cmd_weight
 from src.telegram.handlers.account import cmd_delete_me, cmd_delete_me_confirm, cmd_login_info, cmd_reset_password, get_new_password, cancel_reset_password
-from src.telegram.handlers.coach import (cmd_coach_settings, cmd_plan,
+from src.telegram.handlers.coach import (cmd_coach_settings, cmd_plan, cmd_report,
                                           cmd_verdict, cmd_week, handle_text,
                                           initiative_callback)
 from src.telegram.handlers.sleep_photo import cmd_sleep, handle_sleep_photo
@@ -73,6 +73,7 @@ def run_bot():
     application.add_handler(CommandHandler("verdict", cmd_verdict))
     application.add_handler(CommandHandler("plan", cmd_plan))
     application.add_handler(CommandHandler("week", cmd_week))
+    application.add_handler(CommandHandler("report", cmd_report))
     application.add_handler(CommandHandler("sleep", cmd_sleep))
     application.add_handler(CommandHandler("coach_settings", cmd_coach_settings))
 

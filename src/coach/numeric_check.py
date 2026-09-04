@@ -63,6 +63,19 @@ def _mismatches(found: list[float], expected: list[float], tol: float,
             if not any(abs(v - e) <= tol for e in expected)]
 
 
+_PCT_RE = re.compile(r"(\d+)\s*%")
+
+
+def prose_numbers(message: str) -> list[str]:
+    """Числа тренировок/недели в прозе (км/мин/темп/пульс/%) — для ходов, где все числа
+    отдаёт детерминированная карточка (недельный отчёт, C8.1): нашли → лог + meta,
+    текст не режем (#247). (Training numbers found in prose that should carry none.)"""
+    found: list[str] = []
+    for rx in (_KM_RE, _MIN_RE, _PACE_RE, _HR_RE, _PCT_RE):
+        found += [m.group(0) for m in rx.finditer(message)]
+    return found
+
+
 def check_prose(message: str, p: Prescription | None,
                 max_hr: int | None = None, lthr: int | None = None) -> list[str]:
     """Числа тренировки в прозе, противоречащие карточке (пусто = всё сходится).

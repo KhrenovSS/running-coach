@@ -268,3 +268,62 @@ def test_latest_rows_for_dates_skips_superseded(db_session):
     rows = planning.latest_rows_for_dates(user.id, db=db_session, dates=[d, date(2026, 9, 5)])
     assert set(rows) == {d} and rows[d].workout_type == "long"
     assert planning.latest_rows_for_dates(user.id, db=db_session, dates=[]) == {}
+
+
+def test_week_plan_review_include_today_counts_missed(db_session):
+    """Отчёт вс 19:00: сегодняшний невыполненный плановый день — пропущен (include_today)."""
+    from src.models import Recommendation
+    from src.utils.timeutils import user_now
+
+    user = _unique_user(db_session)
+    today = user_now(user).date()
+    db_session.add(Recommendation(user_id=user.id, for_date=today, workout_type="easy",
+                                  status="planned", volume_json={"duration_min": 30.0}))
+    db_session.commit()
+    week_start = today - timedelta(days=today.weekday())
+    default = planning.week_plan_review(user.id, db=db_session, week_start=week_start)
+    closing = planning.week_plan_review(user.id, db=db_session, week_start=week_start,
+                                        include_today=True)
+    assert default["missed"] == 0 and closing["missed"] == 1
+    assert closing["planned"] == 1 and closing["week_start"] == week_start.isoformat()
+
+
+def test_cancel_days_marks_athlete_unavailable(db_session):
+    """cancel_days пишет маркер в proposal_json.rationale; blocked_by_unavailable его видит,
+    reopen_days гасит; строка отдыха без маркера не блокирует."""
+    from datetime import date as _date
+
+    from src.coach.state import assess_state
+    from src.coach.turn_context import is_athlete_unavailable
+    from src.models import Recommendation
+    from src.utils.timeutils import user_now
+
+    user = _unique_user(db_session)
+    now = user_now(user)
+    state = assess_state(user.id, db=db_session)
+    planning.cancel_days([1], user.id, state, db=db_session, now=now)
+    when = now.date() + timedelta(days=1)
+    row = db_session.query(Recommendation).filter_by(user_id=user.id, for_date=when).one()
+    assert is_athlete_unavailable(row) and row.workout_type == "rest"
+    assert "бегать не сможешь" in planning.blocked_by_unavailable(user.id, db=db_session, when=when)
+    assert planning.blocked_by_unavailable(user.id, db=db_session,
+                                           when=when + timedelta(days=1)) is None
+    line = planning.reopen_days([1], user.id, db=db_session, now=now)
+    assert "Снял отдых" in line
+    db_session.refresh(row)
+    assert row.status == "superseded"
+    assert planning.reopen_days([1], user.id, db=db_session, now=now) == ""
+
+
+def test_week_done_uses_effective_type(db_session):
+    """week_done считает качество по effective_training_type (override учитывается)."""
+    from src.coach.planning_window import week_done
+    from src.utils.timeutils import user_now
+
+    user = _unique_user(db_session)
+    today = user_now(user).date()
+    build_training_session(db_session, user.id, training_type="easy", avg_heart_rate=130,
+                           training_type_override="interval", begin_ts=utcnow())
+    done = week_done(user.id, db=db_session, week_start=today - timedelta(days=today.weekday()),
+                     today=today)
+    assert done["runs"] == 1 and done["quality_runs"] == 1

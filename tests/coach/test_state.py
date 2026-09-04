@@ -105,11 +105,13 @@ def test_week_signals_empty_user_defaults(db_session):
 
 
 def test_assess_state_signals_include_week_signals(athlete_with_history, db_session):
-    """assess_state кладёт недельные сигналы в signals: interval был 6 дней назад
-    (tempo фикстуры «мягкое» — avg_hr 150 < 0.95·170), сегодня easy → days_off=0."""
+    """assess_state кладёт недельные сигналы в signals: interval 6 дней назад, длительная
+    4 дня назад — тоже качественный день (решение владельца 04.09.2026, гайд 45);
+    tempo фикстуры «мягкое» (avg_hr 150 < 0.95·170), сегодня easy → days_off=0."""
     state = assess_state(athlete_with_history.id, db=db_session)
-    assert state.signals["days_since_quality"] == 6
-    assert state.signals["quality_days_7d"] == 1
+    assert state.signals["days_since_quality"] == 4
+    assert state.signals["quality_days_7d"] == 2
+    assert "hard_share_7d" in state.signals
     assert state.signals["days_off"] == 0
     assert state.signals["post_race_days_left"] == 0
 
@@ -192,3 +194,33 @@ def test_sleep_signal_none_for_yesterdays_row(db_session):
                         sleep_duration_min=340)
     state = assess_state(user.id, db=db_session)
     assert state.signals["sleep_duration_min"] is None
+
+
+def test_week_signals_long_run_counts_as_quality(db_session):
+    """Длительная вчера → days_since_quality=1 (день после длительной — лёгкий, гайд 45)."""
+    user = _unique_user(db_session)
+    build_training_session(db_session, user.id, training_type="long", avg_heart_rate=135,
+                           begin_ts=utcnow() - timedelta(days=1))
+    today = user_now(user).date()
+    sig = _week_signals(user.id, today, user, db=db_session)
+    assert sig["days_since_quality"] == 1 and sig["quality_days_7d"] == 1
+    # часовая «easy» по ярлыку классификатора — тоже длительная (LONG_RUN_MIN_MINUTES)
+    user2 = _unique_user(db_session)
+    build_training_session(db_session, user2.id, training_type="easy", duration_minutes=62,
+                           avg_heart_rate=135, begin_ts=utcnow() - timedelta(days=1))
+    assert _week_signals(user2.id, today, user2, db=db_session)["days_since_quality"] == 1
+
+
+def test_hard_share_7d_signal(db_session):
+    """Доля Z3+ за 7 дней из зон по сегментам; мало минут (< 60) → None."""
+    user = _unique_user(db_session)             # max_hr 177 → 165 = Z4+, 130 = Z2
+    build_training_session(db_session, user.id, training_type="easy",
+                           begin_ts=utcnow() - timedelta(days=1),
+                           segments_json=[{"avg_hr": 130, "duration_min": 20.0}])
+    assert assess_state(user.id, db=db_session).signals["hard_share_7d"] is None
+    build_training_session(db_session, user.id, training_type="tempo",
+                           begin_ts=utcnow() - timedelta(days=2),
+                           segments_json=[{"avg_hr": 165, "duration_min": 30.0},
+                                          {"avg_hr": 130, "duration_min": 20.0}])
+    state = assess_state(user.id, db=db_session)
+    assert state.signals["hard_share_7d"] == round(30 / 70, 2)

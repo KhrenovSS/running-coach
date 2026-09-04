@@ -13,6 +13,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from src.analysis.week_structure import is_quality_session
+from src.coach.util import effective_training_type
 from src.models import TrainingSession, User
 from src.services.repositories import latest_lthr
 from src.utils.timeutils import session_local_dt
@@ -59,7 +60,7 @@ def week_done(user_id: int, *, db: Session, week_start: date, today: date) -> di
         km += float(s.total_distance_km or 0.0)
         if d == today:
             trained_today = True
-        if is_quality_session(s.training_type, s.avg_heart_rate, max_hr, lthr):
+        if is_quality_session(effective_training_type(s), s.avg_heart_rate, max_hr, lthr):
             quality += 1
     return {"km": round(km, 1), "runs": runs, "quality_runs": quality,
             "trained_today": trained_today}

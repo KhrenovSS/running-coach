@@ -159,6 +159,10 @@ class CoachTurn(BaseModel):
     # в БД не попадала (инцидент 03.09.2026). (Days the athlete cannot run → code cancels.)
     unavailable_days_ahead: list[Annotated[int, Field(ge=0, le=7)]] | None = Field(
         default=None, max_length=8)
+    # Обратный путь: «в субботу всё-таки смогу побегать» → код снимает отдых-отмену
+    # (Athlete is available again → code reopens the cancelled day.)
+    available_again_days_ahead: list[Annotated[int, Field(ge=0, le=7)]] | None = Field(
+        default=None, max_length=8)
 
 
 def _strictify(schema: dict) -> dict:

@@ -302,14 +302,17 @@ def upsert_workout_insights(user_id: int, session_id: int, *, db: Session,
         return None
     baseline = _stored_baseline(user_id, db=db)
     from src.services.repositories import latest_lthr
+    max_hr, lthr = _user_max_hr(user_id, db=db), latest_lthr(user_id, db=db)
+    plan = _plan_for_session(user_id, session, db=db)
+    # Ярлык с учётом плана — ДО метрик, чтобы plan_vs_actual/long_run/peers видели честный тип
+    apply_type_resolution(user_id, session, db=db, plan=plan, max_hr=max_hr, lthr=lthr)
     computed = compute_workout_metrics(
         session, baseline=baseline,
-        max_hr=_user_max_hr(user_id, db=db),
-        lthr=latest_lthr(user_id, db=db),
+        max_hr=max_hr, lthr=lthr,
         week_km=(TrainingRepository.km_in_window(user_id, session.begin_ts, db=db)
                  if session.begin_ts else None),
         rpe_history=_rpe_history(user_id, session, db=db),
-        plan=_plan_for_session(user_id, session, db=db),
+        plan=plan,
         history_briefs=_history_briefs(user_id, session, db=db))
     # #246 (02.09.2026): статистика прогноз↔факт — только пишем, потребитель после M3.2
     try:
@@ -331,6 +334,45 @@ def get_or_compute(user_id: int, session_id: int, *, db: Session) -> dict | None
             and row.schema_version == INSIGHTS_SCHEMA_VERSION:
         return row.computed_json
     return upsert_workout_insights(user_id, session_id, db=db)
+
+
+def apply_type_resolution(user_id: int, session: TrainingSession, *, db: Session,
+                          plan: dict | None = None, max_hr: int | None = None,
+                          lthr: int | None = None) -> tuple[str, str, str | None]:
+    """Ярлык «план — назначение, факт — интенсивность» (04.09.2026): пишет training_type/
+    training_type_source от сырого training_type_auto; ручной override не трогает.
+    Возврат (type, source, plan_type). Идемпотентно. (Apply the plan-aware label.)"""
+    from src.analysis.type_resolution import resolve_training_type
+    from src.config.constants import TYPE_SOURCE_MANUAL
+
+    if session.training_type is None and session.training_type_auto is None:
+        return session.training_type, session.training_type_source, (plan or {}).get("type")
+    if session.training_type_auto is None:
+        session.training_type_auto = session.training_type      # legacy-строка до миграции
+    if session.training_type_override:
+        if session.training_type_source != TYPE_SOURCE_MANUAL:
+            session.training_type_source = TYPE_SOURCE_MANUAL
+            db.commit()
+        return session.training_type_override, TYPE_SOURCE_MANUAL, (plan or {}).get("type")
+    if plan is None:
+        plan = _plan_for_session(user_id, session, db=db)
+    if max_hr is None:
+        max_hr = _user_max_hr(user_id, db=db)
+    if lthr is None:
+        from src.services.repositories import latest_lthr
+        lthr = latest_lthr(user_id, db=db)
+    new_type, source = resolve_training_type(
+        session.training_type_auto, (plan or {}).get("type"),
+        avg_hr=session.avg_heart_rate, max_hr=max_hr, lthr=lthr,
+        duration_min=session.duration_minutes,
+        plan_duration_min=(plan or {}).get("duration_min"))
+    if new_type != session.training_type or source != session.training_type_source:
+        logger.info("Relabel session=%s: %s → %s (%s, plan=%s)", session.id,
+                    session.training_type, new_type, source, (plan or {}).get("type"))
+        session.training_type = new_type
+        session.training_type_source = source
+        db.commit()
+    return new_type, source, (plan or {}).get("type")
 
 
 def _user_max_hr(user_id: int, *, db: Session) -> int:

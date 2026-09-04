@@ -63,7 +63,8 @@ def _clean_days(items: list[WorkoutProposal],
 
 def generate_weekly_plan(user_id: int, *, db: Session,
                          llm: CoachLLM | None = None,
-                         now: datetime | None = None) -> str | None:
+                         now: datetime | None = None,
+                         week_report: dict | None = None) -> str | None:
     """Составить и записать план недели; вернуть текст карточки или None.
 
     None — бюджет ходов исчерпан, LLM недоступна или план пуст.
@@ -90,6 +91,9 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     extras["week_targets (planning)"] = targets
     if review is not None:
         extras["week_plan_review (planning)"] = review
+    if week_report is not None:
+        # Числа прошедшей недели (C8.1): план объясняет, что меняется и почему
+        extras["week_report (week_report)"] = week_report
 
     verdict_json = jsonable(verdict)
     if verdict.earliest_next_hard is not None:

@@ -12,6 +12,7 @@ from typing import Any
 from src.analysis.hr_zones import zone_ceiling_hr
 from src.analysis.utils import format_pace
 from src.coach.contracts import AthleteState, Prescription, SafetyVerdict, SkillResult
+from src.coach.safety import is_stride
 from src.coach.render_segments import (compact_segments, render_segment_lines,
                                        segments_total_min, visible_segments)
 from src.config.constants import HR_DISPLAY_UNIT
@@ -116,8 +117,10 @@ def render_prescription(p: Prescription, max_hr: int | None = None,
     day = _day_label(p.when, today)
     title = _TYPE_LABEL.get(p.workout_type, p.workout_type)
     segments = visible_segments(p.target)     # ровная пробежка — без разбивки (02.09.2026)
-    if (segments and any(s.get("role") == "work" for s in segments)
+    work = [s for s in segments if s.get("role") == "work"]
+    if (work and all(is_stride(s) for s in work)
             and p.workout_type in ("easy", "long", "recovery")):
+        # только короткие ускорения; длинные отрезки в Z3+ — уже tempo/interval (safety 04.09)
         title += " с ускорениями"
     header = f"*{title} — {day}*" if day else f"*{title}*"
     if segments:

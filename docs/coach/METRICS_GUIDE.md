@@ -68,6 +68,12 @@
 (б) точный `build_time_in_zones` → `computed.time_in_zones`; (в) рассинхрон имён флагов —
 маппинг `FLAG_TO_ASSESSMENT` + `orchestrator._merged_flags` (кодом, не LLM; §6).
 
+### Ярлык тренировки (04.09.2026)
+`training_type` — результат `analysis/type_resolution.resolve_training_type(training_type_auto, план дня)`:
+интервалы/пульс ≥ `QUALITY_TEMPO_MIN_*` — качество (tempo/interval/race по плану), иначе назначение
+из плана (long при ≥ `LONG_RUN_MIN_MINUTES` или `LONG_RUN_PLAN_RATIO` плановой; recovery по пульсу;
+easy), без плана — long по длительности, иначе easy. Провенанс — `training_type_source`.
+
 ## 4. Что добавить — этап M1 (сырьё готово, только вычислить и отдать)
 
 Все метрики ниже считаются из уже хранимых данных (`trackpoints_json`,
@@ -106,7 +112,8 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
   маппинг первого приближения: Z1→0.2, Z2→0.25, Z3→0.5, Z4→1.0, Z5→1.5
   (у Дэниелса Л 0.2 / М 0.4 / П 0.6 / И 1.0 / Пв 1.5–2.0; наши Z — от %max_hr,
   поэтому коэффициенты — конфиг, уточняются после M3).
-- **Выход**: `computed["load_points"]` + недельная сумма в weekly_summary.
+- **Выход**: `computed["load_points"]` + недельная сумма в `week_report.this.load_points`
+  (C8.1, 03.09.2026; прежде обещалась в weekly_summary — там её не было).
   Даёт коучу язык: «эта тренировка стоила 38 баллов — треть твоей недели».
 
 ### M1.5 Потолки качественного объёма (Дэниелс, гайд 44)
@@ -218,7 +225,9 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
 
 | Флаг | Действие (существующий механизм) |
 |---|---|
-| `easy_run_too_hard` ×2 за 7 дней | ⬜ не замкнуто (skill `distribution` ловит долю Z3+, сигнала в `evaluate_safety` нет — #289) |
+| `easy_run_too_hard` ×2 за 7 дней | 🟡 частично: правило 16 p1_safety `week_intensity_overload` — доля Z3+ за 7 дней > `HARD_SHARE_OVERLOAD` (30%) → `max_zone=2`, без интенсива (04.09.2026, гайд 10); счётчик флагов ×2 — ⬜ #289 |
+| интенсив под ярлыком easy/long (сегменты 4×3 мин Z3) | ✅ `safety.effective_workout_type`: тип по сегментам (`STRIDE_MAX_SEC`), гейты интенсива применяются к содержимому (инцидент 04.09.2026) |
+| день после длительной | ✅ длительная — качественный день в `_week_signals` → правило 12 (гайд 45, 04.09.2026) |
 | `quality_volume_exceeded`, `long_run_share_high` | ⬜ не замкнуто (skill `load` — только ACWR/ATI-CTI — #289) |
 | `poor_interval_recovery` | ✅ правило 11 p1_safety: `earliest_next_hard` ≥ +48 ч (окно 4 дня) |
 | `rpe_elevated` | carry_forward → утренний вердикт (механизм D7 уже есть) |
@@ -334,3 +343,31 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
   скриншотом) — тренд за 7/28 дней; «поймать перетренировку раньше результатов».
   Новых вопросов пользователю НЕ добавлять (отклик падает — DEV_PLAN §12); только
   агрегация имеющегося.
+
+## 12. Слой «неделя»: week_report (C8.1, 03.09.2026)
+
+Недельный отчёт (вс 19:00 и `/report`) — детерминированные числа `src/coach/week_report.py`
++ карточка `render_week_report.py`; LLM только интерпретирует и выбирает ровно один сигнал
+прогресса из `highlights` и одно слабое место из `concerns` (предвыбор кодом). Корзины недель —
+по **локальной** дате тренировки, полные недели пн–вс.
+
+| Поле `this`/`prev` | Расчёт | Источник методики |
+|---|---|---|
+| `km`, `minutes`, `runs` | сумма по сессиям недели | гайд 20 (шаг ≤10%), 42 (частота) |
+| `quality_runs` | `is_quality_session` (пульс, не ярлык) | гайд 45 |
+| `long_run_km`, `long_run_share` | самая длинная / км недели (от 2 пробежек) | гайд 45: ≤25–30% или 150 мин |
+| `easy_time_share` | минуты Z1–2 / все минуты в зонах (посекундно из разборов, fallback сегменты) | гайд 10: доля ВРЕМЕНИ, Z3+ >30% — перегруз |
+| `load_points` | Σ минуты в зоне × `POINTS_PER_MIN` | гайд 44 (≈50/нед новичку) |
+| `efficiency_delta_bpm`, `efficiency_n` | среднее `hr_vs_baseline.delta_bpm` разборов | гайд 00: пульс на том же темпе — главный маркер базы |
+| `pain_days` | дни недели с болью > 0 (feedback + wellness) | гайд 30: рост после боли = 0 |
+| `flags` | счётчик флагов разборов | §6 |
+
+Сигналы (пороги — `src/coach/config.py`): `efficiency_gain` (≤ `EFFICIENCY_GAIN_BPM` при n≥2) /
+`efficiency_loss` (≥ `EFFICIENCY_LOSS_BPM`); `easy_share_ok` / `easy_share_low` / `intensity_overload`
+(Z3+ > `HARD_SHARE_OVERLOAD`); `volume_step_ok` / `volume_jump` (`LOAD_PROGRESSION`);
+`long_run_share_high` (`LONG_RUN_MAX_PCT_WEEK`/`LONG_RUN_MAX_MIN`); `pain_days` / `pain_free_week`;
+`frequency_up`; `acwr_high` (> `WEEK_REPORT_ACWR_HIGH`); `easy_runs_too_hard`
+(≥ `EASY_TOO_HARD_WEEK_FLAGS`); `plan_complete` / `plan_missed`; `no_runs`.
+Сравнение: `prev`, `avg_prev` (среднее за `WEEK_REPORT_AVG_WEEKS` прошлых недель с пробежками),
+`series` (`WEEK_REPORT_SERIES_WEEKS`). Метрики здоровья (HRV/RHR/сон) в отчёт не входят
+(решение владельца 03.09.2026). Не реализовано: монотонность/страйн Фостера (#308).

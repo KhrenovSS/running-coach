@@ -87,6 +87,14 @@ LTHR_SANITY_MIN: Final[int] = 100        # lthr вне (LTHR_SANITY_MIN, max_hr)
 # Классификация при известном LTHR: recovery целиком в Z1, easy — не выше Z2
 RECOVERY_MAX_LTHR_PCT: Final[float] = 0.81
 EASY_MAX_LTHR_PCT: Final[float] = 0.89
+# Резолвер ярлыка с учётом плана (src/analysis/type_resolution.py, 04.09.2026):
+# длительная — от LONG_RUN_MIN_MINUTES (гайд 00: 1.5–2× обычной лёгкой; классификатор требовал 90)
+# или ≥ LONG_RUN_PLAN_RATIO плановой длительности; источник ярлыка — auto | plan | manual
+LONG_RUN_MIN_MINUTES: Final[float] = 60.0
+LONG_RUN_PLAN_RATIO: Final[float] = 0.8
+TYPE_SOURCE_AUTO: Final[str] = "auto"
+TYPE_SOURCE_PLAN: Final[str] = "plan"
+TYPE_SOURCE_MANUAL: Final[str] = "manual"
 # Нормативный темп зоны от порогового темпа ltsp (#273, «правило шести секунд» Дэниелса:
 # соседние качественные уровни различаются ~15–20 c/км; easy консервативно медленнее порога)
 LTSP_ZONE_OFFSET_S: Final[dict] = {1: 105, 2: 75, 3: 0, 4: -17, 5: -34}

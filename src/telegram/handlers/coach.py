@@ -147,6 +147,31 @@ def _plan_blocking(user_id: int) -> str | None:
         db.close()
 
 
+async def cmd_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /report — итоги текущей недели (пн–сегодня): проза LLM + карточка чисел (C8.1)."""
+    user = get_user(update.effective_chat.id)
+    if not user:
+        await update.message.reply_text(
+            "❌ Сначала используй /start чтобы зарегистрироваться.")
+        return
+    await update.message.reply_text("📊 Считаю итоги недели…")
+    try:
+        text = await asyncio.to_thread(_report_blocking, user.id)
+        await send_md_safe(update.message.reply_text, text)
+    except (CoachError, telegram.error.TelegramError) as e:
+        logger.error("Report error for user=%s: %s", user.id, e, exc_info=True)
+        await update.message.reply_text("😔 Не удалось собрать итоги недели.")
+
+
+def _report_blocking(user_id: int) -> str:
+    """Sync-обёртка отчёта: сессия живёт только внутри этого треда."""
+    db = SessionLocal()
+    try:
+        return orchestrator.weekly_report(user_id, db=db).text
+    finally:
+        db.close()
+
+
 async def cmd_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /week — показать СОХРАНЁННЫЙ план текущей недели (read-only, без LLM).
 

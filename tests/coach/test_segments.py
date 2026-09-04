@@ -230,3 +230,26 @@ def test_finalize_drops_monotone_segments(db_session):
     p2 = finalize(WorkoutProposal(workout_type="easy", target_zone=3, duration_min=40,
                                   segments=strides), state, db=db_session, persist=False)
     assert p2.target.get("segments")
+
+
+def test_finalize_drops_segments_of_mislabelled_quality_work(athlete_with_history, db_session):
+    """Регресс инцидента 04.09.2026 (recommendations #38): «лёгкий бег» с 4×3 мин Z3 при
+    незакрытом восстановлении → тип easy без отрезков, clamped, блок ограничения в карточке."""
+    from src.coach.contracts import WorkoutSegment, WorkoutProposal
+    from src.coach.prescriber import finalize
+    from src.coach.render import render_prescription
+    from src.coach.state import assess_state
+
+    state = assess_state(athlete_with_history.id, db=db_session)   # тренировка сегодня → часы > 0
+    assert state.recovery_hours_left > 0
+    proposal = WorkoutProposal(workout_type="easy", target_zone=3, duration_min=40, segments=[
+        WorkoutSegment(role="warmup", amount_kind="min", amount_value=10, target_zone=2),
+        WorkoutSegment(role="work", repeat=4, amount_kind="min", amount_value=3, target_zone=3),
+        WorkoutSegment(role="cooldown", amount_kind="min", amount_value=10, target_zone=2),
+    ])
+    p = finalize(proposal, state, db=db_session, persist=False, source="llm")
+    assert p.workout_type == "easy" and p.clamped is True
+    assert "segments" not in p.target                              # отрезки отброшены
+    text = render_prescription(p, max_hr=177)
+    assert "с ускорениями" not in text and "Работа" not in text
+    assert "Ограничение по безопасности" in text
