@@ -133,3 +133,18 @@ def test_load_ratio_prefers_watch_ati_cti(db_session):
     build_daily_metrics(db_session, user.id, metric_date=sunday, ati=44.0, cti=40.0)
     r = compute_week_report(user.id, db=db_session, week_start=ws, today=sunday)
     assert r["acwr"] == 1.1
+
+
+def test_week_report_monotony_concern(db_session):
+    """#308: 6 одинаковых дней недели (один отдых) → monotony ≈ 2.45 и concern monotony_high."""
+    user = _unique_user(db_session)
+    ws, sunday = _last_full_week()
+    for i in range(6):
+        s = build_training_session(db_session, user.id, total_distance_km=5.0, duration_minutes=35,
+                                   training_type="easy", begin_ts=_at(ws + timedelta(days=i)))
+        _insight(db_session, user.id, s.id, time_in_zones={
+            "available": True, "minutes": {"z1": 5.0, "z2": 30.0, "z3": 0.0, "z4": 0.0, "z5": 0.0}})
+    db_session.commit()
+    r = compute_week_report(user.id, db=db_session, week_start=ws, today=sunday)
+    assert r["this"]["trained_days"] == 6 and r["this"]["monotony"] > 2.0
+    assert "monotony_high" in {c["key"] for c in r["concerns"]}

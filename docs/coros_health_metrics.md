@@ -300,7 +300,7 @@ def anomaly(rhr, rhr_baseline):
 
 # Часть C. Справочник метрик EvoLab (из документации COROS) — в проекте НЕ реализовано
 
-> Реализованы только: §12 Recovery % (шкала в коде 30/70 расходится с 20/70/90 — BACKLOG #249),
+> Реализованы только: §12 Recovery % (шкала 20/70/90 приведена к коду 04.09.2026: `RECOVERY_PCT_MODERATE/READY/FRESH`),
 > §13 Training Effect (колонки `training_effect`/`anaerobic_training_effect`), §18 пороги LTHR/LTSP
 > (зоны и нормативные темпы, F4). §11, §14–§17, §19–§20 — справочник без кода.
 

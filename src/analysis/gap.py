@@ -137,7 +137,8 @@ def downhill_block(dists: list[float], alts_smoothed: list[float] | None) -> dic
 
 def compute_gap(times_sec: list[float], dists: list[float],
                 hrs: list[int | None],
-                alts: list[float | None]) -> dict:
+                alts: list[float | None],
+                pauses_sec: list[tuple[float, float]] | None = None) -> dict:
     """GAP-блок computed_json: по-км уклон/темп/GAP/пульс + сводка.
 
     times_sec — секунды от старта; dists — кумулятивные метры.
@@ -155,6 +156,10 @@ def compute_gap(times_sec: list[float], dists: list[float],
         if dists[i] >= km_n * 1000.0 or i == len(dists) - 1:
             seg_dist = dists[i] - dists[km_start_idx]
             seg_time = times_sec[i] - times_sec[km_start_idx]
+            if pauses_sec:
+                # #286: время километра без пауз часов — честный темп км-точки базовой линии
+                from src.analysis.utils import pause_overlap_sec
+                seg_time -= pause_overlap_sec(times_sec[km_start_idx], times_sec[i], pauses_sec)
             if seg_dist < 200 or seg_time <= 0:  # огрызок < 200 м не информативен
                 break
             pace = (seg_time / 60.0) / (seg_dist / 1000.0)

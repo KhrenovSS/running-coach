@@ -20,7 +20,7 @@ _ESTIMATE = {"pace_min_km": 6.12, "n_points": 20}
 def test_finalize_fills_predicted_and_persists(athlete_with_history, db_session,
                                                monkeypatch):
     monkeypatch.setattr(wi, "expected_pace_at_hr",
-                        lambda uid, hr, *, db: dict(_ESTIMATE))
+                        lambda uid, hr, *, db, **kw: dict(_ESTIMATE))
     state = assess_state(athlete_with_history.id, db=db_session)
     p = finalize(WorkoutProposal(workout_type="easy", target_zone=2,
                                  duration_min=40), state,
@@ -37,7 +37,7 @@ def test_finalize_fills_predicted_and_persists(athlete_with_history, db_session,
 def test_finalize_without_estimate_predicted_empty(athlete_with_history, db_session,
                                                    monkeypatch):
     """Нет данных для оценки → predicted пуст, назначение собирается как раньше."""
-    monkeypatch.setattr(wi, "expected_pace_at_hr", lambda uid, hr, *, db: None)
+    monkeypatch.setattr(wi, "expected_pace_at_hr", lambda uid, hr, *, db, **kw: None)
     state = assess_state(athlete_with_history.id, db=db_session)
     p = finalize(WorkoutProposal(workout_type="easy", target_zone=2,
                                  duration_min=40, distance_km=5.5), state,
@@ -49,7 +49,7 @@ def test_chat_reply_contains_estimate_line(athlete_with_history, db_session,
                                            monkeypatch):
     """Полный контур: ход LLM → карточка со строкой «Ориентир…», км LLM скрыт."""
     monkeypatch.setattr(wi, "expected_pace_at_hr",
-                        lambda uid, hr, *, db: dict(_ESTIMATE))
+                        lambda uid, hr, *, db, **kw: dict(_ESTIMATE))
     turn = {"message": "Сегодня легко.", "followup_question": None,
             "log_suggestion": None,
             "proposal": {"workout_type": "easy", "target_zone": 2,
@@ -116,3 +116,39 @@ def test_chat_reply_pace_lead_card(athlete_with_history, db_session, monkeypatch
     assert "Темп 6:30/км" in reply.text
     assert "на пульс сегодня не смотрим" in reply.text
     assert "~138 уд/мин" in reply.text
+
+
+def test_pace_clamp_context_never_uses_degraded_estimate(athlete_with_history, db_session,
+                                                          monkeypatch):
+    """Гвард #264: safety-контекст темпа зовёт expected_pace_at_hr БЕЗ degraded_ok."""
+    from src.coach.prescriber import _pace_clamp_context
+    from src.coach.rules.p1_safety import evaluate_safety
+
+    calls = []
+
+    def fake(uid, hr, *, db, **kw):
+        calls.append(kw)
+        return None
+
+    monkeypatch.setattr(wi, "expected_pace_at_hr", fake)
+    monkeypatch.setattr(wi, "expected_hr_at_pace", lambda uid, pace, *, db, **kw: None)
+    state = assess_state(athlete_with_history.id, db=db_session)
+    _pace_clamp_context(WorkoutProposal(workout_type="tempo", target_zone=3, duration_min=40,
+                                        target_pace_min_km=6.0),
+                        evaluate_safety(state), state, db=db_session)
+    assert calls and all(not kw.get("degraded_ok") for kw in calls)
+
+
+def test_predict_volume_carries_quality(athlete_with_history, db_session, monkeypatch):
+    """quality уровня доезжает в predicted и в строку карточки."""
+    from src.coach.render import render_prescription
+
+    monkeypatch.setattr(wi, "expected_pace_at_hr",
+                        lambda uid, hr, *, db, **kw: {"pace_min_km": 8.27, "n_points": 43,
+                                                      "quality": "adjusted", "hr_delta_bpm": -10})
+    state = assess_state(athlete_with_history.id, db=db_session)
+    p = finalize(WorkoutProposal(workout_type="recovery", target_zone=1, duration_min=30),
+                 state, db=db_session, persist=False, source="llm")
+    assert p.predicted["quality"] == "adjusted" and p.predicted["distance_km"] == 3.6
+    text = render_prescription(p, max_hr=177)
+    assert "Прикидка (данных на этом пульсе мало): ~8:16/км → ≈3.6 км" in text

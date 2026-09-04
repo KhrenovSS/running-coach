@@ -47,7 +47,8 @@ QUALITY_TYPES_M1 = ("tempo", "interval", "race")  # M1.9: где нужна ра
 
 
 def time_in_zones(times_sec: list[float], hrs: list[int | None],
-                  max_hr: int | None, lthr: int | None = None) -> dict:
+                  max_hr: int | None, lthr: int | None = None,
+                  pauses_sec: list[tuple[float, float]] | None = None) -> dict:
     """M1.1: точное время в зонах по трекпоинтам (посекундно, минуты).
 
     Дельта времени относится к зоне ПРЕДЫДУЩЕЙ точки (как build_time_in_zones).
@@ -61,8 +62,11 @@ def time_in_zones(times_sec: list[float], hrs: list[int | None],
     minutes = {f"z{i}": 0.0 for i in range(1, 6)}
     z4_segments: list[dict] = []
     seg_min, seg_hr_sum = 0.0, 0.0
+    from src.analysis.utils import pause_overlap_sec
     for i in range(1, len(times_sec)):
         dt_min = (times_sec[i] - times_sec[i - 1]) / 60.0
+        if pauses_sec:
+            dt_min -= pause_overlap_sec(times_sec[i - 1], times_sec[i], pauses_sec) / 60.0   # #286
         hr = hrs[i - 1]
         if dt_min <= 0 or hr is None or dt_min * 60 > RECORDING_GAP_MAX_SEC:
             # Разрыв записи или HR-дропаут РАЗРЫВАЕТ Z4-отрезок (#279): иначе

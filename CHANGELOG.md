@@ -2,6 +2,124 @@
 
 All notable changes to this project are tracked here.
 
+## [04.09.2026] — Документация синхронизирована с кодом дня
+
+### Changed
+- `docs/coach/ARCHITECTURE.md` — карта модулей: `week_report.py`, `render_week_report.py`,
+  `load_monotony.py`, `planning_window.local_week_volumes`, обновлённые `planning.py`/`rules/p1_safety.py`
+  (правила 1–20)/`llm/schemas`; смежное — `analysis/type_resolution.py`, backfill, миграция.
+- `docs/ARCHITECTURE.md` — `type_resolution.py` и utils в пакете analysis, поток «ярлык по плану»,
+  moving-time, правила 11–20 в потоке разбора. `docs/TESTING.md` — новые тестовые модули.
+- `README.md` — команда `/report`. `CLAUDE.md` — актуальный список открытого + раздел «Где продолжать».
+- `docs/coach/DEV_PLAN.md` §9 — блок «P0/P1 — безопасность и планирование (04.09.2026)», статус #289.
+
+- `~/go.sh` (стартер сессии вне репозитория) — статусный блок обновлён на 04.09.2026.
+
+## [04.09.2026] — P1 #286 Moving-time: паузы часов вычитаются из длительности, темпа и зон; ТЗ #243
+
+### Changed
+- **#286** `duration_minutes` = moving-time (как таймер часов): точные паузы записи из
+  `device_summary.pauses` (F1) вычитаются в `build_time_in_zones` (классификатор/длительность/зоны),
+  `session_metrics.time_in_zones` (разбор) и `gap.compute_gap` (время километра → честные км-точки
+  базовой линии); `avg_pace` — от moving-времени. Помощники `analysis.utils.pauses_to_offsets` /
+  `pause_overlap_sec`. Паузы доезжают из FIT (`parse_fit`), из сырья и из кэша (`reanalyze`);
+  TCX/без списка — прежняя эвристика разрывов > `RECORDING_GAP_MAX_SEC`. В `cleaning_log` —
+  запись `stage=pauses, pause_sec`. `device_check.time_diff_pct` теперь сравнивает moving с `timer_s`
+  один-к-одному. Backfill не делался (у владельца паузы 8–9 с в двух тренировках).
+- **#243** — зафиксировано решение владельца: подготовка нейтральная, без даты; после выбора
+  целевого старта — план к дате с тейпером, прогноз результата, тактика на дистанции, решение
+  «быстро или в лёгком режиме» через safety (травма/болезнь). ТЗ — в BACKLOG #243.
+- Тесты: `test_moving_time.py` (помощники, остановка 20 с с/без списка пауз, разрыв 90 с),
+  `test_insights_subtract_watch_pauses`.
+
+## [04.09.2026] — P1 #264/#263: ориентир темпа всегда, со ступенчатой честностью
+
+По ТЗ `docs/coach/TASK_pace_estimate_fallback.md` (инцидент 27.08: восстановительный без ориентира
+дистанции — владелец по нему выбирает маршрут).
+
+### Added
+- `analysis.hr_baseline.pace_at_hr_adjusted` (уровень B: двусторонняя полоса ±25 уд/мин, локальный
+  наклон с санити-гейтом, дефолт −8 bpm за мин/км, предохранитель Δ ≤ 15, без клэмпа к границе) и
+  `typical_pace_median` (уровень C: медиана `avg_pace` прошлых тренировок типа). `pace_at_hr_band`
+  отдаёт `quality="band"`.
+- `insights_baseline.expected_pace_at_hr(..., workout_type, degraded_ok)`: A → B → C только при
+  `degraded_ok=True`; `predict_volume` включает ступени и C′ — нормативный темп зоны от `ltsp`
+  (`quality="threshold"`); `_pace_clamp_context` (safety) остаётся на уровне A — тест-гвард.
+- Карточка: «Прикидка (данных на этом пульсе мало): …», «По твоим прошлым таким пробежкам: …
+  (без привязки к пульсу)», «Нормативный темп зоны от ПАНО часов: …»; старые `predicted` без
+  `quality` — прежняя строка «Ориентир…».
+- **#263** `_collect_window_points(include_quality=True)`: км-точки темповых входят в полосы «темп
+  на пульсе»/«пульс на темпе» (высокие зоны), OLS-база остаётся на steady-типах (`BASELINE_POINT_TYPES`).
+- Константы `BASELINE_PACE_WIDE_BAND_BPM`, `BASELINE_PACE_ADJUST_MAX_BPM`, `BASELINE_HR_PACE_SLOPE_*`,
+  `BASELINE_TYPICAL_MIN_SESSIONS`. Тесты: математика B/C (закон 190−8·pace, ловушка #259, гейты),
+  композиция до C и приоритет типа, темповые точки, гвард safety, quality в карточке.
+
+## [04.09.2026] — P1 планирование: локальные недели, строка утра, окно доступности, потолок пульса
+
+Вторая пачка приоритетов (BACKLOG «Приоритеты 04.09.2026», P1).
+
+### Changed
+- **#220** `planning.week_targets` считает прошлые недели по ЛОКАЛЬНОЙ дате полными неделями
+  (`planning_window.local_week_volumes`), не UTC-корзинами `weekly_volume` с обрезанной первой;
+  пик для `detraining_return` — оттуда же. Пустые недели прогрессию не задают (как раньше).
+- **#292/#305** `confirm_or_adjust_morning`: план дня — последняя действующая строка на дату
+  (включая `proposed` из чата) → утро подтверждает ТУ строку, что показывает; статусы в БД честные,
+  `week_plan_review` видит нужную.
+- **#295** `finalize` фиксирует `target.hr_ceiling` (уд/мин) в назначении; `render._hr_ceiling`
+  читает его — смена якоря зон (max_hr → ПАНО) не меняет молча числа сохранённого плана.
+- **#311** `WEEKLY_PROMPT`: интенсивность недели — только по `quality_runs`/`hard_time_share`/`is_quality`.
+
+### Added
+- **#294 Окно доступности**: `CoachTurn.available_weekdays` («могу бегать только пн–чт», [] — снять)
+  → `planning.set_availability` (params_json.week_plan.availability) → `week_targets.availability`
+  и фильтр `days_ahead_allowed` (дни недели + даты, отменённые подопечным через
+  `unavailable_days_ahead`); `remaining_run_days_max` ≤ доступных дней; `supersede_future_rows`
+  не гасит отмены подопечного — они переживают `/plan`. PLAN_PROMPT знает про availability.
+- Тесты: `local_week_volumes` (граница полуночи, пустые недели), утро подтверждает `proposed`,
+  availability (персист, фильтр окна, выживание отмен), `hr_ceiling` в target и в карточке,
+  `available_weekdays` из чата.
+
+## [04.09.2026] — P0 безопасность: шкала восстановления Coros, замыкания флагов, монотонность, ранний пик
+
+Первый пакет приоритетов P0 (BACKLOG «Приоритеты 04.09.2026»).
+
+### Changed
+- **#249 Шкала Recovery % → Coros §12** (0–19 Exhausted · 20–69 Fatigued · 70–89 Normal · 90+ Fresh):
+  `RECOVERY_PCT_MODERATE=20`, `RECOVERY_PCT_READY=70`, новая `RECOVERY_PCT_FRESH=90`. Правило 4 safety:
+  < 20 → `max_zone=2` + без интенсива; 20–69 → без интенсива (`recovery_fatigued`); ≥ 70 — без
+  ограничений. `recovery_view` — четыре ярлыка. Fallback-назначение использует те же пороги.
+
+### Added
+- **#289 Замыкания флагов разбора на safety** (правила 17–19 p1_safety, сигналы `state`):
+  `easy_run_too_hard` ≥ 2 за 7 дней → `max_zone=2`, без интенсива; `quality_volume_exceeded` в
+  разборе за 3 дня → следующий качественный не раньше +48 ч; `downhill_load_high` за 2 дня →
+  `max_zone=3`, интенсив не раньше +24 ч (колено). `InsightRepository.recent_flag_count`.
+  Планирование: `long_run_share_high` на прошлой неделе → `long_run_km_max` = факт прошлой
+  длительной (`long_run_hold`); пауза ≥ 14 дней → `target_km` ≤ 65% пика 8 недель,
+  `hard_days_max=0` (`detraining_return`). Остаток #289 — поправка ожиданий `hr_vs_baseline` при detraining.
+- **#308 Монотонность/страйн Фостера** — `coach/load_monotony.py` (дневные баллы Дэниелса из зон
+  разборов; monotony = mean/SD, strain = Σ×monotony): `week_report.this.monotony/strain/trained_days`,
+  concern `monotony_high`, строка «монотонность X» в карточке; правило 20 safety — monotony > 2 при
+  ≥ 5 тренировочных днях → без интенсива («нужен день отдыха»).
+- **#238 Ранний пик пульса на медленном темпе** — `analysis.utils.early_peak_suspect`: пик в первые
+  5 мин при темпе медленнее медианы на 0.5 мин/км и выше пика остатка на 8 уд/мин → `hr_peak_smoothed`
+  без первого окна, флаг `hr_early_peak`; адаптивный max_hr не раздувается глюком датчика.
+- **Fix** `InsightRepository.recent/recent_flag/recent_flag_count` — свежесть по дате ТРЕНИРОВКИ
+  (join `training_sessions.begin_ts`), не по `created_at` разбора: после бэкфилла 44 разборов
+  счётчик `easy_too_hard_7d` показал 27, а `recent_reviews` в контексте LLM стали бы майскими.
+- Тесты: шкала восстановления (5 полос), правила 17–20, монотонность (математика + окно из разборов),
+  потолки плана (`long_run_hold`, `detraining_return`), концерн отчёта, ранний пик (3 кейса), сигналы
+  state. **#307** — тест `test_poor_interval_recovery_delays_next_hard` больше не зависит от времени.
+
+## [04.09.2026] — BACKLOG: приоритизация открытых пунктов
+
+### Changed
+- `BACKLOG.md`: раздел «Приоритеты (ревизия владельца 04.09.2026)» — P0 безопасность тренировок
+  (#289, #249, #308, #238), P1 нормирование нагрузки и правильность планов (#220, #292+#305, #294,
+  #295, #264, #259, #286, #263, #311, #243), P2 данные/аналитика, P3 приложение/инфра/доки;
+  рекомендуемый порядок первого спринта. #305 помечен как один корень с #292; #291 → 🔶 (род
+  зафиксирован в персоне 03.09); следующий свободный номер — #312.
+
 ## [04.09.2026] — Ярлык тренировки с учётом плана: «план — назначение, факт — интенсивность»
 
 Классификатор (`classify_training`) ставил `tempo` как catch-all (#290) и `long` только от 90 мин;

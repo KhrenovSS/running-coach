@@ -327,3 +327,124 @@ def test_week_done_uses_effective_type(db_session):
     done = week_done(user.id, db=db_session, week_start=today - timedelta(days=today.weekday()),
                      today=today)
     assert done["runs"] == 1 and done["quality_runs"] == 1
+
+
+def test_week_targets_long_run_hold_after_share_flag(db_session):
+    """#289: на прошлой неделе long_run_share_high → потолок длительной = её факт, не растёт."""
+    from src.models import WorkoutInsight
+
+    user = _unique_user(db_session)
+    build_training_session(db_session, user.id, total_distance_km=15.0,
+                           begin_ts=utcnow() - timedelta(days=9))
+    long = build_training_session(db_session, user.id, total_distance_km=9.0,
+                                  training_type="long", begin_ts=utcnow() - timedelta(days=3))
+    build_training_session(db_session, user.id, total_distance_km=5.0,
+                           begin_ts=utcnow() - timedelta(days=2))
+    db_session.add(WorkoutInsight(user_id=user.id, session_id=long.id, status="done",
+                                  computed_json={"flags": ["long_run_share_high"]}))
+    db_session.commit()
+    t = planning.week_targets(user.id, db=db_session)
+    assert t["long_run_hold"] is True
+    assert t["long_run_km_max"] <= 9.0
+    assert t["detraining_return"] is False and t["hard_days_max"] == 1
+
+
+def test_week_targets_detraining_return_ceiling(db_session):
+    """#289: пауза ≥ 14 дней → объём ≤ 65% пика 8 недель, качественных нет."""
+    from src.coach.config import DETRAINING_RETURN_VOLUME_PCT
+
+    user = _unique_user(db_session)
+    _week_of_km(db_session, user.id, 30.0, 4)
+    _week_of_km(db_session, user.id, 24.0, 3)
+    build_training_session(db_session, user.id, total_distance_km=8.0,
+                           begin_ts=utcnow() - timedelta(days=15))
+    t = planning.week_targets(user.id, db=db_session)
+    assert t["detraining_return"] is True and t["days_off"] >= 14
+    assert t["target_km"] <= round(30.0 * DETRAINING_RETURN_VOLUME_PCT, 1)
+    assert t["hard_days_max"] == 0 and t["remaining_hard_days_max"] == 0
+
+
+# --- P1 04.09.2026: #220 локальные недели, #292/#305 строка утра, #294 доступность, #295 потолок ---
+
+def test_local_week_volumes_full_weeks_with_zero_gaps(db_session):
+    """#220: полные недели пн–вс по локальной дате, пустые недели — нулями, без обрезки."""
+    from datetime import datetime, time, timezone as tz
+
+    from src.coach.planning_window import local_week_volumes, monday_of
+    from src.utils.timeutils import user_now
+
+    user = _unique_user(db_session)                       # Europe/Moscow
+    today = user_now(user).date()
+    this_monday = monday_of(today)
+    # вс 22:30 UTC перед прошлой неделей = пн 01:30 МСК → в прошлую неделю
+    build_training_session(db_session, user.id, total_distance_km=6.0,
+                           begin_ts=datetime.combine(this_monday - timedelta(days=8), time(22, 30),
+                                                     tzinfo=tz.utc))
+    build_training_session(db_session, user.id, total_distance_km=4.0,
+                           begin_ts=datetime.combine(this_monday - timedelta(days=4), time(8),
+                                                     tzinfo=tz.utc))
+    weeks = local_week_volumes(user.id, db=db_session, today=today, weeks=3)
+    assert [w["week_start"] for w in weeks] == [this_monday - timedelta(weeks=3),
+                                                this_monday - timedelta(weeks=2),
+                                                this_monday - timedelta(weeks=1)]
+    assert weeks[-1] == {"week_start": this_monday - timedelta(weeks=1), "total_km": 10.0,
+                         "session_count": 2}
+    assert weeks[0]["total_km"] == 0.0 and weeks[0]["session_count"] == 0
+
+
+def test_morning_confirms_latest_row_including_proposed(db_session):
+    """#292/#305: план дня = последняя действующая строка (proposed из чата), не старая planned."""
+    from src.coach.state import assess_state
+    from src.models import Recommendation
+    from src.utils.timeutils import user_now
+
+    user = _unique_user(db_session)
+    now = user_now(user)
+    old = Recommendation(user_id=user.id, for_date=now.date(), workout_type="tempo",
+                         status="planned", target_json={"max_zone": 3}, volume_json={"duration_min": 45.0})
+    new = Recommendation(user_id=user.id, for_date=now.date(), workout_type="easy",
+                         status="proposed", target_json={"max_zone": 2}, volume_json={"duration_min": 30.0})
+    db_session.add_all([old, new])
+    db_session.commit()
+    state = assess_state(user.id, db=db_session)
+    p, mode, row = planning.confirm_or_adjust_morning(None, user.id, state, db=db_session, now=now)
+    assert row.id == new.id and mode == "confirmed" and p.workout_type == "easy"
+    db_session.refresh(old); db_session.refresh(new)
+    assert new.status == "confirmed" and old.status == "planned"
+
+
+def test_availability_persists_and_filters_plan_window(db_session):
+    """#294: окно доступности (дни недели) хранится в params_json и вычитается из days_ahead_allowed;
+    отменённые подопечным даты не входят в окно и переживают supersede_future_rows."""
+    from src.coach.state import assess_state
+    from src.models import Recommendation
+    from src.utils.timeutils import user_now
+
+    user = _unique_user(db_session)
+    _week_of_km(db_session, user.id, 20.0, 2)
+    _week_of_km(db_session, user.id, 22.0, 1)
+    assert planning.set_availability(user.id, db=db_session, weekdays=[0, 1, 2, 3]) == {"weekdays": [0, 1, 2, 3]}
+    assert planning.availability(user.id, db=db_session)["weekdays"] == [0, 1, 2, 3]
+    now = user_now(user)
+    # отмена конкретного дня через cancel_days (маркер) — на ближайший понедельник
+    d_mon = (7 - now.date().weekday()) % 7 or 7
+    planning.cancel_days([d_mon], user.id, assess_state(user.id, db=db_session), db=db_session, now=now)
+    t = planning.week_targets(user.id, db=db_session)
+    mon_date = now.date() + timedelta(days=d_mon)
+    from src.coach.planning_window import plan_window
+    _, first, last = plan_window(now.date(), trained_today=False)
+    expected = [d for d in range(first, last + 1)
+                if (now.date() + timedelta(days=d)).weekday() in (0, 1, 2, 3)
+                and now.date() + timedelta(days=d) != mon_date]
+    assert t["days_ahead_allowed"] == expected          # может быть [] среди недели пт–вс
+    assert t["availability"]["weekday_names"] == ["Пн", "Вт", "Ср", "Чт"]
+    from datetime import date as _d
+    ws = _d.fromisoformat(t["week_start"])
+    if ws <= mon_date <= ws + timedelta(days=6):        # отмена внутри планируемой недели
+        assert mon_date.isoformat() in t["availability"]["unavailable_dates"]
+    assert t["remaining_run_days_max"] <= len(t["days_ahead_allowed"])
+    # перепланирование не гасит отмену подопечного
+    planning.supersede_future_rows(user.id, db=db_session, from_date=now.date())
+    rest = db_session.query(Recommendation).filter_by(user_id=user.id, for_date=mon_date).one()
+    assert rest.status == "adjusted"
+    assert planning.set_availability(user.id, db=db_session, weekdays=[]) == {"weekdays": None}

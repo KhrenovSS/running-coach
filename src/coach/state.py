@@ -8,6 +8,9 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from src.coach.config import (
+    DOWNHILL_LOOKBACK_DAYS,
+    EASY_TOO_HARD_LOOKBACK_DAYS,
+    QUALITY_VOLUME_LOOKBACK_DAYS,
     HARD_TYPES,
     CONFIDENCE_MIN_DAYS,
     CONFIDENCE_MIN_SESSIONS,
@@ -22,7 +25,12 @@ from src.coach.skills import distribution, fatigue, load, pain, progress, recove
 from src.coach.util import clamp_value, effective_training_type, safe_div
 from src.models import User
 from src.services.recovery_view import hrv_status, rhr_anomaly
-from src.analysis.session_metrics import FLAG_POOR_INTERVAL_RECOVERY
+from src.analysis.session_metrics import (
+    FLAG_DOWNHILL_LOAD,
+    FLAG_EASY_TOO_HARD,
+    FLAG_POOR_INTERVAL_RECOVERY,
+    FLAG_QUALITY_VOLUME,
+)
 from src.services.repositories import FeedbackRepository, TrainingRepository
 from src.services.repositories_coach import CoachRepository
 from src.services.repositories_insights import InsightRepository
@@ -213,6 +221,9 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
             "z1_z2": round((zones["z1"] + zones["z2"]) / total_z, 2),
             "z3_plus": round((zones["z3"] + zones["z4"] + zones["z5"]) / total_z, 2),
         }
+    # Правило 20 (#308): монотонность нагрузки за 7 дней (Foster monotony over the last week)
+    from src.coach.load_monotony import monotony_window
+    monotony = monotony_window(user_id, db=db, today=today_local, user=user_row)
     # Правило 16 (гайд 10, 04.09.2026): доля Z3+ за 7 дней — при достаточном объёме зон
     from src.coach.config import HARD_SHARE_MIN_MINUTES_7D
     zones7 = TrainingRepository.zone_distribution(user_id, days=7, db=db)
@@ -279,6 +290,16 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
         **_week_signals(user_id, today_local, user_row, db=db),
         # правило 16: перекос последних 7 дней в интенсивность (weekly intensity skew)
         "hard_share_7d": hard_share_7d,
+        # P0 #289 (04.09.2026): замыкания флагов разбора — правила 17–19
+        "easy_too_hard_7d": InsightRepository.recent_flag_count(
+            user_id, FLAG_EASY_TOO_HARD, db=db, days=EASY_TOO_HARD_LOOKBACK_DAYS),
+        "quality_volume_exceeded_recent": InsightRepository.recent_flag(
+            user_id, FLAG_QUALITY_VOLUME, db=db, days=QUALITY_VOLUME_LOOKBACK_DAYS),
+        "downhill_load_recent": InsightRepository.recent_flag(
+            user_id, FLAG_DOWNHILL_LOAD, db=db, days=DOWNHILL_LOOKBACK_DAYS),
+        # P0 #308: монотонность Фостера за 7 дней — правило 20
+        "monotony_7d": monotony["monotony"],
+        "trained_days_7d": monotony["trained_days"],
         # #254: сон прошлой ночи — только если скриншот за СЕГОДНЯ (иначе молчим:
         # нет данных — не наказываем) (last night's sleep, today's screenshot only)
         "sleep_duration_min": (dm.sleep_duration_min

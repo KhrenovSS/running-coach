@@ -8,6 +8,12 @@
 from __future__ import annotations
 
 from src.config.constants import (
+    BASELINE_HR_PACE_SLOPE_DEFAULT,
+    BASELINE_HR_PACE_SLOPE_MAX,
+    BASELINE_HR_PACE_SLOPE_MIN,
+    BASELINE_PACE_ADJUST_MAX_BPM,
+    BASELINE_PACE_WIDE_BAND_BPM,
+    BASELINE_TYPICAL_MIN_SESSIONS,
     BASELINE_HR_AT_PACE_BAND_MIN_KM,
     BASELINE_HR_PREDICT_MAX,
     BASELINE_HR_PREDICT_MIN,
@@ -85,7 +91,56 @@ def pace_at_hr_band(points: list[tuple[float, float]],
     pace = band[mid] if len(band) % 2 else (band[mid - 1] + band[mid]) / 2
     if not (BASELINE_PACE_PREDICT_MIN <= pace <= BASELINE_PACE_PREDICT_MAX):
         return None
-    return {"pace_min_km": round(pace, 2), "n_points": len(band)}
+    return {"pace_min_km": round(pace, 2), "n_points": len(band), "quality": "band"}
+
+
+def _median(values: list[float]) -> float:
+    s = sorted(values)
+    mid = len(s) // 2
+    return s[mid] if len(s) % 2 else (s[mid - 1] + s[mid]) / 2
+
+
+def pace_at_hr_adjusted(points: list[tuple[float, float]], hr_ceiling: int) -> dict | None:
+    """Уровень B (#264): широкая двусторонняя полоса + локальная поправка наклоном.
+
+    Для низких зон полезные точки лежат ВЫШЕ потолка: медиана полосы сдвигается к потолку
+    по локальному наклону HR~pace (санити-гейт; занижённый глобальный наклон #259 гейт
+    закономерно не проходит → дефолт −8 bpm за мин/км). Δ пульса больше предохранителя
+    или результат вне санити → None (не клэмп к границе — честнее упасть на уровень C).
+    (Level B: wide band + local slope adjustment; no fabricated numbers.)
+    """
+    sample = [(p, h) for p, h in points if abs(h - hr_ceiling) <= BASELINE_PACE_WIDE_BAND_BPM]
+    if len(sample) < BASELINE_PACE_BAND_MIN_POINTS:
+        return None
+    med_hr = _median([h for _, h in sample])
+    med_pace = _median([p for p, _ in sample])
+    delta = hr_ceiling - med_hr
+    if abs(delta) > BASELINE_PACE_ADJUST_MAX_BPM:
+        return None
+    n = len(sample)
+    mean_p = sum(p for p, _ in sample) / n
+    mean_h = sum(h for _, h in sample) / n
+    sxx = sum((p - mean_p) ** 2 for p, _ in sample)
+    slope = BASELINE_HR_PACE_SLOPE_DEFAULT
+    if sxx > 0:
+        b = sum((p - mean_p) * (h - mean_h) for p, h in sample) / sxx
+        if BASELINE_HR_PACE_SLOPE_MIN <= b <= BASELINE_HR_PACE_SLOPE_MAX:
+            slope = b
+    pace = med_pace + delta / slope
+    if not (BASELINE_PACE_PREDICT_MIN <= pace <= BASELINE_PACE_PREDICT_MAX):
+        return None
+    return {"pace_min_km": round(pace, 2), "n_points": n, "quality": "adjusted",
+            "hr_delta_bpm": round(delta, 1), "slope_used": round(slope, 2)}
+
+
+def typical_pace_median(paces: list[float | None]) -> dict | None:
+    """Уровень C (#264): медиана среднего темпа прошлых тренировок типа (без привязки к пульсу)."""
+    clean = [p for p in paces if p is not None
+             and BASELINE_PACE_PREDICT_MIN <= p <= BASELINE_PACE_PREDICT_MAX]
+    if len(clean) < BASELINE_TYPICAL_MIN_SESSIONS:
+        return None
+    return {"pace_min_km": round(_median(clean), 2), "n_sessions": len(clean),
+            "quality": "typical"}
 
 
 def hr_at_pace_band(points: list[tuple[float, float]],

@@ -17,6 +17,8 @@ from src.coach.config import (
     HARD_SHARE_OVERLOAD,
     LOAD_RATIO_LOW,
     LONG_RUN_MAX_PCT_WEEK,
+    MONOTONY_HIGH,
+    MONOTONY_MIN_TRAIN_DAYS,
     WEEK_REPORT_ACWR_HIGH,
 )
 
@@ -108,6 +110,11 @@ def _load_line(this: dict, prev: dict | None, acwr: float | None) -> str | None:
         parts.append(f"Нагрузка: {this['load_points']} баллов")
         if prev and prev.get("load_points") is not None:
             parts.append(f"прошлая {prev['load_points']}")
+    if this.get("monotony") is not None:
+        mono = f"монотонность {this['monotony']:.1f}"
+        if this["monotony"] > MONOTONY_HIGH and (this.get("trained_days") or 0) >= MONOTONY_MIN_TRAIN_DAYS:
+            mono += " ⚠"
+        parts.append(mono)
     if acwr is not None:
         if acwr > WEEK_REPORT_ACWR_HIGH:
             label = "высокая ⚠"

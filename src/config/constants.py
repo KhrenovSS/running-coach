@@ -139,6 +139,13 @@ RECOVERY_MAX_Z4_PCT: Final[float] = 5.0           # макс. % времени �
 LONG_MAX_Z4_PCT: Final[float] = 15.0              # макс. % времени в Z4+ для long
 EASY_MAX_Z4_SEGMENT_MIN: Final[float] = 3.0       # макс. длительность Z4+ сегмента для easy (мин)
 
+# Ранний пик пульса на медленном темпе = глюк оптического датчика (#238, 04.09.2026):
+# пик в первые EARLY_PEAK_WINDOW_SEC при темпе медленнее медианы сессии на SLACK и выше
+# пика остальной части на DELTA → пик берём без первого окна, флаг hr_early_peak
+EARLY_PEAK_WINDOW_SEC: Final[int] = 300
+EARLY_PEAK_PACE_SLACK_MIN_KM: Final[float] = 0.5
+EARLY_PEAK_DELTA_BPM: Final[int] = 8
+
 # Диапазон достоверного темпа для графика HR/pace (Plausible pace range for HR/pace chart, мин/км)
 CHART_MIN_PACE_MIN_PER_KM: Final[float] = 3.0     # быстрее — считаем GPS-шумом (faster → GPS noise)
 CHART_MAX_PACE_MIN_PER_KM: Final[float] = 10.0    # медленнее — ходьба/остановка (slower → walking/stop)
@@ -205,6 +212,16 @@ BASELINE_PACE_BAND_MIN_POINTS: Final[int] = 5   # минимум км-точек
 BASELINE_HR_AT_PACE_BAND_MIN_KM: Final[float] = 0.25  # полоса темпа ±15 с/км для медианы HR (pace band for HR median)
 BASELINE_HR_PREDICT_MIN: Final[int] = 90        # прогноз пульса ниже → None (HR prediction sanity floor, bpm)
 BASELINE_HR_PREDICT_MAX: Final[int] = 200       # прогноз пульса выше → None (HR prediction sanity ceiling, bpm)
+# #264 (04.09.2026): ступенчатая деградация ориентира темпа A (полоса) → B (широкая полоса +
+# локальный наклон) → C (типичный темп типа) — только для СПРАВОЧНОГО ориентира, не для safety
+BASELINE_PACE_WIDE_BAND_BPM: Final[int] = 25      # двусторонняя полоса уровня B
+BASELINE_PACE_ADJUST_MAX_BPM: Final[int] = 15     # предохранитель экстраполяции (~1.9 мин/км)
+BASELINE_HR_PACE_SLOPE_DEFAULT: Final[float] = -8.0   # bpm за мин/км (эмпирика владельца)
+BASELINE_HR_PACE_SLOPE_MIN: Final[float] = -15.0      # санити локального OLS
+BASELINE_HR_PACE_SLOPE_MAX: Final[float] = -4.0
+BASELINE_TYPICAL_MIN_SESSIONS: Final[int] = 3     # минимум сессий для медианы avg_pace
+# #263: км-точки темповых тоже идут в полосы «темп на пульсе / пульс на темпе» (не в OLS-базу)
+BASELINE_POINT_TYPES: Final[tuple] = ("easy", "long", "recovery", "tempo")
 
 # Жара (heat)
 HEAT_TEMP_THRESHOLD_C: Final[int] = 20       # температура старта выше → heat_flag (heat threshold)

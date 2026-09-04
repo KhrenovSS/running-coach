@@ -16,7 +16,10 @@ tests/
 │                            #   source-гварды (Prescription только из clamp; tools read-only),
 │                            #   tools, agent (ScriptedLLM), промпт-стабильность, оркестратор,
 │                            #   pain-флоу, рендер, BridgeLLM (httpx.MockTransport); fakes.py;
-│                            #   test_lthr_coach.py (LTHR у коуча), test_safety_week_rules.py (правила 12–14)
+│                            #   test_lthr_coach.py (LTHR у коуча), test_safety_week_rules.py (правила 12–20,
+│                            #   шкала Recovery), test_week_report.py/test_render_week_report.py (отчёт недели),
+│                            #   test_load_monotony.py (Фостер), test_replan_regex.py, test_planning.py
+│                            #   (week_targets, availability, cancel/reopen days)
 ├── test_gps.py              # clean_trackpoints, haversine_m
 ├── test_classify.py / test_classify_boundaries.py  # classify_training
 ├── test_hr_zones.py         # get_zone/get_band/zone_bounds (LTHR-лестница + fallback %max_hr)
@@ -28,7 +31,9 @@ tests/
 ├── test_lthr_pipeline.py    # зоны от LTHR по всему пайплайну
 ├── test_session_metrics.py  # метрики M1 разбора
 ├── test_workout_insights.py # разбор тренировки (computed_json schema v7)
-├── test_hr_baseline.py      # базовая линия HR↔темп
+├── test_hr_baseline.py      # базовая линия HR↔темп + ступени B/C ориентира темпа (#264)
+├── test_type_resolution.py  # ярлык по плану дня (матрица), test_type_resolution_backfill.py — переразметка
+├── test_moving_time.py      # #286: паузы часов → длительность/темп/зоны
 ├── test_effort.py           # кардиодрейф / HR-стабильность
 ├── test_gap.py              # GAP/Minetti + downhill_block
 ├── test_timeutils.py        # хелперы времени/таймзон

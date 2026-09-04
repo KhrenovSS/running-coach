@@ -190,7 +190,8 @@ def parse_fit(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.
     result = process_trackpoints(trackpoints, start_time_utc, max_hr,
                                   max_credible_pace, lthr=lthr,
                                   max_gps_jump_m=max_gps_jump_m,
-                                  min_hr_for_fast_pace=min_hr_for_fast_pace)
+                                  min_hr_for_fast_pace=min_hr_for_fast_pace,
+                                  pauses=(activity['device_summary'] or {}).get('pauses'))
     if result is None:
         return None
     if activity['calories'] is not None:

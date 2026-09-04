@@ -6,8 +6,12 @@
 # НЕ дублировать значения inline. (Single executable source; two human-readable sources.)
 
 # --- Пороги метрик (Metric thresholds — см. §§ в docs/coros_health_metrics.md) ---
-RECOVERY_PCT_READY = 70        # §12 coros-дока: recovery_pct ≥ 70 → готов (ready)
-RECOVERY_PCT_MODERATE = 30     # исторический порог display-слоя; шкала Coros §12 — 20/70/90 (приведение — BACKLOG #249)
+# Шкала Recovery % Coros §12 (приведено 04.09.2026, #249): 0–19 Exhausted · 20–69 Fatigued ·
+# 70–89 Normal · 90–100 Fresh (готов к интенсиву). Safety: < MODERATE → max_zone 2 + без интенсива;
+# < READY → без интенсива (Fatigued); ≥ READY — без ограничений по этому сигналу.
+RECOVERY_PCT_FRESH = 90        # ≥ 90 → Fresh: готов к интенсивной тренировке
+RECOVERY_PCT_READY = 70        # ≥ 70 → Normal (ready)
+RECOVERY_PCT_MODERATE = 20     # ≥ 20 → Fatigued (умеренная готовность); ниже — Exhausted
 LOAD_RATIO_LOW = 0.8           # display-ярлык нагрузки (UI); травмоопасные пороги ACWR — INJURY_RISK_THRESHOLDS
 LOAD_RATIO_HIGH = 1.2          # display-ярлык нагрузки (UI)
 PERFORMANCE_READY = 0.5        # §4: performance > 0.5 → готов (float −2..+2)
@@ -140,6 +144,20 @@ LOAD_PROGRESSION = {
 # turn_context.is_athlete_unavailable; чат/утро на такой день назначение не дают (04.09.2026).
 # (Marker of an athlete-unavailable rest row; guards chat/morning proposals.)
 UNAVAILABLE_RATIONALE = "athlete_unavailable: подопечный не сможет бегать в этот день"
+
+# --- Замыкания флагов разбора на safety (#289, P0 04.09.2026) — правила 17–20 p1_safety ---
+EASY_TOO_HARD_LOOKBACK_DAYS = 7    # окно счётчика easy_run_too_hard (гайд 10)
+QUALITY_VOLUME_LOOKBACK_DAYS = 3   # quality_volume_exceeded в недавнем разборе …
+QUALITY_VOLUME_EXTRA_H = 48        # … → следующий качественный не раньше чем через 48 ч (гайд 44)
+DOWNHILL_LOOKBACK_DAYS = 2         # downhill_load_high в недавнем разборе (колено, гайд 46) …
+DOWNHILL_EXTRA_H = 24              # … → день лёгкий, интенсив не раньше +24 ч
+MONOTONY_HIGH = 2.0                # Фостер: монотонность > 2 — риск (нужен день отдыха)
+MONOTONY_MIN_TRAIN_DAYS = 5        # монотонность осмысленна от 5 тренировочных дней из 7
+LONG_RUN_SHARE_LOOKBACK_DAYS = 7   # long_run_share_high на прошлой неделе → длительная не растёт
+DETRAINING_RETURN_VOLUME_PCT = 0.65  # гайд 61: первые недели возврата — 65–70% прежнего пика
+DETRAINING_RETURN_MIN_DAYS_OFF = 14  # потолок объёма — после паузы от 2 недель (гайд 46: до 5 дней
+                                     # форма не теряется; 6–13 дней — только правило 14 safety)
+DETRAINING_PEAK_WEEKS = 8          # окно поиска пика недельного объёма до паузы
 
 # --- Недельный отчёт (coach/week_report.py) — METRICS_GUIDE §12, решение владельца 03.09.2026 ---
 WEEK_REPORT_SERIES_WEEKS = 6       # ряд недель в карточке «N недель: … км»

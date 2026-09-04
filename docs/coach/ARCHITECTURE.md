@@ -154,30 +154,43 @@ coach/
 ├── render_segments.py # рендер посегментной раскладки + segments_total_min + compact_segments (структура одной строкой)
 ├── render_week.py     # карточка недели (render_week_plan: план/факт по дням, ~темп, ≈км из прогноза)
 ├── week_view.py       # read-only показ сохранённого плана недели (/week, show_week_plan)
-├── planning_window.py # окно планирования (остаток недели) + week_done (факт недели по локальной дате)
+├── week_report.py     # C8.1 (03.09): числа недели по локальной дате (объём, лёгкое время по зонам, баллы,
+│                      #   экономичность, монотонность), highlights/concerns, build_week_report (вс/report)
+├── render_week_report.py # карточка «Итоги недели» (строки без данных опускаются, ✓/⚠ по порогам)
+├── load_monotony.py   # #308: монотонность/страйн Фостера по дневным баллам (week_report + правило 20)
+├── planning_window.py # окно планирования (остаток недели) + week_done + local_week_volumes (#220,
+│                      #   полные недели по локальной дате — база week_targets)
 ├── segments.py        # enrich_and_clamp_segments: числа сегментам из зон/истории, per-segment clamp (M2.1)
 ├── orchestrator.py    # morning_verdict (подтверждает план дня), handle_chat, on_workout_completed
 ├── review_flow.py     # ensure_insights_for_batch, run_pending_review, due_review_sessions
 │                      #   (+ слияние флагов из computed), weekly_report; ChatReply
 ├── turn_context.py    # build_extras / unchanged_today / history (вынос из orchestrator, #266)
-├── planning.py        # детерминированные числа недели (мезоцикл 3:1, прогрессия, потолки),
-│                      #   week_plan_review, confirm_or_adjust_morning
+├── planning.py        # детерминированные числа недели (мезоцикл 3:1, прогрессия, потолки,
+│                      #   long_run_hold/detraining_return, availability #294), week_plan_review,
+│                      #   confirm_or_adjust_morning (последняя строка дня), cancel_days/reopen_days
+│                      #   (отмены подопечного с маркером), blocked_by_unavailable, plan_change_line
 ├── weekly_plan.py     # generate_weekly_plan (вс 19:00, строки recommendations status=planned)
 ├── numeric_check.py   # #247: сверка чисел прозы LLM с карточкой (детект+лог)
 ├── vision.py          # #257: SleepShot + extract_sleep (скриншот → мост /vision)
-├── rules/p1_safety.py # evaluate_safety(state) — триггеры границы (чистая функция)
+├── rules/p1_safety.py # evaluate_safety(state) — правила 1–20 (шкала Recovery Coros, флаги разбора
+│                      #   17–19, монотонность 20, перекос недели 16); safety.effective_workout_type —
+│                      #   интенсивность по сегментам, не по ярлыку (04.09)
 ├── skills/            # base(SkillFn, SKILL_KEYS=6) + fatigue, recovery, load,
 │                      #   distribution, progress, pain (state) + workout (per-session)
 ├── tools/             # registry (7 read-only tools), context, serialize, state_tools,
 │                      #   history_tools (daily_metrics_morning += сон), knowledge_tools
 ├── knowledge/         # loader (front-matter, key_rules_digest, keyword-поиск)
 │   └── guides/        #   методика: Лидьярд/80-20/прогрессия/колено + Дэниелс/Фицджеральд
-└── llm/               # client (get_llm: ключ→мост→Null), config, schemas (CoachTurn+weekly_plan),
+└── llm/               # client (get_llm: ключ→мост→Null), config, schemas (CoachTurn: proposal, weekly_plan,
+                       #   unavailable/available_again_days_ahead, available_weekdays, show_week_plan),
                        #   prompts (кэш-блоки + today + PLAN/MORNING/REVIEW), agent, anthropic/bridge/null
 
 # Смежное: analysis/session_metrics.py (метрики M1), services/{workout_insights,sleep_ingest,
 #   repositories_insights}.py, telegram/{handlers/sleep_photo, jobs/{sleep_reminder,coach_weekly}}.py,
 #   bin/coach_llm_bridge.py (/complete + /vision). Миграции сна: r1s2t3u4v5w6, s2t3u4v5w6x7.
+#   Ярлык тренировки (04.09): analysis/type_resolution.py (план — назначение, факт — интенсивность),
+#   применяется в services/workout_insights.apply_type_resolution; провенанс training_type_auto/_source
+#   (миграция v5w6x7y8z9a0); переразметка — services/type_resolution_backfill.py.
 ```
 
 Смежное: `src/services/repositories_coach.py` (CoachRepository — выборки для скиллов/state,

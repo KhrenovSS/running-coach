@@ -5,7 +5,7 @@ _THIS = {"week_start": "2026-08-31", "km": 25.4, "minutes": 180, "runs": 4, "qua
          "long_run_km": 8.5, "long_run_min": 60, "long_run_share": 0.33,
          "easy_time_share": 0.84, "hard_time_share": 0.16, "load_points": 62,
          "efficiency_delta_bpm": -3.0, "efficiency_n": 4, "cadence_median": 156,
-         "pain_days": 0, "flags": {}}
+         "pain_days": 0, "flags": {}, "monotony": 1.4, "strain": 86.8, "trained_days": 4}
 _PREV = dict(_THIS, week_start="2026-08-24", km=25.3, runs=4, easy_time_share=0.71,
              hard_time_share=0.29, load_points=48)
 
@@ -32,7 +32,7 @@ def test_full_card_layout():
         "К прошлой: +0.1 км (25.3) · среднее за 4 нед: 22.0 км",
         "Лёгкое время (Z1–2): 84% · цель ≥80% · прошлая 71% ✓",
         "Качество: 1 из 1 · длительная 8.5 км = 33% недели ⚠ (потолок 30%)",
-        "Нагрузка: 62 баллов · прошлая 48 · острая/хроническая 1.10 (норма)",
+        "Нагрузка: 62 баллов · прошлая 48 · монотонность 1.4 · острая/хроническая 1.10 (норма)",
         "Экономичность: пульс на своём темпе −3 уд/мин к базе (по 4 пробежкам) ✓",
         "План недели: выполнено 3 · пропущено 1 · скорректировано 1",
         "6 недель: 12 · 14 · 17 · 25 · 25 · 25 км",
@@ -42,6 +42,7 @@ def test_full_card_layout():
 def test_missing_data_lines_are_omitted():
     """Нет зон/базы/плана/цели — строк нет, карточка не врёт нулями."""
     this = dict(_THIS, easy_time_share=None, hard_time_share=None, load_points=None,
+                monotony=None, strain=None, trained_days=1,
                 efficiency_delta_bpm=None, efficiency_n=0, long_run_share=None, runs=1,
                 km=5.0, minutes=30)
     text = render_week_report(_report(this=this, prev=None, avg_prev=None, targets={},

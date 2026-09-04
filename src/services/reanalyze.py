@@ -89,6 +89,10 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
 
     try:
         from src.services.repositories import latest_lthr
+        # #286: паузы часов — из сырья (FIT) или из сохранённого device_summary (кэш-путь)
+        pauses = ((activity.get('device_summary') or {}).get('pauses') if from_raw else None) \
+            or ((session.device_summary or {}).get('pauses')
+                if isinstance(session.device_summary, dict) else None)
         result = process_trackpoints(
             trackpoints, session.begin_ts,
             max_hr=user.max_hr or app_settings.default_max_hr,
@@ -97,6 +101,7 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
             max_gps_jump_m=user.max_gps_jump_m or 100.0,
             min_hr_for_fast_pace=user.min_hr_for_fast_pace or 130,
             pace_gap=pace_gap,
+            pauses=pauses,
             interval_min_phase_duration=phase,
             interval_min_phase_distance_m=phase_dist_m,
             interval_hr_lag_sec=lag,

@@ -224,3 +224,12 @@ def test_hard_share_7d_signal(db_session):
                                           {"avg_hr": 130, "duration_min": 20.0}])
     state = assess_state(user.id, db=db_session)
     assert state.signals["hard_share_7d"] == round(30 / 70, 2)
+
+
+def test_state_signals_carry_p0_closures(athlete_with_history, db_session):
+    """#289/#308: сигналы правил 17–20 присутствуют в state.signals."""
+    sig = assess_state(athlete_with_history.id, db=db_session).signals
+    assert sig["easy_too_hard_7d"] == 0
+    assert sig["quality_volume_exceeded_recent"] is False
+    assert sig["downhill_load_recent"] is False
+    assert "monotony_7d" in sig and "trained_days_7d" in sig

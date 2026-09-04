@@ -59,7 +59,7 @@ from src.models import TrainingFeedback, User, UserModel, WellnessReport
 from src.services.repositories import latest_lthr
 from src.services.repositories_coach import CoachRepository
 from src.utils.logger import get_logger
-from src.utils.timeutils import fmt_local, local_dt, user_now
+from src.utils.timeutils import WEEKDAYS_RU_SHORT, fmt_local, local_dt, user_now
 from dataclasses import dataclass, field
 
 logger = get_logger("coach.orchestrator")
@@ -181,6 +181,14 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
                                         db=db, now=user_now(user))
         if reopened:
             text += "\n\n" + reopened
+    if turn.available_weekdays is not None and kind == "chat":
+        # #294: постоянное окно доступности — персистим, /plan его учитывает
+        saved = planning.set_availability(user_id, db=db, weekdays=turn.available_weekdays)
+        if saved["weekdays"]:
+            names = ", ".join(WEEKDAYS_RU_SHORT[d] for d in saved["weekdays"])
+            text += f"\n\nЗапомнил дни для бега: {names}. План недели будет ставить тренировки только в них."
+        else:
+            text += "\n\nЗапомнил: бегать можно в любой день недели."
     if proposal is not None and proposal.workout_type != "rest" and kind in ("chat", "morning"):
         # Детерминированный гвард (инцидент 04.09.2026): на день, который подопечный
         # отменил сам, тренировку не назначаем — предложение LLM отбрасывается.

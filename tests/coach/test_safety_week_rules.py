@@ -199,3 +199,63 @@ def test_week_intensity_overload_rule(share, triggered):
         assert "перегружена интенсивностью" in " ".join(r.reason for r in verdict.reasons)
     else:
         assert verdict.max_zone == SAFETY_MAX_ZONE_DEFAULT
+
+
+# --- P0 04.09.2026: шкала восстановления Coros §12 (#249) и правила 17–20 (#289, #308) -------
+
+@pytest.mark.parametrize("pct, triggered, zone, hard_forbidden", [
+    (19, "recovery_low", 2, True),          # Exhausted
+    (20, "recovery_fatigued", None, True),  # Fatigued: без интенсива, зона не режется
+    (69, "recovery_fatigued", None, True),
+    (70, None, None, False),                # Normal
+    (95, None, None, False),                # Fresh
+])
+def test_recovery_bands_follow_coros_scale(pct, triggered, zone, hard_forbidden):
+    from tests.coach.test_safety_clamp import _state
+
+    v = evaluate_safety(_state(recovery_pct=pct))
+    assert (triggered in v.triggered) if triggered else not (
+        {"recovery_low", "recovery_fatigued"} & set(v.triggered))
+    assert v.max_zone == (zone or SAFETY_MAX_ZONE_DEFAULT)
+    assert (not set(HARD_TYPES) & set(v.allowed_types)) is hard_forbidden if v.allowed_types \
+        else hard_forbidden is False
+
+
+def test_easy_runs_too_hard_rule_17():
+    from src.coach.config import EASY_TOO_HARD_WEEK_FLAGS
+    from tests.coach.test_safety_clamp import _state
+
+    v = evaluate_safety(_state(easy_too_hard_7d=EASY_TOO_HARD_WEEK_FLAGS))
+    assert "easy_runs_too_hard" in v.triggered and v.max_zone == 2
+    assert not set(HARD_TYPES) & set(v.allowed_types)
+    silent = evaluate_safety(_state(easy_too_hard_7d=EASY_TOO_HARD_WEEK_FLAGS - 1))
+    assert "easy_runs_too_hard" not in silent.triggered
+
+
+def test_quality_volume_and_downhill_push_next_hard():
+    from src.coach.config import DOWNHILL_EXTRA_H, QUALITY_VOLUME_EXTRA_H
+    from tests.coach.test_safety_clamp import _state
+
+    now = datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc)
+    v = evaluate_safety(_state(quality_volume_exceeded_recent=True), now=now)
+    assert "quality_volume_exceeded" in v.triggered
+    assert v.earliest_next_hard == now + timedelta(hours=QUALITY_VOLUME_EXTRA_H)
+    d = evaluate_safety(_state(downhill_load_recent=True), now=now)
+    assert "downhill_load" in d.triggered and d.max_zone == 3
+    assert d.earliest_next_hard == now + timedelta(hours=DOWNHILL_EXTRA_H)
+    both = evaluate_safety(_state(quality_volume_exceeded_recent=True,
+                                  downhill_load_recent=True), now=now)
+    assert both.earliest_next_hard == now + timedelta(hours=max(QUALITY_VOLUME_EXTRA_H,
+                                                                DOWNHILL_EXTRA_H))
+
+
+@pytest.mark.parametrize("mono, days, triggered", [
+    (2.5, 5, True), (2.5, 4, False), (1.5, 6, False), (None, 6, False)])
+def test_monotony_rule_20(mono, days, triggered):
+    from tests.coach.test_safety_clamp import _state
+
+    v = evaluate_safety(_state(monotony_7d=mono, trained_days_7d=days))
+    assert ("monotony_high" in v.triggered) is triggered
+    if triggered:
+        assert not set(HARD_TYPES) & set(v.allowed_types)
+        assert "нужен день отдыха" in " ".join(r.reason for r in v.reasons)

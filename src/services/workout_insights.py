@@ -131,6 +131,10 @@ def compute_workout_metrics(session: TrainingSession, *,
     """
     times_sec, dists, hrs, alts, tp_t0 = _parse_trackpoints(session.trackpoints_json)
     ttype = effective_training_type(session)
+    # #286: паузы часов → зоны и темп км-точек без стоячего времени (moving-time)
+    from src.analysis.utils import pauses_to_offsets
+    ds = session.device_summary if isinstance(session.device_summary, dict) else {}
+    pauses_sec = pauses_to_offsets(ds.get("pauses"), tp_t0)
     # Квалиметрия GPS: количественный ущерб для LLM; unreliable гейтит pace-блоки
     # (GPS quality: quantitative damage for the LLM; unreliable gates pace-derived blocks)
     gps_quality = session.gps_quality if isinstance(session.gps_quality, dict) else None
@@ -197,7 +201,7 @@ def compute_workout_metrics(session: TrainingSession, *,
         drift = {**_EMPTY_DRIFT, "reason": "gps_unreliable"}
         deviation = {"available": False, "reason": "gps_unreliable"}
     else:
-        gap = compute_gap(times_sec, dists, hrs, alts)
+        gap = compute_gap(times_sec, dists, hrs, alts, pauses_sec=pauses_sec or None)
         alts_smoothed = smooth_altitudes(alts)
         factors = local_grade_factors(dists, alts_smoothed) if alts_smoothed else None
         drift = compute_cardiac_drift(times_sec, dists, hrs, training_type=ttype,
@@ -217,7 +221,7 @@ def compute_workout_metrics(session: TrainingSession, *,
     computed["heat"] = heat
 
     # --- M1: детерминированные метрики сессии (METRICS_GUIDE §4) ---
-    zones = sm.time_in_zones(times_sec, hrs, max_hr, lthr)
+    zones = sm.time_in_zones(times_sec, hrs, max_hr, lthr, pauses_sec=pauses_sec or None)
     computed["time_in_zones"] = zones
     computed["easy_discipline"] = sm.easy_discipline(
         zones, ttype, tolerance=EASY_RUN_Z3_TOLERANCE_PCT)

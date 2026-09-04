@@ -22,7 +22,7 @@ from src.coach.fallback import fallback_proposal
 from src.coach.rules.p1_safety import evaluate_safety
 from src.coach.safety import clamp, effective_workout_type
 from src.config import settings
-from src.config.constants import BASELINE_WINDOW_DAYS
+from src.config.constants import BASELINE_WINDOW_DAYS, LTSP_ZONE_OFFSET_S
 from src.models import Recommendation, User
 from src.utils.logger import get_logger
 
@@ -64,15 +64,24 @@ def predict_volume(p: Prescription, state: AthleteState, *, db: Session) -> dict
                               latest_lthr(state.user_id, db=db))
     if ceiling is None:
         return {}
-    estimate = expected_pace_at_hr(state.user_id, ceiling, db=db)
+    # #264: справочный ориентир — со ступенчатой деградацией (band → adjusted → typical →
+    # threshold от ltsp); safety-контекст (_pace_clamp_context) остаётся на уровне A
+    estimate = expected_pace_at_hr(state.user_id, ceiling, db=db,
+                                   workout_type=p.workout_type, degraded_ok=True)
+    if estimate is None:
+        ltsp = latest_ltsp(state.user_id, db=db)
+        if ltsp and zone in LTSP_ZONE_OFFSET_S:
+            estimate = {"pace_min_km": round((ltsp + LTSP_ZONE_OFFSET_S[zone]) / 60, 2),
+                        "quality": "threshold"}
     if estimate is None:
         return {}
     pace = estimate["pace_min_km"]
     return {"pace_min_km": pace,
             "distance_km": round(duration / pace, 1),
             "hr_ceiling": ceiling,
-            "based_on": {"n_points": estimate["n_points"],
-                         "window_days": BASELINE_WINDOW_DAYS}}
+            "quality": estimate.get("quality", "band"),
+            "based_on": {k: estimate[k] for k in ("n_points", "n_sessions", "hr_delta_bpm")
+                         if k in estimate} | {"window_days": BASELINE_WINDOW_DAYS}}
 
 
 def _pace_clamp_context(proposal: WorkoutProposal, verdict, state: AthleteState,
@@ -121,6 +130,13 @@ def finalize(proposal: WorkoutProposal | None, state: AthleteState, *,
                     prescription.workout_type, ",".join(verdict.triggered))
     if db is not None:
         prescription.predicted = predict_volume(prescription, state, db=db)
+        # #295: потолок пульса фиксируем в назначении (уд/мин) — смена якоря зон
+        # (max_hr → ПАНО) не меняет молча числа сохранённого плана
+        zone = prescription.target.get("max_zone")
+        if zone is not None and prescription.workout_type != "rest":
+            user = db.query(User).filter(User.id == state.user_id).first()
+            prescription.target["hr_ceiling"] = zone_ceiling_hr(
+                zone, user_max_hr(user), latest_lthr(state.user_id, db=db))
     if db is not None and proposal.segments:
         # Числа сегментам проставляются ПОСЛЕ clamp — по итоговым зоне/типу (симметрично
         # predict_volume). enrich сам вернёт [], если структуру нельзя показать безопасно.

@@ -70,6 +70,7 @@ OUTPUT_CONTRACT = """ФОРМАТ ОТВЕТА — ровно один JSON-об
   "weekly_plan": null,
   "unavailable_days_ahead": null,
   "available_again_days_ahead": null,
+  "available_weekdays": null,
   "assessment": {
     "effort_match": "ok|harder|easier|unknown",
     "causes": ["heat|cold|wind|elevation|terrain|poor_sleep|fatigue|pace_too_fast|illness|recovery_good|other"],
@@ -164,6 +165,10 @@ OUTPUT_CONTRACT = """ФОРМАТ ОТВЕТА — ровно один JSON-об
 - available_again_days_ahead: подопечный говорит, что в ранее отменённый день всё-таки
   сможет бегать («в субботу смогу») — сдвиги этих дней; система снимет отдых-отмену.
   Иначе null.
+- available_weekdays: подопечный описывает ПОСТОЯННОЕ окно («могу бегать только пн–чт»,
+  «по выходным не бегаю») — список дней недели 0=пн … 6=вс, когда бегать МОЖНО; «могу в
+  любой день» — []. Система сохранит окно и /plan будет ставить тренировки только в эти
+  дни. Разовая отмена конкретных дней — это unavailable_days_ahead, не это поле. Иначе null.
 - show_week_plan: true, когда подопечный спрашивает, какой у него план на неделю
   или в какие дни бегать — это НЕ просьба составить план: weekly_plan=null,
   числа и дни в прозе не перечисляй — карточку сохранённого плана (уже с учётом
@@ -223,7 +228,8 @@ WEEKLY_PROMPT = (
     "подготовка — по week_report.next_week (фаза мезоцикла, что меняется: объём, качество, "
     "длительная), без конкретных тренировок и чисел. Не больше пяти предложений, без дежурной "
     "похвалы и общих слов: если сказать нечего — не говори. recent_reviews (effort_match/flags/"
-    "carry_forward) — контекст для объяснения причин. Пробежек не было (this.runs=0) — одно "
+    "carry_forward) — контекст для объяснения причин. Интенсивность недели оценивай ТОЛЬКО по "
+    "week_report (quality_runs, hard_time_share) и is_quality тренировок — не по ярлыку type. Пробежек не было (this.runs=0) — одно "
     "предложение. proposal=null, weekly_plan=null — план следующей недели придёт отдельным "
     "сообщением. В конце — один короткий вопрос о целях недели.")
 
@@ -241,6 +247,8 @@ PLAN_PROMPT = (
     "посчитаны в week_targets: target_km, потолки качества (quality_z4/z3_km_max), "
     "long_run_km_max/long_run_min_max, hard_days_max, фаза мезоцикла "
     "(build/deload), run_days_max/rest_days_min — НЕ выходи за них и НЕ пересчитывай. "
+    "availability — окно доступности подопечного (дни недели и отменённые даты): "
+    "days_ahead_allowed его уже учитывает, других дней не назначай. "
     "Заполни weekly_plan: только тренировочные дни, for_days_ahead ТОЛЬКО из "
     "days_ahead_allowed (сдвиг от текущего дня из «Сейчас»; 0 = сегодня, если он в "
     "списке), по одному элементу на день; пропущенные дни = отдых, rest-элементы не "

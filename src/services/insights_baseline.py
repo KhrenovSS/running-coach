@@ -12,13 +12,15 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from src.analysis.hr_baseline import (
+    pace_at_hr_adjusted,
+    typical_pace_median,
     fit_hr_pace_baseline,
     hr_at_pace_band,
     km_points,
     pace_at_hr_band,
 )
 from src.coach.util import effective_training_type
-from src.config.constants import BASELINE_TYPES, BASELINE_WINDOW_DAYS
+from src.config.constants import BASELINE_POINT_TYPES, BASELINE_TYPES, BASELINE_WINDOW_DAYS
 from src.models import TrainingSession, UserModel, WorkoutInsight
 from src.utils.logger import get_logger
 
@@ -77,16 +79,43 @@ def ensure_baseline(user_id: int, *, db: Session) -> dict | None:
     return stored_baseline(user_id, db=db)
 
 
-def expected_pace_at_hr(user_id: int, hr_ceiling: int, *, db: Session) -> dict | None:
-    """Эмпирический темп на пульсе: медиана км-точек insights окна в полосе
-    под потолком (+ ленивый бутстрап недостающих insights).
-
-    (Empirical pace at HR from window km-points; lazy insights bootstrap.)
-    Мало точек в полосе → None. Возвращает {"pace_min_km", "n_points"}.
+def expected_pace_at_hr(user_id: int, hr_ceiling: int, *, db: Session,
+                        workout_type: str | None = None,
+                        degraded_ok: bool = False) -> dict | None:
+    """Темп на пульсе: A — медиана км-точек в узкой полосе под потолком; при degraded_ok
+    (#264, ТОЛЬКО справочный ориентир, НЕ safety-clamp) — B (широкая полоса + локальный
+    наклон) → C (типичный темп типа по avg_pace). Км-точки — steady + tempo (#263).
+    Возвращает {"pace_min_km", "quality": band|adjusted|typical, …} или None.
+    (Pace at HR with honest step-wise degradation for the reference estimate only.)
     """
     _bootstrap_window_insights(user_id, db=db)
-    points, _ = _collect_window_points(user_id, db=db)
-    return pace_at_hr_band(points, hr_ceiling)
+    points, _ = _collect_window_points(user_id, db=db, include_quality=True)
+    estimate = pace_at_hr_band(points, hr_ceiling)
+    if estimate is not None or not degraded_ok:
+        return estimate
+    estimate = pace_at_hr_adjusted(points, hr_ceiling)
+    if estimate is not None:
+        return estimate
+    return _typical_pace(user_id, workout_type, db=db)
+
+
+def _typical_pace(user_id: int, workout_type: str | None, *, db: Session) -> dict | None:
+    """Уровень C (#264): медиана avg_pace прошлых тренировок — сначала того же типа,
+    при нехватке — всех steady-типов. Лёгкий запрос без trackpoints_json."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=BASELINE_WINDOW_DAYS)
+    rows = db.query(TrainingSession.training_type, TrainingSession.training_type_override,
+                    TrainingSession.avg_pace).filter(
+        TrainingSession.user_id == user_id,
+        TrainingSession.begin_ts >= cutoff,
+        TrainingSession.avg_pace.isnot(None),
+    ).all()
+    def _type(r):
+        return r.training_type_override or r.training_type
+    if workout_type:
+        same = typical_pace_median([r.avg_pace for r in rows if _type(r) == workout_type])
+        if same is not None:
+            return same
+    return typical_pace_median([r.avg_pace for r in rows if _type(r) in BASELINE_TYPES])
 
 
 def expected_hr_at_pace(user_id: int, pace_min_km: float, *, db: Session) -> dict | None:
@@ -97,16 +126,19 @@ def expected_hr_at_pace(user_id: int, pace_min_km: float, *, db: Session) -> dic
     Мало точек в полосе → None. Возвращает {"hr_bpm", "n_points"}.
     """
     _bootstrap_window_insights(user_id, db=db)
-    points, _ = _collect_window_points(user_id, db=db)
+    points, _ = _collect_window_points(user_id, db=db, include_quality=True)   # #263
     return hr_at_pace_band(points, pace_min_km)
 
 
-def _collect_window_points(user_id: int, *, db: Session
+def _collect_window_points(user_id: int, *, db: Session, include_quality: bool = False
                            ) -> tuple[list[tuple[float, float]], int]:
-    """Км-точки (gap_pace, hr) steady-тренировок окна из готовых insights.
+    """Км-точки (gap_pace, hr) тренировок окна из готовых insights.
 
+    По умолчанию — steady-типы (база OLS); include_quality (#263) добавляет темповые —
+    для полос «темп на пульсе»/«пульс на темпе» на высоких зонах (интервалы — нет: осцилляции).
     (Window km-points from stored insights.) Возвращает (points, n_sessions).
     """
+    allowed = BASELINE_POINT_TYPES if include_quality else BASELINE_TYPES
     cutoff = datetime.now(timezone.utc) - timedelta(days=BASELINE_WINDOW_DAYS)
     rows = db.query(WorkoutInsight, TrainingSession).join(
         TrainingSession, WorkoutInsight.session_id == TrainingSession.id,
@@ -117,7 +149,7 @@ def _collect_window_points(user_id: int, *, db: Session
     points: list[tuple[float, float]] = []
     n_sessions = 0
     for insight, session in rows:
-        if effective_training_type(session) not in BASELINE_TYPES:
+        if effective_training_type(session) not in allowed:
             continue
         gap = (insight.computed_json or {}).get("gap") or {}
         if not gap.get("available"):

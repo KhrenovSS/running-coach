@@ -11,7 +11,12 @@ from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
+from src.analysis.session_metrics import FLAG_LONG_RUN_SHARE
 from src.coach.config import (
+    DETRAINING_PEAK_WEEKS,
+    DETRAINING_RETURN_MIN_DAYS_OFF,
+    DETRAINING_RETURN_VOLUME_PCT,
+    LONG_RUN_SHARE_LOOKBACK_DAYS,
     UNAVAILABLE_RATIONALE,
     CYCLE_3_1,
     INTERVAL_MAX_KM,
@@ -27,11 +32,12 @@ from src.coach.config import (
     THRESHOLD_MAX_PCT_WEEK,
 )
 from src.coach.contracts import AthleteState, Prescription, WorkoutProposal
-from src.coach.planning_window import plan_window, week_done
+from src.coach.planning_window import local_week_volumes, plan_window, week_done
 from src.coach.prescriber import finalize, save_prescription
 from src.coach.turn_context import is_athlete_unavailable, unchanged_today
 from src.coach.util import effective_training_type
 from src.config.constants import RECOMMENDATION_STATUS_SUPERSEDED
+from src.services.repositories_insights import InsightRepository
 from src.models import Recommendation, TrainingSession, User, UserModel
 from src.services.repositories import TrainingRepository
 from src.utils.logger import get_logger
@@ -48,6 +54,65 @@ PLAN_STATUSES = ("planned", "confirmed", "adjusted")
 _KEEP_TYPES = ("long", "tempo", "interval", "race")
 
 _MESO_LEN = CYCLE_3_1["build_weeks"] + CYCLE_3_1["deload_week"]  # 4
+
+
+def availability(user_id: int, *, db: Session) -> dict:
+    """Окно доступности подопечного (#294): {"weekdays": [0..6] | None} из params_json.week_plan.
+    None/пусто — бегать можно в любой день. (Persisted weekday availability.)"""
+    meta = _week_plan_meta(user_id, db=db)
+    return {"weekdays": (meta.get("availability") or {}).get("weekdays")}
+
+
+def set_availability(user_id: int, *, db: Session, weekdays: list[int] | None) -> dict:
+    """Записать дни недели, когда подопечный может бегать (merge-паттерн advance_mesocycle).
+    Пустой список/None — снять ограничение. Возврат — сохранённое окно."""
+    um = db.query(UserModel).filter(UserModel.user_id == user_id).first()
+    if um is None:
+        um = UserModel(user_id=user_id, params_json={})
+        db.add(um)
+    params = dict(um.params_json or {})
+    meta = dict(params.get("week_plan") or {})
+    days = sorted({d for d in (weekdays or []) if 0 <= d <= 6})
+    meta["availability"] = {"weekdays": days or None,
+                            "updated_at": datetime.now(timezone.utc).isoformat()}
+    params["week_plan"] = meta
+    um.params_json = params
+    db.commit()
+    logger.info("Availability set for user=%s: weekdays=%s", user_id, days or "any")
+    return {"weekdays": days or None}
+
+
+def unavailable_dates(user_id: int, *, db: Session, week_start: date) -> list[date]:
+    """Даты недели week_start, отменённые подопечным (rest с маркером) — план их не трогает."""
+    rows = db.query(Recommendation).filter(
+        Recommendation.user_id == user_id,
+        Recommendation.for_date >= week_start,
+        Recommendation.for_date <= week_start + timedelta(days=6),
+        Recommendation.status != RECOMMENDATION_STATUS_SUPERSEDED,
+    ).order_by(Recommendation.id.asc()).all()
+    latest = {r.for_date: r for r in rows}
+    return sorted(d for d, r in latest.items() if is_athlete_unavailable(r))
+
+
+def _last_long_run_km(user_id: int, *, db: Session, since: date) -> float | None:
+    """Самая длинная тренировка (км) с даты since (last long run distance)."""
+    row = db.query(TrainingSession).filter(
+        TrainingSession.user_id == user_id,
+        TrainingSession.begin_ts >= datetime.combine(since, datetime.min.time(),
+                                                     tzinfo=timezone.utc),
+    ).order_by(TrainingSession.total_distance_km.desc()).first()
+    return float(row.total_distance_km) if row and row.total_distance_km else None
+
+
+def _days_off(user_id: int, *, db: Session, today: date) -> int | None:
+    """Дней без бега до today (None — тренировок не было вовсе)."""
+    from src.utils.timeutils import session_local_dt
+    row = db.query(TrainingSession).filter(TrainingSession.user_id == user_id).order_by(
+        TrainingSession.begin_ts.desc()).first()
+    if row is None or row.begin_ts is None:
+        return None
+    user = db.query(User).filter(User.id == user_id).first()
+    return (today - session_local_dt(row.begin_ts, row, user).date()).days
 
 
 def _monday_of(d: date) -> date:
@@ -76,8 +141,11 @@ def week_targets(user_id: int, *, db: Session, today: date | None = None) -> dic
         # Воскресенье: планируем следующую неделю — сделанного в ней ещё нет
         done = {"km": 0.0, "runs": 0, "quality_runs": 0, "trained_today": False}
 
-    weeks = TrainingRepository.weekly_volume(user_id, weeks=4, db=db)
-    prev = [w for w in weeks if w["week_start"] < week_start]
+    # #220: локальные полные недели (не UTC-корзины); при планировании следующей недели
+    # текущая (уже завершённая к вс) — тоже «прошлая»
+    weeks = local_week_volumes(user_id, db=db, today=week_start + timedelta(days=6), weeks=4)
+    # prev — прошлые недели С пробежками (пустые недели прогрессию не задают, как и раньше)
+    prev = [w for w in weeks if w["week_start"] < week_start and w["session_count"] > 0]
     meta = _week_plan_meta(user_id, db=db)
 
     # Счётчик мезоцикла: replan той же недели НЕ двигает счётчик (идемпотентно)
@@ -108,6 +176,39 @@ def week_targets(user_id: int, *, db: Session, today: date | None = None) -> dic
         pct = LOAD_PROGRESSION["max_weekly_increase_pct"] / 100.0
         target_km = round(prev_km * (1 + pct), 1)
 
+    # #294: окно доступности — дни недели из params_json + даты, отменённые подопечным
+    avail = availability(user_id, db=db)
+    blocked_dates = unavailable_dates(user_id, db=db, week_start=week_start)
+    days_allowed = [
+        d for d in range(first_offset, last_offset + 1)
+        if (today + timedelta(days=d)) not in blocked_dates
+        and (not avail["weekdays"] or (today + timedelta(days=d)).weekday() in avail["weekdays"])
+    ]
+
+    # P0 #289: длительная не растёт, если на прошлой неделе её доля превысила потолок
+    # (long-run share exceeded last week → hold the long run at its last size)
+    long_run_km_max = round(target_km * LONG_RUN_MAX_PCT_WEEK, 1)
+    long_run_hold = False
+    if InsightRepository.recent_flag(user_id, FLAG_LONG_RUN_SHARE, db=db,
+                                     days=LONG_RUN_SHARE_LOOKBACK_DAYS):
+        last_long = _last_long_run_km(user_id, db=db, since=week_start - timedelta(days=7))
+        if last_long:
+            long_run_km_max = round(min(long_run_km_max, last_long), 1)
+            long_run_hold = True
+    # P0 #289: возврат после паузы ≥ DETRAINING_RETURN_MIN_DAYS_OFF (2 недели) — объём ≤ 65%
+    # пика (гайд 61), без качественных; паузы 6–13 дней закрывает правило 14 safety
+    # (detraining return → volume ceiling, no quality)
+    detraining_return = False
+    hard_days_max = PLAN_QUALITY_DAYS_MAX
+    days_off = _days_off(user_id, db=db, today=today)
+    if days_off is not None and days_off >= DETRAINING_RETURN_MIN_DAYS_OFF:
+        peak = max([w["total_km"] for w in local_week_volumes(
+            user_id, db=db, today=today, weeks=DETRAINING_PEAK_WEEKS)] or [0.0])
+        if peak > 0:
+            target_km = round(min(target_km, peak * DETRAINING_RETURN_VOLUME_PCT), 1)
+            detraining_return = True
+            hard_days_max = 0
+
     return {
         "week_start": week_start.isoformat(),
         "mesocycle_week": meso_week,
@@ -121,20 +222,29 @@ def week_targets(user_id: int, *, db: Session, today: date | None = None) -> dic
                                        INTERVAL_MAX_KM), 1),
         "quality_z3_km_max": round(min(target_km * THRESHOLD_MAX_PCT_WEEK,
                                        THRESHOLD_MAX_KM), 1),
-        "long_run_km_max": round(target_km * LONG_RUN_MAX_PCT_WEEK, 1),
+        "long_run_km_max": long_run_km_max,
+        "long_run_hold": long_run_hold,             # #289: доля длительной превышена — не растим
         "long_run_min_max": LONG_RUN_MAX_MIN,
-        "hard_days_max": PLAN_QUALITY_DAYS_MAX,
+        "hard_days_max": hard_days_max,
+        "detraining_return": detraining_return,     # #289: возврат после паузы — объём ≤ 65% пика
+        "days_off": days_off,
         # Беговых дней ≤ и дней полного отдыха ≥ (решение владельца 02.09.2026)
         "run_days_max": run_days_max,
         "rest_days_min": 7 - run_days_max,
         # Остаток недели (#293): что уже сделано и что осталось распределить
         "plan_scope": "week" if first_offset == 1 and last_offset == 7 else "rest_of_week",
-        "days_ahead_allowed": list(range(first_offset, last_offset + 1)),
+        # #294: окно доступности — дни недели подопечного и отменённые им даты вычитаются
+        "days_ahead_allowed": days_allowed,
+        "availability": {"weekdays": avail["weekdays"],
+                         "weekday_names": [WEEKDAYS_RU_SHORT[d] for d in avail["weekdays"]]
+                         if avail["weekdays"] else None,
+                         "unavailable_dates": [d.isoformat() for d in blocked_dates]},
         "done_km": done["km"], "done_runs": done["runs"],
         "done_quality": done["quality_runs"],
         "remaining_km": round(max(0.0, target_km - done["km"]), 1),
-        "remaining_run_days_max": max(0, run_days_max - done["runs"]),
-        "remaining_hard_days_max": max(0, PLAN_QUALITY_DAYS_MAX - done["quality_runs"]),
+        # #294: не больше доступных дней окна планирования
+        "remaining_run_days_max": min(max(0, run_days_max - done["runs"]), len(days_allowed)),
+        "remaining_hard_days_max": max(0, hard_days_max - done["quality_runs"]),
     }
 
 
@@ -268,13 +378,18 @@ def supersede_future_rows(user_id: int, *, db: Session, from_date: date) -> int:
     status='superseded'; читатели их не видят. Возврат — число строк.
     (Mark future rows of the previous plan superseded; linked rows stay.)
     """
-    n = db.query(Recommendation).filter(
+    rows = db.query(Recommendation).filter(
         Recommendation.user_id == user_id,
         Recommendation.for_date >= from_date,
         Recommendation.status != RECOMMENDATION_STATUS_SUPERSEDED,
         Recommendation.linked_session_id.is_(None),
-    ).update({Recommendation.status: RECOMMENDATION_STATUS_SUPERSEDED},
-             synchronize_session="fetch")
+    ).all()
+    n = 0
+    for r in rows:
+        if is_athlete_unavailable(r):
+            continue          # #294: отмены подопечного переживают перепланирование
+        r.status = RECOMMENDATION_STATUS_SUPERSEDED
+        n += 1
     db.commit()
     return int(n or 0)
 
@@ -375,12 +490,14 @@ def confirm_or_adjust_morning(proposal: WorkoutProposal | None, user_id: int,
       LLM не меняла → UPDATE status той же строки, без дубля;
     - adjusted — LLM меняет план или safety урезал → новая строка 'adjusted'.
     """
+    # #292/#305: план дня — ПОСЛЕДНЯЯ действующая строка на дату (включая proposed из чата),
+    # иначе утро подтверждало вытесненную plan-строку, а карточку показывало по новой
     plan_row = db.query(Recommendation).filter(
         Recommendation.user_id == user_id,
         Recommendation.for_date == now.date(),
-        Recommendation.status.in_(PLAN_STATUSES),
+        Recommendation.status != RECOMMENDATION_STATUS_SUPERSEDED,
     ).order_by(Recommendation.id.desc()).first()
-    if plan_row is None:
+    if plan_row is None or plan_row.status not in PLAN_STATUSES + ("proposed",):
         return None
     chosen = proposal if proposal is not None else _proposal_from_row(plan_row)
     prescription = finalize(chosen, state, db=db, persist=False,

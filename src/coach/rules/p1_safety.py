@@ -15,8 +15,14 @@ from src.config.constants import (
 )
 from src.coach.config import (
     ATI_CTI_HIGH,
+    DOWNHILL_EXTRA_H,
+    EASY_TOO_HARD_WEEK_FLAGS,
     HARD_SHARE_OVERLOAD,
     HARD_TYPES,
+    MONOTONY_HIGH,
+    MONOTONY_MIN_TRAIN_DAYS,
+    QUALITY_VOLUME_EXTRA_H,
+    RECOVERY_PCT_READY,
     HRR_POOR_RECOVERY_EXTRA_H,
     SLEEP_SHORT_MIN,
     SLEEP_VERY_SHORT_MIN,
@@ -80,12 +86,20 @@ def evaluate_safety(state: AthleteState, *, now: datetime | None = None) -> Safe
         forbidden |= set(HARD_TYPES)
         reasons.append(_step("max_zone=2, без интенсива", "HRV ниже базовой линии"))
 
-    # 4. Восстановление не завершено по данным часов
+    # 4. Восстановление по данным часов — шкала Coros §12 (#249, 04.09.2026):
+    # < 20 Exhausted → только лёгкое; 20–69 Fatigued → без интенсива; ≥ 70 — без ограничений
     rec_pct = sig.get("recovery_pct")
     if rec_pct is not None and rec_pct < RECOVERY_PCT_MODERATE:
         triggered.append("recovery_low")
         max_zone = min(max_zone, 2)
-        reasons.append(_step("max_zone=2", f"восстановление {rec_pct}% — ниже порога"))
+        forbidden |= set(HARD_TYPES)
+        reasons.append(_step("max_zone=2, без интенсива",
+                             f"восстановление {rec_pct}% — истощение (Coros: отдых)"))
+    elif rec_pct is not None and rec_pct < RECOVERY_PCT_READY:
+        triggered.append("recovery_fatigued")
+        forbidden |= set(HARD_TYPES)
+        reasons.append(_step("без интенсива",
+                             f"восстановление {rec_pct}% — усталость, качественную не сегодня"))
 
     # 5. Перекос в анаэробную нагрузку
     ati_cti = sig.get("ati_cti_ratio")
@@ -210,6 +224,50 @@ def evaluate_safety(state: AthleteState, *, now: datetime | None = None) -> Safe
         reasons.append(_step("max_zone=2, без интенсива",
                              f"за 7 дней {hard_share:.0%} времени в Z3+ — неделя перегружена "
                              "интенсивностью, только лёгкое (гайд 10)"))
+
+    # 17. Лёгкие дни не были лёгкими (#289, гайд 10): ≥ N флагов easy_run_too_hard за 7 дней
+    # → сегодня по-настоящему легко (easy runs too hard → today truly easy)
+    if (sig.get("easy_too_hard_7d") or 0) >= EASY_TOO_HARD_WEEK_FLAGS:
+        triggered.append("easy_runs_too_hard")
+        max_zone = min(max_zone, 2)
+        forbidden |= set(HARD_TYPES)
+        reasons.append(_step("max_zone=2, без интенсива",
+                             f"{sig['easy_too_hard_7d']} лёгких пробежки за неделю бежались слишком "
+                             "быстро — сегодня лёгкий день должен быть лёгким"))
+
+    # 18. Превышен потолок качественного объёма в недавнем разборе (#289, гайд 44)
+    # → следующий качественный день отодвигается (quality volume exceeded → push next hard)
+    if sig.get("quality_volume_exceeded_recent"):
+        triggered.append("quality_volume_exceeded")
+        qv_earliest = now + timedelta(hours=QUALITY_VOLUME_EXTRA_H)
+        if earliest_next_hard is None or qv_earliest > earliest_next_hard:
+            earliest_next_hard = qv_earliest
+        reasons.append(_step("интенсив не раньше чем",
+                             "последняя качественная превысила потолок объёма — "
+                             f"минимум {QUALITY_VOLUME_EXTRA_H} ч до следующей"))
+
+    # 19. Ударные спуски в недавней тренировке (#289, гайд 46 — колено): день лёгкий
+    # (heavy downhill load → easy day, protect the knee)
+    if sig.get("downhill_load_recent"):
+        triggered.append("downhill_load")
+        max_zone = min(max_zone, 3)
+        dh_earliest = now + timedelta(hours=DOWNHILL_EXTRA_H)
+        if earliest_next_hard is None or dh_earliest > earliest_next_hard:
+            earliest_next_hard = dh_earliest
+        reasons.append(_step("max_zone=3, интенсив не раньше чем",
+                             "много ударной работы на спусках в последней тренировке — "
+                             "колену нужен лёгкий день"))
+
+    # 20. Монотонность нагрузки по Фостеру (#308): одинаковая нагрузка 5+ дней из 7 без
+    # вариативности — риск болезни/травмы, нужен день отдыха, не интенсив
+    mono = sig.get("monotony_7d")
+    if (mono is not None and mono > MONOTONY_HIGH
+            and (sig.get("trained_days_7d") or 0) >= MONOTONY_MIN_TRAIN_DAYS):
+        triggered.append("monotony_high")
+        forbidden |= set(HARD_TYPES)
+        reasons.append(_step("без интенсива",
+                             f"монотонность нагрузки {mono:.1f} за 7 дней "
+                             f"({sig['trained_days_7d']} тренировочных дней) — нужен день отдыха"))
 
     allowed_types: tuple[str, ...] = ()
     if forbidden:

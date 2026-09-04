@@ -142,7 +142,9 @@ running-coach/
 │   │   ├── data_checks.py      #   кросс-чеки с часами (device_mismatch, lap_check)
 │   │   ├── intervals.py        #   HRR-разбор интервалов
 │   │   ├── week_structure.py   #   структура недели / детренированность
-│   │   └── utils.py            #   format_pace, calc_elevation, find_timezone, rolling pace
+│   │   ├── type_resolution.py  #   ярлык по плану дня: «план — назначение, факт — интенсивность» (04.09)
+│   │   └── utils.py            #   format_pace, calc_elevation, find_timezone, rolling pace,
+│   │                           #   early_peak_suspect (#238), pauses_to_offsets/pause_overlap_sec (#286)
 │   └── utils/
 │       ├── logger.py           # Структурированное логирование с ротацией
 │       ├── timeutils.py        # Хелперы времени/таймзон
@@ -270,11 +272,15 @@ src/analysis/__init__.py :: process_trackpoints()
   │       при unreliable дистанция = оценка по шагам estimate_distance_by_cadence)
   ├── segment.py: build_time_in_zones + segment_by_pace
   ├── oscillation.py: detect_pace_oscillations + HR-lag
-  ├── classify.py: classify_training (interval/tempo/long/recovery/easy)
+  ├── classify.py: classify_training (interval/tempo/long/recovery/easy) → training_type_auto
   ├── segment_km.py: km_segment_fallback, compute_km_variability
   └── weather.py: fetch_weather, get_temp_at_time
+  (паузы device_summary.pauses вычитаются: duration_minutes = moving-time, #286)
   ↓
-ORM → PostgreSQL (training_sessions)
+ORM → PostgreSQL (training_sessions: training_type_auto/_source — провенанс ярлыка)
+  ↓
+разбор: workout_insights.apply_type_resolution — итоговый training_type по плану дня
+  (analysis/type_resolution.py; override главнее, source auto|plan|manual)
   ↓
 Уведомление в Telegram (telegram_notify.py)
 ```
@@ -291,7 +297,8 @@ services/workout_insights.compute_workout_metrics
   (session_metrics + gap/effort + hr_baseline + data_checks (device/lap check)
    + intervals (HRR) + week_structure/detraining/downhill/session_rpe)
   ↓
-computed.flags → state.signals → rules/p1_safety (правила 11–14) → clamp
+computed.flags → state.signals → rules/p1_safety (правила 11–20: HRR, качество, гонка,
+  пауза, сон, перекос недели, лёгкие-слишком-быстро, объём качества, спуски, монотонность) → clamp
 ```
 
 ### Автосинхронизация с часами (Coros)

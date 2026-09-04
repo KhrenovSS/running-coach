@@ -200,3 +200,22 @@ def test_midweek_day0_replaces_existing_today_row_as_adjusted(athlete_with_histo
     today_rows = db_session.query(Recommendation).filter_by(
         user_id=uid, for_date=wed.date()).order_by(Recommendation.id.desc()).all()
     assert today_rows[0].status == "adjusted" and today_rows[0].workout_type == "easy"
+
+
+def test_plan_with_closed_availability_window_returns_notice(db_session, monkeypatch):
+    """#294: все дни окна закрыты → текст-объяснение без вызова LLM и без записи строк."""
+    from src.coach import planning
+    from src.coach.weekly_plan import generate_weekly_plan
+    from src.models import Recommendation
+    from tests.coach.conftest import _unique_user
+    from tests.coach.fakes import ScriptedLLM
+
+    user = _unique_user(db_session)
+    monkeypatch.setattr(planning, "week_targets", lambda *a, **k: {
+        "days_ahead_allowed": [], "availability": {"weekday_names": ["Пн", "Вт"]},
+        "week_start": "2026-09-07"})
+    llm = ScriptedLLM([])
+    text = generate_weekly_plan(user.id, db=db_session, llm=llm)
+    assert "бегать некуда" in text and "Пн, Вт" in text
+    assert llm.calls == []
+    assert db_session.query(Recommendation).filter_by(user_id=user.id).count() == 0

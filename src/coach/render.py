@@ -41,6 +41,8 @@ def _day_label(when: date | None, today: date | None = None) -> str | None:
 
 def _hr_ceiling(p: Prescription, max_hr: int | None, lthr: int | None = None) -> int | None:
     """Потолок пульса назначения в уд/мин или None (prescription bpm ceiling)."""
+    if p.target.get("hr_ceiling") is not None:
+        return int(p.target["hr_ceiling"])       # #295: зафиксированный при назначении потолок
     if max_hr is None or p.target.get("max_zone") is None:
         return None
     return zone_ceiling_hr(p.target["max_zone"], max_hr, lthr)
@@ -97,8 +99,20 @@ def _hr_lead_lines(p: Prescription, max_hr: int | None,
     lines = [" · ".join(parts)]
     if estimate is not None:
         pace, km = estimate
-        lines.append(f"Ориентир по твоим пробежкам: "
-                     f"~{format_pace(pace)}/км → ≈{km:.1f} км")
+        # #264: честная пометка качества оценки; старые predicted без quality = band
+        quality = (p.predicted or {}).get("quality", "band")
+        if quality == "adjusted":
+            lines.append(f"Прикидка (данных на этом пульсе мало): "
+                         f"~{format_pace(pace)}/км → ≈{km:.1f} км")
+        elif quality == "typical":
+            lines.append(f"По твоим прошлым таким пробежкам: "
+                         f"~{format_pace(pace)}/км → ≈{km:.1f} км (без привязки к пульсу)")
+        elif quality == "threshold":
+            lines.append(f"Нормативный темп зоны от ПАНО часов: "
+                         f"~{format_pace(pace)}/км → ≈{km:.1f} км")
+        else:
+            lines.append(f"Ориентир по твоим пробежкам: "
+                         f"~{format_pace(pace)}/км → ≈{km:.1f} км")
     return lines
 
 

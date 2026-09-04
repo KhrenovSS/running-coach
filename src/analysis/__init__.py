@@ -15,7 +15,7 @@ from src.analysis.utils import (
     format_duration, calc_elevation, find_timezone,
     compute_rolling_pace, interpolate_paces, smooth_paces,
     is_km_segmentation, serialize_trackpoints, build_hr_pace_series,
-    smoothed_hr_peak, TrackpointDict, AnalysisResult,
+    smoothed_hr_peak, early_peak_suspect, pauses_to_offsets, TrackpointDict, AnalysisResult,
 )
 from src.analysis.gps_quality import (
     raw_gps_stats, build_gps_quality, clean_windows, estimate_distance_by_cadence,
@@ -31,6 +31,7 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
                          lthr: int | None = None,
                          max_gps_jump_m: float = 100.0, min_hr_for_fast_pace: int = 130,
                          pace_gap: float = 1.0,
+                         pauses: list[dict] | None = None,
                          interval_min_phase_duration: int = 60,
                          interval_min_phase_distance_m: int = 200,
                          interval_hr_lag_sec: int = 5,
@@ -127,7 +128,10 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
                 hrs.append(tp['hr'])
                 dists.append(tp['dist'])
 
-    time_in_zone, z4_plus_segments, total_duration_min = build_time_in_zones(trackpoints, max_hr, lthr=lthr)
+    # #286: паузы записи часов (device_summary.pauses) → длительность и темп = moving-time
+    pauses_sec = pauses_to_offsets(pauses, trackpoints[0]['time']) if trackpoints else []
+    time_in_zone, z4_plus_segments, total_duration_min = build_time_in_zones(
+        trackpoints, max_hr, lthr=lthr, pauses_sec=pauses_sec or None)
 
     segments, var_count = segment_by_pace(
         trackpoints, max_hr, total_dist_km, lthr=lthr,
@@ -246,6 +250,14 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
     # одиночный спайк датчика не должен становиться «максимумом» тренировки)
     # (rolling-median peak feeds both adaptive max HR and the UI max)
     hr_peak = smoothed_hr_peak(hr_values)
+    # #238: ранний пик на медленном темпе — глюк датчика: пик без первого окна + флаг
+    from src.config.constants import (EARLY_PEAK_DELTA_BPM, EARLY_PEAK_PACE_SLACK_MIN_KM,
+                                      EARLY_PEAK_WINDOW_SEC)
+    peak_late, early_suspect = early_peak_suspect(
+        times, hrs, dists, window_sec=EARLY_PEAK_WINDOW_SEC,
+        pace_slack_min_km=EARLY_PEAK_PACE_SLACK_MIN_KM, delta_bpm=EARLY_PEAK_DELTA_BPM)
+    if early_suspect and peak_late is not None:
+        hr_peak = peak_late
 
     result = {
         'begin_ts': begin_ts,
@@ -279,8 +291,16 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
         suspect_flags = sorted({r for entry in cleaning_log for r in entry.get('reason', [])})
     if gps_unreliable:
         suspect_flags.append('gps_unreliable')
+    if pauses_sec:
+        # moving-time: сколько секунд пауз часов вычтено (в лог, не в колонку)
+        result.setdefault('cleaning_log', [])
+        result['cleaning_log'] = list(result['cleaning_log']) + [{
+            'stage': 'pauses', 'reason': [],
+            'pause_sec': round(sum(b - a for a, b in pauses_sec))}]
     if result['duration_minutes'] < 2.0 and result['total_distance_km'] > 0.3:
         suspect_flags.append('too_short')
+    if early_suspect:
+        suspect_flags.append('hr_early_peak')       # #238: ранний пик пульса отброшен
     if suspect_flags:
         result['suspect_flags'] = suspect_flags
 

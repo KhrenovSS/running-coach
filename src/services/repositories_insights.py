@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from src.models import WorkoutInsight
+from src.models import TrainingSession, WorkoutInsight
 
 REVIEW_MAX_ATTEMPTS = 3  # после — status='error', разбор не повторяем
 
@@ -147,13 +147,19 @@ class InsightRepository:
     @staticmethod
     def recent(user_id: int, *, db: Session, days: int = 7,
                limit: int = 3) -> list[WorkoutInsight]:
-        """Свежие завершённые итоги — для утреннего вердикта/weekly (новые первыми)."""
+        """Свежие завершённые итоги — для утреннего вердикта/weekly (новые первыми).
+
+        «Свежесть» — по дате ТРЕНИРОВКИ, не по created_at разбора: пересчёт/бэкфилл разборов
+        (04.09.2026: 44 строки за раз) иначе делает «недавними» тренировки мая.
+        (Recency by workout date, not by insight creation time.)"""
         cutoff = _utcnow() - timedelta(days=days)
-        return db.query(WorkoutInsight).filter(
+        return db.query(WorkoutInsight).join(
+            TrainingSession, TrainingSession.id == WorkoutInsight.session_id,
+        ).filter(
             WorkoutInsight.user_id == user_id,
             WorkoutInsight.status == 'done',
-            WorkoutInsight.created_at >= cutoff,
-        ).order_by(WorkoutInsight.created_at.desc()).limit(limit).all()
+            TrainingSession.begin_ts >= cutoff,
+        ).order_by(TrainingSession.begin_ts.desc()).limit(limit).all()
 
     @staticmethod
     def for_session(user_id: int, session_id: int, *, db: Session) -> WorkoutInsight | None:
@@ -164,14 +170,28 @@ class InsightRepository:
         ).first()
 
     @staticmethod
+    def recent_flag_count(user_id: int, flag: str, *, db: Session, days: int) -> int:
+        """Сколько разборов недавних ТРЕНИРОВОК несут флаг (P0 #289: easy_run_too_hard ×N за 7 дней)."""
+        cutoff = _utcnow() - timedelta(days=days)
+        rows = db.query(WorkoutInsight.computed_json).join(
+            TrainingSession, TrainingSession.id == WorkoutInsight.session_id,
+        ).filter(
+            WorkoutInsight.user_id == user_id,
+            TrainingSession.begin_ts >= cutoff,
+        ).all()
+        return sum(1 for r in rows if flag in ((r[0] or {}).get("flags") or []))
+
+    @staticmethod
     def recent_flag(user_id: int, flag: str, *, db: Session, days: int) -> bool:
         """Есть ли флаг в computed.flags недавних разборов (F3 → сигнал safety).
 
         JSON-фильтр переносим между PG/SQLite делаем в Python — строк мало.
         (Whether a recent computed_json carries the flag; Python-side JSON check.)"""
         cutoff = _utcnow() - timedelta(days=days)
-        rows = db.query(WorkoutInsight.computed_json).filter(
+        rows = db.query(WorkoutInsight.computed_json).join(
+            TrainingSession, TrainingSession.id == WorkoutInsight.session_id,
+        ).filter(
             WorkoutInsight.user_id == user_id,
-            WorkoutInsight.created_at >= cutoff,
+            TrainingSession.begin_ts >= cutoff,        # по дате тренировки, не разбора
         ).all()
         return any(flag in ((r[0] or {}).get("flags") or []) for r in rows)

@@ -80,6 +80,13 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     now_local = now or user_now(user)
     today = now_local.date()
     targets = planning.week_targets(user_id, db=db, today=today)
+    if not targets["days_ahead_allowed"]:
+        # #294: окно доступности закрыло все дни окна планирования — честно сказать, не звать LLM
+        names = targets["availability"].get("weekday_names")
+        window = f"дни для бега: {', '.join(names)}" if names else "отменённые дни"
+        logger.info("Weekly plan skipped: no available days user=%s", user_id)
+        return (f"На оставшиеся дни недели бегать некуда ({window}) — новый план составлю "
+                "в воскресенье вечером. Изменились планы — напиши «могу бегать в любой день».")
     review = planning.week_plan_review(user_id, db=db)
     state = assess_state(user_id, db=db)
     verdict = evaluate_safety(state)

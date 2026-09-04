@@ -63,6 +63,7 @@
 | Жара | `heat_block` | `heat{temp_c, heat_flag, expected_hr_shift_bpm}` — сдвиг `HEAT_HR_BPM_PER_C·(t−HEAT_REF_TEMP_C)` входит в ожидание `hr_vs_baseline` (`temp_shift_bpm`); t зажата в 10–30 °C (диапазон данных, мороз ≠ −18 уд/мин); исследование 02.09.2026: +0.5 уд/мин/°C, ~7 уд/мин между <16 и ≥24 °C на равном GAP-темпе |
 | Время в HR-зонах (посекундно из `computed_json`; сегментное приближение — fallback, F0/#281) | `history_tools.py::get_workout_detail` | `zone_minutes`, `band_minutes` |
 | Недельный баланс 80/20, прогрессия, ACWR, подряд-тяжёлые | skills | `state.skills`, `zone_balance` |
+| Moving-time (#286, 04.09.2026) | `analysis/segment.py::build_time_in_zones`, `session_metrics.time_in_zones`, `gap.compute_gap` — паузы `device_summary.pauses` вычитаются; разрывы > `RECORDING_GAP_MAX_SEC` — fallback | `duration_minutes` = время таймера часов; `avg_pace`, зоны и км-точки без стоячего времени |
 
 Дефекты, ЗАКРЫТЫЕ в M1 (29.08.2026): (а) `_pace_cv` → `computed.pace_stability`;
 (б) точный `build_time_in_zones` → `computed.time_in_zones`; (в) рассинхрон имён флагов —
@@ -225,10 +226,12 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
 
 | Флаг | Действие (существующий механизм) |
 |---|---|
-| `easy_run_too_hard` ×2 за 7 дней | 🟡 частично: правило 16 p1_safety `week_intensity_overload` — доля Z3+ за 7 дней > `HARD_SHARE_OVERLOAD` (30%) → `max_zone=2`, без интенсива (04.09.2026, гайд 10); счётчик флагов ×2 — ⬜ #289 |
+| `easy_run_too_hard` ×2 за 7 дней | ✅ правило 17 p1_safety `easy_runs_too_hard` (`EASY_TOO_HARD_WEEK_FLAGS`, 04.09.2026) → `max_zone=2`, без интенсива; плюс правило 16 `week_intensity_overload` (доля Z3+ за 7 дней > 30%) |
 | интенсив под ярлыком easy/long (сегменты 4×3 мин Z3) | ✅ `safety.effective_workout_type`: тип по сегментам (`STRIDE_MAX_SEC`), гейты интенсива применяются к содержимому (инцидент 04.09.2026) |
 | день после длительной | ✅ длительная — качественный день в `_week_signals` → правило 12 (гайд 45, 04.09.2026) |
-| `quality_volume_exceeded`, `long_run_share_high` | ⬜ не замкнуто (skill `load` — только ACWR/ATI-CTI — #289) |
+| `quality_volume_exceeded` | ✅ правило 18 p1_safety: следующий качественный не раньше +`QUALITY_VOLUME_EXTRA_H` (48 ч) — 04.09.2026 |
+| `long_run_share_high` | ✅ `planning.week_targets`: `long_run_km_max` = факт прошлой длительной (`long_run_hold`) — длительная не растёт, пока доля не в норме — 04.09.2026 |
+| монотонность Фостера (#308) | ✅ правило 20 p1_safety `monotony_high` (> `MONOTONY_HIGH` при ≥ `MONOTONY_MIN_TRAIN_DAYS`) → без интенсива; concern в week_report |
 | `poor_interval_recovery` | ✅ правило 11 p1_safety: `earliest_next_hard` ≥ +48 ч (окно 4 дня) |
 | `rpe_elevated` | carry_forward → утренний вердикт (механизм D7 уже есть) |
 | `low_cadence` + боль | только интерпретация LLM (совет, не ограничение) |
@@ -236,8 +239,8 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
 | недосып (#254, не флаг разбора — сигнал сна) | ✅ правило 15 p1_safety: <6 ч без интенсива, <5 ч max_zone=2 (v1 — абсолютные пороги) |
 | `hard_days_too_close` (M4.1) | ✅ правило 12 p1_safety: `earliest_next_hard` ≥ +1–2 дня |
 | `post_race_recovery_violated` (M4.1) | ✅ правило 13 p1_safety: `max_zone=2` + запрет hard на период 1 день/3 км |
-| `downhill_load_high` (M4.2) | ⬜ пока только интерпретация LLM; P1-сигнал — #289 |
-| `detraining_expected` (M4.3) | 🟡 частично: правило 14 (max_zone=2 + запрет hard); поправка baseline и потолок объёма — ⬜ #289 |
+| `downhill_load_high` (M4.2) | ✅ правило 19 p1_safety `downhill_load`: `max_zone=3`, интенсив не раньше +24 ч (колено) — 04.09.2026 |
+| `detraining_expected` (M4.3) | 🟡 правило 14 (max_zone=2 + запрет hard) + потолок объёма плана ≤ 65% пика после паузы ≥ 14 дн (`detraining_return`, 04.09.2026); поправка ожиданий `hr_vs_baseline` — ⬜ #289 |
 
 Правило: **ограничения проходят через `evaluate_safety`/`clamp` — LLM может
 только сказать мягче, но не мягче границ.** Это уже инвариант проекта; новые

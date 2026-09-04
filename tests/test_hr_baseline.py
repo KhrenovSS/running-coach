@@ -163,3 +163,51 @@ def test_deviation_temperature_shift_moves_expectation():
     assert hot["temp_shift_bpm"] == 6 and plain["temp_shift_bpm"] == 0
     # None/0 — без поправки (no shift when temperature unknown)
     assert baseline_deviation(baseline, per_km, temp_shift_bpm=None)["expected_hr"] == 140.0
+
+
+# --- #264: ступени B/C ориентира темпа --------------------------------------------------
+
+def _law_points(paces, a=190.0, b=-8.0):
+    return [(p, a + b * p) for p in paces]
+
+
+def test_band_result_carries_quality():
+    from src.analysis.hr_baseline import pace_at_hr_band
+    pts = _law_points([6.5 + i * 0.05 for i in range(12)])          # HR 138…133.6
+    est = pace_at_hr_band(pts, 138)
+    assert est is not None and est["quality"] == "band"
+
+
+def test_adjusted_interpolates_below_data_with_local_slope():
+    """Точки по закону 190 − 8·pace на HR 128–142; потолок 125 ниже массива → темп ≈ инверсии закона."""
+    from src.analysis.hr_baseline import pace_at_hr_adjusted
+    pts = _law_points([6.0 + i * 0.1 for i in range(18)])            # HR 142 … 128.4
+    est = pace_at_hr_adjusted(pts, 125)
+    assert est is not None and est["quality"] == "adjusted"
+    assert abs(est["pace_min_km"] - (190 - 125) / 8) < 0.15          # 8.125
+    assert abs(est["slope_used"] + 8.0) < 0.01
+
+
+def test_adjusted_uses_default_slope_when_local_is_flat():
+    """Занижённый наклон (ловушка #259) не проходит санити → дефолт −8."""
+    from src.analysis.hr_baseline import pace_at_hr_adjusted
+    from src.config.constants import BASELINE_HR_PACE_SLOPE_DEFAULT
+    pts = _law_points([6.0 + i * 0.1 for i in range(18)], a=150.0, b=-2.0)   # HR 138 … 134.6
+    est = pace_at_hr_adjusted(pts, 128)                              # Δ ≈ −8 → в пределах 15
+    assert est is not None and est["slope_used"] == BASELINE_HR_PACE_SLOPE_DEFAULT
+
+
+def test_adjusted_gates():
+    from src.analysis.hr_baseline import pace_at_hr_adjusted
+    pts = _law_points([6.0 + i * 0.1 for i in range(18)])
+    assert pace_at_hr_adjusted(pts, 100) is None          # Δ > 15 → уровень C
+    assert pace_at_hr_adjusted(pts[:3], 130) is None      # < 5 точек в полосе
+    slow = _law_points([11.5, 11.6, 11.7, 11.8, 11.9, 12.0])    # HR ≈ 98…94
+    assert pace_at_hr_adjusted(slow, 85) is None          # результат медленнее 12:00 → None, не клэмп
+
+
+def test_typical_pace_median():
+    from src.analysis.hr_baseline import typical_pace_median
+    assert typical_pace_median([7.0, 7.4, 7.2, None, 30.0]) == {
+        "pace_min_km": 7.2, "n_sessions": 3, "quality": "typical"}
+    assert typical_pace_median([7.0, 7.4]) is None

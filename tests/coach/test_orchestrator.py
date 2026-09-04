@@ -140,7 +140,8 @@ def test_chat_changed_proposal_gets_full_card(athlete_with_history, db_session):
 
 
 def test_morning_kind_not_deduped(athlete_with_history, db_session):
-    """Дедуп — только для kind=chat: утренний вердикт всегда с полной карточкой."""
+    """Утро — всегда полная карточка; назначение из чата на сегодня утро ПОДТВЕРЖДАЕТ
+    (UPDATE той же строки → confirmed, без дубля — #292/#305, 04.09.2026)."""
     llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=EASY_TURN),
                        LLMResponse(stop_reason="end_turn", parsed=EASY_TURN)])
     uid = athlete_with_history.id
@@ -151,8 +152,10 @@ def test_morning_kind_not_deduped(athlete_with_history, db_session):
                                        llm=llm, kind="morning")
     assert "Лёгкий бег" in morning.text
     assert "План на сегодня без изменений" not in morning.text
-    assert db_session.query(Recommendation).filter_by(
-        user_id=uid).count() == n_recs + 1
+    assert db_session.query(Recommendation).filter_by(user_id=uid).count() == n_recs
+    latest = db_session.query(Recommendation).filter_by(user_id=uid).order_by(
+        Recommendation.id.desc()).first()
+    assert latest.status == "confirmed"
 
 
 def test_llm_card_contains_bpm_ceiling(athlete_with_history, db_session):
@@ -452,3 +455,17 @@ def test_available_again_reopens_cancelled_day(athlete_with_history, db_session)
     db_session.refresh(row)
     assert row.status == "superseded"
     assert "Снял отдых" in reply.text and f"{when:%d.%m}" in reply.text
+
+
+def test_available_weekdays_persisted_from_chat(athlete_with_history, db_session):
+    """#294: «могу бегать только пн–чт» → окно сохранено, в ответе — подтверждение."""
+    from src.coach import planning
+
+    uid = athlete_with_history.id
+    turn = {"message": "Понял, учту дни.", "proposal": None, "followup_question": None,
+            "log_suggestion": None, "available_weekdays": [0, 1, 2, 3]}
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
+    reply = orchestrator.handle_chat(uid, "бегать могу только с понедельника по четверг",
+                                     db=db_session, llm=llm)
+    assert "Запомнил дни для бега: Пн, Вт, Ср, Чт" in reply.text
+    assert planning.availability(uid, db=db_session)["weekdays"] == [0, 1, 2, 3]

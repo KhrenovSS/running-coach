@@ -287,3 +287,46 @@ def test_button_ignore_keeps_value(db_session):
     reloaded = db_session.query(User).filter(User.id == user.id).first()
     assert reloaded.max_hr == 177
     assert any("без изменений" in m for m in messages)
+
+
+# --- #238: ранний пик на медленном темпе = глюк датчика -----------------------------------
+
+def _series(n_sec: int, hr_fn, pace_min_km_fn):
+    times, hrs, dists = [], [], []
+    d = 0.0
+    for t in range(0, n_sec, 5):
+        pace = pace_min_km_fn(t)
+        d += (5 / 60.0) / pace * 1000.0
+        times.append(float(t)); hrs.append(int(hr_fn(t))); dists.append(d)
+    return times, hrs, dists
+
+
+def test_early_peak_on_slow_pace_is_suspect():
+    from src.analysis.utils import early_peak_suspect
+
+    # первые 3 мин: пульс 178 при темпе 8:00 (разминка шагом-трусцой), дальше 140 при 6:30
+    times, hrs, dists = _series(40 * 60, lambda t: 178 if t < 180 else 140,
+                                lambda t: 8.0 if t < 300 else 6.5)
+    peak_late, suspect = early_peak_suspect(times, hrs, dists, window_sec=300,
+                                            pace_slack_min_km=0.5, delta_bpm=8)
+    assert suspect is True and peak_late == 140
+
+
+def test_early_peak_on_fast_start_is_real():
+    from src.analysis.utils import early_peak_suspect
+
+    # быстрый старт: пульс высокий И темп быстрый — это реальный пик, не глюк
+    times, hrs, dists = _series(40 * 60, lambda t: 178 if t < 180 else 140,
+                                lambda t: 5.0 if t < 300 else 6.5)
+    _, suspect = early_peak_suspect(times, hrs, dists, window_sec=300,
+                                    pace_slack_min_km=0.5, delta_bpm=8)
+    assert suspect is False
+
+
+def test_no_suspect_when_peak_is_late():
+    from src.analysis.utils import early_peak_suspect
+
+    times, hrs, dists = _series(40 * 60, lambda t: 140 if t < 1800 else 175, lambda t: 6.5)
+    peak_late, suspect = early_peak_suspect(times, hrs, dists, window_sec=300,
+                                            pace_slack_min_km=0.5, delta_bpm=8)
+    assert suspect is False and peak_late == 175

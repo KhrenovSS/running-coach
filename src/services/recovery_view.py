@@ -9,6 +9,7 @@ from src.coach.config import (
     LOAD_RATIO_LOW,
     PERFORMANCE_MODERATE,
     PERFORMANCE_READY,
+    RECOVERY_PCT_FRESH,
     RECOVERY_PCT_MODERATE,
     RECOVERY_PCT_READY,
     RHR_CRITICAL_DIFF,
@@ -62,12 +63,14 @@ def tired_label(tired_rate: int | None) -> str:
 def readiness_label(performance: float | None, recovery_pct: float | None = None,
                     training_load_ratio: float | None = None) -> str:
     if recovery_pct is not None:
-        if recovery_pct >= RECOVERY_PCT_READY:
+        if recovery_pct >= RECOVERY_PCT_FRESH:
+            return '🟢 Свеж — готов к интенсивной'
+        elif recovery_pct >= RECOVERY_PCT_READY:
             return '🟢 Готов к тренировкам'
         elif recovery_pct >= RECOVERY_PCT_MODERATE:
-            return '🟡 Умеренная готовность'
+            return '🟡 Усталость — без интенсива'
         else:
-            return '🔴 Требуется отдых'
+            return '🔴 Истощение — требуется отдых'
     if training_load_ratio is not None:
         if training_load_ratio < LOAD_RATIO_LOW:
             return '🟢 Низкая нагрузка'

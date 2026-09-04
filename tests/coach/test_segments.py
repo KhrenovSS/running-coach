@@ -253,3 +253,19 @@ def test_finalize_drops_segments_of_mislabelled_quality_work(athlete_with_histor
     text = render_prescription(p, max_hr=177)
     assert "с ускорениями" not in text and "Работа" not in text
     assert "Ограничение по безопасности" in text
+
+
+def test_finalize_persists_hr_ceiling_and_render_uses_it(athlete_with_history, db_session):
+    """#295: потолок пульса фиксируется в target при назначении; карточка читает его, а не
+    пересчитывает от текущего якоря зон (смена якоря не меняет сохранённый план молча)."""
+    from src.coach.contracts import WorkoutProposal
+    from src.coach.prescriber import finalize
+    from src.coach.render import render_prescription
+    from src.coach.state import assess_state
+
+    state = assess_state(athlete_with_history.id, db=db_session)
+    p = finalize(WorkoutProposal(workout_type="easy", target_zone=2, duration_min=40),
+                 state, db=db_session, persist=False, source="llm")
+    assert p.target["hr_ceiling"] == 151                          # lthr 170 → Z2 151
+    p.target["hr_ceiling"] = 144                                  # «старый якорь» в сохранённой строке
+    assert "пульс до 144 уд/мин" in render_prescription(p, max_hr=177, lthr=170)

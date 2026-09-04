@@ -190,6 +190,76 @@ def smoothed_hr_peak(hr_values: list[int], window: int = HR_SMOOTH_MEDIAN_WINDOW
     ))
 
 
+def pauses_to_offsets(pauses: list[dict] | None, track_start) -> list[tuple[float, float]]:
+    """device_summary.pauses (ISO start/end) → [(start_sec, end_sec)] от начала трека (#286).
+    Мусор/None → []. (Watch pauses as second offsets from track start.)"""
+    from datetime import datetime
+    out: list[tuple[float, float]] = []
+    if not pauses or track_start is None:
+        return out
+    for p in pauses:
+        try:
+            s = p.get("start"); e = p.get("end")
+            s_dt = datetime.fromisoformat(s) if isinstance(s, str) else s
+            e_dt = datetime.fromisoformat(e) if isinstance(e, str) else e
+            if s_dt is None or e_dt is None:
+                continue
+            a = (s_dt - track_start).total_seconds()
+            b = (e_dt - track_start).total_seconds()
+            if b > a:
+                out.append((a, b))
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return sorted(out)
+
+
+def pause_overlap_sec(t0: float, t1: float, pauses_sec: list[tuple[float, float]] | None) -> float:
+    """Сколько секунд интервала [t0, t1] приходится на паузы записи (#286)."""
+    if not pauses_sec or t1 <= t0:
+        return 0.0
+    total = 0.0
+    for a, b in pauses_sec:
+        lo, hi = max(t0, a), min(t1, b)
+        if hi > lo:
+            total += hi - lo
+    return total
+
+
+def early_peak_suspect(times: list[float], hrs: list[int], dists: list[float], *,
+                       window_sec: int, pace_slack_min_km: float, delta_bpm: int) -> tuple[int | None, bool]:
+    """Ранний пик пульса на медленном темпе = глюк оптического датчика (#238).
+
+    Возвращает (пик без первого окна, suspect): suspect=True, когда сглаженный пик всей
+    тренировки лежит в первые window_sec, темп там медленнее медианы сессии на
+    pace_slack_min_km и пик остального участка ниже на delta_bpm и больше.
+    (Early peak at slow pace → optical-sensor glitch; use the peak after the window.)
+    """
+    if len(times) < 3 or len(times) != len(hrs) or len(times) != len(dists):
+        return None, False
+    t0 = times[0]
+    early = [i for i, t in enumerate(times) if t - t0 <= window_sec]
+    late = [i for i, t in enumerate(times) if t - t0 > window_sec]
+    if len(early) < 2 or len(late) < 3:
+        return None, False
+    peak_all = smoothed_hr_peak(hrs)
+    peak_late = smoothed_hr_peak([hrs[i] for i in late])
+    if peak_all is None or peak_late is None or peak_all - peak_late < delta_bpm:
+        return peak_late, False
+    peak_early = smoothed_hr_peak([hrs[i] for i in early])
+    if peak_early is None or peak_early < peak_all:
+        return peak_late, False
+
+    def _pace(idx: list[int]) -> float | None:
+        dd = dists[idx[-1]] - dists[idx[0]]
+        dt = times[idx[-1]] - times[idx[0]]
+        return (dt / 60.0) / (dd / 1000.0) if dd > 0 and dt > 0 else None
+
+    early_pace, all_pace = _pace(early), _pace(list(range(len(times))))
+    if early_pace is None or all_pace is None:
+        return peak_late, False
+    return peak_late, early_pace >= all_pace + pace_slack_min_km
+
+
 def smooth_paces(paces: list[float], window: int = 5) -> list[float]:
     """Сглаживание темпа скользящим средним (Smooth pace via moving average)"""
     n = len(paces)

@@ -458,3 +458,76 @@ def test_upsert_respects_manual_override(db_session):
     upsert_workout_insights(user.id, s.id, db=db_session)
     db_session.refresh(s)
     assert s.training_type == "tempo" and s.training_type_source == "manual"
+
+
+# --- #264/#263: композиция ориентира темпа ------------------------------------------------
+
+def test_expected_pace_degrades_to_typical_and_guards_default(db_session):
+    """Нет км-точек в полосах → уровень C по avg_pace (сначала тот же тип);
+    degraded_ok=False (safety) → прежнее None."""
+    from src.services.insights_baseline import expected_pace_at_hr
+
+    user = _user(db_session)
+    for pace in (8.1, 8.3, 8.5):        # recovery без per-km (нет трекпоинтов) — только avg_pace
+        build_training_session(db_session, user.id, training_type="recovery",
+                               total_distance_km=3.5, duration_minutes=3.5 * pace)
+    for pace in (6.8, 7.0, 7.1):
+        build_training_session(db_session, user.id, training_type="easy",
+                               total_distance_km=5.0, duration_minutes=5.0 * pace)
+    db_session.commit()
+    assert expected_pace_at_hr(user.id, 125, db=db_session) is None
+    est = expected_pace_at_hr(user.id, 125, db=db_session, workout_type="recovery",
+                              degraded_ok=True)
+    assert est["quality"] == "typical" and abs(est["pace_min_km"] - 8.3) < 0.05
+    est_easy = expected_pace_at_hr(user.id, 125, db=db_session, workout_type="easy",
+                                   degraded_ok=True)
+    assert abs(est_easy["pace_min_km"] - 7.0) < 0.05
+
+
+def test_window_points_include_tempo_only_when_asked(db_session):
+    """#263: км-точки темповых входят в полосы (include_quality), но не в OLS-базу."""
+    from src.services.insights_baseline import _collect_window_points
+
+    user = _user(db_session)
+    # hr=160 ≥ 0.85·177 — качество подтверждено, ярлык tempo остаётся после резолвера
+    s = _session_with_track(db_session, user.id, duration_min=40, hr=160, ttype='tempo',
+                            avg_heart_rate=160)
+    upsert_workout_insights(user.id, s.id, db=db_session)
+    steady, _ = _collect_window_points(user.id, db=db_session)
+    quality, _ = _collect_window_points(user.id, db=db_session, include_quality=True)
+    assert steady == [] and len(quality) > 0
+
+
+def test_insights_subtract_watch_pauses(db_session):
+    """#286: device_summary.pauses → time_in_zones и темп км-точек без стоячего времени;
+    device_check сходится с timer_s (moving) один-к-одному."""
+    from datetime import timedelta
+
+    from src.analysis.utils import serialize_trackpoints
+
+    user = _user(db_session)
+    tps = build_trackpoints('long', duration_min=30, base_pace=6.5, hr=135)
+    for tp in tps[121:]:
+        tp['time'] = tp['time'] + timedelta(seconds=20)
+    pause = {"start": tps[120]['time'].isoformat(),
+             "end": (tps[120]['time'] + timedelta(seconds=20)).isoformat(), "duration_s": 20}
+    dist_km = tps[-1]['dist'] / 1000.0
+    moving_min = 30.0
+    s_plain = build_training_session(db_session, user.id, total_distance_km=round(dist_km, 2),
+                                     duration_minutes=moving_min, training_type='easy',
+                                     trackpoints_json=serialize_trackpoints(tps))
+    s_paused = build_training_session(db_session, user.id, total_distance_km=round(dist_km, 2),
+                                      duration_minutes=moving_min, training_type='easy',
+                                      trackpoints_json=serialize_trackpoints(tps),
+                                      device_summary={"pauses": [pause],
+                                                      "timer_s": round(moving_min * 60),
+                                                      "distance_m": round(dist_km * 1000)})
+    plain = upsert_workout_insights(user.id, s_plain.id, db=db_session)
+    paused = upsert_workout_insights(user.id, s_paused.id, db=db_session)
+    assert plain["time_in_zones"]["total_min"] - paused["time_in_zones"]["total_min"] > 0.3
+    km_plain = plain["gap"]["per_km"][1]["pace_min_km"] if plain["gap"].get("available") else None
+    km_paused = paused["gap"]["per_km"][1]["pace_min_km"] if paused["gap"].get("available") else None
+    if km_plain is not None and km_paused is not None:
+        assert km_paused <= km_plain
+    dc = paused["inputs"]["device_check"]
+    assert dc["mismatch"] is False and dc["time_diff_pct"] < 0.01

@@ -163,6 +163,10 @@ class CoachTurn(BaseModel):
     # (Athlete is available again → code reopens the cancelled day.)
     available_again_days_ahead: list[Annotated[int, Field(ge=0, le=7)]] | None = Field(
         default=None, max_length=8)
+    # #294: постоянное окно доступности — дни недели (0=пн … 6=вс), когда подопечный может
+    # бегать; [] — снять ограничение. Код персистит и учитывает в /plan.
+    available_weekdays: list[Annotated[int, Field(ge=0, le=6)]] | None = Field(
+        default=None, max_length=7)
 
 
 def _strictify(schema: dict) -> dict:

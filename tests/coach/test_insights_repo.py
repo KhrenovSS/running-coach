@@ -194,12 +194,13 @@ def test_recent_flag_true_within_window(athlete_with_history, db_session):
 
 
 def test_recent_flag_false_when_stale(athlete_with_history, db_session):
-    """Строка старше окна → False (флаг «протухает»)."""
+    """Тренировка старше окна → False (флаг «протухает» по дате тренировки, 04.09.2026)."""
     sid = _session_id(athlete_with_history.id, db_session)
-    row = InsightRepository.upsert(
+    InsightRepository.upsert(
         athlete_with_history.id, sid, db=db_session,
         computed={"flags": ["poor_interval_recovery"]}, schema_version=6)
-    row.created_at = datetime.now(timezone.utc) - timedelta(days=10)
+    session = db_session.query(TrainingSession).filter_by(id=sid).one()
+    session.begin_ts = datetime.now(timezone.utc) - timedelta(days=10)
     db_session.commit()
     assert InsightRepository.recent_flag(
         athlete_with_history.id, "poor_interval_recovery",
@@ -217,3 +218,27 @@ def test_recent_flag_false_without_flag_or_computed(athlete_with_history, db_ses
     assert InsightRepository.recent_flag(
         athlete_with_history.id, "poor_interval_recovery",
         db=db_session, days=4) is False
+
+
+def test_recent_and_flags_use_workout_date_not_insight_date(db_session):
+    """Пересчёт/бэкфилл разборов не делает старые тренировки «недавними» (04.09.2026)."""
+    from datetime import timedelta
+
+    from src.domain.models.base import utcnow
+    from src.models import WorkoutInsight
+    from src.services.repositories_insights import InsightRepository
+    from tests.coach.conftest import _unique_user
+    from tests.helpers import build_training_session
+
+    user = _unique_user(db_session)
+    old = build_training_session(db_session, user.id, begin_ts=utcnow() - timedelta(days=40))
+    new = build_training_session(db_session, user.id, begin_ts=utcnow() - timedelta(days=1))
+    for s in (old, new):   # оба разбора созданы СЕЙЧАС (как при бэкфилле)
+        db_session.add(WorkoutInsight(user_id=user.id, session_id=s.id, status="done",
+                                      computed_json={"flags": ["easy_run_too_hard"]}))
+    db_session.commit()
+    assert InsightRepository.recent_flag_count(user.id, "easy_run_too_hard", db=db_session, days=7) == 1
+    assert InsightRepository.recent_flag(user.id, "easy_run_too_hard", db=db_session, days=7) is True
+    assert InsightRepository.recent_flag(user.id, "easy_run_too_hard", db=db_session, days=0) is False
+    recent = InsightRepository.recent(user.id, db=db_session, days=7, limit=5)
+    assert [r.session_id for r in recent] == [new.id]

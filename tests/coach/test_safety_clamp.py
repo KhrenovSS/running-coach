@@ -351,7 +351,7 @@ def test_poor_interval_recovery_delays_next_hard():
     assert verdict.earliest_next_hard == \
         now + timedelta(hours=HRR_POOR_RECOVERY_EXTRA_H)
     assert verdict.allow_training is True
-    p, clamped = clamp(AGGRESSIVE, verdict, state)
+    p, clamped = clamp(AGGRESSIVE, verdict, state, now=now)   # #307: тот же now, что у вердикта
     assert clamped is True
     assert p.workout_type != "interval"
 

@@ -28,6 +28,8 @@ from src.coach.config import (
     LOAD_PROGRESSION,
     LONG_RUN_MAX_MIN,
     LONG_RUN_MAX_PCT_WEEK,
+    MONOTONY_HIGH,
+    MONOTONY_MIN_TRAIN_DAYS,
     POINTS_PER_MIN,
     WEEK_REPORT_ACWR_HIGH,
     WEEK_REPORT_AVG_WEEKS,
@@ -81,6 +83,13 @@ def compute_week_report(user_id: int, *, db: Session, week_start: date, today: d
     past = [w for w in weeks[:-1] if w["runs"] > 0][-WEEK_REPORT_AVG_WEEKS:]
     avg = ({"km": round(mean(w["km"] for w in past), 1), "weeks": len(past)}
            if past else None)
+
+    # P0 #308: монотонность/страйн Фостера за неделю (по дневным баллам нагрузки)
+    from src.coach.load_monotony import daily_load_points, monotony_from_daily
+    mono = monotony_from_daily(daily_load_points(user_id, db=db, start=week_start, days=7,
+                                                 user=user, max_hr=max_hr, lthr=lthr))
+    this["monotony"], this["strain"] = mono["monotony"], mono["strain"]
+    this["trained_days"] = mono["trained_days"]
 
     targets = week_targets_stored(user_id, db=db, week_start=week_start)
     if targets.get("target_km") and this["km"] is not None:
@@ -332,6 +341,11 @@ def _signals(r: dict) -> tuple[list[dict], list[dict]]:
     if prev and this["runs"] > prev["runs"] and this["pain_days"] == 0:
         h("frequency_up", "пробежек больше, чем неделей раньше, и без боли — сначала частота, потом объём (Дэниелс/Лидьярд)",
           runs=this["runs"], prev_runs=prev["runs"])
+
+    if (this.get("monotony") is not None and this["monotony"] > MONOTONY_HIGH
+            and (this.get("trained_days") or 0) >= MONOTONY_MIN_TRAIN_DAYS):
+        c("monotony_high", "нагрузка почти одинаковая день за днём без дня отдыха — монотонность по Фостеру повышает риск болезни и травмы, нужна вариативность",
+          monotony=this["monotony"], trained_days=this["trained_days"])
 
     if r.get("acwr") is not None and r["acwr"] > WEEK_REPORT_ACWR_HIGH:
         c("acwr_high", "острая нагрузка заметно выше хронической — организму нужна разгрузка",

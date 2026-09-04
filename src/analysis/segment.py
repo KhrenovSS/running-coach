@@ -54,7 +54,9 @@ def _all_adjacent_paces_differ_by(segments: list[dict], threshold: float = 1.0) 
 
 
 def build_time_in_zones(trackpoints: list[dict], max_hr: int,
-                        lthr: int | None = None) -> tuple[dict, list[dict], float]:
+                        lthr: int | None = None,
+                        pauses_sec: list[tuple[float, float]] | None = None
+                        ) -> tuple[dict, list[dict], float]:
     """
     Рассчитать время в пульсовых зонах и найти длинные Z4+ сегменты.
     Calculate time in HR zones and find long Z4+ segments.
@@ -83,12 +85,24 @@ def build_time_in_zones(trackpoints: list[dict], max_hr: int,
                 z4_plus_segments.append({'duration': seg_dur_z4, 'avg_hr': seg_avg_z4})
             z4_seg_hrs = []
 
+    from src.analysis.utils import pause_overlap_sec
+    t_start = trackpoints[0]['time']
     prev = trackpoints[0]
     for tp in trackpoints[1:]:
         if not (prev['time'] and tp['time']):
             prev = tp
             continue
         delta = (tp['time'] - prev['time']).total_seconds() / 60
+        if pauses_sec and t_start:
+            # #286: точные паузы часов вычитаются из дельты (moving-time); дельта целиком
+            # в паузе — разрыв (не зона, не длительность), Z4-отрезок рвётся
+            t0 = (prev['time'] - t_start).total_seconds()
+            t1 = (tp['time'] - t_start).total_seconds()
+            delta -= pause_overlap_sec(t0, t1, pauses_sec) / 60
+            if delta <= 0:
+                _flush_z4()
+                prev = tp
+                continue
         if delta * 60 > RECORDING_GAP_MAX_SEC:
             # Разрыв записи (пауза часов/туннель) — не тренировка: не в зону,
             # не в длительность; Z4-отрезок разрывается (#279 — иначе пауза
