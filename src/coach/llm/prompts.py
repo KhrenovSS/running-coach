@@ -247,6 +247,8 @@ PLAN_PROMPT = (
     "посчитаны в week_targets: target_km, потолки качества (quality_z4/z3_km_max), "
     "long_run_km_max/long_run_min_max, hard_days_max, фаза мезоцикла "
     "(build/deload), run_days_max/rest_days_min — НЕ выходи за них и НЕ пересчитывай. "
+    "hard_days_max = 0 (quality_blocked_by_safety) — качественных дней в плане нет: ни tempo, "
+    "ни interval, и в message не обещай темповую/интервалы — только лёгкие и длительная. "
     "availability — окно доступности подопечного (дни недели и отменённые даты): "
     "days_ahead_allowed его уже учитывает, других дней не назначай. "
     "Заполни weekly_plan: только тренировочные дни, for_days_ahead ТОЛЬКО из "

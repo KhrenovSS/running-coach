@@ -438,3 +438,35 @@ def test_strides_stay_easy_without_clamp():
     gated.recovery_hours_left = 3.0
     p, clamped = clamp(proposal, evaluate_safety(gated), gated)
     assert p.workout_type == "easy" and clamped is False
+
+
+# --- 06.09.2026: урезанная качественная работа → easy, не «длительная» той же длины ---
+
+def _week_rules_verdict():
+    """Вердикт правил 16/17 (перекос Z3+, лёгкие слишком быстро): max_zone=2, long разрешён."""
+    from src.coach.contracts import ReasoningStep, SafetyVerdict
+    return SafetyVerdict(max_zone=2,
+                         allowed_types=("rest", "recovery", "easy", "long"),
+                         triggered=["week_intensity_overload"],
+                         reasons=[ReasoningStep(rule="p1_safety", decision="max_zone=2",
+                                                reason="за 7 дней 31% времени в Z3+")])
+
+
+@pytest.mark.parametrize("hard", ["tempo", "interval", "race"])
+def test_gated_quality_day_becomes_easy_not_long(hard):
+    """Инцидент 06.09.2026: tempo 40 мин при запрете интенсива становился «long 40 мин»
+    (неотличим от easy). long — тип по объёму, не ступень лестницы: даунгрейд → easy."""
+    p, _ = clamp(WorkoutProposal(workout_type=hard, target_zone=4, duration_min=40),
+                 _week_rules_verdict(), _state())
+    assert p.workout_type == "easy"
+    assert p.clamped and p.target["max_zone"] == 2
+    assert p.volume["duration_min"] == 40                # длительность не трогаем
+    assert p.proposal is not None and p.proposal.workout_type == hard
+
+
+def test_long_proposal_survives_week_rules():
+    """Предложенная длительная под теми же правилами остаётся длительной (long разрешён)."""
+    p, _ = clamp(WorkoutProposal(workout_type="long", target_zone=2, duration_min=70),
+                 _week_rules_verdict(), _state())
+    assert p.workout_type == "long"
+    assert not p.clamped

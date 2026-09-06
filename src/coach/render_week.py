@@ -29,6 +29,30 @@ def _change_label(workout_type: str | None, volume: dict | None) -> str:
     return label
 
 
+def _clamp_notes(prescriptions: list[Prescription]) -> list[str]:
+    """Строки о вмешательстве safety (06.09.2026): день с заменённым типом — по имени
+    и с причиной («⚠️ Чт 10.09: 🟠 Темповая → 🟢 Лёгкий бег — за 7 дней 31% времени в Z3+ …»);
+    урезаны только зона/длительность — одна общая строка. Всё детерминированно: из
+    `proposal` (до урезания) и первой причины вердикта. (Clamp notes: per-day type
+    substitutions with the safety reason; a single generic line for zone/duration cuts.)"""
+    notes: list[str] = []
+    generic = False
+    for p in sorted(prescriptions, key=lambda x: x.when):
+        if not p.clamped:
+            continue
+        before = p.proposal.workout_type if p.proposal is not None else None
+        if before is None or before == p.workout_type:
+            generic = True
+            continue
+        reason = next((r.reason for r in p.safety.reasons if r.reason), None)
+        line = (f"⚠️ {_day_label(p.when)}: {_TYPE_LABEL.get(before, before)} → "
+                f"{_TYPE_LABEL.get(p.workout_type, p.workout_type)}")
+        notes.append(line + (f" — {reason}" if reason else ""))
+    if generic:
+        notes.append("⚠️ Часть дней урезана границами безопасности.")
+    return notes
+
+
 def plan_change_line(when: date, new: Prescription, old) -> str:
     """Строка о замене назначения дня (решение владельца 03.09.2026):
     «Изменил план на Вс 06.09: 🛌 Отдых (было: 🟦 Длительный бег · 80 мин)»;
@@ -125,6 +149,10 @@ def render_week_plan(prescriptions: list[Prescription], targets: dict,
         summary = (f"Неделя {targets['mesocycle_week']}/{targets['mesocycle_length']} "
                    f"мезоцикла ({'разгрузочная' if targets['phase'] == 'deload' else 'рост'}) "
                    f"· цель ~{targets['target_km']:.0f} км")
+        if targets.get("quality_blocked_by_safety"):
+            # Интенсив закрыт вердиктом safety на всю неделю (06.09.2026): фаза мезоцикла —
+            # календарная, а «рост» без качественных дней надо назвать честно
+            summary += " · без интенсива (safety)"
         if targets.get("plan_scope") == "rest_of_week":
             # Остаток недели (#293): сколько уже сделано и что распределяли
             summary += (f" · сделано {targets['done_km']:.1f} км, "
@@ -164,8 +192,8 @@ def render_week_plan(prescriptions: list[Prescription], targets: dict,
         elif p.target.get("structure"):
             parts.append(p.target["structure"])
         lines.append(f"{day} — " + " · ".join(parts))
-    if any(p.clamped for p in prescriptions):
-        lines.append("⚠️ Часть дней урезана границами безопасности.")
+    lines.extend(_clamp_notes([p for p in prescriptions
+                               if today is None or p.when >= today]))
     legend = "✓ факт · ✗ пропущен · " if has_facts else ""
     lines.append(f"{legend}Остальные дни — отдых. Перепланировать: /plan")
     return "\n".join(lines)

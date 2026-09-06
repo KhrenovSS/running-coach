@@ -38,11 +38,17 @@ def _step(decision: str, reason: str) -> ReasoningStep:
 def _downgrade(workout_type: str, allowed: tuple[str, ...], max_zone: int) -> str:
     """Самый интенсивный тип, разрешённый и вписывающийся в потолок зоны.
 
-    (Highest-intensity type that is both allowed and fits under the zone cap.)
+    «long» — тип по объёму, а не ступень интенсивности: урезанная качественная работа
+    (tempo/interval/race) становится лёгким бегом, а не «длительной» той же длины
+    (инцидент 06.09.2026: tempo 40 мин → «Длительный бег 40 мин», неотличимый от easy).
+    long остаётся кандидатом только для самого long.
+    (Highest allowed type under the zone cap; "long" is volume-defined, so a gated
+    quality day falls to easy, never to long — long stays only for a long proposal.)
     """
     candidates = [
         t for t in TYPE_INTENSITY_ORDER
         if (not allowed or t in allowed) and TYPE_MIN_ZONE[t] <= max_zone
+        and (t != "long" or workout_type == "long")
     ]
     if not candidates:
         return "rest"
@@ -297,6 +303,13 @@ def rehydrate(row) -> Prescription:
     Используется read-only карточкой сохранённого плана недели (week_view).
     (Rehydrate a persisted, already-clamped prescription; no recomputation.)
     """
+    pj = getattr(row, "proposal_json", None) or {}
+    # Что предлагали ДО урезания — для строки «⚠️ Чт: Темповая → Лёгкий бег» в карточке
+    # (the pre-clamp proposal, so the saved card can name the substitution)
+    proposal = (WorkoutProposal(workout_type=pj["workout_type"],
+                                target_zone=int(pj.get("target_zone") or 2),
+                                duration_min=pj.get("duration_min"))
+                if pj.get("workout_type") else None)
     return Prescription(
         safety=SafetyVerdict(),
         workout_type=row.workout_type,
@@ -306,4 +319,5 @@ def rehydrate(row) -> Prescription:
         predicted=dict(row.predicted_json or {}),
         clamped=bool(row.clamped),
         source=row.source or "plan",
+        proposal=proposal,
     )

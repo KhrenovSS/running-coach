@@ -14,6 +14,12 @@
 она перенесена с дисциплины на **тип** (`Prescription` требует `SafetyVerdict` и собирается
 только в `safety.py::clamp()`, source-гвард в тестах).
 
+Даунгрейд типа в `clamp()` (06.09.2026): «long» — тип по объёму, а не ступень лестницы
+интенсивности, поэтому урезанные tempo/interval/race становятся `easy` (не «long» той же длины);
+`long` остаётся кандидатом только для самого `long`. Карточка недели называет замену и причину
+(`render_week._clamp_notes` — из `Prescription.proposal` и `safety.reasons`), а потолки недели
+видят вердикт до промпта (`planning_safety.apply_safety_to_targets`).
+
 ## Решение 2: ручной tool-loop, не SDK tool_runner
 
 `client.beta.messages.tool_runner` генерирует схему из сигнатуры и вызывает функцию сам —
@@ -160,6 +166,8 @@ coach/
 ├── load_monotony.py   # #308: монотонность/страйн Фостера по дневным баллам (week_report + правило 20)
 ├── planning_window.py # окно планирования (остаток недели) + week_done + local_week_volumes (#220,
 │                      #   полные недели по локальной дате — база week_targets)
+├── planning_safety.py # apply_safety_to_targets: интенсив закрыт вердиктом → hard_days_max=0,
+│                      #   quality_*_km_max=0, quality_blocked_by_safety (06.09.2026, до промпта LLM)
 ├── segments.py        # enrich_and_clamp_segments: числа сегментам из зон/истории, per-segment clamp (M2.1)
 ├── orchestrator.py    # morning_verdict (подтверждает план дня), handle_chat, on_workout_completed
 ├── review_flow.py     # ensure_insights_for_batch, run_pending_review, due_review_sessions

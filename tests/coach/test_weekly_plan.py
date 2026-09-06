@@ -219,3 +219,70 @@ def test_plan_with_closed_availability_window_returns_notice(db_session, monkeyp
     assert "бегать некуда" in text and "Пн, Вт" in text
     assert llm.calls == []
     assert db_session.query(Recommendation).filter_by(user_id=user.id).count() == 0
+
+
+# --- 06.09.2026: потолки недели видят вердикт safety; карточка называет замену ---
+
+def _forbid_hard_verdict():
+    from src.coach.contracts import ReasoningStep, SafetyVerdict
+    return SafetyVerdict(max_zone=2, allowed_types=("rest", "recovery", "easy", "long"),
+                         triggered=["week_intensity_overload"],
+                         reasons=[ReasoningStep(rule="p1_safety", decision="max_zone=2",
+                                                reason="за 7 дней 31% времени в Z3+")])
+
+
+def test_apply_safety_to_targets_zeroes_quality_caps():
+    from src.coach.contracts import SafetyVerdict
+    from src.coach.planning_safety import apply_safety_to_targets
+
+    base = {"hard_days_max": 1, "remaining_hard_days_max": 1,
+            "quality_z3_km_max": 5.6, "quality_z4_km_max": 2.8, "target_km": 28.0}
+    out = apply_safety_to_targets(base, _forbid_hard_verdict())
+    assert out["hard_days_max"] == 0 and out["remaining_hard_days_max"] == 0
+    assert out["quality_z3_km_max"] == 0.0 and out["quality_z4_km_max"] == 0.0
+    assert out["quality_blocked_by_safety"] == "за 7 дней 31% времени в Z3+"
+    assert base["hard_days_max"] == 1                      # чистая функция: вход не мутирует
+    # Обычный вердикт (всё разрешено) — без изменений
+    assert apply_safety_to_targets(base, SafetyVerdict()) is base
+
+
+def test_weekly_plan_gated_tempo_rendered_as_easy_with_reason(athlete_with_history, db_session,
+                                                              monkeypatch):
+    """Инцидент 06.09.2026: LLM заложил tempo при запрете интенсива → раньше «Длительный бег
+    40 мин» и общее «урезано». Теперь: строка easy, карточка называет замену и причину,
+    шапка — «без интенсива (safety)», LLM получил hard_days_max=0."""
+    from src.coach import prescriber, weekly_plan
+
+    verdict = _forbid_hard_verdict()
+    monkeypatch.setattr(weekly_plan, "evaluate_safety", lambda state, **kw: verdict)
+    monkeypatch.setattr(prescriber, "evaluate_safety", lambda state, **kw: verdict)
+    seen: dict = {}
+    real_today_block = weekly_plan.build_today_block
+
+    def spy_today_block(state_json, verdict_json, now_str, extras=None):
+        seen["targets"] = (extras or {}).get("week_targets (planning)")
+        return real_today_block(state_json, verdict_json, now_str, extras=extras)
+    monkeypatch.setattr(weekly_plan, "build_today_block", spy_today_block)
+    turn = dict(PLAN_TURN, weekly_plan=[
+        {"workout_type": "easy", "target_zone": 2, "duration_min": 40, "for_days_ahead": 2},
+        {"workout_type": "tempo", "target_zone": 3, "duration_min": 40, "for_days_ahead": 4},
+        {"workout_type": "long", "target_zone": 2, "duration_min": 70, "for_days_ahead": 7},
+    ])
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
+    uid = athlete_with_history.id
+    text = generate_weekly_plan(uid, db=db_session, llm=llm, now=_sunday(athlete_with_history))
+    assert text is not None
+
+    rows = {r.for_date: r for r in db_session.query(Recommendation).filter_by(
+        user_id=uid, status="planned").all()}
+    types = sorted(r.workout_type for r in rows.values())
+    assert types == ["easy", "easy", "long"]               # tempo → easy, длительная осталась
+    gated = [r for r in rows.values() if r.proposal_json["workout_type"] == "tempo"][0]
+    assert gated.workout_type == "easy" and gated.clamped
+    assert "🟠 Темповая → 🟢 Лёгкий бег — за 7 дней 31% времени в Z3+" in text
+    assert "без интенсива (safety)" in text
+    assert "Часть дней урезана" not in text
+    # LLM видел обнулённые потолки (targets в контексте промпта)
+    assert seen["targets"]["hard_days_max"] == 0
+    assert seen["targets"]["quality_z3_km_max"] == 0.0
+    assert seen["targets"]["quality_blocked_by_safety"] == "за 7 дней 31% времени в Z3+"

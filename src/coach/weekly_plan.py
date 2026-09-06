@@ -24,6 +24,7 @@ from src.coach.llm.prompts import (
     build_system_blocks,
     build_today_block,
 )
+from src.coach.planning_safety import apply_safety_to_targets
 from src.coach.prescriber import finalize, save_prescription, user_max_hr
 from src.services.repositories import latest_lthr
 from src.coach.render_week import render_week_plan
@@ -90,6 +91,9 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     review = planning.week_plan_review(user_id, db=db)
     state = assess_state(user_id, db=db)
     verdict = evaluate_safety(state)
+    # Интенсив закрыт safety → потолки качества = 0 ДО промпта (06.09.2026: иначе LLM
+    # закладывает темповую, clamp режет её молча, проза расходится с картой)
+    targets = apply_safety_to_targets(targets, verdict)
     state_json = jsonable(state)
     state_json.pop("signals", None)
 

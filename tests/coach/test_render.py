@@ -500,3 +500,48 @@ def test_plan_change_line_formats():
     line = plan_change_line(date(2026, 9, 2), tempo, SimpleNamespace(
         workout_type="rest", volume_json={}))
     assert line.startswith("Изменил план на Ср 02.09: 🟢 Лёгкий бег · 45 мин (было: 🛌 Отдых)")
+
+
+def test_render_week_plan_names_clamped_substitution():
+    """06.09.2026: карточка называет замену типа и причину («Темповая → Лёгкий бег — …»),
+    общая строка «Часть дней урезана» при этом не дублируется; шапка — « · без интенсива (safety)»."""
+    from datetime import date
+
+    from src.coach.contracts import ReasoningStep, SafetyVerdict
+    from src.coach.render_week import render_week_plan
+
+    state = _state()
+    verdict = SafetyVerdict(max_zone=2, allowed_types=("rest", "recovery", "easy", "long"),
+                            reasons=[ReasoningStep(rule="p1_safety", decision="max_zone=2",
+                                                   reason="за 7 дней 31% времени в Z3+")])
+    gated, _ = clamp(WorkoutProposal(workout_type="tempo", target_zone=3, duration_min=40),
+                     verdict, state)
+    easy, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2, duration_min=40),
+                    verdict, state)
+    gated.when = date(2026, 9, 10)
+    easy.when = date(2026, 9, 8)
+    targets = {"week_start": "2026-09-07", "mesocycle_week": 2, "mesocycle_length": 4,
+               "phase": "build", "target_km": 28,
+               "quality_blocked_by_safety": "за 7 дней 31% времени в Z3+"}
+
+    text = render_week_plan([easy, gated], targets, max_hr=177)
+    assert "мезоцикла (рост) · цель ~28 км · без интенсива (safety)" in text
+    assert "⚠️ Чт 10.09: 🟠 Темповая → 🟢 Лёгкий бег — за 7 дней 31% времени в Z3+" in text
+    assert "Часть дней урезана" not in text
+    assert "Длительный" not in text
+
+
+def test_render_week_plan_generic_clamp_line_for_zone_cut():
+    """Урезана только зона (тип тот же) → одна общая строка, без «X → Y»."""
+    from datetime import date
+
+    from src.coach.contracts import SafetyVerdict
+    from src.coach.render_week import render_week_plan
+
+    verdict = SafetyVerdict(max_zone=2)
+    p, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=3, duration_min=40),
+                 verdict, _state())
+    p.when = date(2026, 9, 8)
+    text = render_week_plan([p], {"week_start": "2026-09-07"})
+    assert p.clamped
+    assert text.count("⚠️") == 1 and "Часть дней урезана" in text

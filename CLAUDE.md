@@ -162,6 +162,9 @@
   (P0 04.09): перекос Z3+ за 7 дней, `easy_run_too_hard` ×2, `quality_volume_exceeded` (+48 ч),
   `downhill_load_high` (+24 ч, колено), монотонность Фостера (`coach/load_monotony.py`); шкала
   Recovery % — Coros §12 (20/70/90). Планирование: `long_run_hold`, `detraining_return` (пауза ≥ 14 дн).
+  **Даунгрейд (06.09.2026)**: урезанные tempo/interval/race → `easy`, не `long` (`_downgrade`); потолки
+  недели видят вердикт до промпта (`planning_safety.apply_safety_to_targets`, `hard_days_max=0`), карточка
+  называет замену и причину (`render_week._clamp_notes`).
 - **Планирование недели (P1 04.09.2026)**: прошлые недели — `planning_window.local_week_volumes`
   (локальная дата, полные недели); утро подтверждает последнюю действующую строку дня (в т.ч.
   `proposed` из чата); окно доступности — `available_weekdays` → `planning.set_availability`,
