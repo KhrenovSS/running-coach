@@ -173,6 +173,9 @@ def generate_weekly_plan(user_id: int, *, db: Session,
             items[i] = capped
             prescriptions[i] = _finalize(capped)
             plan_notes.append(note)
+        elif note:
+            logger.warning("Long run above cap but structured user=%s: %s", user_id, note)
+            plan_notes.append(note)
     long_run_capped = bool(plan_notes)
     scaled, note = cap_week_volume(items, prescriptions, targets)
     if scaled is not None:

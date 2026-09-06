@@ -410,3 +410,38 @@ def test_weekly_plan_keeps_strides_segments(athlete_with_history, db_session, mo
     assert any(s.get("role") == "work" and s.get("repeat") == 4 for s in segs)
     assert not row.clamped                                        # ускорения — не интенсив
     assert "4×20 сек" in text or "4×20" in text
+
+
+def test_weekly_plan_volume_cap_skips_structured_day_and_leaves_trail(athlete_with_history,
+                                                                       db_session, monkeypatch):
+    """06.09.2026: перебор объёма + день с ускорениями → структурный день неизменен, соседние
+    ужаты, proposal_json.rationale урезанных дней содержит «урезано кодом»."""
+    from src.coach import prescriber
+
+    def fake_predict(p, state, *, db):
+        if p.workout_type == "rest":
+            return {}
+        return {"pace_min_km": 4.0, "distance_km": round((p.volume.get("duration_min") or 0) / 4.0, 1)}
+    monkeypatch.setattr(prescriber, "predict_volume", fake_predict)
+    strides = [{"role": "warmup", "amount_kind": "min", "amount_value": 20, "target_zone": 2},
+               {"role": "work", "amount_kind": "sec", "amount_value": 20, "repeat": 5,
+                "target_zone": 3, "recovery": {"duration_min": 2.0}},
+               {"role": "cooldown", "amount_kind": "min", "amount_value": 10, "target_zone": 2}]
+    turn = dict(PLAN_TURN, weekly_plan=[
+        {"workout_type": "easy", "target_zone": 2, "duration_min": 90, "for_days_ahead": 1},
+        {"workout_type": "easy", "target_zone": 2, "duration_min": 42, "for_days_ahead": 3,
+         "segments": strides},
+        {"workout_type": "easy", "target_zone": 2, "duration_min": 90, "for_days_ahead": 5},
+        {"workout_type": "long", "target_zone": 2, "duration_min": 40, "for_days_ahead": 7},
+    ])
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
+    uid = athlete_with_history.id
+    text = generate_weekly_plan(uid, db=db_session, llm=llm, now=_sunday(athlete_with_history))
+    assert text is not None and "Объём недели урезан" in text
+    rows = db_session.query(Recommendation).filter_by(user_id=uid, status="planned").all()
+    structured = [r for r in rows if (r.target_json or {}).get("segments")]
+    assert len(structured) == 1 and structured[0].volume_json["duration_min"] == 42
+    trimmed = [r for r in rows if r.workout_type == "easy" and not (r.target_json or {}).get("segments")]
+    assert trimmed and all(r.volume_json["duration_min"] < 90 for r in trimmed)
+    assert all(any(x.startswith("урезано кодом") for x in r.proposal_json["rationale"]) for r in trimmed)
+    assert "5×20 сек свободно" in text

@@ -93,7 +93,9 @@ def test_render_segments_compact_and_clear():
     text = render_prescription(_owner_example_prescription(), max_hr=180)
     assert "*🟢 Лёгкий бег с ускорениями* · ~46 мин" in text   # итог из сегментов
     assert "Разминка: 25 мин · пульс до 144" in text                 # уд/мин, без (Z2)
-    assert "Ускорения ×7: 18 сек · пульс до 167 · свободно — не на пределе" in text
+    # 06.09.2026: ускорения — по усилию, потолок пульса за 18 с бессмыслен (гайды 45/46)
+    assert "Ускорения ×7: 18 сек · свободно — не на пределе" in text
+    assert "пульс до 167" not in text
     assert "отдых между: 2 мин трусцой или до пульса ≤130" in text
     assert "Заминка: 5 мин · пульс до 144" in text
     assert "(Z" not in text
@@ -269,3 +271,26 @@ def test_finalize_persists_hr_ceiling_and_render_uses_it(athlete_with_history, d
     assert p.target["hr_ceiling"] == 151                          # lthr 170 → Z2 151
     p.target["hr_ceiling"] = 144                                  # «старый якорь» в сохранённой строке
     assert "пульс до 144 уд/мин" in render_prescription(p, max_hr=177, lthr=170)
+
+
+# --- 06.09.2026: ускорения — усилие вместо пульса; зона safety их не клэмпит ---
+
+def test_strides_effort_led_no_hr_ceiling_no_zone_clamp():
+    """Ускорение 20 с Z3 под max_zone=2: зона не клэмпится, hr_ceiling None, усилие по умолчанию,
+    компактная строка «5×20 сек свободно»; отрезок 3 мин Z3 (не ускорение) клэмпится как раньше."""
+    from src.coach.render_segments import compact_segments
+    out = enrich_and_clamp_segments(
+        [_seg(role="warmup", amount_value=15, target_zone=2),
+         _seg(role="work", amount_kind="sec", amount_value=20, repeat=5, target_zone=3,
+              recovery=RecoverySpec(duration_min=2.0)),
+         _seg(role="work", amount_value=3, target_zone=3),
+         _seg(role="cooldown", amount_value=15, target_zone=2)],
+        workout_type="easy", proposal_type="easy", max_zone=2, max_hr=180, user_id=1, db=None)
+    stride, rep = out[1], out[2]
+    assert stride["stride"] is True and stride["hr_ceiling"] is None
+    assert stride["target_zone"] == 3 and stride["effort"] == "свободно"
+    assert stride["pace_missing"] is False
+    assert rep["stride"] is False and rep["target_zone"] == 2 and rep["hr_ceiling"] == 144
+    line = compact_segments(out, max_hr=180)
+    assert "5×20 сек свободно" in line and "до 144" in line
+    assert "20 сек до" not in line

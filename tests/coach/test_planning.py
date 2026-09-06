@@ -578,3 +578,35 @@ def test_apply_safety_holds_volume_flat():
     # Без истории (prev 0) объём не трогаем
     out2 = apply_safety_to_targets({**base, "prev_week_km": 0.0}, verdict)
     assert out2["target_km"] == 27.9 and "volume_held_by_safety" not in out2
+
+
+def test_cap_week_volume_keeps_structured_days_and_leaves_trail():
+    """06.09.2026: день с сегментами не масштабируется (иначе 39 мин при сегментах на 42);
+    урезанные копии несут след «урезано кодом» в rationale."""
+    from src.coach.contracts import WorkoutSegment
+    from src.coach.planning_safety import cap_week_volume
+    items, pres = _plan_items_and_prescriptions(
+        [("easy", 40, 5.7), ("easy", 42, 6.0), ("easy", 40, 5.7), ("long", 58, 8.3)])
+    items[1].segments.append(WorkoutSegment(role="work", amount_kind="sec", amount_value=20,
+                                            repeat=5, target_zone=3))
+    new, note = cap_week_volume(items, pres, {"target_km": 22.0, "prev_week_km": 22.0})
+    assert new is not None
+    assert new[1] is items[1] and new[3] is items[3]             # структурный и длительная — нетронуты
+    assert new[0].duration_min < 40 and new[2].duration_min < 40
+    assert any(r.startswith("урезано кодом: 40 →") for r in new[0].rationale)
+    assert items[0].rationale == []                              # вход не мутирует
+
+
+def test_cap_long_run_structured_only_warns_and_trail_on_plain():
+    from src.coach.contracts import WorkoutProposal, WorkoutSegment
+    from src.coach.planning_safety import cap_long_run
+    targets = {"long_run_km_max": 8.4, "long_run_min_max": 150.0}
+    structured = WorkoutProposal(workout_type="long", target_zone=2, duration_min=70,
+                                 segments=[WorkoutSegment(role="steady", amount_value=70, target_zone=2)])
+    capped, note = cap_long_run(structured, _long_prescription(10.0), targets)
+    assert capped is None and "структура задана" in note
+    plain = WorkoutProposal(workout_type="long", target_zone=2, duration_min=70,
+                            rationale=["единственная длительная"])
+    capped, _ = cap_long_run(plain, _long_prescription(10.0), targets)
+    assert capped.rationale[0] == "единственная длительная"
+    assert capped.rationale[-1].startswith("урезано кодом: 70 → 58 мин")

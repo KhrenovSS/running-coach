@@ -100,7 +100,9 @@ def render_segment_lines(segments: list[dict]) -> list[str]:
         if amt:
             parts.append(amt)
         zone = seg.get("target_zone")
-        if seg.get("hr_ceiling") is not None:
+        if seg.get("stride"):
+            pass                                # ускорение — по усилию, пульс/зону не печатаем
+        elif seg.get("hr_ceiling") is not None:
             # Пульс в уд/мин, без ярлыка зоны (пожелание владельца 02.09.2026)
             parts.append(f"пульс до {seg['hr_ceiling']}")
         elif zone is not None:
@@ -117,7 +119,10 @@ def render_segment_lines(segments: list[dict]) -> list[str]:
             parts.append("по ощущениям")
         lines.append(f"{head}: " + " · ".join(parts))
         if seg.get("recovery"):
-            lines.append("   отдых между: " + _fmt_recovery(seg["recovery"]))
+            rec_text = _fmt_recovery(seg["recovery"])
+            if seg.get("stride") and rec_text == "лёгкая трусца":
+                rec_text = "до полного восстановления"
+            lines.append("   отдых между: " + rec_text)
     return lines
 
 
@@ -170,8 +175,12 @@ def compact_segments(segments: list[dict] | None, max_hr: int | None = None,
         amt = _fmt_amount(seg.get("amount_kind"), seg.get("amount_value"))
         role, zone = seg.get("role"), seg.get("target_zone")
         rep = seg.get("repeat", 1) or 1
-        bpm = _seg_bpm(seg, max_hr, lthr)
-        intensity = f"до {bpm}" if bpm is not None else (f"Z{zone}" if zone is not None else "")
+        if seg.get("stride"):
+            # Ускорение — усилие вместо пульса (06.09.2026): «5×20 сек свободно»
+            intensity = seg.get("effort") or ""
+        else:
+            bpm = _seg_bpm(seg, max_hr, lthr)
+            intensity = f"до {bpm}" if bpm is not None else (f"Z{zone}" if zone is not None else "")
         if role in _COMPACT_ROLE:
             body = f"{_COMPACT_ROLE[role]} {amt}" if amt else _COMPACT_ROLE[role]
         else:

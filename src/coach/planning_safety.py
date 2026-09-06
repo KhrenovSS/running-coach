@@ -75,6 +75,15 @@ def cap_long_run(proposal: WorkoutProposal, prescription: Prescription,
     """
     if proposal.workout_type != "long" or not proposal.duration_min:
         return None, None
+    if proposal.segments:
+        # Структурная длительная (прогрессия/блоки): молча резать нельзя — сегменты разойдутся
+        # с длительностью; выше потолка — только заметка (structured long run: warn, don't trim)
+        km_est = (prescription.predicted or {}).get("distance_km")
+        cap_km = targets.get("long_run_km_max")
+        if cap_km and km_est and km_est > cap_km + LONG_RUN_CAP_TOLERANCE_KM:
+            return None, (f"⚠️ Длительная ≈{km_est:.1f} км выше потолка {cap_km:.1f} км, "
+                          "структура задана — проверь вручную.")
+        return None, None
     duration = float(proposal.duration_min)
     cap_km = targets.get("long_run_km_max")
     cap_min = targets.get("long_run_min_max")
@@ -100,7 +109,10 @@ def cap_long_run(proposal: WorkoutProposal, prescription: Prescription,
     if est_km is not None:
         note += f" (≈{est_km:.1f} км)"
     note += f": {reason}."
-    return replace(proposal, duration_min=int(new_min), distance_km=new_km), note
+    # След урезания в proposal_json.rationale — что предлагал LLM (audit trail in rationale)
+    trail = f"урезано кодом: {duration:.0f} → {new_min:.0f} мин ({reason})"
+    return replace(proposal, duration_min=int(new_min), distance_km=new_km,
+                   rationale=[*proposal.rationale, trail]), note
 
 
 _SCALABLE_TYPES = ("easy", "recovery")
@@ -125,8 +137,11 @@ def cap_week_volume(items: list[WorkoutProposal], prescriptions: list[Prescripti
     total = sum(est)
     if total <= target * (1 + WEEK_VOLUME_TOLERANCE_PCT):
         return None, None
+    # Структурные дни (сегменты) фиксированы: масштаб длительности разошёлся бы с сегментами
+    # (06.09.2026: 39 мин при сегментах на 42) — ужимаются только ровные лёгкие дни
     scalable = [i for i, it in enumerate(items)
-                if it.workout_type in _SCALABLE_TYPES and est[i] > 0 and it.duration_min]
+                if it.workout_type in _SCALABLE_TYPES and est[i] > 0 and it.duration_min
+                and not it.segments]
     if not scalable:
         return None, None
     fixed = sum(est[i] for i in range(len(items)) if i not in scalable)
@@ -141,9 +156,11 @@ def cap_week_volume(items: list[WorkoutProposal], prescriptions: list[Prescripti
         it = items[i]
         new_min = max(PLAN_EASY_MIN_MINUTES, math.floor(it.duration_min * k))
         if new_min < it.duration_min:
+            trail = f"урезано кодом: {it.duration_min:.0f} → {new_min:.0f} мин (объём недели)"
             new_items[i] = replace(it, duration_min=int(new_min),
                                    distance_km=(round(it.distance_km * new_min / it.duration_min, 1)
-                                                if it.distance_km else None))
+                                                if it.distance_km else None),
+                                   rationale=[*it.rationale, trail])
             changed = True
         new_total += est[i] * new_min / it.duration_min
     if not changed:

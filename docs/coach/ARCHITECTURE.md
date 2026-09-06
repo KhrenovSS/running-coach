@@ -27,6 +27,9 @@
 Объём недели (06.09.2026): `cap_week_volume` ужимает лёгкие дни до `target_km` по сумме `predicted`;
 при закрытом интенсиве `apply_safety_to_targets` держит `target_km = prev_week_km` (решение владельца).
 Элементы `weekly_plan` несут `segments` (`segments_from_schema`) — ускорения доходят до карточки.
+Ускорения (06.09.2026): `is_stride`-сегменты ведутся по усилию — без потолка пульса и клэмпа зоны
+(`segments.enrich_and_clamp_segments` → `stride: True`, рендер «5×20 сек свободно»); структурные дни
+`cap_week_volume` не масштабирует; урезанные предложения несут след «урезано кодом» в `rationale`.
 
 ## Решение 2: ручной tool-loop, не SDK tool_runner
 

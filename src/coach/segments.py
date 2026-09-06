@@ -12,8 +12,9 @@ from sqlalchemy.orm import Session
 
 from src.analysis.hr_zones import zone_ceiling_hr
 from src.config.constants import LTSP_ZONE_OFFSET_S
-from src.coach.config import TYPE_INTENSITY_ORDER
+from src.coach.config import STRIDE_DEFAULT_EFFORT, TYPE_INTENSITY_ORDER
 from src.coach.contracts import RecoverySpec, WorkoutSegment
+from src.coach.safety import is_stride
 
 _LADDER = {t: i for i, t in enumerate(TYPE_INTENSITY_ORDER)}
 
@@ -54,17 +55,24 @@ def enrich_and_clamp_segments(segments: list[WorkoutSegment], *, workout_type: s
 
     out: list[dict] = []
     for seg in segments:
+        stride = seg.role == "work" and is_stride(seg)
         zone = seg.target_zone
-        if zone is not None:
+        if zone is not None and not stride:
             zone = max(1, min(zone, max_zone))     # per-segment clamp под потолок safety
-        hr_ceiling = zone_ceiling_hr(zone, max_hr, lthr) if zone is not None else None
+        # Ускорение 15–20 с (06.09.2026): пульс за такой отрезок не успевает — потолок пульса
+        # бессмыслен, ведём по усилию («свободно»); зону safety не клэмпит, is_stride качеством
+        # это не считает. (Strides are effort-led: no HR ceiling, no zone clamp.)
+        hr_ceiling = (zone_ceiling_hr(zone, max_hr, lthr)
+                      if zone is not None and not stride else None)
 
         pace_target = seg.pace_target_min_km
         pace_hint = None
         pace_source = "history"
         pace_missing = False
         hr_missing = False
-        if pace_target is not None:
+        if stride:
+            pass                                    # темп ускорению не оцениваем — по усилию
+        elif pace_target is not None:
             # Явный темп: проверяем, можем ли предсказать пульс на нём.
             est = (expected_hr_at_pace(user_id, pace_target, db=db)
                    if db is not None else None)
@@ -96,7 +104,8 @@ def enrich_and_clamp_segments(segments: list[WorkoutSegment], *, workout_type: s
             "pace_source": pace_source if pace_hint is not None else None,
             "pace_missing": pace_missing,
             "hr_missing": hr_missing,
-            "effort": seg.effort,
+            "effort": (seg.effort or STRIDE_DEFAULT_EFFORT) if stride else seg.effort,
+            "stride": stride,
             "recovery": _recovery_to_dict(seg.recovery, max_hr, lthr),
         })
     return out
