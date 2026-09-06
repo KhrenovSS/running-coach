@@ -24,7 +24,7 @@ from src.coach.llm.prompts import (
     build_system_blocks,
     build_today_block,
 )
-from src.coach.planning_safety import apply_safety_to_targets
+from src.coach.planning_safety import apply_safety_to_targets, cap_long_run
 from src.coach.prescriber import finalize, save_prescription, user_max_hr
 from src.services.repositories import latest_lthr
 from src.coach.render_week import render_week_plan
@@ -34,7 +34,7 @@ from src.config.constants import RECOMMENDATION_STATUS_SUPERSEDED
 from src.coach.rules.p1_safety import evaluate_safety
 from src.coach.state import assess_state
 from src.coach.tools.serialize import jsonable
-from src.coach.turn_context import build_extras
+from src.coach.turn_context import build_extras, recent_athlete_requests
 from src.exceptions import CoachError, LLMUnavailableError
 from src.models import Recommendation, User
 from src.services.repositories_coach import CoachRepository
@@ -100,6 +100,10 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     extras = build_extras(user_id, db=db, weeks=4,
                           guides_query="план недели мезоцикл фазы объём прогрессия")
     extras["week_targets (planning)"] = targets
+    requests_ = recent_athlete_requests(user_id, db=db)
+    if requests_:
+        # Просьбы подопечного за неделю (06.09.2026): обещанное, но отложенное — назвать, не замолчать
+        extras["athlete_requests (chat, 7d)"] = requests_
     if review is not None:
         extras["week_plan_review (planning)"] = review
     if week_report is not None:
@@ -147,9 +151,20 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     superseded = planning.supersede_future_rows(
         user_id, db=db, from_date=today + timedelta(days=first_offset))
     prescriptions: list[Prescription] = []
+    plan_notes: list[str] = []
     for proposal in items:
         p = finalize(proposal, state, db=db, persist=False, source="llm",
                      now=now_local)
+        # Потолок длительной — кодом (06.09.2026): км по тому же ориентиру, что в карточке;
+        # повторный finalize — Prescription по-прежнему рождается только в clamp
+        capped, note = cap_long_run(proposal, p, targets)
+        if capped is not None:
+            logger.info("Long run capped user=%s: %s→%s min (est %.1f km, cap %.1f km)",
+                        user_id, proposal.duration_min, capped.duration_min,
+                        (p.predicted or {}).get("distance_km") or 0.0,
+                        targets.get("long_run_km_max") or 0.0)
+            p = finalize(capped, state, db=db, persist=False, source="llm", now=now_local)
+            plan_notes.append(note)
         status = "adjusted" if (proposal.for_days_ahead == 0 and had_today_row) else "planned"
         save_prescription(p, state, db=db, status=status)
         prescriptions.append(p)
@@ -165,12 +180,15 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     if dropped_days:
         text += (f"\n⚠️ Беговых дней урезано до {run_days_cap}: "
                  "частота растёт не быстрее +1 в неделю.")
+    for note in plan_notes:
+        text += "\n" + note
     CoachRepository.save_message(user_id, "user", PLAN_PROMPT, db=db, kind="plan")
     CoachRepository.save_message(
         user_id, "assistant", text, db=db, kind="plan",
         meta={"days": len(prescriptions),
               "clamped": sum(1 for p in prescriptions if p.clamped),
               "superseded": superseded, "dropped_days": dropped_days,
+              "long_run_capped": bool(plan_notes),
               "prose": turn.message,   # #258: история берёт прозу без карточки
               "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0)},
         tokens_in=usage.get("input_tokens"), tokens_out=usage.get("output_tokens"),

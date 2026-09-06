@@ -286,3 +286,49 @@ def test_weekly_plan_gated_tempo_rendered_as_easy_with_reason(athlete_with_histo
     assert seen["targets"]["hard_days_max"] == 0
     assert seen["targets"]["quality_z3_km_max"] == 0.0
     assert seen["targets"]["quality_blocked_by_safety"] == "за 7 дней 31% времени в Z3+"
+
+
+def test_weekly_plan_caps_long_run_by_code(athlete_with_history, db_session, monkeypatch):
+    """06.09.2026: LLM дал длительную 70 мин ≈ 10 км при потолке 30 % недели — код урезает
+    до потолка, карточка получает заметку, meta — флаг; LLM видел просьбы подопечного."""
+    from src.coach import prescriber, weekly_plan
+    from src.services.repositories_coach import CoachRepository
+
+    uid = athlete_with_history.id
+    CoachRepository.save_message(uid, "user", "тело просит аккуратных ускорений", db=db_session)
+
+    def fake_predict(p, state, *, db):
+        if p.workout_type == "rest":
+            return {}
+        # Быстрый темп → 70 мин ≈ 17,5 км, заведомо выше потолка 30 % любой недели фикстуры
+        return {"pace_min_km": 4.0, "distance_km": round((p.volume.get("duration_min") or 0) / 4.0, 1)}
+    monkeypatch.setattr(prescriber, "predict_volume", fake_predict)
+    seen: dict = {}
+    real_today_block = weekly_plan.build_today_block
+
+    def spy(state_json, verdict_json, now_str, extras=None):
+        seen["extras"] = extras or {}
+        return real_today_block(state_json, verdict_json, now_str, extras=extras)
+    monkeypatch.setattr(weekly_plan, "build_today_block", spy)
+
+    turn = dict(PLAN_TURN, weekly_plan=[
+        {"workout_type": "easy", "target_zone": 2, "duration_min": 40, "for_days_ahead": 2},
+        {"workout_type": "long", "target_zone": 2, "duration_min": 70, "for_days_ahead": 7},
+    ])
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
+    text = generate_weekly_plan(uid, db=db_session, llm=llm, now=_sunday(athlete_with_history))
+    assert text is not None
+
+    targets = seen["extras"]["week_targets (planning)"]
+    cap_km = targets["long_run_km_max"]
+    long_row = db_session.query(Recommendation).filter_by(
+        user_id=uid, status="planned", workout_type="long").one()
+    est_km = long_row.volume_json["duration_min"] / 4.0
+    assert est_km <= cap_km + 0.3 + 0.15, (est_km, cap_km)   # допуск + округление минут
+    assert long_row.volume_json["duration_min"] < 70
+    assert "⚠️ Длительная урезана до" in text and "потолок 30 % недельного объёма" in text
+    msg = db_session.query(CoachMessage).filter_by(user_id=uid, kind="plan", role="assistant") \
+        .order_by(CoachMessage.id.desc()).first()
+    assert msg.meta_json["long_run_capped"] is True
+    requests_ = seen["extras"]["athlete_requests (chat, 7d)"]
+    assert any("ускорений" in r["text"] for r in requests_)

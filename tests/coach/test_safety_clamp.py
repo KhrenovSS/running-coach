@@ -470,3 +470,14 @@ def test_long_proposal_survives_week_rules():
                  _week_rules_verdict(), _state())
     assert p.workout_type == "long"
     assert not p.clamped
+
+
+def test_strides_allowed_under_week_intensity_rules():
+    """Ускорения 15–20 с при вердикте правил 16/17 (интенсив закрыт): лёгкий день остаётся
+    лёгким и не клэмпится — значит план недели без качества может их содержать (06.09.2026)."""
+    proposal = WorkoutProposal(workout_type="easy", target_zone=2, duration_min=40,
+                               segments=[_seg("warmup", 10, zone=2),
+                                         _seg("work", 20, kind="sec", zone=3, repeat=6),
+                                         _seg("cooldown", 10, zone=2)])
+    p, clamped = clamp(proposal, _week_rules_verdict(), _state())
+    assert p.workout_type == "easy" and clamped is False

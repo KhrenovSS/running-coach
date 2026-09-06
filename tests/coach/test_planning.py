@@ -448,3 +448,60 @@ def test_availability_persists_and_filters_plan_window(db_session):
     rest = db_session.query(Recommendation).filter_by(user_id=user.id, for_date=mon_date).one()
     assert rest.status == "adjusted"
     assert planning.set_availability(user.id, db=db_session, weekdays=[]) == {"weekdays": None}
+
+
+# --- 06.09.2026: потолок длительной держит код (cap_long_run) ---
+
+def _long_prescription(distance_km):
+    from src.coach.contracts import Prescription, SafetyVerdict
+    return Prescription(safety=SafetyVerdict(), workout_type="long",
+                        volume={"duration_min": 70.0},
+                        predicted={"pace_min_km": 7.0, "distance_km": distance_km} if distance_km else {})
+
+
+def test_cap_long_run_trims_to_km_ceiling():
+    """70 мин ≈ 10 км при потолке 8,4 км → 58 мин, заметка про 30 % недели."""
+    from src.coach.contracts import WorkoutProposal
+    from src.coach.planning_safety import cap_long_run
+    proposal = WorkoutProposal(workout_type="long", target_zone=2, duration_min=70, for_days_ahead=7)
+    targets = {"long_run_km_max": 8.4, "long_run_min_max": 150.0, "long_run_hold": False}
+    capped, note = cap_long_run(proposal, _long_prescription(10.0), targets)
+    assert capped is not None and capped.duration_min == 58      # floor(70 × 8.4 / 10)
+    assert capped.for_days_ahead == 7 and proposal.duration_min == 70   # копия, вход не мутирует
+    assert "Длительная урезана до 58 мин" in note and "≈8.3 км" in note
+    assert "потолок 30 % недельного объёма" in note
+
+
+def test_cap_long_run_within_tolerance_untouched():
+    """8,6 км при потолке 8,4 + допуск 0,3 — не трогаем (шум оценки темпа)."""
+    from src.coach.contracts import WorkoutProposal
+    from src.coach.planning_safety import cap_long_run
+    proposal = WorkoutProposal(workout_type="long", target_zone=2, duration_min=60)
+    targets = {"long_run_km_max": 8.4, "long_run_min_max": 150.0}
+    assert cap_long_run(proposal, _long_prescription(8.6), targets) == (None, None)
+    # Не длительная — вообще не рассматриваем
+    easy = WorkoutProposal(workout_type="easy", target_zone=2, duration_min=200)
+    assert cap_long_run(easy, _long_prescription(20.0), targets) == (None, None)
+
+
+def test_cap_long_run_minutes_only_without_pace_history():
+    """Нет оценки темпа → км-потолок честно не применяем, только 150 мин."""
+    from src.coach.contracts import WorkoutProposal
+    from src.coach.planning_safety import cap_long_run
+    targets = {"long_run_km_max": 8.4, "long_run_min_max": 150.0}
+    ok = WorkoutProposal(workout_type="long", target_zone=2, duration_min=120)
+    assert cap_long_run(ok, _long_prescription(None), targets) == (None, None)
+    too_long = WorkoutProposal(workout_type="long", target_zone=2, duration_min=170)
+    capped, note = cap_long_run(too_long, _long_prescription(None), targets)
+    assert capped.duration_min == 150 and "не дольше 150 мин" in note and "≈" not in note
+
+
+def test_cap_long_run_mentions_hold():
+    """long_run_hold (доля длительной превышена на прошлой неделе) — дополнение в заметке."""
+    from src.coach.contracts import WorkoutProposal
+    from src.coach.planning_safety import cap_long_run
+    proposal = WorkoutProposal(workout_type="long", target_zone=2, duration_min=70, distance_km=10.0)
+    targets = {"long_run_km_max": 8.4, "long_run_min_max": 150.0, "long_run_hold": True}
+    capped, note = cap_long_run(proposal, _long_prescription(10.0), targets)
+    assert capped.distance_km == 8.4 and capped.duration_min == 58
+    assert "длительная не растёт после прошлой недели" in note

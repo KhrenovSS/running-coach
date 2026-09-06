@@ -189,6 +189,7 @@ INTERVAL_SEGMENT_MAX_MIN = 5.0     # непрерывный отрезок в Z4
 # M1.6: длительная (Дэниелс, гайд 45: ≤25–30% недели или 150 мин)
 LONG_RUN_MAX_PCT_WEEK = 0.30
 LONG_RUN_MAX_MIN = 150.0
+LONG_RUN_CAP_TOLERANCE_KM = 0.3   # допуск оценки км по темпу истории при урезании длительной (06.09.2026)
 # Длительная как качественный день для правила 12 (04.09.2026): по ярлыку long ИЛИ по
 # длительности; единый источник порога — src/config/constants.py (резолвер ярлыка)
 from src.config.constants import LONG_RUN_MIN_MINUTES  # noqa: E402,F401

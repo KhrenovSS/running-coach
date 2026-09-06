@@ -19,7 +19,7 @@ from src.coach.llm.config import (
 )
 from src.coach.tools.registry import run_tool
 from src.config.constants import RECOMMENDATION_STATUS_SUPERSEDED
-from src.models import Recommendation, User
+from src.models import CoachMessage, Recommendation, User
 from src.services.repositories_coach import CoachRepository
 from src.utils.timeutils import WEEKDAYS_RU, local_dt, user_now
 
@@ -153,6 +153,29 @@ def history(user_id: int, *, db: Session) -> list[dict]:
         else:
             content = m.text
         out.append({"role": m.role, "content": content})
+    return out
+
+
+def recent_athlete_requests(user_id: int, *, db: Session, days: int = 7,
+                            limit: int = 5, max_chars: int = 240) -> list[dict]:
+    """Свежие реплики подопечного (role=user, kind=chat) за `days` дней — контекст плана недели
+    (06.09.2026): просьба про темповые вставки от 04.09 выпала из 8-ходового окна истории, и план
+    молча её проигнорировал. Детерминированно: дата + обрезанный текст.
+    (Recent athlete chat requests for the weekly-plan context; deterministic, no LLM.)"""
+    from datetime import datetime, timedelta, timezone
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = (db.query(CoachMessage)
+            .filter(CoachMessage.user_id == user_id, CoachMessage.role == "user",
+                    CoachMessage.kind == "chat", CoachMessage.created_at >= since)
+            .order_by(CoachMessage.created_at.desc(), CoachMessage.id.desc())
+            .limit(limit).all())
+    out = []
+    for m in reversed(rows):
+        text = " ".join((m.text or "").split())
+        if len(text) > max_chars:
+            text = text[:max_chars].rstrip() + "…"
+        out.append({"date": m.created_at.date().isoformat() if m.created_at else None,
+                    "text": text})
     return out
 
 
