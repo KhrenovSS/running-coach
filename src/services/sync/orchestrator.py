@@ -30,6 +30,8 @@ SYNC_CONFIG = {
         'label_ru': 'здоровья',
         'empty_msg': 'нет новых данных',
         'empty_label': 'данных о сне нет',
+        'synced_unit': 'записей здоровья',
+        'unit_gen': 'данных о здоровье',
     },
     'activity': {
         'key': 'activity',
@@ -41,16 +43,71 @@ SYNC_CONFIG = {
         'label_ru': 'тренировок',
         'empty_msg': 'нет новых тренировок',
         'empty_label': 'новых тренировок нет',
+        'synced_unit': 'тренировок',
+        'unit_gen': 'тренировок',
     },
 }
 
 
-def _record_sync_success(db, cred, cfg) -> None:
-    """Успех: двигаем таймстемп, сбрасываем счётчик сбоев (Success: advance timestamp, reset failures)."""
-    setattr(cred, cfg['last_field'], datetime.now(timezone.utc))
-    if getattr(cred, cfg['failures_field'], 0):
+def _fmt_gap(seconds: float) -> str:
+    """Длительность паузы «1 ч 42 мин» / «17 мин» / «3 дн 2 ч» (human-readable gap)."""
+    total_min = max(int(seconds // 60), 0)
+    days, rem = divmod(total_min, 24 * 60)
+    hours, minutes = divmod(rem, 60)
+    if days:
+        return f"{days} дн {hours} ч" if hours else f"{days} дн"
+    if hours:
+        return f"{hours} ч {minutes} мин" if minutes else f"{hours} ч"
+    return f"{minutes} мин"
+
+
+def _sync_failed_text(cfg, brand: str, failures: int, last_ok) -> str:
+    """Текст алерта о сбое синка (sync-failure alert text)."""
+    last_str = last_ok.strftime('%d.%m.%Y %H:%M UTC') if last_ok else 'никогда'
+    return (f"⚠️ *Синхронизация {cfg['label_ru']} ({brand}) не работает*\n"
+            f"Подряд сбоев: {failures}. Последний успех: {last_str}.\n"
+            f"Данные могли устареть — проверь учётные данные часов "
+            f"или запусти синхронизацию вручную.")
+
+
+def _sync_recovered_text(cfg, brand: str, prev_failures: int, prev_last_ok, now, synced) -> str:
+    """Текст «синхронизация восстановлена» — закрывает ранее отправленный алерт
+    (recovery text: closes the earlier failure alert)."""
+    if prev_last_ok is not None:
+        gap = _fmt_gap((now - ensure_aware_utc(prev_last_ok)).total_seconds())
+        pause = f"пауза {gap} (с {prev_last_ok.strftime('%d.%m.%Y %H:%M UTC')})"
+    else:
+        pause = "раньше успешных синхронизаций не было"
+    if synced and synced > 0:
+        data_line = f"Подтянуто {cfg['synced_unit']}: {synced}."
+    else:
+        data_line = f"Новых {cfg['unit_gen']} за время сбоя не было."
+    return (f"✅ *Синхронизация {cfg['label_ru']} ({brand}) восстановлена*\n"
+            f"Сбоев подряд было: {prev_failures}, {pause}.\n"
+            f"{data_line}")
+
+
+def _record_sync_success(db, cred, cfg, synced: int | None = None) -> None:
+    """Успех: двигаем таймстемп, сбрасываем счётчик сбоев; если до этого ушёл алерт о сбое —
+    сообщаем о восстановлении (Success: advance timestamp, reset failures; notify recovery
+    if the failure alert had been sent, i.e. counter reached the notify threshold)."""
+    now = datetime.now(timezone.utc)
+    prev_failures = getattr(cred, cfg['failures_field'], 0) or 0
+    prev_last_ok = getattr(cred, cfg['last_field'])
+    setattr(cred, cfg['last_field'], now)
+    if prev_failures:
         setattr(cred, cfg['failures_field'], 0)
     db.commit()
+    if prev_failures >= SYNC_FAILURE_NOTIFY_THRESHOLD:
+        # Алерт уходит ровно на пороге → счётчик ≥ порога означает «пользователь предупреждён»
+        # (alert fires exactly at threshold → counter ≥ threshold means the user was warned)
+        try:
+            telegram_notify(
+                user_id=cred.user_id,
+                text=_sync_recovered_text(cfg, cred.brand, prev_failures, prev_last_ok, now, synced),
+            )
+        except Exception as e:  # уведомление — best-effort, успех синка важнее (best-effort notify)
+            logger.warning("%s sync: recovery notify failed for user=%s: %s", cfg['label'], cred.user_id, e)
 
 
 def _record_sync_failure(db, cred, cfg) -> None:
@@ -65,14 +122,9 @@ def _record_sync_failure(db, cred, cfg) -> None:
     cred.token_expires_at = None
     db.commit()
     if failures == SYNC_FAILURE_NOTIFY_THRESHOLD:
-        last_ok = getattr(cred, cfg['last_field'])
-        last_str = last_ok.strftime('%d.%m.%Y %H:%M UTC') if last_ok else 'никогда'
         telegram_notify(
             user_id=cred.user_id,
-            text=f"⚠️ *Синхронизация {cfg['label_ru']} ({cred.brand}) не работает*\n"
-                 f"Подряд сбоев: {failures}. Последний успех: {last_str}.\n"
-                 f"Данные могли устареть — проверь учётные данные часов "
-                 f"или запусти синхронизацию вручную.",
+            text=_sync_failed_text(cfg, cred.brand, failures, getattr(cred, cfg['last_field'])),
         )
 
 
@@ -116,7 +168,7 @@ def run_sync_for_user(user_id: int, brand: str, sync_type: str,
         result = run_async_in_thread(cfg['sync_fn'](cred, brand, db, progress=progress, pending=pending if sync_type == 'activity' else None))
 
         if result >= 0:
-            _record_sync_success(db, cred, cfg)
+            _record_sync_success(db, cred, cfg, synced=result)
             audit.log_sync_completed(brand=brand, user_id=user_id, found=result, processed=result,
                                      source=f"web_{brand}_sync")
         else:
@@ -192,11 +244,11 @@ def _auto_sync(sync_type: str):
                     if result > 0:
                         total_synced += result
                         logger.info("%s sync: brand=%s user=%s synced=%d", label, cred.brand, cred.user_id, result)
-                        _record_sync_success(db, cred, cfg)
+                        _record_sync_success(db, cred, cfg, synced=result)
                     elif result == 0:
                         total_empty += 1
                         logger.info("%s sync: brand=%s user=%s — %s", label, cred.brand, cred.user_id, cfg['empty_msg'])
-                        _record_sync_success(db, cred, cfg)
+                        _record_sync_success(db, cred, cfg, synced=result)
                     elif result == -1:
                         total_failed += 1
                         logger.warning("%s sync: brand=%s user=%s — сбой синхронизации (result=-1), подряд: %d",

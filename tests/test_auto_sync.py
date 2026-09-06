@@ -133,6 +133,85 @@ def test_auto_sync_success_resets_failure_counter(db_session, monkeypatch):
     assert reloaded.last_activity_sync_at is not None
 
 
+# --- Восстановление после алерта: бот отписывается, что синк снова работает (06.09.2026) ---
+
+def _collect_notify(monkeypatch):
+    sent = []
+    monkeypatch.setattr(orchestrator, "telegram_notify", lambda **kw: sent.append(kw))
+    return sent
+
+
+def _mine(sent, user_id):
+    # Цикл синкает ВСЕ creds в БД — фильтруем по своему пользователю (filter by our user)
+    return [kw["text"] for kw in sent if kw["user_id"] == user_id]
+
+
+def test_auto_sync_recovery_notifies_after_alert(db_session, monkeypatch):
+    """3 сбоя → алерт; следующий успех → ровно одно сообщение «восстановлена» с числом подтянутых."""
+    user = make_user(db_session, chat_id=96006, email="recover-alert@example.com")
+    cred = _make_cred(db_session, user.id)
+    sent = _collect_notify(monkeypatch)
+    _patch_no_network(monkeypatch, result=-1)
+    for _ in range(3):
+        orchestrator.auto_sync_activities()
+
+    _patch_no_network(monkeypatch, result=2)
+    orchestrator.auto_sync_activities()
+
+    texts = _mine(sent, user.id)
+    assert len(texts) == 2, texts
+    assert "не работает" in texts[0]
+    assert "восстановлена" in texts[1] and "тренировок" in texts[1]
+    assert "Сбоев подряд было: 3" in texts[1]
+    assert "Подтянуто тренировок: 2" in texts[1]
+    assert "раньше успешных синхронизаций не было" in texts[1]  # last_activity_sync_at был None
+    assert _reload_cred(cred.id).activity_sync_failures == 0
+
+
+def test_auto_sync_recovery_silent_below_threshold(db_session, monkeypatch):
+    """2 сбоя (алерта не было) → успех → никаких уведомлений: нечего «закрывать»."""
+    user = make_user(db_session, chat_id=96007, email="recover-quiet@example.com")
+    _make_cred(db_session, user.id)
+    sent = _collect_notify(monkeypatch)
+    _patch_no_network(monkeypatch, result=-1)
+    orchestrator.auto_sync_health()
+    orchestrator.auto_sync_health()
+    _patch_no_network(monkeypatch, result=3)
+    orchestrator.auto_sync_health()
+
+    assert _mine(sent, user.id) == []
+
+
+def test_auto_sync_recovery_text_empty_result_and_gap(db_session, monkeypatch):
+    """Успех с пустым результатом после алерта: «новых … не было» + длительность паузы от last_*_sync_at.
+    Backoff при 3 сбоях = интервал ×8: минимальный интервал 15 мин → 2 ч, пауза 3 ч 5 мин → синк созрел."""
+    from datetime import datetime, timedelta, timezone
+    user = make_user(db_session, chat_id=96008, email="recover-empty@example.com")
+    cred = _make_cred(db_session, user.id)
+    cred.activity_sync_interval = 15
+    cred.last_activity_sync_at = datetime.now(timezone.utc) - timedelta(hours=3, minutes=5)
+    cred.activity_sync_failures = 3  # алерт уже уходил (порог достигнут)
+    db_session.commit()
+    sent = _collect_notify(monkeypatch)
+    _patch_no_network(monkeypatch, result=0)
+
+    orchestrator.auto_sync_activities()
+
+    texts = _mine(sent, user.id)
+    assert len(texts) == 1, texts
+    assert "тренировок" in texts[0] and "восстановлена" in texts[0]
+    assert "Новых тренировок за время сбоя не было" in texts[0]
+    assert "пауза 3 ч 5 мин" in texts[0]
+
+
+def test_fmt_gap():
+    """Форматирование паузы: минуты / часы / дни."""
+    assert orchestrator._fmt_gap(17 * 60) == "17 мин"
+    assert orchestrator._fmt_gap(3600) == "1 ч"
+    assert orchestrator._fmt_gap(3600 + 42 * 60) == "1 ч 42 мин"
+    assert orchestrator._fmt_gap(26 * 3600) == "1 дн 2 ч"
+
+
 def test_effective_interval_backoff():
     """Backoff: интервал удваивается на каждый сбой, cap = MAX_SYNC_INTERVAL_MIN."""
     from src.config.constants import MAX_SYNC_INTERVAL_MIN
