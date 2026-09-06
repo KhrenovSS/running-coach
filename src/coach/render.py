@@ -11,6 +11,7 @@ from typing import Any
 
 from src.analysis.hr_zones import zone_ceiling_hr
 from src.analysis.utils import format_pace
+from src.coach.config import STRIDE_HOWTO
 from src.coach.contracts import AthleteState, Prescription, SafetyVerdict, SkillResult
 from src.coach.safety import is_stride
 from src.coach.render_segments import (compact_segments, render_segment_lines,
@@ -147,6 +148,8 @@ def render_prescription(p: Prescription, max_hr: int | None = None,
     if p.workout_type != "rest":
         if segments:
             lines += render_segment_lines(segments)   # посегментная раскладка вместо сводной
+            if any(s.get("stride") or (s.get("role") == "work" and is_stride(s)) for s in segments):
+                lines.append(STRIDE_HOWTO)            # как выполнять ускорения (гайды 46/61)
         elif p.target.get("pace_min_km") is not None:
             lines += _pace_lead_lines(p)
         else:

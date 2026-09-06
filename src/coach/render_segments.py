@@ -187,5 +187,23 @@ def compact_segments(segments: list[dict] | None, max_hr: int | None = None,
             body = amt or "—"
             if rep > 1:
                 body = f"{rep}×{body}"
-        parts.append(f"{body} {intensity}".rstrip())
+        text = f"{body} {intensity}".rstrip()
+        rec = _compact_recovery(seg)
+        if rec:
+            text += f" ({rec})"                # отдых — в строке недели (запрос владельца 06.09.2026)
+        parts.append(text)
     return " + ".join(parts)
+
+
+def _compact_recovery(seg: dict) -> str | None:
+    """«отдых 2 мин трусцой» / «отдых до пульса ≤125» для work-сегмента; ускорение без чисел —
+    «отдых до полного восстановления»; прочим сегментам — None (compact recovery text)."""
+    if seg.get("role") != "work":
+        return None
+    rec = seg.get("recovery") or {}
+    has_numbers = any(rec.get(k) is not None for k in ("duration_min", "distance_km", "until_hr"))
+    if has_numbers:
+        return "отдых " + _fmt_recovery(rec)
+    if seg.get("stride"):
+        return "отдых до полного восстановления"
+    return None

@@ -16,6 +16,7 @@ from src.coach.contracts import (
     AthleteState,
     PaceClampContext,
     Prescription,
+    ReasoningStep,
     WorkoutProposal,
 )
 from src.coach.fallback import fallback_proposal
@@ -158,6 +159,19 @@ def finalize(proposal: WorkoutProposal | None, state: AthleteState, *,
         # с разным пульсом сохраняются. (Monotone structure is not persisted.)
         if seg_dicts and not is_monotone(seg_dicts):
             prescription.target["segments"] = seg_dicts
+            # Длительность структурного дня — из суммы сегментов (06.09.2026: LLM дал 39 мин при
+            # сегментах на 42 → строка недели спорила с карточкой дня); predicted пересчитываем,
+            # чтобы «≈км» совпадал. Интенсивность не меняется — safety не трогаем.
+            # (Structured day: duration follows the segments; not a safety widening.)
+            from src.coach.render_segments import segments_total_min
+            total = segments_total_min(seg_dicts)
+            current = prescription.volume.get("duration_min")
+            if total and (current is None or round(current) != total):
+                prescription.rationale.append(ReasoningStep(
+                    rule="segments", decision=f"длительность {current or 0:.0f} → {total} мин",
+                    reason="сумма сегментов с отдыхом"))
+                prescription.volume["duration_min"] = float(total)
+                prescription.predicted = predict_volume(prescription, state, db=db)
     if persist and db is not None:
         save_prescription(prescription, state, db=db)
     return prescription

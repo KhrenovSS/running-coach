@@ -188,9 +188,12 @@ def test_compact_segments_one_line():
                {"role": "cooldown", "amount_kind": "min", "amount_value": 5.0, "target_zone": 1}]
     # без max_hr пульс неизвестен → зона как fallback
     assert compact_segments(today) == "разм 5 мин Z1 + 25 мин Z2 + зам 5 мин Z1"
-    assert compact_segments(strides) == "25 мин Z2 + 7×18 сек Z3 + зам 5 мин Z1"
+    # 06.09.2026: отдых между отрезками — в компактной строке (запрос владельца: конкретика)
+    assert compact_segments(strides) == \
+        "25 мин Z2 + 7×18 сек Z3 (отдых 2 мин трусцой или до пульса ≤125) + зам 5 мин Z1"
     # с max_hr — пульс в уд/мин от текущего якоря зон (пожелание владельца 02.09)
-    assert compact_segments(strides, max_hr=180) == "25 мин до 144 + 7×18 сек до 156 + зам 5 мин до 125"
+    assert compact_segments(strides, max_hr=180) == \
+        "25 мин до 144 + 7×18 сек до 156 (отдых 2 мин трусцой или до пульса ≤125) + зам 5 мин до 125"
     assert compact_segments([]) == "" and compact_segments(None) == ""
 
 
@@ -294,3 +297,59 @@ def test_strides_effort_led_no_hr_ceiling_no_zone_clamp():
     line = compact_segments(out, max_hr=180)
     assert "5×20 сек свободно" in line and "до 144" in line
     assert "20 сек до" not in line
+
+
+# --- 06.09.2026: конкретика структурного дня ---
+
+def test_compact_recovery_variants_and_stride_default():
+    from src.coach.render_segments import compact_segments
+    stride_no_rec = [{"role": "work", "repeat": 5, "amount_kind": "sec", "amount_value": 20.0,
+                      "target_zone": 3, "stride": True, "effort": "свободно"}]
+    assert compact_segments(stride_no_rec) == "5×20 сек свободно (отдых до полного восстановления)"
+    rep_hr = [{"role": "work", "repeat": 6, "amount_kind": "sec", "amount_value": 90.0,
+               "target_zone": 4, "recovery": {"until_hr": 125}}]
+    assert compact_segments(rep_hr, max_hr=180) == "6×90 сек до 167 (отдых до пульса ≤125)"
+    # work без отдыха и не ускорение — без скобок; разминка/заминка — никогда
+    plain = [{"role": "work", "amount_kind": "min", "amount_value": 20.0, "target_zone": 3},
+             {"role": "cooldown", "amount_kind": "min", "amount_value": 5.0, "target_zone": 1,
+              "recovery": {"duration_min": 2.0}}]
+    assert compact_segments(plain) == "20 мин Z3 + зам 5 мин Z1"
+
+
+def test_render_prescription_stride_howto_only_with_strides():
+    """Карточка дня с ускорениями печатает «как выполнять» (без чисел); без ускорений — нет."""
+    from src.coach.config import STRIDE_HOWTO
+    text = render_prescription(_owner_example_prescription(), max_hr=180)
+    assert STRIDE_HOWTO in text
+    plain = Prescription(safety=SafetyVerdict(), workout_type="easy",
+                         target={"max_zone": 2}, volume={"duration_min": 40})
+    assert STRIDE_HOWTO not in render_prescription(plain, max_hr=180)
+
+
+def test_finalize_sets_structured_duration_from_segments(db_session):
+    """finalize: LLM дал 39 мин при сегментах 15 + 5×(20 с + 2 мин) + 15 ≈ 42 → длительность 42,
+    rationale «сумма сегментов»; без сегментов длительность не трогается (06.09.2026)."""
+    from datetime import date
+
+    from src.coach.contracts import AthleteState
+    from src.coach.prescriber import finalize
+    from tests.coach.conftest import _unique_user   # диапазон 92xxx (счётчик коуча)
+
+    user = _unique_user(db_session)
+    state = AthleteState(user_id=user.id, as_of=date.today(), data_confidence=0.9,
+                         recovery_hours_left=0.0,
+                         signals={"hrv_status": "normal", "rhr_status": "normal", "recovery_pct": 90,
+                                  "ati_cti_ratio": 1.0, "acwr_ratio": 1.0, "consecutive_hard_days": 0,
+                                  "pain_level": None, "pain_days": 0})
+    structured = WorkoutProposal(
+        workout_type="easy", target_zone=2, duration_min=39,
+        segments=[_seg(role="warmup", amount_value=15, target_zone=2),
+                  _seg(role="work", amount_kind="sec", amount_value=20, repeat=5, target_zone=3,
+                       recovery=RecoverySpec(duration_min=2.0)),
+                  _seg(role="cooldown", amount_value=15, target_zone=2)])
+    p = finalize(structured, state, db=db_session, persist=False, source="llm")
+    assert p.volume["duration_min"] == 42.0
+    assert any(r.rule == "segments" and "сумма сегментов" in r.reason for r in p.rationale)
+    plain = finalize(WorkoutProposal(workout_type="easy", target_zone=2, duration_min=39),
+                     state, db=db_session, persist=False, source="llm")
+    assert plain.volume["duration_min"] == 39

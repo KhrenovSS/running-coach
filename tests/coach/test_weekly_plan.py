@@ -429,8 +429,8 @@ def test_weekly_plan_volume_cap_skips_structured_day_and_leaves_trail(athlete_wi
                {"role": "cooldown", "amount_kind": "min", "amount_value": 10, "target_zone": 2}]
     turn = dict(PLAN_TURN, weekly_plan=[
         {"workout_type": "easy", "target_zone": 2, "duration_min": 90, "for_days_ahead": 1},
-        {"workout_type": "easy", "target_zone": 2, "duration_min": 42, "for_days_ahead": 3,
-         "segments": strides},
+        {"workout_type": "easy", "target_zone": 2, "duration_min": 39, "for_days_ahead": 3,
+         "segments": strides},   # 39 при сегментах на 42 — код выставит 42 (06.09.2026)
         {"workout_type": "easy", "target_zone": 2, "duration_min": 90, "for_days_ahead": 5},
         {"workout_type": "long", "target_zone": 2, "duration_min": 40, "for_days_ahead": 7},
     ])
@@ -440,8 +440,10 @@ def test_weekly_plan_volume_cap_skips_structured_day_and_leaves_trail(athlete_wi
     assert text is not None and "Объём недели урезан" in text
     rows = db_session.query(Recommendation).filter_by(user_id=uid, status="planned").all()
     structured = [r for r in rows if (r.target_json or {}).get("segments")]
-    assert len(structured) == 1 and structured[0].volume_json["duration_min"] == 42
+    assert len(structured) == 1 and structured[0].volume_json["duration_min"] == 42   # из сегментов
     trimmed = [r for r in rows if r.workout_type == "easy" and not (r.target_json or {}).get("segments")]
     assert trimmed and all(r.volume_json["duration_min"] < 90 for r in trimmed)
     assert all(any(x.startswith("урезано кодом") for x in r.proposal_json["rationale"]) for r in trimmed)
-    assert "5×20 сек свободно" in text
+    structured_line = next(l for l in text.splitlines() if "5×20 сек свободно" in l)
+    assert "(отдых 2 мин трусцой)" in structured_line
+    assert " 42 мин" in structured_line and " 39 мин" not in structured_line   # длительность из сегментов
