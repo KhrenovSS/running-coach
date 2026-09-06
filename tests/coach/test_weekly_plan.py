@@ -332,3 +332,81 @@ def test_weekly_plan_caps_long_run_by_code(athlete_with_history, db_session, mon
     assert msg.meta_json["long_run_capped"] is True
     requests_ = seen["extras"]["athlete_requests (chat, 7d)"]
     assert any("ускорений" in r["text"] for r in requests_)
+
+
+def test_weekly_plan_caps_week_volume_and_puts_notes_in_card(athlete_with_history, db_session,
+                                                              monkeypatch):
+    """06.09.2026: сумма плана выше цели → лёгкие дни ужаты кодом, длительная под своим потолком,
+    заметки стоят до футера, meta.week_volume_capped."""
+    from src.coach import prescriber, weekly_plan
+
+    def fake_predict(p, state, *, db):
+        if p.workout_type == "rest":
+            return {}
+        return {"pace_min_km": 4.0, "distance_km": round((p.volume.get("duration_min") or 0) / 4.0, 1)}
+    monkeypatch.setattr(prescriber, "predict_volume", fake_predict)
+    seen: dict = {}
+    real_today_block = weekly_plan.build_today_block
+
+    def spy(state_json, verdict_json, now_str, extras=None):
+        seen["targets"] = (extras or {}).get("week_targets (planning)")
+        return real_today_block(state_json, verdict_json, now_str, extras=extras)
+    monkeypatch.setattr(weekly_plan, "build_today_block", spy)
+
+    # 3 × 90 мин по 4:00/км = 67,5 км — заведомо выше цели любой фикстуры
+    turn = dict(PLAN_TURN, weekly_plan=[
+        {"workout_type": "easy", "target_zone": 2, "duration_min": 90, "for_days_ahead": 1},
+        {"workout_type": "easy", "target_zone": 2, "duration_min": 90, "for_days_ahead": 3},
+        {"workout_type": "easy", "target_zone": 2, "duration_min": 90, "for_days_ahead": 5},
+        {"workout_type": "long", "target_zone": 2, "duration_min": 40, "for_days_ahead": 7},
+    ])
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
+    uid = athlete_with_history.id
+    text = generate_weekly_plan(uid, db=db_session, llm=llm, now=_sunday(athlete_with_history))
+    assert text is not None
+    target_km = seen["targets"]["target_km"]
+
+    rows = db_session.query(Recommendation).filter_by(user_id=uid, status="planned").all()
+    total_km = sum(r.volume_json["duration_min"] / 4.0 for r in rows)
+    assert total_km <= target_km * 1.05 + 0.5, (total_km, target_km)
+    easy_minutes = [r.volume_json["duration_min"] for r in rows if r.workout_type == "easy"]
+    assert easy_minutes and all(m < 90 for m in easy_minutes)
+    card = text.split("*План на неделю")[1].split("\n")
+    note_idx = next(i for i, l in enumerate(card) if "Объём недели урезан" in l)
+    assert note_idx < len(card) - 1 and card[-1].startswith("Остальные дни — отдых")
+    msg = db_session.query(CoachMessage).filter_by(user_id=uid, kind="plan", role="assistant") \
+        .order_by(CoachMessage.id.desc()).first()
+    assert msg.meta_json["week_volume_capped"] is True
+
+
+def test_weekly_plan_keeps_strides_segments(athlete_with_history, db_session, monkeypatch):
+    """06.09.2026: сегменты элементов weekly_plan терялись → обещанные ускорения не доходили до
+    карточки. Теперь лёгкий день с 4×20 с при закрытом интенсиве сохраняет структуру."""
+    from src.coach import prescriber, weekly_plan
+
+    verdict = _forbid_hard_verdict()
+    monkeypatch.setattr(weekly_plan, "evaluate_safety", lambda state, **kw: verdict)
+    monkeypatch.setattr(prescriber, "evaluate_safety", lambda state, **kw: verdict)
+    strides_day = {
+        "workout_type": "easy", "target_zone": 2, "duration_min": 40, "for_days_ahead": 2,
+        "segments": [
+            {"role": "warmup", "amount_kind": "min", "amount_value": 25, "target_zone": 2},
+            {"role": "work", "amount_kind": "sec", "amount_value": 20, "repeat": 4,
+             "target_zone": 3, "effort": "свободно", "recovery": {"duration_min": 1.5}},
+            {"role": "cooldown", "amount_kind": "min", "amount_value": 8, "target_zone": 2},
+        ],
+    }
+    turn = dict(PLAN_TURN, weekly_plan=[strides_day,
+                                        {"workout_type": "long", "target_zone": 2,
+                                         "duration_min": 50, "for_days_ahead": 7}])
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
+    uid = athlete_with_history.id
+    text = generate_weekly_plan(uid, db=db_session, llm=llm, now=_sunday(athlete_with_history))
+    assert text is not None
+    row = db_session.query(Recommendation).filter_by(user_id=uid, status="planned",
+                                                     workout_type="easy").one()
+    segs = (row.target_json or {}).get("segments") or []
+    assert segs, "сегменты ускорений потеряны при сборке плана"
+    assert any(s.get("role") == "work" and s.get("repeat") == 4 for s in segs)
+    assert not row.clamped                                        # ускорения — не интенсив
+    assert "4×20 сек" in text or "4×20" in text

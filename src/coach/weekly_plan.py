@@ -24,7 +24,8 @@ from src.coach.llm.prompts import (
     build_system_blocks,
     build_today_block,
 )
-from src.coach.planning_safety import apply_safety_to_targets, cap_long_run
+from src.coach.planning_safety import apply_safety_to_targets, cap_long_run, cap_week_volume
+from src.coach.segments import segments_from_schema
 from src.coach.prescriber import finalize, save_prescription, user_max_hr
 from src.services.repositories import latest_lthr
 from src.coach.render_week import render_week_plan
@@ -131,6 +132,9 @@ def generate_weekly_plan(user_id: int, *, db: Session,
         workout_type=p.workout_type, target_zone=p.target_zone,
         duration_min=p.duration_min, distance_km=p.distance_km,
         target_pace_min_km=p.target_pace_min_km, structure=p.structure,
+        # Сегменты (ускорения/структура) — как в чате (06.09.2026: терялись → обещанные
+        # ускорения не доходили до карточки)
+        segments=segments_from_schema(p.segments),
         rationale=list(p.rationale), for_days_ahead=p.for_days_ahead,
     ) for p in (turn.weekly_plan or [])], allowed=targets["days_ahead_allowed"])
     if not items:
@@ -150,24 +154,43 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     # строки первого /plan «ожили» после перепланирования). (Supersede before saving.)
     superseded = planning.supersede_future_rows(
         user_id, db=db, from_date=today + timedelta(days=first_offset))
-    prescriptions: list[Prescription] = []
     plan_notes: list[str] = []
-    for proposal in items:
-        p = finalize(proposal, state, db=db, persist=False, source="llm",
-                     now=now_local)
-        # Потолок длительной — кодом (06.09.2026): км по тому же ориентиру, что в карточке;
-        # повторный finalize — Prescription по-прежнему рождается только в clamp
+
+    def _finalize(proposal: WorkoutProposal) -> Prescription:
+        return finalize(proposal, state, db=db, persist=False, source="llm", now=now_local)
+
+    # (1) первый проход — нужны predicted (км по истории) для потолков; (2) потолок длительной;
+    # (3) потолок объёма недели; (4) запись. Prescription по-прежнему рождается только в clamp —
+    # урезанные предложения проходят finalize повторно. (Two-pass finalize with code-held caps.)
+    prescriptions: list[Prescription] = [_finalize(it) for it in items]
+    for i, (proposal, p) in enumerate(zip(items, prescriptions)):
         capped, note = cap_long_run(proposal, p, targets)
         if capped is not None:
             logger.info("Long run capped user=%s: %s→%s min (est %.1f km, cap %.1f km)",
                         user_id, proposal.duration_min, capped.duration_min,
                         (p.predicted or {}).get("distance_km") or 0.0,
                         targets.get("long_run_km_max") or 0.0)
-            p = finalize(capped, state, db=db, persist=False, source="llm", now=now_local)
+            items[i] = capped
+            prescriptions[i] = _finalize(capped)
             plan_notes.append(note)
+    long_run_capped = bool(plan_notes)
+    scaled, note = cap_week_volume(items, prescriptions, targets)
+    if scaled is not None:
+        before = sum((p.predicted or {}).get("distance_km") or 0.0 for p in prescriptions)
+        for i, (old, new) in enumerate(zip(items, scaled)):
+            if new is not old:
+                items[i] = new
+                prescriptions[i] = _finalize(new)
+        after = sum((p.predicted or {}).get("distance_km") or 0.0 for p in prescriptions)
+        logger.info("Week volume capped user=%s: %.1f→%.1f km (target %.1f)",
+                    user_id, before, after, targets.get("target_km") or 0.0)
+        plan_notes.append(note)
+    if dropped_days:
+        plan_notes.append(f"⚠️ Беговых дней урезано до {run_days_cap}: "
+                          "частота растёт не быстрее +1 в неделю.")
+    for proposal, p in zip(items, prescriptions):
         status = "adjusted" if (proposal.for_days_ahead == 0 and had_today_row) else "planned"
         save_prescription(p, state, db=db, status=status)
-        prescriptions.append(p)
 
     # Карточка — одна картина недели: прошедшие дни фактом (week_view) + новый остаток
     week_start = date.fromisoformat(targets["week_start"])
@@ -176,19 +199,16 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     text = (turn.message + "\n\n"
             + render_week_plan(past + prescriptions, targets, max_hr=user_max_hr(user),
                                lthr=latest_lthr(user_id, db=db), today=today,
-                               facts=week_facts(rows, db=db, today=today)))
-    if dropped_days:
-        text += (f"\n⚠️ Беговых дней урезано до {run_days_cap}: "
-                 "частота растёт не быстрее +1 в неделю.")
-    for note in plan_notes:
-        text += "\n" + note
+                               facts=week_facts(rows, db=db, today=today),
+                               notes=plan_notes))
     CoachRepository.save_message(user_id, "user", PLAN_PROMPT, db=db, kind="plan")
     CoachRepository.save_message(
         user_id, "assistant", text, db=db, kind="plan",
         meta={"days": len(prescriptions),
               "clamped": sum(1 for p in prescriptions if p.clamped),
               "superseded": superseded, "dropped_days": dropped_days,
-              "long_run_capped": bool(plan_notes),
+              "long_run_capped": long_run_capped,
+              "week_volume_capped": scaled is not None,
               "prose": turn.message,   # #258: история берёт прозу без карточки
               "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0)},
         tokens_in=usage.get("input_tokens"), tokens_out=usage.get("output_tokens"),

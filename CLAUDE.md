@@ -171,7 +171,9 @@
   `week_targets.availability`/`days_ahead_allowed`, отмены подопечного переживают `/plan`;
   `target.hr_ceiling` фиксируется при `finalize`. **Потолок длительной — кодом** (06.09.2026): `planning_safety.cap_long_run`
   при финализации плана (км по `predicted`, минуты по `long_run_min_max`), просьбы подопечного
-  за 7 дней — `turn_context.recent_athlete_requests` в контексте плана.
+  за 7 дней — `turn_context.recent_athlete_requests` в контексте плана. **Объём недели — кодом** (`cap_week_volume`, лёгкие дни ужимаются до `target_km`);
+  при закрытом интенсиве объём плоский (`target_km = prev_week_km`, решение владельца 06.09.2026);
+  элементы плана несут `segments` (ускорения доходят до карточки).
 - **Отмена дней подопечным (03–04.09.2026)**: `CoachTurn.unavailable_days_ahead` →
   `planning.cancel_days` (rest-строки `adjusted` с маркером `UNAVAILABLE_RATIONALE`, прежние
   строки `superseded`); детерминированный гвард `blocked_by_unavailable` — чат/утро на такой день

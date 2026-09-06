@@ -24,6 +24,9 @@
 плана по ориентиру км карточки (`predicted.distance_km`) и по минутам, с повторным `finalize`;
 просьбы подопечного за 7 дней (`turn_context.recent_athlete_requests`) попадают в контекст плана,
 чтобы отложенное называлось явно.
+Объём недели (06.09.2026): `cap_week_volume` ужимает лёгкие дни до `target_km` по сумме `predicted`;
+при закрытом интенсиве `apply_safety_to_targets` держит `target_km = prev_week_km` (решение владельца).
+Элементы `weekly_plan` несут `segments` (`segments_from_schema`) — ускорения доходят до карточки.
 
 ## Решение 2: ручной tool-loop, не SDK tool_runner
 
@@ -174,6 +177,7 @@ coach/
 ├── planning_safety.py # apply_safety_to_targets: интенсив закрыт вердиктом → hard_days_max=0,
 │                      #   quality_*_km_max=0, quality_blocked_by_safety (06.09.2026, до промпта LLM)
 │                      #   + cap_long_run: потолок длительной (30 % недели / 150 мин) кодом при финализации
+│                      #   + cap_week_volume: сумма плана ≤ target_km (лёгкие ужимаются); объём плоский при закрытом интенсиве
 ├── segments.py        # enrich_and_clamp_segments: числа сегментам из зон/истории, per-segment clamp (M2.1)
 ├── orchestrator.py    # morning_verdict (подтверждает план дня), handle_chat, on_workout_completed
 ├── review_flow.py     # ensure_insights_for_batch, run_pending_review, due_review_sessions

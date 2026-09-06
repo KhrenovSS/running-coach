@@ -133,7 +133,8 @@ def _fact_line(day: str, p: Prescription, fact: dict | None,
 def render_week_plan(prescriptions: list[Prescription], targets: dict,
                      max_hr: int | None = None, lthr: int | None = None,
                      today: date | None = None,
-                     facts: dict[date, dict | None] | None = None) -> str:
+                     facts: dict[date, dict | None] | None = None,
+                     notes: list[str] | None = None) -> str:
     """Сводная карточка недельного плана — числа только из клэмпленных
     Prescription и детерминированных targets (weekly plan card).
 
@@ -153,6 +154,8 @@ def render_week_plan(prescriptions: list[Prescription], targets: dict,
             # Интенсив закрыт вердиктом safety на всю неделю (06.09.2026): фаза мезоцикла —
             # календарная, а «рост» без качественных дней надо назвать честно
             summary += " · без интенсива (safety)"
+            if targets.get("volume_held_by_safety"):
+                summary += ", объём без роста"
         if targets.get("plan_scope") == "rest_of_week":
             # Остаток недели (#293): сколько уже сделано и что распределяли
             summary += (f" · сделано {targets['done_km']:.1f} км, "
@@ -194,6 +197,9 @@ def render_week_plan(prescriptions: list[Prescription], targets: dict,
         lines.append(f"{day} — " + " · ".join(parts))
     lines.extend(_clamp_notes([p for p in prescriptions
                                if today is None or p.when >= today]))
+    # Детерминированные заметки планировщика (потолки длительной/объёма/беговых дней) — внутри
+    # карточки, до футера (planner notes go before the footer, 06.09.2026)
+    lines.extend(notes or [])
     legend = "✓ факт · ✗ пропущен · " if has_facts else ""
     lines.append(f"{legend}Остальные дни — отдых. Перепланировать: /plan")
     return "\n".join(lines)

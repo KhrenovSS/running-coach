@@ -545,3 +545,19 @@ def test_render_week_plan_generic_clamp_line_for_zone_cut():
     text = render_week_plan([p], {"week_start": "2026-09-07"})
     assert p.clamped
     assert text.count("⚠️") == 1 and "Часть дней урезана" in text
+
+
+def test_render_week_plan_notes_before_footer():
+    """Заметки планировщика (потолки) печатаются внутри карточки, до футера (06.09.2026)."""
+    from datetime import date
+
+    from src.coach.contracts import Prescription, SafetyVerdict
+    from src.coach.render_week import render_week_plan
+
+    p = Prescription(safety=SafetyVerdict(), workout_type="easy", when=date(2026, 9, 8),
+                     target={"max_zone": 2}, volume={"duration_min": 40.0})
+    text = render_week_plan([p], {"week_start": "2026-09-07"},
+                            notes=["⚠️ Объём недели урезан до ~25 км: цель недели."])
+    lines = text.split("\n")
+    assert lines.index("⚠️ Объём недели урезан до ~25 км: цель недели.") < len(lines) - 1
+    assert lines[-1].startswith("Остальные дни — отдых")

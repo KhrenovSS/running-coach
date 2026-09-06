@@ -190,6 +190,8 @@ INTERVAL_SEGMENT_MAX_MIN = 5.0     # непрерывный отрезок в Z4
 LONG_RUN_MAX_PCT_WEEK = 0.30
 LONG_RUN_MAX_MIN = 150.0
 LONG_RUN_CAP_TOLERANCE_KM = 0.3   # допуск оценки км по темпу истории при урезании длительной (06.09.2026)
+WEEK_VOLUME_TOLERANCE_PCT = 0.05  # сумма плана выше target_km × (1+допуск) → лёгкие дни ужимаются кодом
+PLAN_EASY_MIN_MINUTES = 25        # ниже этого лёгкий день при ужатии объёма не режем
 # Длительная как качественный день для правила 12 (04.09.2026): по ярлыку long ИЛИ по
 # длительности; единый источник порога — src/config/constants.py (резолвер ярлыка)
 from src.config.constants import LONG_RUN_MIN_MINUTES  # noqa: E402,F401

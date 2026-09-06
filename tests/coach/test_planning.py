@@ -505,3 +505,76 @@ def test_cap_long_run_mentions_hold():
     capped, note = cap_long_run(proposal, _long_prescription(10.0), targets)
     assert capped.distance_km == 8.4 and capped.duration_min == 58
     assert "длительная не растёт после прошлой недели" in note
+
+
+# --- 06.09.2026: потолок объёма недели (cap_week_volume) и плоский объём в safety-разгрузку ---
+
+def _plan_items_and_prescriptions(spec):
+    """spec: [(type, minutes, est_km)] → (items, prescriptions с predicted)."""
+    from src.coach.contracts import Prescription, SafetyVerdict, WorkoutProposal
+    items, pres = [], []
+    for i, (t, minutes, km) in enumerate(spec):
+        items.append(WorkoutProposal(workout_type=t, target_zone=2, duration_min=minutes,
+                                     for_days_ahead=i + 1))
+        pres.append(Prescription(safety=SafetyVerdict(), workout_type=t,
+                                 volume={"duration_min": float(minutes)},
+                                 predicted={"pace_min_km": 7.0, "distance_km": km} if km else {}))
+    return items, pres
+
+
+def test_cap_week_volume_scales_easy_days_only():
+    """Инцидент 06.09.2026: сумма ≈ 30 км при цели 27,9 → лёгкие ужаты пропорционально,
+    длительная не тронута, заметка про +10 %."""
+    from src.coach.planning_safety import cap_week_volume
+    items, pres = _plan_items_and_prescriptions(
+        [("easy", 35, 5.0), ("easy", 42, 6.0), ("easy", 40, 5.7), ("easy", 35, 5.0), ("long", 58, 8.3)])
+    targets = {"target_km": 27.9, "prev_week_km": 25.4}
+    new, note = cap_week_volume(items, pres, targets)
+    assert new is not None and new[4] is items[4]                 # длительная — тот же объект
+    scaled_min = [it.duration_min for it in new[:4]]
+    assert all(n < o for n, o in zip(scaled_min, [35, 42, 40, 35]))
+    est = sum(km * n / o for (_, o, km), n in zip(
+        [("easy", 35, 5.0), ("easy", 42, 6.0), ("easy", 40, 5.7), ("easy", 35, 5.0)], scaled_min)) + 8.3
+    assert est <= 27.9 + 0.3
+    assert "Объём недели урезан до ~28 км" in note and "+10 %" in note and "25.4" in note
+    assert items[0].duration_min == 35                            # вход не мутирует
+
+
+def test_cap_week_volume_within_tolerance_and_floor():
+    from src.coach.planning_safety import cap_week_volume
+    items, pres = _plan_items_and_prescriptions([("easy", 40, 5.7), ("long", 60, 8.6)])
+    assert cap_week_volume(items, pres, {"target_km": 14.0}) == (None, None)   # 14.3 ≤ 14×1.05
+    # Минимум 25 мин: цель заведомо ниже — лёгкий не режется ниже пола
+    items, pres = _plan_items_and_prescriptions([("easy", 30, 4.3), ("long", 60, 8.6)])
+    new, note = cap_week_volume(items, pres, {"target_km": 9.0, "prev_week_km": 8.0})
+    assert new[0].duration_min == 25 and new[1] is items[1]
+    # Только длительная/качество — ужимать нечего
+    items, pres = _plan_items_and_prescriptions([("long", 90, 12.9)])
+    assert cap_week_volume(items, pres, {"target_km": 9.0}) == (None, None)
+
+
+def test_cap_week_volume_rest_of_week_uses_remaining():
+    from src.coach.planning_safety import cap_week_volume
+    items, pres = _plan_items_and_prescriptions([("easy", 40, 5.7), ("easy", 40, 5.7)])
+    targets = {"target_km": 28.0, "plan_scope": "rest_of_week", "remaining_km": 6.0, "done_km": 22.0}
+    new, note = cap_week_volume(items, pres, targets)
+    assert new is not None and all(it.duration_min < 40 for it in new)
+
+
+def test_apply_safety_holds_volume_flat():
+    """Решение владельца 06.09.2026: интенсив закрыт → цель объёма = прошлая неделя,
+    потолок длительной пересчитан, флаг для шапки/промпта."""
+    from src.coach.contracts import ReasoningStep, SafetyVerdict
+    from src.coach.planning_safety import apply_safety_to_targets
+    verdict = SafetyVerdict(max_zone=2, allowed_types=("rest", "recovery", "easy", "long"),
+                            reasons=[ReasoningStep(rule="p1_safety", decision="", reason="перекос")])
+    base = {"hard_days_max": 1, "quality_z3_km_max": 5.6, "quality_z4_km_max": 2.8,
+            "target_km": 27.9, "prev_week_km": 25.4, "long_run_km_max": 8.4,
+            "plan_scope": "rest_of_week", "done_km": 10.0, "remaining_km": 17.9}
+    out = apply_safety_to_targets(base, verdict)
+    assert out["target_km"] == 25.4 and out["volume_held_by_safety"] is True
+    assert out["long_run_km_max"] == 7.6                          # 25.4 × 0.30
+    assert out["remaining_km"] == 15.4
+    # Без истории (prev 0) объём не трогаем
+    out2 = apply_safety_to_targets({**base, "prev_week_km": 0.0}, verdict)
+    assert out2["target_km"] == 27.9 and "volume_held_by_safety" not in out2
