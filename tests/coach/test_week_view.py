@@ -33,8 +33,10 @@ def test_latest_row_per_date_wins_and_today_marked(empty_user, db_session):
     today = user_now(empty_user).date()
     monday = _monday(today)
     sunday = monday + timedelta(days=6)
-    _rec(db_session, empty_user.id, sunday, "long", 2, 75.0, "planned", km=8.4)
-    _rec(db_session, empty_user.id, sunday, "long", 2, 80.0, "proposed", km=9.0)
+    # #314: день «свежая поверх старой» не должен совпадать с сегодня (в воскресенье совпадал)
+    fresh_day = sunday if today != sunday else monday
+    _rec(db_session, empty_user.id, fresh_day, "long", 2, 75.0, "planned", km=8.4)
+    _rec(db_session, empty_user.id, fresh_day, "long", 2, 80.0, "proposed", km=9.0)
     _rec(db_session, empty_user.id, today, "easy", 2, 35.0, "confirmed")
     _rec(db_session, empty_user.id, monday + timedelta(days=7), "tempo", 3, 45.0)
 

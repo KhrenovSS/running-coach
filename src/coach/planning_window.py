@@ -13,6 +13,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from src.analysis.week_structure import is_quality_session
+from src.coach.config import PLAN_TODAY_CUTOFF_HOUR
 from src.coach.util import effective_training_type
 from src.models import TrainingSession, User
 from src.services.repositories import latest_lthr
@@ -23,17 +24,21 @@ def monday_of(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
-def plan_window(today: date, trained_today: bool) -> tuple[date, int, int]:
+def plan_window(today: date, trained_today: bool,
+                hour: int | None = None) -> tuple[date, int, int]:
     """(week_start, first_offset, last_offset) — какие for_days_ahead планировать.
 
     Воскресенье → следующая неделя целиком (1..7). Иначе — остаток текущей:
-    с сегодня (0), если сегодня ещё не бегали, иначе с завтра (1), до воскресенья.
-    (Sunday → next full week; otherwise the rest of this week.)
+    с сегодня (0), если сегодня ещё не бегали и локальный час < PLAN_TODAY_CUTOFF_HOUR
+    (#319: вечером день уходит — не назначать на него), иначе с завтра (1), до воскресенья.
+    hour=None — час неизвестен (тесты/DI) → отсечка не применяется.
+    (Sunday → next full week; otherwise the rest of this week; late evening skips day 0.)
     """
     if today.weekday() == 6:
         return today + timedelta(days=1), 1, 7
     last = 6 - today.weekday()
-    return monday_of(today), (1 if trained_today else 0), last
+    today_gone = hour is not None and hour >= PLAN_TODAY_CUTOFF_HOUR
+    return monday_of(today), (1 if trained_today or today_gone else 0), last
 
 
 def local_week_volumes(user_id: int, *, db: Session, today: date, weeks: int) -> list[dict]:

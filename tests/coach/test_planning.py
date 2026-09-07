@@ -96,23 +96,23 @@ def test_week_plan_review_done_missed(db_session):
 
     user = _unique_user(db_session)
     today = planning.user_now(user).date()
-    week_start = today - timedelta(days=today.weekday())
+    # #320: сверяем ПРОШЛУЮ полную неделю — дни фиксированы и всегда в прошлом
+    # (в понедельник «сегодня» и «вчера» текущей недели совпадали → строки перекрывались)
+    week_start = today - timedelta(days=today.weekday() + 7)
     s = build_training_session(db_session, user.id, total_distance_km=8.0,
-                               begin_ts=utcnow())
-    done_rec = Recommendation(user_id=user.id, for_date=today,
+                               begin_ts=utcnow() - timedelta(days=today.weekday() + 7))
+    done_rec = Recommendation(user_id=user.id, for_date=week_start,
                               workout_type="easy", status="confirmed",
                               linked_session_id=s.id)
-    missed_rec = Recommendation(user_id=user.id,
-                                for_date=max(week_start, today - timedelta(days=1)),
+    missed_rec = Recommendation(user_id=user.id, for_date=week_start + timedelta(days=1),
                                 workout_type="long", status="planned")
     db_session.add_all([done_rec, missed_rec])
     db_session.commit()
 
-    review = planning.week_plan_review(user.id, db=db_session)
+    review = planning.week_plan_review(user.id, db=db_session, week_start=week_start)
     assert review is not None
     assert review["done"] == 1
-    if missed_rec.for_date < today:                       # пн — дни совпадают
-        assert review["missed"] == 1
+    assert review["missed"] == 1
     assert planning.week_plan_review(_unique_user(db_session).id,
                                      db=db_session) is None
 
@@ -195,6 +195,12 @@ def test_plan_window_sunday_and_midweek():
     assert plan_window(date(2026, 9, 2), False) == (date(2026, 8, 31), 0, 4)    # ср, не бегали
     assert plan_window(date(2026, 9, 2), True) == (date(2026, 8, 31), 1, 4)     # ср, бегали
     assert plan_window(date(2026, 9, 5), False) == (date(2026, 8, 31), 0, 1)    # сб
+    # #319: вечером (час ≥ PLAN_TODAY_CUTOFF_HOUR) день 0 уходит даже без пробежки
+    from src.coach.config import PLAN_TODAY_CUTOFF_HOUR
+    assert plan_window(date(2026, 9, 2), False, PLAN_TODAY_CUTOFF_HOUR) == (date(2026, 8, 31), 1, 4)
+    assert plan_window(date(2026, 9, 2), False, PLAN_TODAY_CUTOFF_HOUR - 1) == (date(2026, 8, 31), 0, 4)
+    assert plan_window(date(2026, 9, 5), False, 21) == (date(2026, 8, 31), 1, 1)   # сб вечер → только вс
+    assert plan_window(date(2026, 8, 30), False, 21) == (date(2026, 8, 31), 1, 7)  # вс — как раньше
 
 
 def test_week_done_counts_by_local_date_and_quality(db_session):
@@ -358,8 +364,10 @@ def test_week_targets_detraining_return_ceiling(db_session):
     user = _unique_user(db_session)
     _week_of_km(db_session, user.id, 30.0, 4)
     _week_of_km(db_session, user.id, 24.0, 3)
+    # #320: ровно 14 дней (тот же день недели) — сессия не попадает в корзину пиковой недели
+    # (15 дней в понедельник = воскресенье 3-й недели назад → пик 24+8 вместо 30)
     build_training_session(db_session, user.id, total_distance_km=8.0,
-                           begin_ts=utcnow() - timedelta(days=15))
+                           begin_ts=utcnow() - timedelta(days=14))
     t = planning.week_targets(user.id, db=db_session)
     assert t["detraining_return"] is True and t["days_off"] >= 14
     assert t["target_km"] <= round(30.0 * DETRAINING_RETURN_VOLUME_PCT, 1)

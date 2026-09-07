@@ -1,12 +1,40 @@
 # Тесты генерации недельного плана (Weekly plan generation tests)
 from datetime import date, timedelta
 
+import pytest
+
 from src.coach.llm.client import LLMResponse
 from src.coach.weekly_plan import generate_weekly_plan
 from src.models import CoachMessage, Recommendation, UserModel
+from src.domain.models.base import utcnow
 from tests.coach.conftest import _unique_user
+from tests.helpers import build_training_session
 from tests.coach.fakes import FailingLLM, ScriptedLLM
 from src.utils.timeutils import user_now
+
+
+@pytest.fixture
+def plan_athlete(db_session):
+    """Подопечный для тестов плана (#320): 14 дней метрик + 4 пробежки по 10 км на ПРОШЛОЙ
+    полной локальной неделе (пн/ср/пт/сб) и одна двумя неделями раньше. Прошлая неделя — всегда
+    целиком в прошлом и всегда одна и та же корзина `local_week_volumes`, поэтому целевой объём,
+    потолок беговых дней и «сделано 0» не зависят от дня недели запуска (fixture `athlete_with_history`
+    кладёт сессии `i*2` дней назад — границы недель плавали, тесты падали по понедельникам)."""
+    from tests.helpers import build_daily_metrics
+    user = _unique_user(db_session)
+    today = user_now(user).date()
+    for i in range(14):
+        build_daily_metrics(db_session, user.id, metric_date=today - timedelta(days=i),
+                            avg_sleep_hrv=65.0 + (i % 3), rhr=54 + (i % 2), vo2max=50.0)
+    prev_monday_ago = today.weekday() + 7            # дней назад до понедельника прошлой недели
+    for offset in (0, 2, 4, 5):                      # пн, ср, пт, сб прошлой недели
+        build_training_session(db_session, user.id, total_distance_km=10.0, duration_minutes=55.0,
+                               training_type="easy", avg_heart_rate=135,
+                               begin_ts=utcnow() - timedelta(days=prev_monday_ago - offset))
+    build_training_session(db_session, user.id, total_distance_km=10.0, duration_minutes=55.0,
+                           training_type="easy", avg_heart_rate=135,
+                           begin_ts=utcnow() - timedelta(days=prev_monday_ago + 5))
+    return user
 
 
 def _sunday(user):
@@ -55,12 +83,12 @@ PLAN_TURN = {
 }
 
 
-def test_generate_weekly_plan_persists_rows(athlete_with_history, db_session):
+def test_generate_weekly_plan_persists_rows(plan_athlete, db_session):
     """План: строки status='planned' на будущие даты, rest/день-0/дубли чищены,
     карточка недели, kind='plan', мета мезоцикла в params_json."""
     llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=PLAN_TURN)])
-    uid = athlete_with_history.id
-    text = generate_weekly_plan(uid, db=db_session, llm=llm, now=_sunday(athlete_with_history))
+    uid = plan_athlete.id
+    text = generate_weekly_plan(uid, db=db_session, llm=llm, now=_sunday(plan_athlete))
     assert text is not None
 
     rows = db_session.query(Recommendation).filter_by(
@@ -179,13 +207,13 @@ def test_clean_days_respects_window():
     assert [it.for_days_ahead for it in _clean_days(items, allowed=[0, 1, 2, 3, 4])] == [0, 1, 3]
 
 
-def test_midweek_plan_covers_rest_of_week_only(athlete_with_history, db_session):
+def test_midweek_plan_covers_rest_of_week_only(plan_athlete, db_session):
     """Среда без пробежки: окно 0..4 — день 0 записан (planned, строки на сегодня не было),
     день 7 отброшен; все даты внутри пн–вс той недели; в шапке — «сделано … осталось»."""
     from src.coach.planning_window import monday_of
 
-    uid = athlete_with_history.id
-    wed = _wednesday(athlete_with_history)
+    uid = plan_athlete.id
+    wed = _wednesday(plan_athlete)
     llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=PLAN_TURN)])
     text = generate_weekly_plan(uid, db=db_session, llm=llm, now=wed)
     assert text is not None
@@ -352,7 +380,7 @@ def test_weekly_plan_caps_long_run_by_code(athlete_with_history, db_session, mon
     assert any("ускорений" in r["text"] for r in requests_)
 
 
-def test_weekly_plan_caps_week_volume_and_puts_notes_in_card(athlete_with_history, db_session,
+def test_weekly_plan_caps_week_volume_and_puts_notes_in_card(plan_athlete, db_session,
                                                               monkeypatch):
     """06.09.2026: сумма плана выше цели → лёгкие дни ужаты кодом, длительная под своим потолком,
     заметки стоят до футера, meta.week_volume_capped."""
@@ -379,8 +407,8 @@ def test_weekly_plan_caps_week_volume_and_puts_notes_in_card(athlete_with_histor
         {"workout_type": "long", "target_zone": 2, "duration_min": 40, "for_days_ahead": 7},
     ])
     llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
-    uid = athlete_with_history.id
-    text = generate_weekly_plan(uid, db=db_session, llm=llm, now=_sunday(athlete_with_history))
+    uid = plan_athlete.id
+    text = generate_weekly_plan(uid, db=db_session, llm=llm, now=_sunday(plan_athlete))
     assert text is not None
     target_km = seen["targets"]["target_km"]
 

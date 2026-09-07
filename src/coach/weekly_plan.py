@@ -112,7 +112,8 @@ def _apply_availability_from_turn(turn: CoachTurn, user_id: int, *, db: Session,
             recompute = True
             tail.append(reopened)
     if recompute:
-        targets = apply_targets(planning.week_targets(user_id, db=db, today=today))
+        targets = apply_targets(planning.week_targets(user_id, db=db, today=today,
+                                                      now=now_local))
     cancelled = sorted(set(turn.unavailable_days_ahead or []))
     if cancelled:
         allowed = [d for d in targets["days_ahead_allowed"] if d not in cancelled]
@@ -143,7 +144,7 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     user = db.query(User).filter(User.id == user_id).first()
     now_local = now or user_now(user)
     today = now_local.date()
-    targets = planning.week_targets(user_id, db=db, today=today)
+    targets = planning.week_targets(user_id, db=db, today=today, now=now_local)
     if not targets["days_ahead_allowed"] and not athlete_text:
         # #294: окно доступности закрыло все дни окна планирования — честно сказать, не звать LLM
         # (с репликой подопечного LLM всё же зовём: она может открыть дни заново)

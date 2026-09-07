@@ -126,17 +126,21 @@ def _week_plan_meta(user_id: int, *, db: Session) -> dict:
     return {}
 
 
-def week_targets(user_id: int, *, db: Session, today: date | None = None) -> dict:
+def week_targets(user_id: int, *, db: Session, today: date | None = None,
+                 now: datetime | None = None) -> dict:
     """Числа планируемой недели — LLM получает их как факты.
 
     Вс вечером → следующая неделя целиком (plan_scope="week"); /plan среди недели →
     ОСТАТОК текущей (plan_scope="rest_of_week", #293): полные недельные числа плюс блок
-    remaining_* с вычетом уже сделанного и окно days_ahead_allowed. today — DI для тестов.
+    remaining_* с вычетом уже сделанного и окно days_ahead_allowed. today — DI для тестов;
+    now — локальное время подопечного (#319: после PLAN_TODAY_CUTOFF_HOUR день 0 не планируем;
+    без now отсечка не применяется).
     """
     user = db.query(User).filter(User.id == user_id).first()
-    today = today or user_now(user).date()
+    today = today or (now or user_now(user)).date()
     done = week_done(user_id, db=db, week_start=_monday_of(today), today=today)
-    week_start, first_offset, last_offset = plan_window(today, done["trained_today"])
+    hour = now.hour if now is not None and now.date() == today else None
+    week_start, first_offset, last_offset = plan_window(today, done["trained_today"], hour)
     if week_start != _monday_of(today):
         # Воскресенье: планируем следующую неделю — сделанного в ней ещё нет
         done = {"km": 0.0, "runs": 0, "quality_runs": 0, "trained_today": False}

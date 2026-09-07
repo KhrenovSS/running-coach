@@ -238,6 +238,10 @@ PLAN_QUALITY_DAYS_MAX = 1
 PLAN_RUN_DAYS_CAP = 6
 PLAN_RUN_DAYS_STEP = 1
 PLAN_RUN_DAYS_FLOOR = 3
+# Час (локальный), после которого /plan среди недели не назначает тренировку на «сегодня»
+# (#319, 07.09.2026: карточка в 18:00+ ставила «▶ Пн — Лёгкий бег» на уходящий день).
+# (Local hour after which day 0 is no longer plannable.)
+PLAN_TODAY_CUTOFF_HOUR = 20
 
 
 def long_run_max_pct(week_km: float | None, run_days: int | None = None) -> float:
