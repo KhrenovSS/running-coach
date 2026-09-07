@@ -59,7 +59,7 @@
 |---|---|---|
 | Aerobic decoupling (Pa:HR, GAP-корректированный) | `analysis/effort.py::compute_cardiac_drift` | `drift{drift_pct, flag}` → флаги `decoupling_high/moderate` |
 | Темп↔HR против личной нормы | `analysis/hr_baseline.py::hr_vs_baseline` (OLS HR↔GAP, окно 120 дн) | `hr_vs_baseline{expected_hr, delta_bpm, z}` → `hr_above/below_baseline` |
-| GAP по-км (рельеф) | `analysis/gap.py` | `gap.per_km[]` |
+| GAP по-км (рельеф) | `analysis/gap.py` — Minetti 2002, на спусках фактор не ниже `GAP_FACTOR_MIN` 0.88 (#298, 07.09.2026: остаточный эффект уклона поверх GAP положительный, минимум HR-модели Strava 0.88 при −9 %; на маршрутах владельца км-GAP не меняется, посэмпловый средний фактор +0.3–0.9 %) | `gap.per_km[]` |
 | Жара | `heat_block` | `heat{temp_c, heat_flag, expected_hr_shift_bpm, temp_source}` — t: для тренировок ≥ `WEATHER_AVG_MIN_DURATION_MIN` (60) среднее часовых Open-Meteo за интервал бега (#300), иначе значение на старте; нет погоды → датчик часов минус `WATCH_TEMP_BIAS_C` (3.3 °C, `temp_source=watch`, #299); сдвиг `HEAT_HR_BPM_PER_C·(t−HEAT_REF_TEMP_C)` входит в ожидание `hr_vs_baseline` (`temp_shift_bpm`); t зажата в 10–30 °C (диапазон данных, мороз ≠ −18 уд/мин); исследование 02.09.2026: +0.5 уд/мин/°C, ~7 уд/мин между <16 и ≥24 °C на равном GAP-темпе |
 | Время в HR-зонах (посекундно из `computed_json`; сегментное приближение — fallback, F0/#281) | `history_tools.py::get_workout_detail` | `zone_minutes`, `band_minutes` |
 | Недельный баланс 80/20, прогрессия, ACWR, подряд-тяжёлые | skills | `state.skills`, `zone_balance` |

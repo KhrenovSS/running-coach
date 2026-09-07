@@ -17,6 +17,7 @@ from src.config.constants import (
     DOWNHILL_KM_FLAG,
     DOWNHILL_SHARE_FLAG_PCT,
     ELEV_MIN_DELTA_M,
+    GAP_FACTOR_MIN,
     GAP_MAX_GRADE,
     GAP_GRADE_WINDOW_M,
     GAP_MIN_ALT_COVERAGE,
@@ -36,8 +37,9 @@ def minetti_cost(grade: float) -> float:
 
 
 def gap_factor(grade: float) -> float:
-    """Фактор поправки темпа: >1 в подъём (эквивалентный плоский темп быстрее)."""
-    return max(0.1, minetti_cost(grade) / _LEVEL_COST)
+    """Фактор поправки темпа: >1 в подъём (эквивалентный плоский темп быстрее); на спусках не ниже
+    GAP_FACTOR_MIN (#298: Minetti занижает усилие на спуске — ударная работа, торможение)."""
+    return max(GAP_FACTOR_MIN, minetti_cost(grade) / _LEVEL_COST)
 
 
 def smooth_altitudes(alts: list[float | None]) -> list[float] | None:

@@ -196,6 +196,11 @@ ELEV_MIN_DELTA_M: Final[float] = 1.0         # гистерезис набора
 GAP_MAX_GRADE: Final[float] = 0.30           # клип уклона — граница валидности полинома Minetti (grade clip)
 GAP_GRADE_WINDOW_M: Final[float] = 60.0      # окно локального уклона для посэмплового фактора (local grade window)
 GAP_MIN_ALT_COVERAGE: Final[float] = 0.8     # доля точек с высотой, ниже → GAP недоступен (min alt coverage)
+# #298 (07.09.2026): спуски у Minetti «слишком лёгкие» — остаточный эффект уклона поверх GAP
+# положительный (исследование 02.09). Нижняя граница фактора — как минимум HR-модели Strava
+# (0.88 при −9 %): −3 % → 0.88 вместо 0.85, −5 % → 0.88 вместо 0.76; подъёмы не трогаем.
+# (Floor for the downhill GAP factor; Minetti undercounts effort on descents.)
+GAP_FACTOR_MIN: Final[float] = 0.88
 HILLY_GAIN_M_PER_KM: Final[float] = 10.0     # набор на км выше → «холмистая» (hilly threshold)
 
 # Персональная базовая линия HR↔GAP-темп (personal HR↔pace baseline, OLS)

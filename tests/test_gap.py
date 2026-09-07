@@ -71,6 +71,15 @@ def test_gap_factor_monotonic():
     assert abs(gap_factor(0.0) - 1.0) < 1e-9
 
 
+def test_gap_factor_downhill_floor():
+    """#298: на спусках фактор не ниже GAP_FACTOR_MIN (Minetti занижает усилие); −2 % — ещё
+    выше пола (polynomial), подъёмы не тронуты."""
+    from src.config.constants import GAP_FACTOR_MIN
+    assert gap_factor(-0.05) == GAP_FACTOR_MIN and gap_factor(-0.15) == GAP_FACTOR_MIN
+    assert gap_factor(-0.02) > GAP_FACTOR_MIN
+    assert gap_factor(0.03) > 1.1
+
+
 # --- F0 #278/#283: дистанционно-взвешенные средние + km_len_m в per_km ---
 
 def _flat_series(km_paces, step_m=20.0):
