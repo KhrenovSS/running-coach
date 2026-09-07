@@ -37,12 +37,19 @@ def profile(user: User) -> dict:
     }
 
 
+def _as_queries(guides_query: str | list[str] | None) -> list[str]:
+    """Один запрос или список → список запросов к базе знаний (normalize guide queries)."""
+    if not guides_query:
+        return []
+    return [guides_query] if isinstance(guides_query, str) else list(guides_query)
+
+
 def build_extras(user_id: int, *, db: Session,
                  weeks: int = COACH_ENRICH_WEEKS,
                  limit: int = COACH_ENRICH_RECENT_LIMIT,
                  session_id: int | None = None,
                  insights_limit: int = COACH_RECENT_REVIEWS_LIMIT,
-                 guides_query: str | None = None) -> dict:
+                 guides_query: str | list[str] | None = None) -> dict:
     """Обогащение today-блока: меньше tool round-trip'ов в API-режиме; в режиме
     моста tool-цикл неактивен — это его основной источник фактов (enrichment).
 
@@ -113,9 +120,9 @@ def build_extras(user_id: int, *, db: Session,
         if guides_query is None:
             queries = review_guides_queries(detail, computed)
         else:
-            queries = [guides_query]
+            queries = _as_queries(guides_query)
     else:
-        queries = [guides_query] if guides_query else []
+        queries = _as_queries(guides_query)
     chunks: list = []
     seen: set[tuple[str, str]] = set()
     for q in queries:

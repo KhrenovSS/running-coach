@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from src.coach import planning
 from src.coach.contracts import Prescription, WorkoutProposal
+from src.coach.knowledge.loader import plan_guides_queries
 from src.coach.llm.agent import run_turn
 from src.coach.llm.anthropic_client import estimate_cost_usd
 from src.coach.llm.client import CoachLLM, get_llm
@@ -176,8 +177,9 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     state_json = jsonable(state)
     state_json.pop("signals", None)
 
+    # Возврат после паузы → гайды ходьба→бег и план возврата (Швец 47 / Дэниелс 61)
     extras = build_extras(user_id, db=db, weeks=4,
-                          guides_query="план недели мезоцикл фазы объём прогрессия")
+                          guides_query=plan_guides_queries(targets))
     extras["week_targets (planning)"] = targets
     requests_ = recent_athlete_requests(user_id, db=db)
     if requests_:

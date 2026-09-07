@@ -112,8 +112,17 @@ _TYPE_GUIDE_TERMS = {
     "long": "длительный база объём",
     "tempo": "темповая интенсивность прогрессия",
     "interval": "интервалы интенсивность прогрессия",
-    "race": "соревнование интенсивность",
+    "race": "соревнование гонка раскладка",   # гайд 48 (Швец): день гонки и раскладка
 }
+
+# Запрос про погоду — при флаге жары в разборе (heat guide query, гайд 49 Швеца)
+_HEAT_GUIDE_TERMS = "жара погода условия"
+
+# Запросы для плана недели (weekly-plan guide queries): обычный — мезоцикл/прогрессия;
+# при возврате после паузы — ходьба→бег (гайд 47) + план возврата в % от пика (гайд 61).
+_PLAN_GUIDE_TERMS = ["план недели мезоцикл фазы объём прогрессия"]
+_PLAN_RETURN_GUIDE_TERMS = ["ходьба чередование бег новичок регулярность",
+                            "возврат после перерыва объём пик"]
 
 
 def review_guides_queries(detail: dict, computed: dict | None) -> list[str]:
@@ -127,7 +136,21 @@ def review_guides_queries(detail: dict, computed: dict | None) -> list[str]:
     type_terms = _TYPE_GUIDE_TERMS.get(detail.get("type") or "")
     if type_terms:
         queries.append(type_terms)
+    # Жара — третьим запросом: вытесняется болью/типом при лимите чанков (heat last)
+    if ((computed or {}).get("heat") or {}).get("heat_flag"):
+        queries.append(_HEAT_GUIDE_TERMS)
     return queries
+
+
+def plan_guides_queries(targets: dict | None) -> list[str]:
+    """Запросы к базе знаний для плана недели (guide queries for the weekly plan).
+
+    detraining_return (пауза ≥ DETRAINING_RETURN_MIN_DAYS_OFF) → вход через ходьбу→бег
+    (гайд 47) и план возврата в % от пика (гайд 61) вместо общей прогрессии мезоцикла.
+    """
+    if (targets or {}).get("detraining_return"):
+        return list(_PLAN_RETURN_GUIDE_TERMS)
+    return list(_PLAN_GUIDE_TERMS)
 
 
 def search(query: str, top_k: int = 3) -> list[GuideChunk]:
