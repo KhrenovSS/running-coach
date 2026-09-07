@@ -35,7 +35,7 @@ from src.coach.planning_safety import (
     quality_reopens_at,
 )
 from src.analysis.session_metrics import FLAG_EASY_TOO_HARD
-from src.coach.config import EASY_TOO_HARD_LOOKBACK_DAYS
+from src.coach.config import EASY_TOO_HARD_LOOKBACK_DAYS, LONG_RUN_MIN_MINUTES
 from src.services.repositories_insights import InsightRepository
 from src.coach.segments import segments_from_schema
 from src.coach.prescriber import finalize, save_prescription, user_max_hr
@@ -257,7 +257,10 @@ def generate_weekly_plan(user_id: int, *, db: Session,
         # Safety дня — по прогнозному счётчику правила 17 на его дату (см. counts): темповая в
         # четверг не режется сегодняшним счётчиком, раньше открытия — режется детерминированно
         return finalize(proposal, project_state(state, counts, proposal.for_days_ahead or 0),
-                        db=db, persist=False, source="llm", now=now_local)
+                        db=db, persist=False, source="llm", now=now_local,
+                        # #317/#318: длительная под потолком км (hint < 60 мин) остаётся длительной
+                        long_min_minutes=min(LONG_RUN_MIN_MINUTES,
+                                             targets.get("long_run_min_hint") or LONG_RUN_MIN_MINUTES))
 
     # (1) первый проход — нужны predicted (км по истории) для потолков; (2) потолок длительной;
     # (3) потолок объёма недели; (4) запись. Prescription по-прежнему рождается только в clamp —

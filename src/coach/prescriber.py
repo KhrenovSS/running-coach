@@ -23,7 +23,7 @@ from src.coach.fallback import fallback_proposal
 from src.coach.rules.p1_safety import evaluate_safety
 from src.coach.safety import clamp, effective_workout_type
 from src.config import settings
-from src.config.constants import BASELINE_WINDOW_DAYS, LTSP_ZONE_OFFSET_S
+from src.config.constants import BASELINE_WINDOW_DAYS, LONG_RUN_MIN_MINUTES, LTSP_ZONE_OFFSET_S
 from src.models import Recommendation, User
 from src.utils.logger import get_logger
 
@@ -110,11 +110,14 @@ def _pace_clamp_context(proposal: WorkoutProposal, verdict, state: AthleteState,
 
 def finalize(proposal: WorkoutProposal | None, state: AthleteState, *,
              db: Session | None = None, persist: bool = False,
-             source: str = "fallback", now: datetime | None = None) -> Prescription:
+             source: str = "fallback", now: datetime | None = None,
+             long_min_minutes: float = LONG_RUN_MIN_MINUTES) -> Prescription:
     """Собрать назначение: safety вычисляется здесь же, clamp безусловный.
 
     proposal=None → детерминированное табличное предложение (fallback).
-    (Assemble prescription; safety is computed here, clamp is unconditional.)
+    long_min_minutes — порог, короче которого предложенная LLM «длительная» = лёгкая (#317);
+    план недели передаёт min(60, long_run_min_hint), чтобы длительная под потолком км осталась
+    длительной. (Assemble prescription; safety is computed here, clamp is unconditional.)
     """
     verdict = evaluate_safety(state, now=now)
     if proposal is None:
@@ -172,6 +175,19 @@ def finalize(proposal: WorkoutProposal | None, state: AthleteState, *,
                     reason="сумма сегментов с отдыхом"))
                 prescription.volume["duration_min"] = float(total)
                 prescription.predicted = predict_volume(prescription, state, db=db)
+    # #317: «длительная» короче LONG_RUN_MIN_MINUTES — по содержанию лёгкая пробежка; ярлык
+    # правим кодом (карточка показывала «Длительный бег 40 мин»). Интенсивность/потолки те же —
+    # safety не расширяется. (Short "long" run is relabelled easy deterministically.)
+    duration = prescription.volume.get("duration_min")
+    if (prescription.workout_type == "long" and not proposal.code_trimmed
+            and duration is not None and float(duration) < long_min_minutes):
+        prescription.rationale.append(ReasoningStep(
+            rule="long_run_min", decision="long → easy",
+            reason=f"{float(duration):.0f} мин короче порога длительной "
+                   f"{long_min_minutes:.0f} мин"))
+        prescription.workout_type = "easy"
+        if db is not None:
+            prescription.predicted = predict_volume(prescription, state, db=db)
     if persist and db is not None:
         save_prescription(prescription, state, db=db)
     return prescription

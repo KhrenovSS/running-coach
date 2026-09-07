@@ -627,3 +627,24 @@ def test_cap_long_run_structured_only_warns_and_trail_on_plain():
     capped, _ = cap_long_run(plain, _long_prescription(10.0), targets)
     assert capped.rationale[0] == "единственная длительная"
     assert capped.rationale[-1].startswith("урезано кодом: 70 → 58 мин")
+
+
+
+def test_week_targets_long_run_min_hint(db_session, monkeypatch):
+    """#318: ориентир минут длительной = потолок км × темп на потолке Z2 (не дольше 150);
+    без оценки темпа — None (не выдумываем)."""
+    import src.services.workout_insights as wi
+    from src.coach.config import LONG_RUN_MAX_MIN
+
+    user = _unique_user(db_session)
+    _week_of_km(db_session, user.id, 30.0, 1)
+    monkeypatch.setattr(wi, "expected_pace_at_hr", lambda uid, hr, *, db, **kw: None)
+    t = planning.week_targets(user.id, db=db_session)
+    assert t["long_run_min_hint"] is None
+    monkeypatch.setattr(wi, "expected_pace_at_hr",
+                        lambda uid, hr, *, db, **kw: {"pace_min_km": 6.0, "quality": "band"})
+    t = planning.week_targets(user.id, db=db_session)
+    assert t["long_run_min_hint"] == round(t["long_run_km_max"] * 6.0)
+    monkeypatch.setattr(wi, "expected_pace_at_hr",
+                        lambda uid, hr, *, db, **kw: {"pace_min_km": 60.0, "quality": "band"})
+    assert planning.week_targets(user.id, db=db_session)["long_run_min_hint"] == LONG_RUN_MAX_MIN

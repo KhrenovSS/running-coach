@@ -249,6 +249,8 @@ PLAN_PROMPT = (
     "посчитаны в week_targets: target_km, потолки качества (quality_z4/z3_km_max), "
     "long_run_km_max/long_run_min_max, hard_days_max, фаза мезоцикла "
     "(build/deload), run_days_max/rest_days_min — НЕ выходи за них и НЕ пересчитывай. "
+    "long_run_min_hint (если не null) — минуты длительной, соответствующие потолку км по твоему "
+    "темпу: duration_min длительной не выше него (иначе код урежет). "
     "hard_days_max = 0 (quality_blocked_by_safety) — качественных дней в плане нет: ни tempo, "
     "ни interval, и в message не обещай темповую/интервалы. Допустимы короткие ускорения "
     "15–20 с (4–6 повторов, свободно) в конце ОДНОГО лёгкого дня — ТОЛЬКО как segments: "

@@ -12,10 +12,13 @@ from dataclasses import replace
 from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from src.coach.config import (
     EASY_TOO_HARD_LOOKBACK_DAYS,
     HARD_TYPES,
     LONG_RUN_CAP_TOLERANCE_KM,
+    LONG_RUN_MAX_MIN,
     PLAN_EASY_MIN_MINUTES,
     PLAN_RUN_DAYS_FLOOR,
     WEEK_VOLUME_TOLERANCE_PCT,
@@ -178,7 +181,7 @@ def cap_long_run(proposal: WorkoutProposal, prescription: Prescription,
     # След урезания в proposal_json.rationale — что предлагал LLM (audit trail in rationale)
     trail = f"урезано кодом: {duration:.0f} → {new_min:.0f} мин ({reason})"
     return replace(proposal, duration_min=int(new_min), distance_km=new_km,
-                   rationale=[*proposal.rationale, trail]), note
+                   rationale=[*proposal.rationale, trail], code_trimmed=True), note
 
 
 _SCALABLE_TYPES = ("easy", "recovery")
@@ -238,3 +241,25 @@ def cap_week_volume(items: list[WorkoutProposal], prescriptions: list[Prescripti
                   else ": цель недели"))
     note = f"⚠️ Объём недели урезан до ~{new_total:.0f} км{tail}."
     return new_items, note
+
+
+def long_run_min_hint(user_id: int, user: Any, km_max: float | None, *, db: Session) -> int | None:
+    """Ориентир длительной в минутах для LLM (#318): потолок км × темп на потолке Z2 по истории,
+    не дольше LONG_RUN_MAX_MIN. Только подсказка в week_targets — потолок по-прежнему режет
+    `cap_long_run`; нет оценки темпа → None (не выдумываем). (Long-run minutes hint from the
+    km cap and historical pace at the Z2 ceiling; advisory only, the code cap still applies.)
+    """
+    from src.analysis.hr_zones import zone_ceiling_hr
+    from src.coach.prescriber import user_max_hr
+    from src.services.repositories import latest_lthr
+    from src.services.workout_insights import expected_pace_at_hr
+
+    if not km_max:
+        return None
+    ceiling = zone_ceiling_hr(2, user_max_hr(user), latest_lthr(user_id, db=db))
+    if ceiling is None:
+        return None
+    estimate = expected_pace_at_hr(user_id, ceiling, db=db, workout_type="long", degraded_ok=True)
+    if not estimate or not estimate.get("pace_min_km"):
+        return None
+    return int(min(LONG_RUN_MAX_MIN, round(km_max * float(estimate["pace_min_km"]))))

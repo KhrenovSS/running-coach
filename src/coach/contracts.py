@@ -131,6 +131,7 @@ class WorkoutProposal:
     segments: list[WorkoutSegment] = field(default_factory=list)  # структура по сегментам
     rationale: list[str] = field(default_factory=list)
     for_days_ahead: int = 0                    # 0 = сегодня, 1 = завтра (target day offset)
+    code_trimmed: bool = False                 # урезано кодом (cap_long_run) — ярлык long не пересматриваем (#317)
 
 
 @dataclass

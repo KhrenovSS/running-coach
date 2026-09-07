@@ -2,6 +2,18 @@
 
 All notable changes to this project are tracked here.
 
+## [07.09.2026] — Длительная: ярлык по длительности (#317) и ориентир минут в плане (#318)
+
+### Changed
+- **#317** — `prescriber.finalize`: «длительная» короче `LONG_RUN_MIN_MINUTES` (60) по замыслу LLM
+  получает ярлык `easy` детерминированно (след `long_run_min` в rationale, `proposal` хранит
+  исходный тип). Исключения: урезанная кодом длительная (`WorkoutProposal.code_trimmed` из
+  `cap_long_run`) и длительная под порогом недели — план передаёт
+  `long_min_minutes = min(60, long_run_min_hint)`, чтобы при малом объёме длительная не исчезала.
+- **#318** — `week_targets.long_run_min_hint`: минуты длительной под потолок км по темпу истории
+  на потолке Z2 (`planning_safety.long_run_min_hint`, не дольше 150; нет оценки → null);
+  PLAN_PROMPT просит не превышать его — урезание постфактум становится редкостью.
+
 ## [07.09.2026] — Планирование: вечерняя отсечка дня 0, детерминированные тесты плана
 
 ### Fixed

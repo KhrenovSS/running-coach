@@ -32,6 +32,7 @@ from src.coach.config import (
     long_run_max_pct,
 )
 from src.coach.contracts import AthleteState, Prescription, WorkoutProposal
+from src.coach.planning_safety import long_run_min_hint
 from src.coach.planning_window import local_week_volumes, plan_window, week_done
 from src.coach.prescriber import finalize, save_prescription
 from src.coach.turn_context import is_athlete_unavailable, unchanged_today
@@ -232,6 +233,8 @@ def week_targets(user_id: int, *, db: Session, today: date | None = None,
         "long_run_max_pct": long_run_pct,
         "long_run_hold": long_run_hold,             # #289: доля длительной превышена — не растим
         "long_run_min_max": LONG_RUN_MAX_MIN,
+        # #318: ориентир минут длительной под потолок км — LLM планирует минутами
+        "long_run_min_hint": long_run_min_hint(user_id, user, long_run_km_max, db=db),
         "hard_days_max": hard_days_max,
         "detraining_return": detraining_return,     # #289: возврат после паузы — объём ≤ 65% пика
         "days_off": days_off,
