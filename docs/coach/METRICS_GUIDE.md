@@ -230,7 +230,7 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
 
 | Флаг | Действие (существующий механизм) |
 |---|---|
-| `easy_run_too_hard` ×2 за 7 дней | ✅ правило 17 p1_safety `easy_runs_too_hard` (`EASY_TOO_HARD_WEEK_FLAGS`, 04.09.2026) → `max_zone=2`, без интенсива; плюс правило 16 `week_intensity_overload` (доля Z3+ за 7 дней > 30%). План недели прогнозирует счётчик по датам флагов (`planning_safety.easy_too_hard_counts_by_day`/`quality_reopens_at`, 07.09.2026): качественный день ставится с дня, когда окно очистится, каждый день плана финализируется по прогнозному состоянию |
+| `easy_run_too_hard` ×2 за 7 дней | ✅ правило 17 p1_safety `easy_runs_too_hard` (`EASY_TOO_HARD_WEEK_FLAGS`, 04.09.2026) → `max_zone=2`, без интенсива; плюс правило 16 `week_intensity_overload` (доля Z3+ за 7 дней > 30%). План недели прогнозирует оба окна по дню плана (#315, решение владельца 07.09.2026): счётчик флагов — `planning_safety.easy_too_hard_counts_by_day`, доля Z3+ — `hard_share_by_day` по посессионным зонам (`TrainingRepository.zone_minutes_by_session`); `quality_reopens_at`/`project_state` — качественный день ставится с дня, когда окна очистятся, каждый день плана финализируется по прогнозному состоянию |
 | интенсив под ярлыком easy/long (сегменты 4×3 мин Z3) | ✅ `safety.effective_workout_type`: тип по сегментам (`STRIDE_MAX_SEC`), гейты интенсива применяются к содержимому (инцидент 04.09.2026) |
 | день после длительной | ✅ длительная — качественный день в `_week_signals` → правило 12 (гайд 45, 04.09.2026) |
 | `quality_volume_exceeded` | ✅ правило 18 p1_safety: следующий качественный не раньше +`QUALITY_VOLUME_EXTRA_H` (48 ч) — 04.09.2026 |

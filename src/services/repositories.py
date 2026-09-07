@@ -99,8 +99,14 @@ class TrainingRepository:
         return float(total or 0.0)
 
     @staticmethod
-    def zone_distribution(user_id: int, days: int = 28, *, db: Session) -> dict:
-        """Распределение времени по пульсовым зонам (Time distribution by HR zones)."""
+    def zone_minutes_by_session(user_id: int, days: int = 28, *,
+                                db: Session) -> list[tuple[datetime, dict]]:
+        """Минуты по пульсовым зонам на каждую тренировку за days дней: [(begin_ts, {z1..z5})].
+
+        Посекундные зоны из workout_insights, если посчитаны (#281), иначе сегментное
+        приближение. Сырьё для zone_distribution и прогноза правила 16 по дню плана (#315).
+        (Per-session zone minutes — feeds the aggregate and the per-day projection.)
+        """
         since = datetime.now(timezone.utc) - timedelta(days=days)
         user = db.query(User).filter(User.id == user_id).first()
         max_hr = user.max_hr if user else settings.default_max_hr
@@ -109,11 +115,6 @@ class TrainingRepository:
             TrainingSession.user_id == user_id,
             TrainingSession.begin_ts >= since,
         ).all()
-
-        # Посекундные зоны из workout_insights, если посчитаны (#281): сегментное
-        # «вся длительность в зону среднего пульса» кладёт пограничный км целиком
-        # в одну зону и маркирует recovery интервальной как hard
-        # (prefer per-second zones from computed insights over segment-avg buckets)
         from src.models import WorkoutInsight
         session_ids = [s.id for s in sessions]
         insights = {}
@@ -122,25 +123,34 @@ class TrainingRepository:
                 WorkoutInsight.session_id.in_(session_ids)).all()
             insights = {r.session_id: r.computed_json or {} for r in rows}
 
-        zone_minutes = {"z1": 0.0, "z2": 0.0, "z3": 0.0, "z4": 0.0, "z5": 0.0}
+        out: list[tuple[datetime, dict]] = []
         for session in sessions:
+            zone_minutes = {"z1": 0.0, "z2": 0.0, "z3": 0.0, "z4": 0.0, "z5": 0.0}
             tz = insights.get(session.id, {}).get("time_in_zones") or {}
             if tz.get("available") and tz.get("minutes"):
                 for zone_key, minutes in tz["minutes"].items():
                     if zone_key in zone_minutes:
                         zone_minutes[zone_key] += minutes or 0.0
+            elif session.segments_json:
+                # Fallback — сегментное приближение (нет computed_json у сессии)
+                for segment in session.segments_json:
+                    avg_hr = segment.get('avg_hr') or 0
+                    duration = segment.get('duration_min', 0) or 0
+                    zone_key = f"z{get_zone(avg_hr, max_hr, lthr)}"
+                    if zone_key in zone_minutes:
+                        zone_minutes[zone_key] += duration
+            else:
                 continue
-            # Fallback — сегментное приближение (нет computed_json у сессии)
-            if not session.segments_json:
-                continue
-            for segment in session.segments_json:
-                avg_hr = segment.get('avg_hr') or 0
-                duration = segment.get('duration_min', 0) or 0
-                zone = get_zone(avg_hr, max_hr, lthr)
-                zone_key = f"z{zone}"
-                if zone_key in zone_minutes:
-                    zone_minutes[zone_key] += duration
+            out.append((session.begin_ts, zone_minutes))
+        return out
 
+    @staticmethod
+    def zone_distribution(user_id: int, days: int = 28, *, db: Session) -> dict:
+        """Распределение времени по пульсовым зонам (Time distribution by HR zones)."""
+        zone_minutes = {"z1": 0.0, "z2": 0.0, "z3": 0.0, "z4": 0.0, "z5": 0.0}
+        for _, per_session in TrainingRepository.zone_minutes_by_session(user_id, days, db=db):
+            for zone_key, minutes in per_session.items():
+                zone_minutes[zone_key] += minutes
         return zone_minutes
 
     @staticmethod

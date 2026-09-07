@@ -112,3 +112,29 @@ def test_weekly_plan_places_tempo_after_rule17_clears(db_session):
     assert f"интенсив не раньше" in text and f"{reopen:%d.%m}" in text
     assert "разгрузка по safety" in text
     assert '"quality_allowed_from_days_ahead": 2' in str(llm.calls[0])
+
+
+def test_hard_share_by_day_slides_window_and_reopens_quality():
+    """#315 (решение владельца 07.09.2026): доля Z3+ правила 16 прогнозируется по дню плана —
+    тяжёлая тренировка 6 дней назад выходит из окна на день +2, качество открывается."""
+    from src.coach.config import HARD_SHARE_OVERLOAD
+    from src.coach.planning_safety import hard_share_by_day
+
+    now = _now()
+    rows = [(now - timedelta(days=6), {"z1": 0, "z2": 10, "z3": 30, "z4": 10, "z5": 0}),   # тяжёлая
+            (now - timedelta(days=3), {"z1": 10, "z2": 40, "z3": 0, "z4": 0, "z5": 0}),
+            (now - timedelta(days=1), {"z1": 10, "z2": 50, "z3": 0, "z4": 0, "z5": 0})]
+    shares = hard_share_by_day(rows, now=now)
+    assert shares[0] == shares[1] == round(40 / 160, 2) and shares[0] > HARD_SHARE_OVERLOAD - 0.06
+    assert shares[2] == 0.0                                 # −6 вышла из окна (now+2−7 = −5)
+    # мало минут в окне → None (правило молчит)
+    assert hard_share_by_day(rows[:1], now=now, min_minutes=60)[2] is None
+    # naive-время — как UTC
+    assert hard_share_by_day([(t.replace(tzinfo=None), z) for t, z in rows], now=now)[0] == shares[0]
+
+    state = _state(hard_share_7d=0.4)
+    counts: dict = {}
+    assert quality_reopens_at(state, counts, now=now, days=[0, 1, 2, 3]) is None   # без прогноза — блок
+    assert quality_reopens_at(state, counts, now=now, days=[0, 1, 2, 3],
+                              hard_shares={0: 0.4, 1: 0.4, 2: 0.1, 3: 0.0}) == 2
+    assert project_state(state, counts, 2, {2: 0.1}).signals["hard_share_7d"] == 0.1

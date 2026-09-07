@@ -30,16 +30,17 @@ from src.coach.planning_safety import (
     cap_long_run,
     cap_week_volume,
     easy_too_hard_counts_by_day,
+    hard_share_by_day,
     project_state,
     quality_blocked,
     quality_reopens_at,
 )
 from src.analysis.session_metrics import FLAG_EASY_TOO_HARD
-from src.coach.config import EASY_TOO_HARD_LOOKBACK_DAYS, LONG_RUN_MIN_MINUTES
+from src.coach.config import EASY_TOO_HARD_LOOKBACK_DAYS, HARD_SHARE_LOOKBACK_DAYS, LONG_RUN_MIN_MINUTES
 from src.services.repositories_insights import InsightRepository
 from src.coach.segments import segments_from_schema
 from src.coach.prescriber import finalize, save_prescription, user_max_hr
-from src.services.repositories import latest_lthr
+from src.services.repositories import TrainingRepository, latest_lthr
 from src.coach.render_week import render_week_plan
 from src.coach.safety import rehydrate
 from src.coach.week_view import _active_rows, week_facts
@@ -157,19 +158,24 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     review = planning.week_plan_review(user_id, db=db)
     state = assess_state(user_id, db=db)
     verdict = evaluate_safety(state)
-    # Правило 17 (лёгкие слишком быстро) — 7-дневное окно по дате тренировки: прогнозируем,
-    # с какого дня недели оно перестанет срабатывать (07.09.2026: план обнулял качество на всю
-    # неделю по сегодняшнему вердикту). Остальные правила прогнозу не поддаются — блок на окно.
-    # (Project the rule-17 counter per day; other rules stay as of today.)
+    # Правила 16/17 (доля Z3+ и лёгкие слишком быстро) — 7-дневные окна по дате тренировки:
+    # прогнозируем, с какого дня недели они перестанут срабатывать (07.09.2026: план обнулял
+    # качество на всю неделю по сегодняшнему вердикту; #315 — решение владельца: окно сдвигается
+    # по дню). Остальные правила прогнозу не поддаются — блок на окно.
+    # (Project the rule-16/17 signals per day; other rules stay as of today.)
     counts = easy_too_hard_counts_by_day(
         InsightRepository.recent_flag_sessions(user_id, FLAG_EASY_TOO_HARD, db=db,
                                                days=EASY_TOO_HARD_LOOKBACK_DAYS),
         now=now_local)
+    hard_shares = hard_share_by_day(
+        TrainingRepository.zone_minutes_by_session(user_id, HARD_SHARE_LOOKBACK_DAYS, db=db),
+        now=now_local, lookback_days=HARD_SHARE_LOOKBACK_DAYS)
 
     def _apply_targets(t: dict) -> dict:
         # Интенсив закрыт safety → потолки качества ДО промпта (06.09.2026: иначе LLM
         # закладывает темповую, clamp режет её молча, проза расходится с картой)
-        reopen = (quality_reopens_at(state, counts, now=now_local, days=t["days_ahead_allowed"])
+        reopen = (quality_reopens_at(state, counts, now=now_local, days=t["days_ahead_allowed"],
+                                     hard_shares=hard_shares)
                   if quality_blocked(verdict) else None)
         out = apply_safety_to_targets(t, verdict, quality_from_days_ahead=reopen)
         if reopen is not None:
@@ -260,7 +266,8 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     def _finalize(proposal: WorkoutProposal) -> Prescription:
         # Safety дня — по прогнозному счётчику правила 17 на его дату (см. counts): темповая в
         # четверг не режется сегодняшним счётчиком, раньше открытия — режется детерминированно
-        return finalize(proposal, project_state(state, counts, proposal.for_days_ahead or 0),
+        return finalize(proposal, project_state(state, counts, proposal.for_days_ahead or 0,
+                                                hard_shares),
                         db=db, persist=False, source="llm", now=now_local,
                         # #317/#318: длительная под потолком км (hint < 60 мин) остаётся длительной
                         long_min_minutes=min(LONG_RUN_MIN_MINUTES,

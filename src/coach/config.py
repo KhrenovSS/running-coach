@@ -103,6 +103,7 @@ HARD_TYPES = ("tempo", "interval", "race")
 STRIDE_MAX_SEC = 30
 # Правило 16 p1_safety: доля времени Z3+ за 7 дней считается только при достаточном объёме зон
 HARD_SHARE_MIN_MINUTES_7D = 60
+HARD_SHARE_LOOKBACK_DAYS = 7          # окно правила 16 (доля Z3+); план сдвигает его по дню (#315)
 EASY_TYPES = ("recovery", "easy")
 # Минимальная зона, в которой тип имеет смысл: потолок зоны ниже → тип даунгрейдится.
 # (Minimal zone a type makes sense in; a lower zone cap downgrades the type.)

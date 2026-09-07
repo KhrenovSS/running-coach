@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from src.coach.config import (
     EASY_TOO_HARD_LOOKBACK_DAYS,
+    HARD_SHARE_MIN_MINUTES_7D,
     HARD_TYPES,
     LONG_RUN_CAP_TOLERANCE_KM,
     LONG_RUN_MAX_MIN,
@@ -54,24 +55,54 @@ def easy_too_hard_counts_by_day(flag_times: list[datetime], *, now: datetime,
             for d in range(0, horizon_days + 1)}
 
 
-def project_state(state: AthleteState, counts: dict[int, int], day: int) -> AthleteState:
-    """Снимок состояния на день `day`: прогнозный счётчик правила 17 и сдвиг дня для правила 21
-    (болезнь/пауза); остальные сигналы — сегодняшние, консервативно.
-    (State copy with the projected rule-17 counter and the plan-day offset.)"""
+def hard_share_by_day(zone_rows: list[tuple[datetime, dict]], *, now: datetime,
+                      horizon_days: int = 7, lookback_days: int = 7,
+                      min_minutes: float = HARD_SHARE_MIN_MINUTES_7D) -> dict[int, float | None]:
+    """Доля времени Z3+ «за последние 7 дней» на каждый день вперёд (правило 16, #315).
+
+    Окно сдвигается по дню плана: тренировки старше 7 дней от этого дня выходят из окна,
+    будущие дни неизвестны (не считаем — консервативно: доля падает только за счёт ухода
+    старых). Меньше min_minutes в окне → None (правило молчит, как и сегодня).
+    (Projected 7-day Z3+ share per day ahead; the window slides with the plan day.)
+    """
+    def _aware(t: datetime) -> datetime:
+        return t if t.tzinfo is not None else t.replace(tzinfo=timezone.utc)
+    rows = [(_aware(t), z) for t, z in zone_rows]
+    out: dict[int, float | None] = {}
+    for d in range(0, horizon_days + 1):
+        since = now + timedelta(days=d - lookback_days)
+        total = hard = 0.0
+        for t, z in rows:
+            if t >= since:
+                total += sum(z.values())
+                hard += z.get("z3", 0.0) + z.get("z4", 0.0) + z.get("z5", 0.0)
+        out[d] = round(hard / total, 2) if total >= min_minutes else None
+    return out
+
+
+def project_state(state: AthleteState, counts: dict[int, int], day: int,
+                  hard_shares: dict[int, float | None] | None = None) -> AthleteState:
+    """Снимок состояния на день `day`: прогнозный счётчик правила 17, доля Z3+ правила 16
+    (#315, окно сдвигается по дню) и сдвиг дня для правила 21 (болезнь/пауза); остальные
+    сигналы — сегодняшние, консервативно.
+    (State copy with the projected rule-16/17 signals and the plan-day offset.)"""
     signals = {**(state.signals or {}), "day_offset": day}   # #322: правило 21 знает день плана
     if day in counts:
         signals["easy_too_hard_7d"] = counts[day]
+    if hard_shares is not None and day in hard_shares:
+        signals["hard_share_7d"] = hard_shares[day]
     return replace(state, signals=signals)
 
 
 def quality_reopens_at(state: AthleteState, counts: dict[int, int], *, now: datetime,
-                       days: list[int]) -> int | None:
+                       days: list[int],
+                       hard_shares: dict[int, float | None] | None = None) -> int | None:
     """Первый день окна (сдвиг от сегодня), когда вердикт уже допускает качественный день:
-    правило 17 по прогнозному счётчику, `earliest_next_hard` — не позже конца того дня.
-    None — интенсив закрыт на всё окно (другие правила прогнозу не поддаются).
+    правила 16/17 по прогнозным сигналам, `earliest_next_hard` — не позже конца того дня.
+    None — интенсив закрыт на всё окно (остальные правила прогнозу не поддаются).
     (First day ahead on which a hard session is allowed; None = blocked all window.)"""
     for d in sorted(days):
-        v = evaluate_safety(project_state(state, counts, d), now=now)
+        v = evaluate_safety(project_state(state, counts, d, hard_shares), now=now)
         if quality_blocked(v):
             continue
         day_end = datetime.combine(now.date() + timedelta(days=d + 1), time(0),

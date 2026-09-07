@@ -8,6 +8,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from src.coach.config import (
+    HARD_SHARE_LOOKBACK_DAYS,
     DOWNHILL_LOOKBACK_DAYS,
     EASY_TOO_HARD_LOOKBACK_DAYS,
     QUALITY_VOLUME_LOOKBACK_DAYS,
@@ -227,7 +228,7 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
     monotony = monotony_window(user_id, db=db, today=today_local, user=user_row)
     # Правило 16 (гайд 10, 04.09.2026): доля Z3+ за 7 дней — при достаточном объёме зон
     from src.coach.config import HARD_SHARE_MIN_MINUTES_7D
-    zones7 = TrainingRepository.zone_distribution(user_id, days=7, db=db)
+    zones7 = TrainingRepository.zone_distribution(user_id, days=HARD_SHARE_LOOKBACK_DAYS, db=db)
     total7 = sum(zones7.values())
     hard_share_7d = (round((zones7["z3"] + zones7["z4"] + zones7["z5"]) / total7, 2)
                      if total7 >= HARD_SHARE_MIN_MINUTES_7D else None)
