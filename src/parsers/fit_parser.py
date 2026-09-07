@@ -1,6 +1,7 @@
 import fitdecode
 from datetime import datetime
 from src.analysis import process_trackpoints
+from src.analysis.gps_quality import watch_stride_m
 from src.config import settings
 
 # Константа для конвертации полуокружностей в градусы (Semicircles to degrees)
@@ -191,7 +192,8 @@ def parse_fit(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.
                                   max_credible_pace, lthr=lthr,
                                   max_gps_jump_m=max_gps_jump_m,
                                   min_hr_for_fast_pace=min_hr_for_fast_pace,
-                                  pauses=(activity['device_summary'] or {}).get('pauses'))
+                                  pauses=(activity['device_summary'] or {}).get('pauses'),
+                                  watch_stride_m=watch_stride_m(activity['device_summary']))
     if result is None:
         return None
     if activity['calories'] is not None:

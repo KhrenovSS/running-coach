@@ -3,6 +3,7 @@
 from sqlalchemy.orm import Session
 from src.models import TrainingSession, User
 from src.analysis import process_trackpoints
+from src.analysis.gps_quality import watch_stride_m
 from src.config import settings as app_settings
 from src.services.raw_files import resolve_raw_file
 from src.utils.logger import get_logger
@@ -102,6 +103,10 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
             min_hr_for_fast_pace=user.min_hr_for_fast_pace or 130,
             pace_gap=pace_gap,
             pauses=pauses,
+            # #275: шаг с часов — из сырья (FIT) или сохранённого device_summary
+            watch_stride_m=watch_stride_m(
+                (activity.get('device_summary') if from_raw else None)
+                or (session.device_summary if isinstance(session.device_summary, dict) else None)),
             interval_min_phase_duration=phase,
             interval_min_phase_distance_m=phase_dist_m,
             interval_hr_lag_sec=lag,

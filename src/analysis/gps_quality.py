@@ -156,11 +156,26 @@ def _steps_between(prev: dict, cur: dict) -> float:
     return cad * dt_min
 
 
+def watch_stride_m(device_summary: dict | None) -> float | None:
+    """Длина шага с часов (FIT session `avg_step_length`, мм → м) в диапазоне здравого смысла
+    (#275, 07.09.2026). Проверка на проде: 890–910 мм при 1.8 м на «страйд» (два шага) — это шаг,
+    как и наш интеграл каденса; битый файл 01.09 (1640 мм) отсекается STRIDE_SANITY_MAX_M.
+    (Watch-reported step length in metres, sanity-checked; None if absent/implausible.)"""
+    if not isinstance(device_summary, dict):
+        return None
+    mm = device_summary.get('avg_step_length_mm')
+    if not mm:
+        return None
+    stride = float(mm) / 1000.0
+    return stride if STRIDE_SANITY_MIN_M <= stride <= STRIDE_SANITY_MAX_M else None
+
+
 def estimate_distance_by_cadence(trackpoints: list[dict], windows: list[tuple[int, int]],
-                                 fallback_stride_m: float | None = None) -> dict | None:
+                                 fallback_stride_m: float | None = None,
+                                 fallback_quality: str = 'rough') -> dict | None:
     """Оценка дистанции: интеграл каденса × длина шага, калиброванная по чистым окнам.
-    quality: "estimate" — шаг откалиброван по этой тренировке; "rough" — дефолтный шаг.
-    None — каденса нет, оценка невозможна.
+    quality: "estimate" — шаг откалиброван по этой тренировке; иначе fallback_quality:
+    "watch" — шаг с часов (#275), "rough" — дефолтный шаг. None — каденса нет.
     (Distance estimate: cadence integral × stride length calibrated on clean windows.)"""
     total_steps = 0.0
     for i in range(1, len(trackpoints)):
@@ -192,7 +207,7 @@ def estimate_distance_by_cadence(trackpoints: list[dict], windows: list[tuple[in
         if fallback_stride_m is None:
             return None
         stride_m = fallback_stride_m
-        quality = 'rough'
+        quality = fallback_quality
 
     return {
         'source': 'cadence_estimate',

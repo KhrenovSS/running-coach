@@ -36,7 +36,8 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
                          interval_min_phase_duration: int = 60,
                          interval_min_phase_distance_m: int = 200,
                          interval_hr_lag_sec: int = 5,
-                         interval_min_oscillations: int = 3) -> AnalysisResult | None:
+                         interval_min_oscillations: int = 3,
+                         watch_stride_m: float | None = None) -> AnalysisResult | None:
     """
     Полный пайплайн анализа тренировки из трекпоинтов.
     Full training analysis pipeline from trackpoints.
@@ -62,9 +63,11 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
     raw_stats = raw_gps_stats(trackpoints, max_credible_pace)
     distance_estimate = None
     if raw_stats is not None:
+        # #275: без калибровки по чистым окнам — шаг с часов (quality="watch"), иначе дефолт
         distance_estimate = estimate_distance_by_cadence(
             trackpoints, clean_windows(trackpoints, max_credible_pace),
-            fallback_stride_m=STRIDE_DEFAULT_M,
+            fallback_stride_m=watch_stride_m or STRIDE_DEFAULT_M,
+            fallback_quality='watch' if watch_stride_m else 'rough',
         )
 
     trackpoints, cleaning_log = clean_trackpoints(

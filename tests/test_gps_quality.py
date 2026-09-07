@@ -155,3 +155,16 @@ def test_clean_windows_exclude_glitch_segment():
     for ws, we in windows:
         assert ws >= n_glitch - 1   # граничная точка допустима (boundary point ok)
         assert we == len(tps) - 1 or we >= n_glitch
+
+
+def test_watch_stride_sanity_and_quality_label():
+    """#275: шаг с часов (мм) → м в диапазоне здравого смысла; вне диапазона/нет данных → None;
+    без калибровки оценка получает quality='watch' с этим шагом."""
+    from src.analysis.gps_quality import watch_stride_m
+    assert watch_stride_m({"avg_step_length_mm": 900}) == 0.9
+    assert watch_stride_m({"avg_step_length_mm": 1640}) is None       # битый файл 01.09
+    assert watch_stride_m({}) is None and watch_stride_m(None) is None
+    tps = build_gps_glitch_trackpoints(glitch_min=10, clean_min=4)
+    windows = clean_windows(tps, MAX_CREDIBLE_PACE)
+    est = estimate_distance_by_cadence(tps, windows, fallback_stride_m=0.9, fallback_quality='watch')
+    assert est['quality'] == 'watch' and est['stride_m'] == 0.9
