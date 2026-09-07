@@ -116,8 +116,14 @@ _REPLAN_RE = re.compile(
     re.IGNORECASE)
 
 
-async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /plan — составить/пересоставить план недели (weekly plan on demand)."""
+async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE, *,
+                   athlete_text: str | None = None):
+    """Команда /plan — составить/пересоставить план недели (weekly plan on demand).
+
+    athlete_text — реплика из чата, попавшая под _REPLAN_RE: уходит в план целиком
+    (инцидент 07.09.2026: «переделай план, сегодня не могу» терялась, план ставил
+    тренировку на сегодня). (Chat trigger text travels with the plan request.)
+    """
     user = get_user(update.effective_chat.id)
     if not user:
         await update.message.reply_text(
@@ -125,7 +131,7 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("🗓 Составляю план недели…")
     try:
-        text = await asyncio.to_thread(_plan_blocking, user.id)
+        text = await asyncio.to_thread(_plan_blocking, user.id, athlete_text)
         if text is None:
             await update.message.reply_text(
                 "😔 Не удалось составить план — попробуй позже.")
@@ -136,13 +142,13 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("😔 Не удалось составить план.")
 
 
-def _plan_blocking(user_id: int) -> str | None:
+def _plan_blocking(user_id: int, athlete_text: str | None = None) -> str | None:
     """Sync-обёртка плана: сессия живёт только внутри этого треда."""
     from src.coach.weekly_plan import generate_weekly_plan
 
     db = SessionLocal()
     try:
-        return generate_weekly_plan(user_id, db=db)
+        return generate_weekly_plan(user_id, db=db, athlete_text=athlete_text)
     finally:
         db.close()
 
@@ -212,8 +218,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user:
         return
     if _REPLAN_RE.search(update.message.text or ""):
-        # Детерминированный триггер перепланирования — до LLM-хода (/plan-путь)
-        return await cmd_plan(update, context)
+        # Детерминированный триггер перепланирования — до LLM-хода (/plan-путь);
+        # текст реплики едет с планом: отмены дней («сегодня не смогу») применит weekly_plan
+        return await cmd_plan(update, context, athlete_text=update.message.text)
     try:
         # to_thread: синхронный LLM-вызов (до ~150с) не должен морозить event loop
         # всего бота (инцидент 23.08). Сессия БД живёт внутри треда целиком.

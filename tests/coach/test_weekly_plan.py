@@ -447,3 +447,73 @@ def test_weekly_plan_volume_cap_skips_structured_day_and_leaves_trail(athlete_wi
     structured_line = next(l for l in text.splitlines() if "5×20 сек свободно" in l)
     assert "(отдых 2 мин трусцой)" in structured_line
     assert " 42 мин" in structured_line and " 39 мин" not in structured_line   # длительность из сегментов
+
+
+def test_replan_text_with_unavailable_today_cancels_day(athlete_with_history, db_session):
+    """Инцидент 07.09.2026: «переделай план, сегодня не смогу» уходило /plan-путём, текст терялся,
+    план ставил тренировку на сегодня. Теперь: реплика сохранена как chat-сообщение,
+    unavailable_days_ahead из ответа LLM применяется кодом — на сегодня rest с маркером,
+    тренировки на сегодня нет, остальные дни planned, в тексте — строка о замене."""
+    from src.coach.config import UNAVAILABLE_RATIONALE
+    from src.coach.turn_context import recent_athlete_requests
+
+    uid = athlete_with_history.id
+    wed = _wednesday(athlete_with_history)
+    turn = {**PLAN_TURN, "unavailable_days_ahead": [0], "weekly_plan": [
+        {"workout_type": "easy", "target_zone": 2, "duration_min": 30, "for_days_ahead": 0},
+        {"workout_type": "easy", "target_zone": 2, "duration_min": 40, "for_days_ahead": 2},
+    ]}
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
+    text = generate_weekly_plan(uid, db=db_session, llm=llm, now=wed,
+                                athlete_text="Переделай план: сегодня не смогу побегать")
+    assert text is not None
+
+    today_rows = [r for r in db_session.query(Recommendation).filter_by(
+        user_id=uid, for_date=wed.date()).all() if r.status != "superseded"]
+    assert len(today_rows) == 1 and today_rows[0].workout_type == "rest"
+    assert UNAVAILABLE_RATIONALE in today_rows[0].proposal_json["rationale"]
+    planned = db_session.query(Recommendation).filter_by(user_id=uid, status="planned").all()
+    assert [(r.for_date - wed.date()).days for r in planned] == [2]
+    assert "Отдых" in text and f"{wed:%d.%m}" in text
+
+    # Реплика подопечного не потеряна: chat-сообщение + контекст следующих планов
+    saved = db_session.query(CoachMessage).filter_by(user_id=uid, role="user", kind="chat").all()
+    assert any("сегодня не смогу" in m.text for m in saved)
+    assert any("сегодня не смогу" in r["text"]
+               for r in recent_athlete_requests(uid, db=db_session))
+    # LLM видела реплику в контексте
+    assert "сегодня не смогу побегать" in str(llm.calls[0])
+
+
+def test_replan_text_without_cancellations_keeps_behaviour(athlete_with_history, db_session):
+    """athlete_text без отмен: план как обычно, день 0 записан, реплика сохранена."""
+    uid = athlete_with_history.id
+    wed = _wednesday(athlete_with_history)
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=PLAN_TURN)])
+    text = generate_weekly_plan(uid, db=db_session, llm=llm, now=wed,
+                                athlete_text="переделай план на неделю")
+    assert text is not None
+    rows = db_session.query(Recommendation).filter(
+        Recommendation.user_id == uid, Recommendation.for_date >= wed.date(),
+        Recommendation.status != "superseded").all()
+    assert not any(r.workout_type == "rest" for r in rows)
+    assert 0 in {(r.for_date - wed.date()).days for r in rows}
+    assert db_session.query(CoachMessage).filter_by(
+        user_id=uid, role="user", kind="chat").count() == 1
+
+
+def test_replan_text_cancelling_all_remaining_days_writes_rest(athlete_with_history, db_session):
+    """Все оставшиеся дни отменены — LLM-план пуст, но отмены записаны (rest с маркером),
+    текст честный, не «не удалось»."""
+    from src.coach.config import UNAVAILABLE_RATIONALE
+
+    uid = athlete_with_history.id
+    wed = _wednesday(athlete_with_history)
+    turn = {**PLAN_TURN, "unavailable_days_ahead": [0, 1, 2, 3, 4], "weekly_plan": []}
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
+    text = generate_weekly_plan(uid, db=db_session, llm=llm, now=wed,
+                                athlete_text="переделай план — до воскресенья бегать не смогу")
+    assert text is not None and "бегать некуда" in text
+    rests = db_session.query(Recommendation).filter_by(user_id=uid, workout_type="rest").all()
+    assert len(rests) == 5
+    assert all(UNAVAILABLE_RATIONALE in r.proposal_json["rationale"] for r in rests)

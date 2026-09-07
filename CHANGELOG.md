@@ -2,6 +2,22 @@
 
 All notable changes to this project are tracked here.
 
+## [07.09.2026] — «Сегодня не могу» доезжает до плана недели
+
+### Fixed
+- **Отмена дня терялась при перепланировании из чата (инцидент 07.09.2026).** Реплика вида
+  «переделай план, сегодня не смогу» попадала под `_REPLAN_RE` и уходила в `/plan`-путь без текста:
+  сообщение не сохранялось, чат-ход с `unavailable_days_ahead` не выполнялся, `days_ahead_allowed`
+  включал сегодня — план снова ставил лёгкий бег на отменённый день. Теперь `handle_text` →
+  `cmd_plan(athlete_text=…)` → `generate_weekly_plan(athlete_text=…)`: реплика сохраняется как
+  chat-сообщение (история и `athlete_requests` её видят), уходит LLM в контексте
+  (`athlete_message (now)`, `PLAN_PROMPT` просит заполнить `unavailable_days_ahead` /
+  `available_again_days_ahead` / `available_weekdays`), а код применяет ответ детерминированно
+  (`_apply_availability_from_turn`): отменённые дни вычитаются из окна, после гашения прежнего плана
+  пишутся rest-строки с маркером (`planning.cancel_days`), над карточкой — «Изменил план на …:
+  🛌 Отдых (было: …)»; все оставшиеся дни отменены → отмены записаны, текст честный. `meta.cancelled_days`.
+  Тесты: `tests/coach/test_weekly_plan.py` (+3), `tests/coach/test_replan_text_passthrough.py`.
+
 ## [06.09.2026] — Уведомление о восстановлении синхронизации
 
 ### Changed
