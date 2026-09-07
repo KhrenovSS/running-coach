@@ -38,6 +38,14 @@ from src.coach.config import (
 from src.coach.contracts import AthleteState, ReasoningStep, SafetyVerdict
 
 
+def _aware(iso: str | None) -> datetime | None:
+    """ISO-строка сигнала → aware datetime (naive трактуем как UTC). (Signal ISO → aware dt.)"""
+    if not iso:
+        return None
+    dt = datetime.fromisoformat(iso)
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
 def _step(decision: str, reason: str) -> ReasoningStep:
     return ReasoningStep(rule="p1_safety", decision=decision, reason=reason)
 
@@ -140,11 +148,17 @@ def evaluate_safety(state: AthleteState, *, now: datetime | None = None) -> Safe
         reasons.append(_step(f"max_zone=2, ≤{SAFETY_MAX_DURATION_CAUTION_MIN} мин",
                              f"боль {pain}/10 или {pain_days} дн. подряд — щадящий режим"))
 
-    # 10. Часы восстановления не вышли → интенсив не раньше чем (ex-P2)
+    # 10. Часы восстановления не вышли → интенсив не раньше чем (ex-P2). Срок — от начала
+    # последней тренировки (`recovery_ready_at`, #306: не дрейфует между ходами); без сигнала —
+    # прежний путь «сейчас + остаток». (Anchored to the session; fallback to hours_left.)
+    ready = _aware(sig.get("recovery_ready_at"))
+    now_cmp = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
     left = state.recovery_hours_left or 0
+    if ready is not None:
+        left = max(0.0, (ready - now_cmp).total_seconds() / 3600)
     if left > 0:
         triggered.append("recovery_hours")
-        earliest_next_hard = now + timedelta(hours=left)
+        earliest_next_hard = ready if ready is not None else now + timedelta(hours=left)
         reasons.append(_step("интенсив не раньше чем",
                              f"до восстановления после последней тренировки {left:.0f} ч"))
 

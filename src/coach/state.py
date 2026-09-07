@@ -290,6 +290,9 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
         # M4.1/M4.3 (F5/F6): структура недели и пауза — сырьё правил 12–14 p1_safety
         # (weekly-structure and layoff signals for the safety rules)
         **_week_signals(user_id, today_local, user_row, db=db),
+        # #306: срок восстановления от тренировки — правило 10 берёт его, а не «сейчас + остаток»
+        "recovery_ready_at": (ready.isoformat()
+                              if (ready := recovery.ready_at(user_id, db=db)) else None),
         # #322: болезнь/пауза после неё — правило 21 (illness block for the safety rule)
         **illness_signals(illness_state(user_id, db=db), today_local),
         # правило 16: перекос последних 7 дней в интенсивность (weekly intensity skew)

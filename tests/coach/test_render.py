@@ -151,15 +151,20 @@ def test_render_earliest_in_local_timezone(monkeypatch):
 
     from src.config import settings
 
+    from datetime import timedelta, timezone
+    from zoneinfo import ZoneInfo
+
     monkeypatch.setattr(settings, "timezone", "Europe/Moscow")
     state = _state()
-    state.recovery_hours_left = 1.0
-    verdict = evaluate_safety(state, now=datetime(2026, 8, 23, 16, 59))
-    p, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2), verdict, state,
-                 now=datetime(2026, 8, 23, 16, 59))
+    state.recovery_hours_left = 3.0
+    # #306: строка на лёгкой показывается только при остатке ≥ часа → срок в будущем от реального now
+    now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    verdict = evaluate_safety(state, now=now)
+    p, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2), verdict, state, now=now)
     text = render_prescription(p)
-    assert "20:59" in text     # 17:59 UTC → 20:59 MSK
-    assert "17:59" not in text
+    earliest = now + timedelta(hours=3)
+    assert f"{earliest.astimezone(ZoneInfo('Europe/Moscow')):%H:%M}" in text   # UTC → MSK
+    assert f"{earliest:%H:%M}" not in text
 
 
 def test_render_earliest_prefers_user_timezone(monkeypatch):
@@ -169,16 +174,20 @@ def test_render_earliest_prefers_user_timezone(monkeypatch):
 
     from src.config import settings
 
+    from datetime import timedelta, timezone
+    from zoneinfo import ZoneInfo
+
     monkeypatch.setattr(settings, "timezone", "Europe/Moscow")
     state = _state()
-    state.recovery_hours_left = 1.0
-    verdict = evaluate_safety(state, now=datetime(2026, 8, 23, 16, 59))
-    p, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2), verdict, state,
-                 now=datetime(2026, 8, 23, 16, 59))
+    state.recovery_hours_left = 3.0
+    now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    verdict = evaluate_safety(state, now=now)
+    p, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2), verdict, state, now=now)
     user = SimpleNamespace(timezone="Europe/Berlin")
     text = render_prescription(p, user=user)
-    assert "19:59" in text     # 17:59 UTC → 19:59 Berlin (не 20:59 MSK)
-    assert "20:59" not in text
+    earliest = now + timedelta(hours=3)
+    assert f"{earliest.astimezone(ZoneInfo('Europe/Berlin')):%H:%M}" in text   # пояс пользователя
+    assert f"{earliest.astimezone(ZoneInfo('Europe/Moscow')):%H:%M}" not in text  # не settings.timezone
 
 
 # --- Pace-режим: цель — темп+время, пульс справочно (pace-lead cards) ---

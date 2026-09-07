@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -17,20 +17,21 @@ from src.services.repositories_coach import CoachRepository
 _STATUS_MAP = {"recovered": "ok", "partial": "warning", "needs_rest": "danger"}
 
 
-def hours_left(user_id: int, *, db: Session) -> float:
-    """Часы до восстановления после последней тренировки, ≥ 0 (hours until recovered).
+def ready_at(user_id: int, *, db: Session) -> datetime | None:
+    """Момент восстановления после последней тренировки: begin_ts + часы по типу (UTC, aware).
 
-    Residual-«tempo» (умеренная пробежка без подтверждения интенсивности пульсом)
-    восстанавливается как easy — иначе `earliest_next_hard` держится 36 ч после
-    каждой обычной пробежки (фикс 02.09.2026, симметрично гейту правила 12).
-    (Residual tempo recovers like easy — same quality gate as safety rule 12.)"""
+    Детерминированно от тренировки (#306: раньше срок считался «сейчас + остаток» и плыл с каждым
+    ходом). None — тренировок нет. Residual-«tempo» (умеренная пробежка без подтверждения
+    интенсивности пульсом) восстанавливается как easy — иначе `earliest_next_hard` держится 36 ч
+    после каждой обычной пробежки (фикс 02.09.2026, симметрично гейту правила 12).
+    (Recovery-ready instant anchored to the session; residual tempo recovers like easy.)"""
     from src.analysis.week_structure import is_quality_session
     from src.models import User
     from src.services.repositories import latest_lthr
 
     sessions = CoachRepository.last_sessions(user_id, n=1, db=db)
     if not sessions or sessions[0].begin_ts is None:
-        return 0.0
+        return None
     last = sessions[0]
     ttype = effective_training_type(last)
     if ttype == "tempo":
@@ -39,12 +40,19 @@ def hours_left(user_id: int, *, db: Session) -> float:
                                   user.max_hr if user else None,
                                   latest_lthr(user_id, db=db)):
             ttype = "easy"
-    need = recovery_hours_for(ttype)
     begin = last.begin_ts
     if begin.tzinfo is None:  # SQLite отдаёт naive datetime (naive under SQLite)
         begin = begin.replace(tzinfo=timezone.utc)
-    elapsed = (datetime.now(timezone.utc) - begin).total_seconds() / 3600
-    return round(max(0.0, need - elapsed), 1)
+    return begin + timedelta(hours=recovery_hours_for(ttype))
+
+
+def hours_left(user_id: int, *, db: Session) -> float:
+    """Часы до восстановления после последней тренировки, ≥ 0 (hours until recovered)."""
+    ready = ready_at(user_id, db=db)
+    if ready is None:
+        return 0.0
+    left = (ready - datetime.now(timezone.utc)).total_seconds() / 3600
+    return round(max(0.0, left), 1)
 
 
 def evaluate(user_id: int, *, db: Session) -> SkillResult:

@@ -6,12 +6,12 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 from src.analysis.hr_zones import zone_ceiling_hr
 from src.analysis.utils import format_pace
-from src.coach.config import STRIDE_HOWTO
+from src.coach.config import EARLIEST_HARD_HIDE_MIN, HARD_TYPES, STRIDE_HOWTO
 from src.coach.contracts import AthleteState, Prescription, SafetyVerdict, SkillResult
 from src.coach.safety import is_stride
 from src.coach.render_segments import (compact_segments, render_segment_lines,
@@ -117,6 +117,17 @@ def _hr_lead_lines(p: Prescription, max_hr: int | None,
     return lines
 
 
+def _show_earliest(p: Prescription, now: datetime | None = None) -> bool:
+    """Показывать ли «Интенсив — не раньше …» (#306): на карточке нехардового дня — только если
+    до срока ≥ EARLIEST_HARD_HIDE_MIN (иначе строка про уже почти вышедший срок — шум);
+    на качественном дне — всегда. (Hide the near-expired line on easy/long cards.)"""
+    if p.workout_type in HARD_TYPES:
+        return True
+    now = now or datetime.now(timezone.utc)
+    earliest = p.earliest if p.earliest.tzinfo is not None else p.earliest.replace(tzinfo=timezone.utc)
+    return (earliest - now).total_seconds() / 60 >= EARLIEST_HARD_HIDE_MIN
+
+
 def render_prescription(p: Prescription, max_hr: int | None = None,
                         lthr: int | None = None,
                         user: Any = None, today: date | None = None) -> str:
@@ -154,7 +165,7 @@ def render_prescription(p: Prescription, max_hr: int | None = None,
             lines += _pace_lead_lines(p)
         else:
             lines += _hr_lead_lines(p, max_hr, lthr)
-    if p.earliest is not None and p.workout_type != "rest":
+    if p.earliest is not None and p.workout_type != "rest" and _show_earliest(p):
         # naive-UTC → пояс пользователя (BACKLOG #260; инциденты 23.08 и 26.08: UTC)
         earliest = local_dt(p.earliest, user)
         lines.append(f"Интенсив — не раньше {earliest:%d.%m %H:%M}")
