@@ -2,6 +2,15 @@
 
 All notable changes to this project are tracked here.
 
+## [07.09.2026] — `/logs`: только для вошедшего и с реальными именами ротации (#303, #119)
+
+### Fixed
+- `src/web/routes/logs.py`: требует сессию (`get_current_user` → 303 на `/login`); читает из
+  `LOGS_DIR` логгера файлы `app.log` (живой) и `app.log.YYYY-MM-DD` (ротация
+  `TimedRotatingFileHandler`) — раньше искал `app_<date>.log` относительно `src/web/routes/` и после
+  первой ротации показывал пусто. Параметр `day` строго `YYYY-MM-DD` (иначе 400 — без traversal),
+  строки экранируются, `lines` ≤ 5000, навигация по последним 10 дням. Тесты `tests/test_logs_route.py`.
+
 ## [07.09.2026] — Синк часов: причина сбоя в алерте (#313), ручной `/sync` закрывает алерт (#312)
 
 ### Fixed
