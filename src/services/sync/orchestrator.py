@@ -11,6 +11,7 @@ from src.services.sync.utils import (
     _auto_sync_status, _auto_sync_status_lock, SYNC_TICK_INTERVAL,
     get_activity_interval_seconds, get_health_interval_seconds, _is_sync_due,
     effective_interval_seconds, ensure_aware_utc,
+    SYNC_ERROR_HINTS, SYNC_ERROR_UNKNOWN, pop_sync_error,
 )
 from src.services.sync.health import sync_health_for_user
 from src.services.sync.activities import sync_activities_for_user
@@ -61,13 +62,14 @@ def _fmt_gap(seconds: float) -> str:
     return f"{minutes} мин"
 
 
-def _sync_failed_text(cfg, brand: str, failures: int, last_ok) -> str:
-    """Текст алерта о сбое синка (sync-failure alert text)."""
+def _sync_failed_text(cfg, brand: str, failures: int, last_ok, reason: str | None = None) -> str:
+    """Текст алерта о сбое синка; подсказка — по причине (#313: 06.09 Coros лежал с 504, а алерт
+    советовал «проверь учётные данные»). (Sync-failure alert text with a cause-specific hint.)"""
     last_str = last_ok.strftime('%d.%m.%Y %H:%M UTC') if last_ok else 'никогда'
+    hint = SYNC_ERROR_HINTS.get(reason or SYNC_ERROR_UNKNOWN, SYNC_ERROR_HINTS[SYNC_ERROR_UNKNOWN])
     return (f"⚠️ *Синхронизация {cfg['label_ru']} ({brand}) не работает*\n"
             f"Подряд сбоев: {failures}. Последний успех: {last_str}.\n"
-            f"Данные могли устареть — проверь учётные данные часов "
-            f"или запусти синхронизацию вручную.")
+            f"Данные могли устареть. {hint}")
 
 
 def _sync_recovered_text(cfg, brand: str, prev_failures: int, prev_last_ok, now, synced) -> str:
@@ -121,11 +123,34 @@ def _record_sync_failure(db, cred, cfg) -> None:
     cred.access_token = None
     cred.token_expires_at = None
     db.commit()
+    reason = pop_sync_error(cred)   # #313: причина из _make_client (credentials/server/unknown)
     if failures == SYNC_FAILURE_NOTIFY_THRESHOLD:
         telegram_notify(
             user_id=cred.user_id,
-            text=_sync_failed_text(cfg, cred.brand, failures, getattr(cred, cfg['last_field'])),
+            text=_sync_failed_text(cfg, cred.brand, failures, getattr(cred, cfg['last_field']),
+                                   reason),
         )
+
+
+def record_manual_sync_result(db, cred, sync_type: str, result: int) -> str | None:
+    """Итог РУЧНОГО синка (web, Telegram /sync) — общая точка (#312, 07.09.2026).
+
+    Успех (result ≥ 0) — как в авто-синке: таймстемп вперёд, счётчик сбоев в ноль, «✅ восстановлена»,
+    если алерт уходил (раньше /sync из бота этого не делал, и алерт закрывался только следующим
+    авто-синком). Сбой — счётчик авто-сбоев не трогаем (пользователь видит ошибку сам), сбрасываем
+    кэш токена; возвращаем подсказку по причине для текста ответа.
+    (Shared manual-sync bookkeeping; returns a cause hint on failure, None on success.)
+    """
+    cfg = SYNC_CONFIG[sync_type]
+    if result >= 0:
+        _record_sync_success(db, cred, cfg, synced=result)
+        pop_sync_error(cred)
+        return None
+    cred.access_token = None
+    cred.token_expires_at = None
+    db.commit()
+    reason = pop_sync_error(cred) or SYNC_ERROR_UNKNOWN
+    return SYNC_ERROR_HINTS[reason]
 
 
 # Единая точка входа для синхронизации из web и Telegram (Unified sync entry point for web and Telegram)
@@ -167,18 +192,16 @@ def run_sync_for_user(user_id: int, brand: str, sync_type: str,
 
         result = run_async_in_thread(cfg['sync_fn'](cred, brand, db, progress=progress, pending=pending if sync_type == 'activity' else None))
 
-        if result >= 0:
-            _record_sync_success(db, cred, cfg, synced=result)
+        hint = record_manual_sync_result(db, cred, sync_type, result)
+        if hint is None:
             audit.log_sync_completed(brand=brand, user_id=user_id, found=result, processed=result,
                                      source=f"web_{brand}_sync")
         else:
-            # Ручной синк: ошибку пользователь видит в progress — счётчик авто-сбоев не трогаем,
-            # но кэш токена сбрасываем (manual sync: user sees the error; drop token cache only)
-            cred.access_token = None
-            cred.token_expires_at = None
-            db.commit()
-            audit.log_sync_failed(brand=brand, user_id=user_id, error='Sync failed (result=-1)',
+            # Ручной синк: ошибку пользователь видит в progress — счётчик авто-сбоев не трогаем
+            audit.log_sync_failed(brand=brand, user_id=user_id, error=f'Sync failed (result=-1): {hint}',
                                    source=f"web_{brand}_sync")
+            if progress is not None:
+                progress['message'] = hint
     except Exception as e:
         logger.error("run_sync_for_user error (user=%s brand=%s): %s", user_id, brand, e, exc_info=True)
         audit.log_sync_failed(brand=brand, user_id=user_id, error=str(e), source=f"web_{brand}_sync")

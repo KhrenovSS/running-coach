@@ -263,3 +263,81 @@ def test_activity_sync_returns_minus_one_on_error(db_session, monkeypatch):
     cred = _make_cred(db_session, user.id)
 
     assert asyncio.run(act_mod.sync_activities_for_user(cred, "coros", db_session)) == -1
+
+
+# --- #312/#313 (07.09.2026): причина сбоя в алерте, ручной синк закрывает алерт ---
+
+def test_classify_watch_error():
+    import httpx
+    from src.exceptions import WatchAPIError, WatchAuthError
+    from src.services.sync import utils as u
+
+    req = httpx.Request("POST", "https://x")
+    assert u.classify_watch_error(httpx.HTTPStatusError("504", request=req,
+                                                        response=httpx.Response(504, request=req))) == u.SYNC_ERROR_SERVER
+    assert u.classify_watch_error(httpx.HTTPStatusError("401", request=req,
+                                                        response=httpx.Response(401, request=req))) == u.SYNC_ERROR_CREDENTIALS
+    assert u.classify_watch_error(httpx.ConnectTimeout("t", request=req)) == u.SYNC_ERROR_SERVER
+    assert u.classify_watch_error(WatchAuthError("Auth failed: bad password", brand="coros")) == u.SYNC_ERROR_CREDENTIALS
+    assert u.classify_watch_error(WatchAuthError("Network error: boom", brand="coros")) == u.SYNC_ERROR_SERVER
+    assert u.classify_watch_error(WatchAPIError("down", brand="coros", status=503)) == u.SYNC_ERROR_SERVER
+    assert u.classify_watch_error(RuntimeError("x")) == u.SYNC_ERROR_UNKNOWN
+
+
+def test_failure_alert_names_server_cause(db_session, monkeypatch):
+    """Coros лежит (5xx) → алерт говорит «сервер часов недоступен», а не «проверь учётные данные»."""
+    from src.config.constants import SYNC_FAILURE_NOTIFY_THRESHOLD
+    from src.services.sync import utils as u
+
+    user = make_user(db_session, chat_id=96010, email="srv@example.com")
+    cred = _make_cred(db_session, user.id)
+    cred.health_sync_failures = SYNC_FAILURE_NOTIFY_THRESHOLD - 1
+    db_session.commit()
+    sent = []
+    monkeypatch.setattr(orchestrator, "telegram_notify", lambda **kw: sent.append(kw))
+    u.note_sync_error(cred, u.SYNC_ERROR_SERVER)
+    orchestrator._record_sync_failure(db_session, cred, orchestrator.SYNC_CONFIG["health"])
+    assert len(sent) == 1 and "Сервер часов недоступен" in sent[0]["text"]
+    assert "проверь логин" not in sent[0]["text"]
+    assert u.pop_sync_error(cred) is None          # причина потреблена
+
+
+def test_manual_sync_success_closes_alert_and_moves_timestamp(db_session, monkeypatch):
+    """#312: ручной синк (бот/web) после алерта → счётчик 0, таймстемп вперёд, «✅ восстановлена»."""
+    from src.config.constants import SYNC_FAILURE_NOTIFY_THRESHOLD
+
+    user = make_user(db_session, chat_id=96011, email="man@example.com")
+    cred = _make_cred(db_session, user.id)
+    cred.health_sync_failures = SYNC_FAILURE_NOTIFY_THRESHOLD
+    db_session.commit()
+    sent = []
+    monkeypatch.setattr(orchestrator, "telegram_notify", lambda **kw: sent.append(kw))
+    assert orchestrator.record_manual_sync_result(db_session, cred, "health", 2) is None
+    reloaded = _reload_cred(cred.id)
+    assert reloaded.health_sync_failures == 0 and reloaded.last_health_sync_at is not None
+    assert len(sent) == 1 and "восстановлена" in sent[0]["text"]
+    # сбой ручного синка: счётчик не трогаем, токен сброшен, подсказка по причине
+    from src.services.sync import utils as u
+    u.note_sync_error(cred, u.SYNC_ERROR_CREDENTIALS)
+    hint = orchestrator.record_manual_sync_result(db_session, cred, "health", -1)
+    assert "учётные данные" in hint and _reload_cred(cred.id).health_sync_failures == 0
+    assert _reload_cred(cred.id).access_token is None
+
+
+def test_bot_sync_runner_uses_shared_bookkeeping(db_session, monkeypatch):
+    from src.telegram import sync_runner
+
+    user = make_user(db_session, chat_id=96012, email="bot@example.com")
+    cred = _make_cred(db_session, user.id)
+    cred.activity_sync_failures = 5
+    db_session.commit()
+
+    def fake_run(coro):
+        coro.close()
+        return 1
+    monkeypatch.setattr(sync_runner, "run_async_in_thread", fake_run)
+    monkeypatch.setattr(orchestrator, "telegram_notify", lambda **kw: None)
+    ok, text = sync_runner.run_sync_in_thread(96012)
+    assert ok and "Синхронизация завершена" in text
+    reloaded = _reload_cred(cred.id)
+    assert reloaded.activity_sync_failures == 0 and reloaded.last_activity_sync_at is not None

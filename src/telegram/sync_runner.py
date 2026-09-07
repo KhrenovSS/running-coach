@@ -19,6 +19,7 @@ from src.services.audit import AuditService
 from src.services.async_utils import run_async_in_thread
 from src.services.sync.health import sync_health_for_user
 from src.services.sync.activities import sync_activities_for_user
+from src.services.sync.orchestrator import record_manual_sync_result
 from src.utils.logger import get_logger
 
 logger = get_logger("telegram.sync_runner")
@@ -59,13 +60,15 @@ def run_sync_in_thread(chat_id: int) -> tuple[bool, str]:
             brand_failed: list[str] = []
             audit.log_sync_started(brand=brand, user_id=user.id, source="telegram")
 
-            # Health sync / Синхронизация метрик здоровья
+            # Health sync / Синхронизация метрик здоровья. Итог — через общий обработчик (#312):
+            # успех двигает last_*_sync_at, сбрасывает счётчик и закрывает алерт «не работает»
             try:
                 new_health = run_async_in_thread(sync_health_for_user(cred, brand, db))
-                if new_health >= 0:
+                hint = record_manual_sync_result(db, cred, 'health', new_health)
+                if hint is None:
                     total_new_health += new_health
                 else:
-                    brand_failed.append("health: sync error")
+                    brand_failed.append(f"health: {hint}")
             except Exception as e:
                 logger.warning("Health sync failed (brand=%s user=%s): %s", brand, user.id, e)
                 brand_failed.append(f"health: {e}")
@@ -73,10 +76,11 @@ def run_sync_in_thread(chat_id: int) -> tuple[bool, str]:
             # Activity sync / Синхронизация тренировок
             try:
                 new_activities = run_async_in_thread(sync_activities_for_user(cred, brand, db))
-                if new_activities >= 0:
+                hint = record_manual_sync_result(db, cred, 'activity', new_activities)
+                if hint is None:
                     total_new_activities += new_activities
                 else:
-                    brand_failed.append("activity: sync error")
+                    brand_failed.append(f"activity: {hint}")
             except Exception as e:
                 logger.warning("Activity sync failed (brand=%s user=%s): %s", brand, user.id, e)
                 brand_failed.append(f"activity: {e}")

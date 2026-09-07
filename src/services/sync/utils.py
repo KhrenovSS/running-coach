@@ -74,10 +74,58 @@ def effective_interval_seconds(base_seconds: int, failures: int) -> int:
     return min(base_seconds * (2 ** exp), MAX_SYNC_INTERVAL_MIN * 60)
 
 
+# --- Причина сбоя синка (#313, 07.09.2026): учётные данные vs сервер часов vs неизвестно ---
+# Хранится транзитно на объекте cred (не колонка): _make_client знает исключение, а текст алерта
+# формирует оркестратор — без изменения контракта sync_*_for_user (-1). (Transient failure reason.)
+SYNC_ERROR_CREDENTIALS = "credentials"
+SYNC_ERROR_SERVER = "server"
+SYNC_ERROR_UNKNOWN = "unknown"
+SYNC_ERROR_HINTS = {
+    SYNC_ERROR_CREDENTIALS: "Похоже на учётные данные часов (401/403 или отказ входа) — проверь логин и пароль через /start.",
+    SYNC_ERROR_SERVER: "Сервер часов недоступен (ошибка 5xx, сеть или таймаут) — учётные данные менять не нужно, повторим автоматически.",
+    SYNC_ERROR_UNKNOWN: "Причина не распознана — проверь учётные данные часов или запусти синхронизацию вручную.",
+}
+_SYNC_ERROR_ATTR = "_sync_error_reason"
+
+
+def classify_watch_error(exc: BaseException) -> str:
+    """Причина по исключению клиента часов (classify a watch-client exception)."""
+    import httpx
+    from src.exceptions import WatchAPIError, WatchAuthError
+
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        if code in (401, 403):
+            return SYNC_ERROR_CREDENTIALS
+        return SYNC_ERROR_SERVER if code >= 500 else SYNC_ERROR_UNKNOWN
+    if isinstance(exc, httpx.RequestError):          # таймауты, сеть, DNS (timeouts, network)
+        return SYNC_ERROR_SERVER
+    details = getattr(exc, "details", None) or {}
+    if isinstance(exc, WatchAuthError):
+        reason = str(details.get("reason", ""))
+        return SYNC_ERROR_SERVER if reason.startswith("Network error") else SYNC_ERROR_CREDENTIALS
+    if isinstance(exc, WatchAPIError):
+        status = details.get("status") or 0
+        return SYNC_ERROR_SERVER if status >= 500 else SYNC_ERROR_UNKNOWN
+    return SYNC_ERROR_UNKNOWN
+
+
+def note_sync_error(cred: WatchCredential, reason: str) -> None:
+    setattr(cred, _SYNC_ERROR_ATTR, reason)
+
+
+def pop_sync_error(cred: WatchCredential) -> Optional[str]:
+    reason = getattr(cred, _SYNC_ERROR_ATTR, None)
+    if reason is not None:
+        setattr(cred, _SYNC_ERROR_ATTR, None)
+    return reason
+
+
 # Создать клиента для бренда по WatchCredential (Create a brand client from WatchCredential)
 async def _make_client(cred: WatchCredential) -> Optional[BaseWatchClient]:
     plain_password = decrypt(cred.encrypted_password) if cred.encrypted_password else None
     if not plain_password:
+        note_sync_error(cred, SYNC_ERROR_CREDENTIALS)
         return None
     email = safe_decrypt(cred.encrypted_user) or cred.encrypted_user or ''
     client = get_watch_client(cred.brand, email=email, password=plain_password, timeout=settings.http_timeout)
@@ -98,7 +146,9 @@ async def _make_client(cred: WatchCredential) -> Optional[BaseWatchClient]:
     try:
         await client.authenticate()
     except Exception as e:
-        logger.warning("Auth failed for brand=%s user=%s: %s", cred.brand, email, e)
+        reason = classify_watch_error(e)
+        note_sync_error(cred, reason)
+        logger.warning("Auth failed for brand=%s user=%s (%s): %s", cred.brand, email, reason, e)
         return None
 
     # Персистим свежий токен на cred (in-memory) — commit делает вызывающий код
