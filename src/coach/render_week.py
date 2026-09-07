@@ -147,13 +147,23 @@ def render_week_plan(prescriptions: list[Prescription], targets: dict,
     end = start + timedelta(days=6)
     lines = [f"*План на неделю ({start:%d.%m}–{end:%d.%m})*"]
     if targets.get("mesocycle_week") is not None:
+        # Фаза мезоцикла календарная, но неделю с плоским объёмом и закрытым интенсивом честно
+        # звать разгрузкой, а не «ростом» (07.09.2026). (Label a safety-held week honestly.)
+        if targets["phase"] == "deload":
+            phase = "разгрузочная"
+        elif targets.get("volume_held_by_safety"):
+            phase = "разгрузка по safety"
+        else:
+            phase = "рост"
         summary = (f"Неделя {targets['mesocycle_week']}/{targets['mesocycle_length']} "
-                   f"мезоцикла ({'разгрузочная' if targets['phase'] == 'deload' else 'рост'}) "
-                   f"· цель ~{targets['target_km']:.0f} км")
+                   f"мезоцикла ({phase}) · цель ~{targets['target_km']:.0f} км")
         if targets.get("quality_blocked_by_safety"):
-            # Интенсив закрыт вердиктом safety на всю неделю (06.09.2026): фаза мезоцикла —
-            # календарная, а «рост» без качественных дней надо назвать честно
-            summary += " · без интенсива (safety)"
+            # Интенсив закрыт вердиктом safety (06.09.2026); с 07.09 может открыться среди недели
+            if targets.get("quality_allowed_from_date"):
+                d = date.fromisoformat(targets["quality_allowed_from_date"])
+                summary += f" · интенсив не раньше {_day_label(d)} (safety)"
+            else:
+                summary += " · без интенсива (safety)"
             if targets.get("volume_held_by_safety"):
                 summary += ", объём без роста"
         if targets.get("plan_scope") == "rest_of_week":

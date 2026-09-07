@@ -23,6 +23,17 @@ def _wednesday(user):
     days = (2 - now.weekday()) % 7 or 7
     return (now + timedelta(days=days)).replace(hour=9, minute=0, second=0, microsecond=0)
 
+def _seed_prev_runs(db, user_id, n=4):
+    """n лёгких пробежек на прошлой неделе: при плоском объёме (safety) беговых дней не больше,
+    чем раньше (07.09.2026) — тесты с 4 днями плана держат частоту прошлой недели ≥ 4."""
+    from tests.helpers import build_training_session
+    from src.domain.models.base import utcnow
+    for i in range(n):
+        build_training_session(db, user_id, total_distance_km=5.0, duration_minutes=35.0,
+                               training_type="easy", avg_heart_rate=130,
+                               begin_ts=utcnow() - timedelta(days=8 + i))
+
+
 PLAN_TURN = {
     "message": "Неделя роста: аккуратно наращиваем объём, одна длительная.",
     "proposal": None,
@@ -140,15 +151,21 @@ def test_run_day_cap_trims_plan_and_notes_it(athlete_with_history, db_session):
          "for_days_ahead": d} for d in range(1, 7)] + [
         {"workout_type": "long", "target_zone": 2, "duration_min": 70, "for_days_ahead": 7}]}
     uid = athlete_with_history.id
+    _seed_prev_runs(db_session, uid)
     sunday = _sunday(athlete_with_history)
     cap = planning.week_targets(uid, db=db_session, today=sunday.date())["remaining_run_days_max"]
     assert cap < 7
     llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=seven)])
     text = generate_weekly_plan(uid, db=db_session, llm=llm, now=sunday)
     rows = db_session.query(Recommendation).filter_by(user_id=uid, status="planned").all()
-    assert len(rows) == cap
+    # Потолок может ужаться ещё и safety (плоский объём → частота прошлой недели, 07.09.2026):
+    # число берём из пометки под карточкой, оно ≤ потолка week_targets
+    import re
+    m = re.search(r"Беговых дней урезано до (\d+)", text)
+    assert m is not None
+    applied = int(m.group(1))
+    assert applied <= cap and len(rows) == applied
     assert any(r.workout_type == "long" for r in rows)
-    assert f"Беговых дней урезано до {cap}" in text
 
 
 def test_clean_days_respects_window():
@@ -187,6 +204,7 @@ def test_midweek_day0_replaces_existing_today_row_as_adjusted(athlete_with_histo
     """Если на «сегодня» уже была строка плана — день 0 пишется как adjusted,
     старая строка гасится (superseded)."""
     uid = athlete_with_history.id
+    _seed_prev_runs(db_session, uid)
     wed = _wednesday(athlete_with_history)
     old = Recommendation(user_id=uid, for_date=wed.date(), workout_type="tempo",
                          target_json={"max_zone": 3}, volume_json={"duration_min": 45.0},
@@ -436,6 +454,7 @@ def test_weekly_plan_volume_cap_skips_structured_day_and_leaves_trail(athlete_wi
     ])
     llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
     uid = athlete_with_history.id
+    _seed_prev_runs(db_session, uid)
     text = generate_weekly_plan(uid, db=db_session, llm=llm, now=_sunday(athlete_with_history))
     assert text is not None and "Объём недели урезан" in text
     rows = db_session.query(Recommendation).filter_by(user_id=uid, status="planned").all()
@@ -488,6 +507,7 @@ def test_replan_text_with_unavailable_today_cancels_day(athlete_with_history, db
 def test_replan_text_without_cancellations_keeps_behaviour(athlete_with_history, db_session):
     """athlete_text без отмен: план как обычно, день 0 записан, реплика сохранена."""
     uid = athlete_with_history.id
+    _seed_prev_runs(db_session, uid)
     wed = _wednesday(athlete_with_history)
     llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=PLAN_TURN)])
     text = generate_weekly_plan(uid, db=db_session, llm=llm, now=wed,

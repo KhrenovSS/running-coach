@@ -180,7 +180,8 @@ coach/
 ├── planning_window.py # окно планирования (остаток недели) + week_done + local_week_volumes (#220,
 │                      #   полные недели по локальной дате — база week_targets)
 ├── planning_safety.py # apply_safety_to_targets: интенсив закрыт вердиктом → hard_days_max=0,
-│                      #   quality_*_km_max=0, quality_blocked_by_safety (06.09.2026, до промпта LLM)
+│                      #   quality_*_km_max=0, quality_blocked_by_safety (06.09.2026, до промпта LLM);
+│                      #   прогноз правила 17 по дням (quality_reopens_at, project_state, 07.09.2026)
 │                      #   + cap_long_run: потолок длительной (30 % недели / 150 мин) кодом при финализации
 │                      #   + cap_week_volume: сумма плана ≤ target_km (лёгкие ужимаются); объём плоский при закрытом интенсиве
 ├── segments.py        # enrich_and_clamp_segments: числа сегментам из зон/истории, per-segment clamp (M2.1)

@@ -172,8 +172,11 @@ EASY_TOO_HARD_WEEK_FLAGS = 2       # ≥ флагов easy_run_too_hard за н�
 # Пороги применяет src/services/workout_insights.py; чистые формулы в
 # src/analysis/session_metrics.py принимают их параметрами (без импорта coach→analysis).
 
-# M1.1: дисциплина лёгкого дня (гайды 00/10 — «лёгкие бегают слишком быстро»)
-EASY_RUN_Z3_TOLERANCE_PCT = 0.10   # доля moving-time в Z3+ у easy/recovery/long → флаг
+# M1.1: дисциплина лёгкого дня (гайды 00/10 — «лёгкие бегают слишком быстро»).
+# 07.09.2026: 10 % флаговали образцовую лёгкую (avg 133 при потолке 138, 13.7 % выше Z2) —
+# у новичка лёгкий пульс лежит у потолка Z2, кратковременный заход в Z3 допустим (Фицджеральд);
+# второй критерий — средний пульс всей пробежки выше потолка Z2 (see easy_discipline).
+EASY_RUN_Z3_TOLERANCE_PCT = 0.20   # доля moving-time в Z3+ у easy/recovery/long → флаг
 
 # M1.4: баллы нагрузки за минуту по зонам (Дэниелс, гайд 44: Л 0.2 … Пв 1.5–2.0;
 # коэффициенты — первое приближение для %max_hr-зон, уточняются после M3/ПАНО)
@@ -188,10 +191,15 @@ INTERVAL_SEGMENT_MAX_MIN = 5.0     # непрерывный отрезок в Z4
 
 # M1.6: длительная (Дэниелс, гайд 45: ≤25–30% недели или 150 мин)
 LONG_RUN_MAX_PCT_WEEK = 0.30
+# 07.09.2026: правило 30 % — для больших объёмов; при ≤ 4 пробежках или < 30 км/нед длительная
+# 33–40 % — норма (иначе 60-минутная длительная урезалась ради пятого 28-минутного дня)
+LONG_RUN_MAX_PCT_LOW_VOLUME = 0.40
+LONG_RUN_LOW_VOLUME_KM = 30.0
+LONG_RUN_LOW_VOLUME_RUN_DAYS = 4
 LONG_RUN_MAX_MIN = 150.0
 LONG_RUN_CAP_TOLERANCE_KM = 0.3   # допуск оценки км по темпу истории при урезании длительной (06.09.2026)
 WEEK_VOLUME_TOLERANCE_PCT = 0.05  # сумма плана выше target_km × (1+допуск) → лёгкие дни ужимаются кодом
-PLAN_EASY_MIN_MINUTES = 25        # ниже этого лёгкий день при ужатии объёма не режем
+PLAN_EASY_MIN_MINUTES = 30        # ниже этого лёгкий день при ужатии объёма не режем (Дэниелс: лёгкий 30–60 мин)
 STRIDE_DEFAULT_EFFORT = "свободно"  # ускорения — по усилию, не по пульсу (гайды 45/46; 06.09.2026)
 STRIDE_HOWTO = ("Ускорения: плавный разгон, быстро и свободно, без спринта и натуживания; "
                 "следи за каденсом и осанкой; пульс не смотрим; между отрезками — трусцой "
@@ -230,3 +238,15 @@ PLAN_QUALITY_DAYS_MAX = 1
 PLAN_RUN_DAYS_CAP = 6
 PLAN_RUN_DAYS_STEP = 1
 PLAN_RUN_DAYS_FLOOR = 3
+
+
+def long_run_max_pct(week_km: float | None, run_days: int | None = None) -> float:
+    """Потолок доли длительной в неделе (гайд 45): 30 % при большом объёме, 40 % при малом
+    (< LONG_RUN_LOW_VOLUME_KM или ≤ LONG_RUN_LOW_VOLUME_RUN_DAYS пробежек). Единственная формула
+    для планирования, недельного отчёта и разбора. (Long-run share cap by weekly volume/frequency.)
+    """
+    if week_km is not None and 0 < week_km < LONG_RUN_LOW_VOLUME_KM:
+        return LONG_RUN_MAX_PCT_LOW_VOLUME
+    if run_days is not None and 0 < run_days <= LONG_RUN_LOW_VOLUME_RUN_DAYS:
+        return LONG_RUN_MAX_PCT_LOW_VOLUME
+    return LONG_RUN_MAX_PCT_WEEK

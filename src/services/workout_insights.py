@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from src.analysis import session_metrics as sm
 from src.analysis.effort import compute_cardiac_drift, heat_block, hr_stability, pace_cv
 from src.analysis.data_checks import device_check, lap_check
-from src.analysis.hr_zones import lthr_valid
+from src.analysis.hr_zones import lthr_valid, zone_ceiling_hr
 from src.analysis.week_structure import detraining, week_structure
 from src.analysis.intervals import interval_recovery
 from src.analysis.gap import compute_gap, downhill_block, local_grade_factors, smooth_altitudes
@@ -28,7 +28,7 @@ from src.coach.config import (
     INTERVAL_MAX_PCT_WEEK,
     INTERVAL_SEGMENT_MAX_MIN,
     LONG_RUN_MAX_MIN,
-    LONG_RUN_MAX_PCT_WEEK,
+    long_run_max_pct,
     PLAN_INTENSITY_TOLERANCE_PCT,
     PLAN_VOLUME_TOLERANCE_PCT,
     POINTS_PER_MIN,
@@ -171,7 +171,7 @@ def compute_workout_metrics(session: TrainingSession, *,
         computed["quality_volume"] = {"available": False, "reason": "no_trackpoints"}
         computed["long_run"] = sm.long_run_share(
             session.total_distance_km, session.duration_minutes, week_km, ttype,
-            max_pct=LONG_RUN_MAX_PCT_WEEK, max_min=LONG_RUN_MAX_MIN)
+            max_pct=long_run_max_pct(week_km), max_min=LONG_RUN_MAX_MIN)
         computed["cadence"] = sm.cadence_block(
             session.segments_json, target=CADENCE_TARGET_SPM,
             low=CADENCE_LOW_SPM, sanity_min=CADENCE_SANITY_MIN_SPM)
@@ -224,7 +224,9 @@ def compute_workout_metrics(session: TrainingSession, *,
     zones = sm.time_in_zones(times_sec, hrs, max_hr, lthr, pauses_sec=pauses_sec or None)
     computed["time_in_zones"] = zones
     computed["easy_discipline"] = sm.easy_discipline(
-        zones, ttype, tolerance=EASY_RUN_Z3_TOLERANCE_PCT)
+        zones, ttype, tolerance=EASY_RUN_Z3_TOLERANCE_PCT,
+        avg_hr=session.avg_heart_rate,
+        easy_ceiling_hr=zone_ceiling_hr(2, max_hr or 0, lthr))
     # CV темпа: из drift, если посчитан; иначе (interval/ранний выход) — напрямую
     cv = drift.get("pace_cv")
     if cv is None:
@@ -245,7 +247,7 @@ def compute_workout_metrics(session: TrainingSession, *,
             segment_max_min=INTERVAL_SEGMENT_MAX_MIN))
     computed["long_run"] = sm.long_run_share(
         session.total_distance_km, session.duration_minutes, week_km, ttype,
-        max_pct=LONG_RUN_MAX_PCT_WEEK, max_min=LONG_RUN_MAX_MIN)
+        max_pct=long_run_max_pct(week_km), max_min=LONG_RUN_MAX_MIN)
     computed["cadence"] = sm.cadence_block(
         session.segments_json, target=CADENCE_TARGET_SPM,
         low=CADENCE_LOW_SPM, sanity_min=CADENCE_SANITY_MIN_SPM)

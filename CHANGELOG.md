@@ -2,6 +2,34 @@
 
 All notable changes to this project are tracked here.
 
+## [07.09.2026] — Методика: оценка рекомендаций коуча и правки потолков
+
+Проверка рекомендаций на проде (план 07–13.09): «перегиб по интенсивности» оказался во многом
+артефактом смены якоря зон 01.09 (Z2 ≤ 144 → ≤ 138 по ПАНО; пробежки 31.08/01.09 бежались по карточке
+«до 144», а 04.09 пересчитаны новой линейкой), а план обнулял качество на всю неделю и урезал
+длительную ради пятого 28-минутного дня.
+
+### Changed
+- **Допуск лёгкой пробежки** `EASY_RUN_Z3_TOLERANCE_PCT` 10 % → 20 % moving-time выше Z2; второй
+  критерий — средний пульс всей пробежки выше потолка Z2 (`session_metrics.easy_discipline`,
+  `avg_hr_above_easy`). Образцовая лёгкая 02.09 (avg 133, 13.7 % выше 138) больше не флагуется.
+- **План недели прогнозирует правило 17** (лёгкие слишком быстро, окно 7 дней по дате тренировки):
+  `planning_safety.easy_too_hard_counts_by_day` / `quality_reopens_at` → `quality_allowed_from_days_ahead`
+  в `week_targets`, `PLAN_PROMPT` ставит один качественный день не раньше этого дня, каждый день плана
+  финализируется по `project_state` (темповая до открытия режется детерминированно, после — нет);
+  шапка «интенсив не раньше Чт (safety)». Другие правила прогнозу не поддаются — блок на окно, как раньше.
+  `InsightRepository.recent_flag_sessions`.
+- **Доля длительной** — `config.long_run_max_pct(week_km, runs)`: 40 % при < 30 км/нед или ≤ 4 пробежек
+  (`LONG_RUN_MAX_PCT_LOW_VOLUME`, `LONG_RUN_LOW_VOLUME_KM`, `LONG_RUN_LOW_VOLUME_RUN_DAYS`), иначе 30 %;
+  одна формула для `week_targets`, `week_report` и разбора (`long_run_share`).
+- **Частота при плоском объёме**: `volume_held_by_safety` → `run_days_max` не больше `prev_week_runs_max`
+  (частота растёт вместе с объёмом); `PLAN_EASY_MIN_MINUTES` 25 → 30; `enforce_run_days` держит дни с
+  сегментами (ускорения) как каркас.
+- **Шапка карточки**: неделя с плоским объёмом и закрытым интенсивом — «разгрузка по safety», не «рост».
+- **«покажи новый план на неделю» — показ, не пересборка** (`is_replan_request`, `_SHOW_PLAN_RE`).
+- Тесты: `tests/coach/test_methodology_caps.py`, `tests/coach/test_quality_reopen.py`; зеркала —
+  `docs/coach/METRICS_GUIDE.md` (M1.1, M1.6, таблица замыканий), CLAUDE.md, ARCHITECTURE.
+
 ## [07.09.2026] — «Сегодня не могу» доезжает до плана недели
 
 ### Fixed

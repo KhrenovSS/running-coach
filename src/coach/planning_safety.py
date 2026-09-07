@@ -9,16 +9,20 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
 from src.coach.config import (
+    EASY_TOO_HARD_LOOKBACK_DAYS,
     HARD_TYPES,
     LONG_RUN_CAP_TOLERANCE_KM,
-    LONG_RUN_MAX_PCT_WEEK,
     PLAN_EASY_MIN_MINUTES,
+    PLAN_RUN_DAYS_FLOOR,
     WEEK_VOLUME_TOLERANCE_PCT,
+    long_run_max_pct,
 )
-from src.coach.contracts import Prescription, SafetyVerdict, WorkoutProposal
+from src.coach.contracts import AthleteState, Prescription, SafetyVerdict, WorkoutProposal
+from src.coach.rules.p1_safety import evaluate_safety
 
 
 def quality_blocked(verdict: SafetyVerdict) -> bool:
@@ -30,35 +34,97 @@ def quality_blocked(verdict: SafetyVerdict) -> bool:
     return not (set(HARD_TYPES) & set(verdict.allowed_types))
 
 
-def apply_safety_to_targets(targets: dict[str, Any], verdict: SafetyVerdict) -> dict[str, Any]:
-    """Обнулить потолки качества недели, если safety закрыл интенсив; иначе — без изменений.
+def easy_too_hard_counts_by_day(flag_times: list[datetime], *, now: datetime,
+                                horizon_days: int = 7,
+                                lookback_days: int = EASY_TOO_HARD_LOOKBACK_DAYS) -> dict[int, int]:
+    """Сколько флагов easy_run_too_hard будет «в окне 7 дней» на каждый день вперёд (0..horizon).
 
-    Чистая функция: возвращает новый dict, ключ `quality_blocked_by_safety` — первая причина
-    вердикта (текст для шапки карточки и промпта). (Pure: zero quality caps when hard types
-    are forbidden; records the first safety reason.)
+    Правило 17 считает флаги по дате тренировки; план недели строится сегодня, но флаги
+    выходят из окна по ходу недели — счётчик прогнозируется детерминированно (07.09.2026:
+    план обнулял качество на Чт/Пт, хотя к среде правило уже не сработало бы).
+    (Projected 7-day flag count per day ahead.)
+    """
+    def _aware(t: datetime) -> datetime:
+        return t if t.tzinfo is not None else t.replace(tzinfo=timezone.utc)
+    times = [_aware(t) for t in flag_times]
+    return {d: sum(1 for t in times if t >= now + timedelta(days=d - lookback_days))
+            for d in range(0, horizon_days + 1)}
+
+
+def project_state(state: AthleteState, counts: dict[int, int], day: int) -> AthleteState:
+    """Снимок состояния с прогнозным счётчиком правила 17 на день `day` (остальные сигналы —
+    сегодняшние, консервативно). (State copy with the projected rule-17 counter.)"""
+    if day not in counts:
+        return state
+    return replace(state, signals={**(state.signals or {}), "easy_too_hard_7d": counts[day]})
+
+
+def quality_reopens_at(state: AthleteState, counts: dict[int, int], *, now: datetime,
+                       days: list[int]) -> int | None:
+    """Первый день окна (сдвиг от сегодня), когда вердикт уже допускает качественный день:
+    правило 17 по прогнозному счётчику, `earliest_next_hard` — не позже конца того дня.
+    None — интенсив закрыт на всё окно (другие правила прогнозу не поддаются).
+    (First day ahead on which a hard session is allowed; None = blocked all window.)"""
+    for d in sorted(days):
+        v = evaluate_safety(project_state(state, counts, d), now=now)
+        if quality_blocked(v):
+            continue
+        day_end = datetime.combine(now.date() + timedelta(days=d + 1), time(0),
+                                   tzinfo=now.tzinfo or timezone.utc)
+        if v.earliest_next_hard is not None and v.earliest_next_hard > day_end:
+            continue
+        return d
+    return None
+
+
+def apply_safety_to_targets(targets: dict[str, Any], verdict: SafetyVerdict, *,
+                            quality_from_days_ahead: int | None = None) -> dict[str, Any]:
+    """Согласовать потолки недели с вердиктом safety; без блокировки — без изменений.
+
+    Интенсив закрыт на всё окно → потолки качества = 0. `quality_from_days_ahead` = N
+    (прогноз `quality_reopens_at`, 07.09.2026) → качественный день остаётся, но только с
+    for_days_ahead ≥ N (`quality_allowed_from_days_ahead`; раньше — clamp по прогнозному
+    состоянию режет сам). В обоих случаях объём плоский и частота прошлой недели (решение
+    владельца 06.09.2026 + 07.09.2026). Чистая функция; `quality_blocked_by_safety` — первая
+    причина вердикта для шапки/промпта. (Pure: reconcile weekly caps with the verdict.)
     """
     if not quality_blocked(verdict):
         return targets
     out = dict(targets)
-    out["hard_days_max"] = 0
-    if "remaining_hard_days_max" in out:
-        out["remaining_hard_days_max"] = 0
-    out["quality_z3_km_max"] = 0.0
-    out["quality_z4_km_max"] = 0.0
     reason = next((r.reason for r in verdict.reasons if r.reason), None)
     out["quality_blocked_by_safety"] = reason or "интенсив закрыт границами безопасности"
+    if quality_from_days_ahead is not None:
+        out["quality_allowed_from_days_ahead"] = quality_from_days_ahead
+    else:
+        out["hard_days_max"] = 0
+        if "remaining_hard_days_max" in out:
+            out["remaining_hard_days_max"] = 0
+        out["quality_z3_km_max"] = 0.0
+        out["quality_z4_km_max"] = 0.0
     # Решение владельца 06.09.2026: в safety-разгрузку объём недели плоский — цель = прошлая
     # неделя, потолок длительной пересчитан; рост +10 % вернётся, когда интенсив снова открыт
     # (owner decision: hold weekly volume flat while quality is blocked by safety)
     prev_km = out.get("prev_week_km") or 0.0
     if prev_km > 0 and (out.get("target_km") or 0.0) > prev_km:
         out["target_km"] = round(prev_km, 1)
-        if out.get("long_run_km_max"):
-            out["long_run_km_max"] = round(min(out["long_run_km_max"],
-                                               prev_km * LONG_RUN_MAX_PCT_WEEK), 1)
         if "remaining_km" in out and "done_km" in out:
             out["remaining_km"] = round(max(0.0, out["target_km"] - (out["done_km"] or 0.0)), 1)
         out["volume_held_by_safety"] = True
+        # Частота растёт вместе с объёмом (07.09.2026): объём плоский → беговых дней не больше,
+        # чем в прошлые недели — иначе лёгкие ужимаются до 28 мин ради лишнего дня
+        # (flat volume → no extra run day)
+        prev_runs = out.get("prev_week_runs_max") or 0
+        if prev_runs and out.get("run_days_max"):
+            out["run_days_max"] = min(out["run_days_max"], max(PLAN_RUN_DAYS_FLOOR, prev_runs))
+            out["rest_days_min"] = 7 - out["run_days_max"]
+            if "remaining_run_days_max" in out:
+                out["remaining_run_days_max"] = min(
+                    max(0, out["run_days_max"] - (out.get("done_runs") or 0)),
+                    len(out.get("days_ahead_allowed") or []) or out["run_days_max"])
+        if out.get("long_run_km_max"):
+            pct = long_run_max_pct(prev_km, out.get("run_days_max"))
+            out["long_run_km_max"] = round(min(out["long_run_km_max"], prev_km * pct), 1)
+            out["long_run_max_pct"] = pct
     return out
 
 

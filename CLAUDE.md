@@ -164,7 +164,13 @@
   Recovery % — Coros §12 (20/70/90). Планирование: `long_run_hold`, `detraining_return` (пауза ≥ 14 дн).
   **Даунгрейд (06.09.2026)**: урезанные tempo/interval/race → `easy`, не `long` (`_downgrade`); потолки
   недели видят вердикт до промпта (`planning_safety.apply_safety_to_targets`, `hard_days_max=0`), карточка
-  называет замену и причину (`render_week._clamp_notes`).
+  называет замену и причину (`render_week._clamp_notes`). **Прогноз правила 17 (07.09.2026)**: план
+  считает, с какого дня окно флагов `easy_run_too_hard` очистится (`easy_too_hard_counts_by_day`,
+  `quality_reopens_at`) → `quality_allowed_from_days_ahead`, каждый день финализируется по
+  `project_state`; шапка «интенсив не раньше Чт». При плоском объёме (`volume_held_by_safety`)
+  беговых дней не больше прошлой недели, доля длительной `long_run_max_pct` (40 % при < 30 км или
+  ≤ 4 пробежек), лёгкий день ≥ `PLAN_EASY_MIN_MINUTES` 30 мин; допуск лёгкой пробежки
+  `EASY_RUN_Z3_TOLERANCE_PCT` 20 % или средний пульс выше потолка Z2.
 - **Планирование недели (P1 04.09.2026)**: прошлые недели — `planning_window.local_week_volumes`
   (локальная дата, полные недели); утро подтверждает последнюю действующую строку дня (в т.ч.
   `proposed` из чата); окно доступности — `available_weekdays` → `planning.set_availability`,

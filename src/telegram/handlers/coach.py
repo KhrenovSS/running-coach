@@ -114,6 +114,16 @@ _REPLAN_RE = re.compile(
     r"|скорректир(?:уй|овать|уем|уйте))\s+(?:\S+\s+){0,2}план"
     r"|нов\w+ план на неделю|план на следующую неделю",
     re.IGNORECASE)
+# «покажи новый план на неделю» — просьба ПОКАЗАТЬ (07.09.2026: уходила в пересборку плана —
+# лишний LLM-ход, дни могли перетасоваться). (Show-verbs veto the compose trigger.)
+_SHOW_PLAN_RE = re.compile(
+    r"\b(?:покажи|показать|напомни|скажи|какой|какая|что (?:у меня )?(?:в плане|по плану))\b",
+    re.IGNORECASE)
+
+
+def is_replan_request(text: str) -> bool:
+    """Текст — просьба СОСТАВИТЬ план (не показать сохранённый)."""
+    return bool(_REPLAN_RE.search(text)) and not _SHOW_PLAN_RE.search(text)
 
 
 async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE, *,
@@ -217,7 +227,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(chat_id)
     if not user:
         return
-    if _REPLAN_RE.search(update.message.text or ""):
+    if is_replan_request(update.message.text or ""):
         # Детерминированный триггер перепланирования — до LLM-хода (/plan-путь);
         # текст реплики едет с планом: отмены дней («сегодня не смогу») применит weekly_plan
         return await cmd_plan(update, context, athlete_text=update.message.text)

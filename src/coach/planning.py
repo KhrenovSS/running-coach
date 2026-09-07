@@ -23,13 +23,13 @@ from src.coach.config import (
     INTERVAL_MAX_PCT_WEEK,
     LOAD_PROGRESSION,
     LONG_RUN_MAX_MIN,
-    LONG_RUN_MAX_PCT_WEEK,
     PLAN_QUALITY_DAYS_MAX,
     PLAN_RUN_DAYS_CAP,
     PLAN_RUN_DAYS_FLOOR,
     PLAN_RUN_DAYS_STEP,
     THRESHOLD_MAX_KM,
     THRESHOLD_MAX_PCT_WEEK,
+    long_run_max_pct,
 )
 from src.coach.contracts import AthleteState, Prescription, WorkoutProposal
 from src.coach.planning_window import local_week_volumes, plan_window, week_done
@@ -187,7 +187,9 @@ def week_targets(user_id: int, *, db: Session, today: date | None = None) -> dic
 
     # P0 #289: длительная не растёт, если на прошлой неделе её доля превысила потолок
     # (long-run share exceeded last week → hold the long run at its last size)
-    long_run_km_max = round(target_km * LONG_RUN_MAX_PCT_WEEK, 1)
+    # Доля длительной: 40 % при малом объёме/частоте, 30 % при большом (07.09.2026)
+    long_run_pct = long_run_max_pct(target_km, run_days_max)
+    long_run_km_max = round(target_km * long_run_pct, 1)
     long_run_hold = False
     if InsightRepository.recent_flag(user_id, FLAG_LONG_RUN_SHARE, db=db,
                                      days=LONG_RUN_SHARE_LOOKBACK_DAYS):
@@ -223,6 +225,7 @@ def week_targets(user_id: int, *, db: Session, today: date | None = None) -> dic
         "quality_z3_km_max": round(min(target_km * THRESHOLD_MAX_PCT_WEEK,
                                        THRESHOLD_MAX_KM), 1),
         "long_run_km_max": long_run_km_max,
+        "long_run_max_pct": long_run_pct,
         "long_run_hold": long_run_hold,             # #289: доля длительной превышена — не растим
         "long_run_min_max": LONG_RUN_MAX_MIN,
         "hard_days_max": hard_days_max,
@@ -231,6 +234,8 @@ def week_targets(user_id: int, *, db: Session, today: date | None = None) -> dic
         # Беговых дней ≤ и дней полного отдыха ≥ (решение владельца 02.09.2026)
         "run_days_max": run_days_max,
         "rest_days_min": 7 - run_days_max,
+        # Частота прошлых недель — при плоском объёме беговой день не добавляем (07.09.2026)
+        "prev_week_runs_max": max([w.get("session_count", 0) for w in prev] or [0]),
         # Остаток недели (#293): что уже сделано и что осталось распределить
         "plan_scope": "week" if first_offset == 1 and last_offset == 7 else "rest_of_week",
         # #294: окно доступности — дни недели подопечного и отменённые им даты вычитаются
@@ -259,12 +264,14 @@ def run_days_cap(session_counts: list[int]) -> int:
 def enforce_run_days(items: list[WorkoutProposal],
                      run_days_max: int) -> tuple[list[WorkoutProposal], int]:
     """Урезать план до run_days_max дней: убираем самые короткие лёгкие/восстановительные,
-    каркас (длительная, качественные) держим. Возврат — (items, сколько убрано).
-    (Deterministic run-day cap: drop the shortest easy days first.)
+    каркас (длительная, качественные, дни с сегментами — ускорения) держим.
+    Возврат — (items, сколько убрано). (Deterministic run-day cap: drop the shortest plain
+    easy days first; structured days are skeleton, 07.09.2026.)
     """
     if len(items) <= run_days_max:
         return items, 0
-    droppable = sorted((it for it in items if it.workout_type not in _KEEP_TYPES),
+    droppable = sorted((it for it in items
+                        if it.workout_type not in _KEEP_TYPES and not it.segments),
                        key=lambda it: (it.duration_min or 0.0, it.for_days_ahead))
     to_drop = set()
     for it in droppable:

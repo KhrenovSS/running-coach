@@ -182,6 +182,22 @@ class InsightRepository:
         return sum(1 for r in rows if flag in ((r[0] or {}).get("flags") or []))
 
     @staticmethod
+    def recent_flag_sessions(user_id: int, flag: str, *, db: Session,
+                             days: int) -> list[datetime]:
+        """Время начала недавних тренировок, разбор которых несёт флаг (07.09.2026: план недели
+        прогнозирует, с какого дня правило 17 перестанет срабатывать).
+        (Start times of recent flagged sessions — for projecting the 7-day rule.)"""
+        cutoff = _utcnow() - timedelta(days=days)
+        rows = db.query(WorkoutInsight.computed_json, TrainingSession.begin_ts).join(
+            TrainingSession, TrainingSession.id == WorkoutInsight.session_id,
+        ).filter(
+            WorkoutInsight.user_id == user_id,
+            TrainingSession.begin_ts >= cutoff,
+        ).all()
+        return [ts for computed, ts in rows
+                if ts is not None and flag in ((computed or {}).get("flags") or [])]
+
+    @staticmethod
     def recent_flag(user_id: int, flag: str, *, db: Session, days: int) -> bool:
         """Есть ли флаг в computed.flags недавних разборов (F3 → сигнал safety).
 

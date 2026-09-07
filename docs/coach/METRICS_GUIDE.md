@@ -90,7 +90,9 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
 - **Формула**: посекундный `build_time_in_zones` (уже написан) →
   `zone_minutes_exact{z1..z5}`, `easy_time_pct` (Z1–Z2 / moving time).
 - **Флаг** (только для easy/recovery/long): `easy_run_too_hard`, если время в Z3+
-  превышает `EASY_RUN_Z3_TOLERANCE_PCT` (предлагаемо 10% moving-time).
+  превышает `EASY_RUN_Z3_TOLERANCE_PCT` (20% moving-time; 07.09.2026: было 10% — флаговало
+  образцовую лёгкую с avg 133 при потолке 138) **или** средний пульс всей пробежки выше потолка
+  Z2 (`easy_discipline.avg_hr_above_easy`). Кратковременный заход в Z3 у потолка — не нарушение.
 - **Выход**: `computed["time_in_zones"]` + `computed["easy_discipline"]{flag}` → `flags`.
 
 ### M1.2 Стабильность темпа и пульса
@@ -125,8 +127,10 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
 
 ### M1.6 Доля длительной в неделе (Дэниелс, гайд 45)
 - **Формула**: `long_run_share = km_сессии / km_недели` для type=long.
-- **Флаг**: `long_run_share_high` при > `LONG_RUN_MAX_PCT_WEEK` (25–30%) или
-  длительности > `LONG_RUN_MAX_MIN` (150 мин).
+- **Флаг**: `long_run_share_high` при > `long_run_max_pct(week_km, runs)` (30%; **40%** при
+  < `LONG_RUN_LOW_VOLUME_KM` 30 км/нед или ≤ `LONG_RUN_LOW_VOLUME_RUN_DAYS` 4 пробежек —
+  07.09.2026: правило 30% для малых объёмов урезало 60-минутную длительную) или
+  длительности > `LONG_RUN_MAX_MIN` (150 мин). Та же формула — в `week_targets` и `week_report`.
 
 ### M1.7 Каденс (Дэниелс, гайд 46 — профилактика колена)
 - **Формула**: медианный `avg_cadence` беговых сегментов vs цель
@@ -226,7 +230,7 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
 
 | Флаг | Действие (существующий механизм) |
 |---|---|
-| `easy_run_too_hard` ×2 за 7 дней | ✅ правило 17 p1_safety `easy_runs_too_hard` (`EASY_TOO_HARD_WEEK_FLAGS`, 04.09.2026) → `max_zone=2`, без интенсива; плюс правило 16 `week_intensity_overload` (доля Z3+ за 7 дней > 30%) |
+| `easy_run_too_hard` ×2 за 7 дней | ✅ правило 17 p1_safety `easy_runs_too_hard` (`EASY_TOO_HARD_WEEK_FLAGS`, 04.09.2026) → `max_zone=2`, без интенсива; плюс правило 16 `week_intensity_overload` (доля Z3+ за 7 дней > 30%). План недели прогнозирует счётчик по датам флагов (`planning_safety.easy_too_hard_counts_by_day`/`quality_reopens_at`, 07.09.2026): качественный день ставится с дня, когда окно очистится, каждый день плана финализируется по прогнозному состоянию |
 | интенсив под ярлыком easy/long (сегменты 4×3 мин Z3) | ✅ `safety.effective_workout_type`: тип по сегментам (`STRIDE_MAX_SEC`), гейты интенсива применяются к содержимому (инцидент 04.09.2026) |
 | день после длительной | ✅ длительная — качественный день в `_week_signals` → правило 12 (гайд 45, 04.09.2026) |
 | `quality_volume_exceeded` | ✅ правило 18 p1_safety: следующий качественный не раньше +`QUALITY_VOLUME_EXTRA_H` (48 ч) — 04.09.2026 |

@@ -27,7 +27,7 @@ from src.coach.config import (
     HARD_SHARE_OVERLOAD,
     LOAD_PROGRESSION,
     LONG_RUN_MAX_MIN,
-    LONG_RUN_MAX_PCT_WEEK,
+    long_run_max_pct,
     MONOTONY_HIGH,
     MONOTONY_MIN_TRAIN_DAYS,
     POINTS_PER_MIN,
@@ -328,7 +328,8 @@ def _signals(r: dict) -> tuple[list[dict], list[dict]]:
               step_pct=step_pct)
 
     share, lmin = this["long_run_share"], this["long_run_min"]
-    if (share is not None and share > LONG_RUN_MAX_PCT_WEEK) or (lmin and lmin > LONG_RUN_MAX_MIN):
+    if ((share is not None and share > long_run_max_pct(this["km"], this["runs"]))
+            or (lmin and lmin > LONG_RUN_MAX_MIN)):
         c("long_run_share_high", "длительная слишком большая относительно недели — растить её можно только вместе с общим объёмом (гайд 45)",
           share=share, minutes=lmin)
 

@@ -24,7 +24,18 @@ from src.coach.llm.prompts import (
     build_system_blocks,
     build_today_block,
 )
-from src.coach.planning_safety import apply_safety_to_targets, cap_long_run, cap_week_volume
+from src.coach.planning_safety import (
+    apply_safety_to_targets,
+    cap_long_run,
+    cap_week_volume,
+    easy_too_hard_counts_by_day,
+    project_state,
+    quality_blocked,
+    quality_reopens_at,
+)
+from src.analysis.session_metrics import FLAG_EASY_TOO_HARD
+from src.coach.config import EASY_TOO_HARD_LOOKBACK_DAYS
+from src.services.repositories_insights import InsightRepository
 from src.coach.segments import segments_from_schema
 from src.coach.prescriber import finalize, save_prescription, user_max_hr
 from src.services.repositories import latest_lthr
@@ -73,7 +84,7 @@ def _no_days_text(targets: dict) -> str:
 
 
 def _apply_availability_from_turn(turn: CoachTurn, user_id: int, *, db: Session,
-                                  targets: dict, verdict, today: date,
+                                  targets: dict, apply_targets, today: date,
                                   now_local: datetime) -> tuple[dict, list[int], str]:
     """Доступность из ответа LLM применить детерминированно (инцидент 07.09.2026).
 
@@ -100,8 +111,7 @@ def _apply_availability_from_turn(turn: CoachTurn, user_id: int, *, db: Session,
             recompute = True
             tail.append(reopened)
     if recompute:
-        targets = apply_safety_to_targets(
-            planning.week_targets(user_id, db=db, today=today), verdict)
+        targets = apply_targets(planning.week_targets(user_id, db=db, today=today))
     cancelled = sorted(set(turn.unavailable_days_ahead or []))
     if cancelled:
         allowed = [d for d in targets["days_ahead_allowed"] if d not in cancelled]
@@ -141,9 +151,28 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     review = planning.week_plan_review(user_id, db=db)
     state = assess_state(user_id, db=db)
     verdict = evaluate_safety(state)
-    # Интенсив закрыт safety → потолки качества = 0 ДО промпта (06.09.2026: иначе LLM
-    # закладывает темповую, clamp режет её молча, проза расходится с картой)
-    targets = apply_safety_to_targets(targets, verdict)
+    # Правило 17 (лёгкие слишком быстро) — 7-дневное окно по дате тренировки: прогнозируем,
+    # с какого дня недели оно перестанет срабатывать (07.09.2026: план обнулял качество на всю
+    # неделю по сегодняшнему вердикту). Остальные правила прогнозу не поддаются — блок на окно.
+    # (Project the rule-17 counter per day; other rules stay as of today.)
+    counts = easy_too_hard_counts_by_day(
+        InsightRepository.recent_flag_sessions(user_id, FLAG_EASY_TOO_HARD, db=db,
+                                               days=EASY_TOO_HARD_LOOKBACK_DAYS),
+        now=now_local)
+
+    def _apply_targets(t: dict) -> dict:
+        # Интенсив закрыт safety → потолки качества ДО промпта (06.09.2026: иначе LLM
+        # закладывает темповую, clamp режет её молча, проза расходится с картой)
+        reopen = (quality_reopens_at(state, counts, now=now_local, days=t["days_ahead_allowed"])
+                  if quality_blocked(verdict) else None)
+        out = apply_safety_to_targets(t, verdict, quality_from_days_ahead=reopen)
+        if reopen is not None:
+            out["quality_allowed_from_date"] = (today + timedelta(days=reopen)).isoformat()
+            logger.info("Quality reopens on day +%s for user=%s (rule-17 projection)",
+                        reopen, user_id)
+        return out
+
+    targets = _apply_targets(targets)
     state_json = jsonable(state)
     state_json.pop("signals", None)
 
@@ -185,7 +214,7 @@ def generate_weekly_plan(user_id: int, *, db: Session,
         return None
 
     targets, cancelled, avail_tail = _apply_availability_from_turn(
-        turn, user_id, db=db, targets=targets, verdict=verdict, today=today,
+        turn, user_id, db=db, targets=targets, apply_targets=_apply_targets, today=today,
         now_local=now_local)
     if not targets["days_ahead_allowed"]:
         # Все оставшиеся дни закрыты (в т.ч. только что отменённые) — отмены всё же записать
@@ -222,7 +251,10 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     plan_notes: list[str] = []
 
     def _finalize(proposal: WorkoutProposal) -> Prescription:
-        return finalize(proposal, state, db=db, persist=False, source="llm", now=now_local)
+        # Safety дня — по прогнозному счётчику правила 17 на его дату (см. counts): темповая в
+        # четверг не режется сегодняшним счётчиком, раньше открытия — режется детерминированно
+        return finalize(proposal, project_state(state, counts, proposal.for_days_ahead or 0),
+                        db=db, persist=False, source="llm", now=now_local)
 
     # (1) первый проход — нужны predicted (км по истории) для потолков; (2) потолок длительной;
     # (3) потолок объёма недели; (4) запись. Prescription по-прежнему рождается только в clamp —

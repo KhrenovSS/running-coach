@@ -103,19 +103,27 @@ def time_in_zones(times_sec: list[float], hrs: list[int | None],
     }
 
 
-def easy_discipline(zones: dict, ttype: str | None, *, tolerance: float) -> dict:
-    """M1.1: дисциплина лёгкого дня — «лёгкая не была лёгкой» (гайды 00/10)."""
+def easy_discipline(zones: dict, ttype: str | None, *, tolerance: float,
+                    avg_hr: int | None = None, easy_ceiling_hr: int | None = None) -> dict:
+    """M1.1: дисциплина лёгкого дня — «лёгкая не была лёгкой» (гайды 00/10).
+
+    Флаг: доля moving-time выше Z2 больше допуска ИЛИ средний пульс всей пробежки выше потолка
+    Z2 (07.09.2026: кратковременный заход в Z3 у потолка — не нарушение, а пробежка целиком
+    «над потолком» — нарушение даже при рваном профиле). (Share above Z2 or whole-run avg HR.)
+    """
     if ttype not in EASY_TYPES_M1:
         return {"applicable": False, "reason": "not_easy_type"}
     if not zones.get("available"):
         return {"applicable": False, "reason": zones.get("reason", "no_zones")}
     hard_pct = round(1.0 - zones["easy_time_pct"], 3)
     minutes_above = round(zones["total_min"] * hard_pct, 1)
+    avg_above = bool(avg_hr and easy_ceiling_hr and avg_hr > easy_ceiling_hr)
     return {
         "applicable": True,
         "minutes_above_z2": minutes_above,
         "pct_above_z2": hard_pct,
-        "flag": hard_pct > tolerance,
+        "avg_hr_above_easy": avg_above,
+        "flag": hard_pct > tolerance or avg_above,
     }
 
 
