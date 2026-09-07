@@ -69,3 +69,19 @@ def test_e2e_mismatch_recorded_in_meta(athlete_with_history, db_session):
     assert mismatches and any("25" in m for m in mismatches)
     # текст пользователю НЕ изменён (v1 — только детект)
     assert "25 км" in msg.text
+
+
+def test_check_plan_prose_counts_and_types():
+    """#316: число беговых дней и названные типы в прозе плана против карточек."""
+    from src.coach.contracts import Prescription, SafetyVerdict
+    from src.coach.numeric_check import check_plan_prose
+
+    def card(t):
+        return Prescription(safety=SafetyVerdict(), workout_type=t)
+    cards = [card("easy"), card("easy"), card("easy"), card("easy"), card("long")]
+    assert check_plan_prose("Пять спокойных дней вокруг одной длительной.", cards)[0].startswith("«Пять спокойных дней»")
+    assert check_plan_prose("Пять пробежек и одна длительная.", cards) == []
+    assert check_plan_prose("Четыре пробежки, два дня отдыха.", cards) != []      # 4 ≠ 5, отдых не считаем
+    assert check_plan_prose("5 тренировок, темповая в четверг.", cards) == ["темповая в прозе, в карте её нет"]
+    assert check_plan_prose("Три пробежки.", cards, plan_scope="rest_of_week") == []
+    assert check_plan_prose("", cards) == [] and check_plan_prose("текст", []) == []

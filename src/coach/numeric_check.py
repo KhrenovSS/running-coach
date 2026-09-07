@@ -100,3 +100,53 @@ def check_prose(message: str, p: Prescription | None,
     out += _mismatches([float(m) for m in _ZONE_RE.findall(message)],
                        exp["zone"], 0.0, "зона")
     return out
+
+
+# --- #316 (07.09.2026): проза плана недели vs карта — типы и число беговых дней ---
+_WORD_NUM = {"одн": 1, "дв": 2, "тр": 3, "четыр": 4, "пят": 5, "шест": 6, "сем": 7}
+_RUNS_RE = re.compile(
+    r"\b(\d+|одн\w*|дв\w*|тр(?:и|ёх|ех)\w*|четыр\w*|пят\w*|шест\w*|сем\w*)\s+"
+    r"(?:(спокойн\w*|лёгк\w*|легк\w*)\s+|беговы\w*\s+)?"
+    r"(пробеж\w*|трениров\w*|дн[яей]+\b(?!\s+отдых))", re.IGNORECASE)
+
+
+def _to_int(token: str) -> int | None:
+    if token.isdigit():
+        return int(token)
+    low = token.lower()
+    for stem, n in _WORD_NUM.items():
+        if low.startswith(stem):
+            return n
+    return None
+
+
+def check_plan_prose(message: str, prescriptions: list[Prescription],
+                     plan_scope: str = "week") -> list[str]:
+    """Расхождения прозы плана недели с картой (пусто = сходится) — детект, текст не режем.
+
+    Проверяем только полную неделю (plan_scope="week": при остатке недели проза может говорить
+    о неделе целиком): число беговых дней в прозе («пять спокойных дней», «4 пробежки») против
+    числа тренировочных карточек; упоминание темповой/интервалов/длительной без такой карточки
+    (06.09: «частота та же» при 4 → 5, «пять спокойных дней вокруг одной длительной» при 4 + 1).
+    (Plan prose vs card: run-day counts and named workout types; detect-only.)
+    """
+    if not message or not prescriptions or plan_scope != "week":
+        return []
+    types = [p.workout_type for p in prescriptions if p.workout_type and p.workout_type != "rest"]
+    n_easy = sum(1 for t in types if t in ("easy", "recovery"))
+    out: list[str] = []
+    for m in _RUNS_RE.finditer(message):
+        n = _to_int(m.group(1))
+        # «пять спокойных дней» — про лёгкие; «пять пробежек» — про все беговые
+        expected = n_easy if m.group(2) else len(types)
+        if n is not None and n != expected:
+            out.append(f"«{m.group(0)}» ≠ карточке ({expected} "
+                       f"{'лёгких' if m.group(2) else 'беговых'} дней)")
+    low = message.lower()
+    if "темпов" in low and "tempo" not in types:
+        out.append("темповая в прозе, в карте её нет")
+    if "интервал" in low and "interval" not in types:
+        out.append("интервалы в прозе, в карте их нет")
+    if "длительн" in low and "long" not in types:
+        out.append("длительная в прозе, в карте её нет")
+    return out

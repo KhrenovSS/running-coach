@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from src.coach import illness, planning
 from src.coach.contracts import Prescription, WorkoutProposal
 from src.coach.knowledge.loader import plan_guides_queries
+from src.coach.numeric_check import check_plan_prose
 from src.coach.llm.agent import run_turn
 from src.coach.llm.anthropic_client import estimate_cost_usd
 from src.coach.llm.client import CoachLLM, get_llm
@@ -320,10 +321,16 @@ def generate_weekly_plan(user_id: int, *, db: Session,
                                lthr=latest_lthr(user_id, db=db), today=today,
                                facts=week_facts(rows, db=db, today=today),
                                notes=plan_notes))
+    # #316: проза vs карта по типам/числу дней — детект в лог и meta, текст не режем (как #247 v1)
+    prose_mismatch = check_plan_prose(turn.message, prescriptions,
+                                      plan_scope=targets.get("plan_scope", "week"))
+    if prose_mismatch:
+        logger.warning("Weekly plan prose mismatch user=%s: %s", user_id, "; ".join(prose_mismatch))
     CoachRepository.save_message(user_id, "user", PLAN_PROMPT, db=db, kind="plan")
     CoachRepository.save_message(
         user_id, "assistant", text, db=db, kind="plan",
         meta={"days": len(prescriptions),
+              "prose_type_mismatch": prose_mismatch,
               "clamped": sum(1 for p in prescriptions if p.clamped),
               "superseded": superseded, "dropped_days": dropped_days,
               "cancelled_days": cancelled,
