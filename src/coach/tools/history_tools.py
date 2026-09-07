@@ -207,8 +207,9 @@ def get_metrics_series(ctx: ToolContext, args: dict) -> dict:
         "days": days,
         "points": _downsample(points),
         "mean": round(sum(present) / len(present), 2) if present else None,
-        "slope": compute_slope(values),
-        "direction": compute_trend_direction(values),
+        # #221: наклон по календарным дням (единиц/день), не по индексу точки
+        "slope": compute_slope(values, dates=[d for d, _ in raw]),
+        "direction": compute_trend_direction(values, dates=[d for d, _ in raw]),
         "baseline": baseline,
         "n_missing": len(values) - len(present),
     }

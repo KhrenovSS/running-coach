@@ -2,6 +2,14 @@
 
 All notable changes to this project are tracked here.
 
+## [07.09.2026] — Тренды по календарным дням (#221)
+
+### Changed
+- `analytics_helpers.compute_slope`/`compute_trend_direction` принимают `dates`: наклон считается по
+  календарным дням (единиц/день), пропуски синка и редкие взвешивания больше не сжимают ось времени;
+  без `dates` — прежний индексный расчёт. Подключено в `history_tools.get_metric_trend` (slope/direction
+  для LLM) и в скилле `progress` (VO2max, вес, темп лёгких по датам тренировок).
+
 ## [07.09.2026] — `/logs`: только для вошедшего и с реальными именами ротации (#303, #119)
 
 ### Fixed

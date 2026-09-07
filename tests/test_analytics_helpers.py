@@ -52,3 +52,23 @@ def test_trend_direction():
     assert compute_trend_direction([5, 4, 3, 2, 1]) == 'down'
     assert compute_trend_direction([3, 3, 3]) == 'stable'
     assert compute_trend_direction([]) == 'stable'
+
+
+def test_slope_with_dates_uses_calendar_days():
+    """#221: с датами наклон — в единицах за день; разрыв в календаре не сжимается."""
+    from datetime import date, datetime, timedelta
+    d0 = date(2026, 9, 1)
+    contiguous = [d0 + timedelta(days=i) for i in range(3)]
+    assert abs(compute_slope([1, 2, 3], dates=contiguous) - compute_slope([1, 2, 3])) < 1e-9
+    gapped = [d0, d0 + timedelta(days=1), d0 + timedelta(days=10)]
+    dated = compute_slope([1, 2, 3], dates=gapped)
+    assert 0 < dated < compute_slope([1, 2, 3])                 # 10 дней на тот же прирост → положе
+    assert abs(dated - 10 / 60.666666) < 1e-3                   # OLS по x = [0, 1, 10]
+    # None и datetime допустимы; окно days — по календарю от последней точки
+    assert compute_slope([1, None, 3], dates=[d0, d0 + timedelta(days=1), d0 + timedelta(days=2)]) == 1.0
+    dt = [datetime(2026, 9, 1, 7), datetime(2026, 9, 2, 19), datetime(2026, 9, 3, 6)]
+    assert abs(compute_slope([1, 2, 3], dates=dt) - 1.0) < 1e-9
+    assert compute_slope([1, 2, 3], days=2, dates=[d0, d0 + timedelta(days=5), d0 + timedelta(days=6)]) == 1.0
+    assert compute_slope([1, 2], dates=[d0, None]) is None
+    assert compute_trend_direction([50, 50.05, 50.1], dates=[d0, d0 + timedelta(days=30), d0 + timedelta(days=60)]) == 'stable'
+    assert compute_trend_direction([50, 51, 52], dates=[d0, d0 + timedelta(days=1), d0 + timedelta(days=2)]) == 'up'

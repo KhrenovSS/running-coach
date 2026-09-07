@@ -19,17 +19,21 @@ def evaluate(user_id: int, *, db: Session) -> SkillResult:
 
     (90-day trends: VO2max up, weight down, easy-run pace down = progress.)
     """
-    vo2_series = [v for _, v in CoachRepository.metrics_series(user_id, "vo2max", 90, db=db)]
-    weight_series = [v for _, v in CoachRepository.weight_series(user_id, days=90, db=db)]
-    easy_paces = [
-        s.avg_pace for s in reversed(CoachRepository.last_sessions(user_id, n=30, db=db))
+    vo2_raw = CoachRepository.metrics_series(user_id, "vo2max", 90, db=db)
+    weight_raw = CoachRepository.weight_series(user_id, days=90, db=db)
+    vo2_series = [v for _, v in vo2_raw]
+    weight_series = [v for _, v in weight_raw]
+    easy_sessions = [
+        s for s in reversed(CoachRepository.last_sessions(user_id, n=30, db=db))
         if effective_training_type(s) in EASY_TYPES and s.avg_pace
     ]
+    easy_paces = [s.avg_pace for s in easy_sessions]
 
-    vo2_dir = compute_trend_direction(vo2_series)
-    weight_dir = compute_trend_direction(weight_series)
-    pace_dir = compute_trend_direction(easy_paces)
-    vo2_slope = compute_slope(vo2_series)
+    # #221: тренды по календарным дням — пропуски синка/редкие взвешивания не сжимают время
+    vo2_dir = compute_trend_direction(vo2_series, dates=[d for d, _ in vo2_raw])
+    weight_dir = compute_trend_direction(weight_series, dates=[d for d, _ in weight_raw])
+    pace_dir = compute_trend_direction(easy_paces, dates=[s.begin_ts for s in easy_sessions])
+    vo2_slope = compute_slope(vo2_series, dates=[d for d, _ in vo2_raw])
 
     has_any = bool(vo2_series or weight_series or easy_paces)
     if not has_any:

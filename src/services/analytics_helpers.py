@@ -1,21 +1,51 @@
 # Функции трендов: slope, EWMA, moving average, направление
 # Trend functions: slope, EWMA, moving average, trend direction
 
+from datetime import datetime
 from collections.abc import Sequence
 
 
-def compute_slope(series: Sequence[float | None], days: int = 30) -> float | None:
-    """Линейная регрессия: наклон ряда за N дней (Linear regression slope over N days)."""
-    cleaned = [v for v in series if v is not None]
-    if len(cleaned) < 2:
-        return None
-    cleaned = cleaned[-days:] if len(cleaned) > days else cleaned
-    n = len(cleaned)
-    x_avg = (n - 1) / 2
-    y_avg = sum(cleaned) / n
-    num = sum((i - x_avg) * (v - y_avg) for i, v in enumerate(cleaned))
-    den = sum((i - x_avg) ** 2 for i in range(n))
+def _ols_slope(xs: Sequence[float], ys: Sequence[float]) -> float:
+    n = len(xs)
+    x_avg = sum(xs) / n
+    y_avg = sum(ys) / n
+    num = sum((x - x_avg) * (y - y_avg) for x, y in zip(xs, ys))
+    den = sum((x - x_avg) ** 2 for x in xs)
     return num / den if den != 0 else 0.0
+
+
+def _day_index(d, d0) -> float:
+    if isinstance(d, datetime):
+        d = d.date()
+    if isinstance(d0, datetime):
+        d0 = d0.date()
+    return float((d - d0).days)
+
+
+def compute_slope(series: Sequence[float | None], days: int = 30,
+                  dates: Sequence | None = None) -> float | None:
+    """Линейная регрессия: наклон ряда (Linear regression slope).
+
+    Без `dates` — по индексу точки (единица = одна точка), как раньше. С `dates` (даты/datetime,
+    выровнены с series) — по календарным дням (#221, 07.09.2026): пропуск синка или редкие
+    взвешивания больше не сжимают ось времени, наклон — «в единицах за день»; окно `days` —
+    последние N дней от последней точки. (Calendar-day slope when dates are given.)
+    """
+    if dates is None:
+        cleaned = [v for v in series if v is not None]
+        if len(cleaned) < 2:
+            return None
+        cleaned = cleaned[-days:] if len(cleaned) > days else cleaned
+        return _ols_slope(list(range(len(cleaned))), cleaned)
+    pairs = [(d, v) for d, v in zip(dates, series) if v is not None and d is not None]
+    if len(pairs) < 2:
+        return None
+    last = pairs[-1][0]
+    pairs = [(d, v) for d, v in pairs if _day_index(last, d) < days]
+    if len(pairs) < 2:
+        return None
+    d0 = pairs[0][0]
+    return _ols_slope([_day_index(d, d0) for d, _ in pairs], [v for _, v in pairs])
 
 
 def compute_ewma(series: Sequence[float | None], alpha: float = 0.3) -> list[float]:
@@ -47,9 +77,16 @@ def compute_moving_average(series: Sequence[float | None], window: int = 7) -> l
 
 def compute_trend_direction(series: Sequence[float | None],
                              up_threshold: float = 0.01,
-                             down_threshold: float = -0.01) -> str:
-    """Направление тренда: 'up', 'stable', 'down' (Trend direction)."""
-    slope = compute_slope(series, days=len([v for v in series if v is not None]))
+                             down_threshold: float = -0.01,
+                             dates: Sequence | None = None) -> str:
+    """Направление тренда: 'up', 'stable', 'down' (Trend direction). С `dates` — наклон за день."""
+    n_present = len([v for v in series if v is not None])
+    if dates is not None:
+        present = [d for d, v in zip(dates, series) if v is not None and d is not None]
+        span = (_day_index(present[-1], present[0]) + 1) if len(present) >= 2 else n_present
+        slope = compute_slope(series, days=int(max(span, n_present)), dates=dates)
+    else:
+        slope = compute_slope(series, days=n_present)
     if slope is None:
         return 'stable'
     if slope > up_threshold:
