@@ -2,6 +2,18 @@
 
 All notable changes to this project are tracked here.
 
+## [07.09.2026] — Температура пробежки: среднее за интервал (#300) и датчик часов как фолбэк (#299)
+
+### Changed
+- `process_trackpoints`: для тренировок ≥ `WEATHER_AVG_MIN_DURATION_MIN` (60 мин) `avg_temperature` —
+  среднее часовых значений Open-Meteo за интервал бега (`parsers/weather.get_avg_temp_between`,
+  допуск ±30 мин к границам), короткие — как раньше, значение на старте. Действует для новых и
+  переанализированных тренировок (`/reanalyze`); история не пересчитывается автоматически.
+- `effort.heat_block(temp_c, watch_temp_c)`: нет погоды → температура датчика часов
+  (`device_summary.avg_temperature_c`) минус `WATCH_TEMP_BIAS_C` (3.3 °C, исследование 02.09),
+  в блоке `heat` появился `temp_source` (weather|watch|null). Погода остаётся главным источником.
+- METRICS_GUIDE §4 (строка «Жара»), тесты `test_weather_avg.py`, `test_effort.py`.
+
 ## [07.09.2026] — Дайджест методики без противоречия по разгрузке (#323)
 
 ### Changed

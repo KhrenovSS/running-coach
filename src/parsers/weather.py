@@ -78,3 +78,23 @@ def get_weather_code_at_time(weather, dt_local):
 
 def get_temp_at_time(weather, dt_local):
     return _get_nearest(weather, dt_local, "temps")
+
+
+def get_avg_temp_between(weather, start_local, end_local):
+    """Средняя температура по часовым значениям внутри [start, end] (#300); часовые точки берём
+    с допуском ±30 мин к границам, чтобы часовая пробежка захватила два отсчёта. Нет точек в
+    окне → ближайшее значение к старту (как раньше). (Mean hourly temperature over the run.)"""
+    if not weather:
+        return None
+    lo = start_local.timestamp() - 1800
+    hi = end_local.timestamp() + 1800
+    vals = []
+    for t, val in zip(weather["times"], weather.get("temps", [])):
+        if val is None:
+            continue
+        ts = datetime.fromisoformat(t).timestamp()
+        if lo <= ts <= hi:
+            vals.append(float(val))
+    if not vals:
+        return get_temp_at_time(weather, start_local)
+    return round(sum(vals) / len(vals))

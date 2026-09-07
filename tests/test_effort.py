@@ -86,7 +86,7 @@ def test_heat_block_threshold():
     assert heat_block(HEAT_TEMP_THRESHOLD_C)["heat_flag"] is True
     assert heat_block(HEAT_TEMP_THRESHOLD_C - 1)["heat_flag"] is False
     assert heat_block(None) == {"temp_c": None, "heat_flag": None,
-                                "expected_hr_shift_bpm": None}
+                                "expected_hr_shift_bpm": None, "temp_source": None}
 
 
 def test_heat_block_expected_hr_shift():
@@ -144,3 +144,12 @@ def test_pace_cv_public_works_without_drift():
               {"pace_min_km": 5.2}, {"pace_min_km": 6.8}]
     cv = pace_cv(per_km)
     assert cv is not None and cv > 0.1
+
+
+def test_heat_block_watch_fallback_with_bias():
+    """#299: нет погоды → датчик часов минус WATCH_TEMP_BIAS_C, источник watch; погода главнее."""
+    from src.config.constants import WATCH_TEMP_BIAS_C
+    hb = heat_block(None, 25.3)
+    assert hb["temp_c"] == round(25.3 - WATCH_TEMP_BIAS_C) and hb["temp_source"] == "watch"
+    assert heat_block(18, 30.0)["temp_c"] == 18 and heat_block(18, 30.0)["temp_source"] == "weather"
+    assert heat_block(None, None)["temp_source"] is None

@@ -162,7 +162,7 @@ def compute_workout_metrics(session: TrainingSession, *,
         computed["drift"] = dict(_EMPTY_DRIFT)
         computed["gap"] = {"available": False}
         computed["hr_vs_baseline"] = {"available": False, "reason": "no_trackpoints"}
-        computed["heat"] = heat_block(session.avg_temperature)
+        computed["heat"] = heat_block(session.avg_temperature, ds.get("avg_temperature_c"))
         computed["time_in_zones"] = {"available": False, "reason": "no_trackpoints"}
         computed["easy_discipline"] = {"applicable": False, "reason": "no_trackpoints"}
         computed["pace_stability"] = {"available": False, "reason": "no_trackpoints"}
@@ -192,7 +192,7 @@ def compute_workout_metrics(session: TrainingSession, *,
 
     # Жара — до отклонения от базовой линии: её ожидаемый сдвиг пульса входит в ожидание
     # (heat first: its expected HR shift feeds the baseline expectation)
-    heat = heat_block(session.avg_temperature)
+    heat = heat_block(session.avg_temperature, ds.get("avg_temperature_c"))
     if gps_unreliable:
         # Дистанции/темпы в trackpoints_json — мусор: pace-производные блоки честно
         # недоступны, а gap.available=false заодно исключает сессию из HR-baseline

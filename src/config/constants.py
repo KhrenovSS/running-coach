@@ -225,6 +225,12 @@ BASELINE_POINT_TYPES: Final[tuple] = ("easy", "long", "recovery", "tempo")
 
 # Жара (heat)
 HEAT_TEMP_THRESHOLD_C: Final[int] = 20       # температура старта выше → heat_flag (heat threshold)
+# #300 (07.09.2026): для тренировок от этой длительности температура — среднее часовых значений
+# Open-Meteo за интервал бега, а не значение на старте (длинная пробежка греется к полудню)
+WEATHER_AVG_MIN_DURATION_MIN: Final[int] = 60
+# #299: датчик часов (FIT session avg_temperature) — второй источник при отсутствии погоды;
+# исследование 02.09.2026: выше воздуха в среднем на 3.3 °C (солнце/тело) — вычитаем
+WATCH_TEMP_BIAS_C: Final[float] = 3.3
 # Ожидаемый сдвиг пульса от температуры на равном GAP-темпе — исследование 02.09.2026 на
 # 39 тренировках: +0.5 уд/мин на °C воздуха (Open-Meteo), опорная точка 15 °C
 # (expected HR shift per °C of air temperature at equal GAP pace; reference temperature)

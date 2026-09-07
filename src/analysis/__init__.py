@@ -5,7 +5,8 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from src.utils.logger import get_logger
 from src.parsers.gps import clean_trackpoints
-from src.parsers.weather import fetch_weather, get_weather_code_at_time, get_temp_at_time
+from src.parsers.weather import (fetch_weather, get_avg_temp_between,
+                                 get_weather_code_at_time, get_temp_at_time)
 from src.analysis.hr_zones import get_zone
 from src.analysis.segment import build_time_in_zones, segment_by_pace
 from src.analysis.segment_km import km_segment_fallback
@@ -21,7 +22,7 @@ from src.analysis.gps_quality import (
     raw_gps_stats, build_gps_quality, clean_windows, estimate_distance_by_cadence,
 )
 from src.config import settings
-from src.config.constants import STRIDE_DEFAULT_M
+from src.config.constants import STRIDE_DEFAULT_M, WEATHER_AVG_MIN_DURATION_MIN
 
 logger = get_logger("analysis")
 
@@ -222,7 +223,12 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
         date_str = begin_local.strftime("%Y-%m-%d")
         weather = fetch_weather(center_lat, center_lon, date_str)
         if weather:
-            avg_temperature = get_temp_at_time(weather, begin_local)
+            # #300: от часа бега — среднее за интервал (утренний старт ≠ полуденный финиш)
+            if total_duration_min >= WEATHER_AVG_MIN_DURATION_MIN:
+                end_local = begin_local + timedelta(minutes=total_duration_min)
+                avg_temperature = get_avg_temp_between(weather, begin_local, end_local)
+            else:
+                avg_temperature = get_temp_at_time(weather, begin_local)
             weather_code = get_weather_code_at_time(weather, begin_local)
             cumul_min = 0.0
             for seg in segments:

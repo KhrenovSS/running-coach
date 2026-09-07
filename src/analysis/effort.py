@@ -24,6 +24,7 @@ from src.config.constants import (
     HEAT_SHIFT_TEMP_MAX_C,
     HEAT_SHIFT_TEMP_MIN_C,
     HEAT_TEMP_THRESHOLD_C,
+    WATCH_TEMP_BIAS_C,
 )
 
 _NOT_APPLICABLE = {"applicable": False, "drift_pct": None, "first_half_ef": None,
@@ -195,8 +196,9 @@ def compute_cardiac_drift(times_sec: list[float], dists: list[float],
     }
 
 
-def heat_block(temp_c: int | None) -> dict:
-    """Heat-блок: флаг жары по температуре старта + ожидаемый сдвиг пульса.
+def heat_block(temp_c: int | None, watch_temp_c: float | None = None) -> dict:
+    """Heat-блок: флаг жары по температуре + ожидаемый сдвиг пульса; источник — погода, при её
+    отсутствии датчик часов с поправкой WATCH_TEMP_BIAS_C (#299, temp_source=watch).
 
     expected_hr_shift_bpm — на сколько уд/мин пульс на равном GAP-темпе ожидаемо выше (+)
     или ниже (−) опорной температуры HEAT_REF_TEMP_C (линейно, HEAT_HR_BPM_PER_C на °C;
@@ -207,8 +209,15 @@ def heat_block(temp_c: int | None) -> dict:
     (Heat flag plus the expected temperature-driven HR shift at equal GAP pace; the
     temperature is clamped to the studied range — no extrapolation into frost or extreme heat.)
     """
+    source = "weather"
+    if temp_c is None and watch_temp_c is not None:
+        # #299: датчик часов греется на солнце/от тела — вычитаем средний сдвиг исследования
+        temp_c = round(float(watch_temp_c) - WATCH_TEMP_BIAS_C)
+        source = "watch"
     if temp_c is None:
-        return {"temp_c": None, "heat_flag": None, "expected_hr_shift_bpm": None}
+        return {"temp_c": None, "heat_flag": None, "expected_hr_shift_bpm": None,
+                "temp_source": None}
     t = max(HEAT_SHIFT_TEMP_MIN_C, min(HEAT_SHIFT_TEMP_MAX_C, temp_c))
     return {"temp_c": temp_c, "heat_flag": temp_c >= HEAT_TEMP_THRESHOLD_C,
-            "expected_hr_shift_bpm": round(HEAT_HR_BPM_PER_C * (t - HEAT_REF_TEMP_C))}
+            "expected_hr_shift_bpm": round(HEAT_HR_BPM_PER_C * (t - HEAT_REF_TEMP_C)),
+            "temp_source": source}
