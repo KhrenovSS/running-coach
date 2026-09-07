@@ -73,6 +73,7 @@ OUTPUT_CONTRACT = """ФОРМАТ ОТВЕТА — ровно один JSON-об
   "unavailable_days_ahead": null,
   "available_again_days_ahead": null,
   "available_weekdays": null,
+  "illness": null,
   "assessment": {
     "effort_match": "ok|harder|easier|unknown",
     "causes": ["heat|cold|wind|elevation|terrain|poor_sleep|fatigue|pace_too_fast|illness|recovery_good|other"],
@@ -189,7 +190,14 @@ OUTPUT_CONTRACT = """ФОРМАТ ОТВЕТА — ровно один JSON-об
   тренировки сбоил: дистанция — оценка по шагам (distance.quality), темп и
   по-км раскладка ненадёжны. Скажи об этом честно, НЕ строй выводов из темпа
   и не вини подопечного за «слишком быстро/медленно»; опирайся на пульс и время.
-  Числа оценки покажет системное предупреждение — не называй их в прозе."""
+  Числа оценки покажет системное предупреждение — не называй их в прозе.
+- illness: подопечный сообщает, что заболел (температура, ОРВИ, грипп, ангина,
+  пневмония) → {"status": "sick", "kind": "cold|flu|angina|pneumonia|other", "days_ago": N};
+  сообщает, что выздоровел → {"status": "recovered", "kind": …, "days_ago": N — когда
+  прошли симптомы}. Тренировки на болезнь и паузу после неё закрывает код и сам называет
+  сроки — в message сроков и чисел не пиши, proposal = null. Блок illness в контексте —
+  система уже знает о болезни: не назначай тренировки на закрытые дни.
+"""
 
 
 REVIEW_PROMPT = (

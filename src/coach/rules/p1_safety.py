@@ -269,6 +269,19 @@ def evaluate_safety(state: AthleteState, *, now: datetime | None = None) -> Safe
                              f"монотонность нагрузки {mono:.1f} за 7 дней "
                              f"({sig['trained_days_7d']} тренировочных дней) — нужен день отдыха"))
 
+    # 21. Болезнь (#322, гайд 50 Швеца): болен — тренировки закрыты до выздоровления; после —
+    # пауза по таблице. day_offset — день плана (project_state): дни после паузы открыты.
+    # (Illness: block until recovery, then the post-illness pause; projected per plan day.)
+    block = sig.get("illness_block_days")
+    if block is not None and (sig.get("day_offset") or 0) < block:
+        triggered.append("illness")
+        allow = False
+        if sig.get("illness_status") == "sick":
+            reasons.append(_step("отдых", "болезнь — с температурой и симптомами не бегаем"))
+        else:
+            reasons.append(_step("отдых", f"пауза после болезни до {sig.get('illness_pause_until')} "
+                                          "(гайд 50)"))
+
     allowed_types: tuple[str, ...] = ()
     if forbidden:
         allowed_types = tuple(t for t in TYPE_INTENSITY_ORDER if t not in forbidden)

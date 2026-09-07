@@ -2,6 +2,26 @@
 
 All notable changes to this project are tracked here.
 
+## [07.09.2026] — Гейт болезни (#322): «заболел» закрывает тренировки, «выздоровел» ставит паузу
+
+Гайд 50 (Швец) дал сроки перерыва после болезни, но safety знала болезнь только через
+критический пульс покоя. Теперь факт сообщает LLM, сроки считает код.
+
+### Added
+- `CoachTurn.illness` (`IllnessReport`: status sick/recovered, kind cold/flu/angina/pneumonia/other,
+  days_ago) — OUTPUT_CONTRACT просит заполнять при «заболел/температура» и «выздоровел».
+- `src/coach/illness.py`: состояние в `UserModel.params_json["illness"]` (без миграции);
+  `record_illness` пишет запись и детерминированную строку ответа; пауза после выздоровления —
+  `config.ILLNESS_PAUSE_DAYS[kind]` (нижняя граница таблицы гайда 50: ОРЗ/грипп 14, ангина 21,
+  пневмония 30 дн.; «другое» — 7 дн., решение агента). `blocked_reason` — гвард чата/утра.
+- Правило 21 `p1_safety` `illness`: болен → `allow_training=false` до сообщения о выздоровлении;
+  после — до `pause_until`; сигналы из `assess_state` (`illness_signals`). `project_state`
+  несёт `day_offset` — план видит, с какого дня бег снова открыт.
+- `week_targets`: даты болезни/паузы выпадают из `days_ahead_allowed`, блок `illness` в целях;
+  `/plan` с репликой «заболел» записывает болезнь и пересчитывает окно; контекст LLM получает
+  `illness (params)`.
+- Тесты `tests/coach/test_illness.py` (6). Документация: METRICS_GUIDE §7 (правило 21), CLAUDE.md.
+
 ## [07.09.2026] — Длительная: ярлык по длительности (#317) и ориентир минут в плане (#318)
 
 ### Changed

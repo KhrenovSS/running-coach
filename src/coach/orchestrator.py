@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from src.coach import planning
+from src.coach import illness, planning
 from src.coach.contracts import Prescription, WorkoutProposal
 from src.coach.numeric_check import check_prose, prose_numbers
 from src.coach.llm.agent import run_turn
@@ -189,11 +189,16 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
             text += f"\n\nЗапомнил дни для бега: {names}. План недели будет ставить тренировки только в них."
         else:
             text += "\n\nЗапомнил: бегать можно в любой день недели."
+    if turn.illness is not None and kind in ("chat", "morning"):
+        # #322: болезнь/выздоровление — паузу ведёт код (гайд 50); safety закрывает тренировки
+        text += "\n\n" + illness.record_illness(turn.illness, user_id, db=db, now=user_now(user))
     if proposal is not None and proposal.workout_type != "rest" and kind in ("chat", "morning"):
         # Детерминированный гвард (инцидент 04.09.2026): на день, который подопечный
         # отменил сам, тренировку не назначаем — предложение LLM отбрасывается.
+        # #322: то же для дней болезни и паузы после неё.
         when = user_now(user).date() + timedelta(days=proposal.for_days_ahead or 0)
-        blocked = planning.blocked_by_unavailable(user_id, db=db, when=when)
+        blocked = (planning.blocked_by_unavailable(user_id, db=db, when=when)
+                   or illness.blocked_reason(user_id, db=db, when=when, today=user_now(user).date()))
         if blocked:
             logger.info("Proposal blocked: athlete unavailable on %s user=%s", when, user_id)
             text += "\n\n" + blocked

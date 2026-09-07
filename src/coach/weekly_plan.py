@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from src.coach import planning
+from src.coach import illness, planning
 from src.coach.contracts import Prescription, WorkoutProposal
 from src.coach.knowledge.loader import plan_guides_queries
 from src.coach.llm.agent import run_turn
@@ -111,6 +111,10 @@ def _apply_availability_from_turn(turn: CoachTurn, user_id: int, *, db: Session,
         if reopened:
             recompute = True
             tail.append(reopened)
+    if turn.illness is not None:
+        # #322: «заболел, переделай план» — запись болезни, дни паузы выпадают из окна
+        tail.append(illness.record_illness(turn.illness, user_id, db=db, now=now_local))
+        recompute = True
     if recompute:
         targets = apply_targets(planning.week_targets(user_id, db=db, today=today,
                                                       now=now_local))

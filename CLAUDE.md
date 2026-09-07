@@ -156,6 +156,11 @@
   (сырой `training_type_auto` + план дня; «план — назначение, факт — интенсивность»), применяется в
   `workout_insights.apply_type_resolution`; `training_type_source` auto|plan|manual, override главнее;
   история переразмечена `services/type_resolution_backfill.relabel_sessions`.
+- **Гейт болезни (#322, 07.09.2026)**: LLM только сообщает факт (`CoachTurn.illness`: sick/recovered,
+  kind, days_ago), сроки считает код — `coach/illness.py` (состояние в `UserModel.params_json["illness"]`,
+  без миграции): болен → правило 21 safety `allow_training=false`; выздоровел → пауза
+  `ILLNESS_PAUSE_DAYS[kind]` (гайд 50, нижняя граница), `/plan` исключает закрытые даты, чат/утро
+  отбрасывают назначение (`blocked_reason`), `project_state` несёт `day_offset` — дни после паузы открыты.
 - **Safety по содержимому (04.09.2026)**: `safety.effective_workout_type` классифицирует
   предложение по рабочим сегментам (отрезки > `STRIDE_MAX_SEC` в Z3+ = tempo/interval), ярлык
   «easy» гейты интенсива не обходит; длительная — качественный день для правила 12; правила 16–20

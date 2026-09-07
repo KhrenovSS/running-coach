@@ -43,9 +43,10 @@ def test_quality_reopens_when_counter_falls_below_threshold():
     assert quality_reopens_at(blocked, counts, now=now, days=[0, 1, 2, 3, 4]) is None
     # project_state меняет только счётчик
     assert project_state(state, counts, 3).signals["easy_too_hard_7d"] == 0
-    assert project_state(state, counts, 9) is state
-
-
+    # вне прогноза счётчик не меняется; day_offset — для правила 21 (#322)
+    projected = project_state(state, counts, 9)
+    assert projected.signals["easy_too_hard_7d"] == state.signals["easy_too_hard_7d"]
+    assert projected.signals["day_offset"] == 9
 def test_apply_safety_partial_keeps_quality_day():
     verdict = SafetyVerdict(max_zone=2, allowed_types=("rest", "recovery", "easy", "long"),
                             triggered=["easy_runs_too_hard"],

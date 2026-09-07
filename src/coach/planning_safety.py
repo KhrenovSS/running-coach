@@ -55,11 +55,13 @@ def easy_too_hard_counts_by_day(flag_times: list[datetime], *, now: datetime,
 
 
 def project_state(state: AthleteState, counts: dict[int, int], day: int) -> AthleteState:
-    """Снимок состояния с прогнозным счётчиком правила 17 на день `day` (остальные сигналы —
-    сегодняшние, консервативно). (State copy with the projected rule-17 counter.)"""
-    if day not in counts:
-        return state
-    return replace(state, signals={**(state.signals or {}), "easy_too_hard_7d": counts[day]})
+    """Снимок состояния на день `day`: прогнозный счётчик правила 17 и сдвиг дня для правила 21
+    (болезнь/пауза); остальные сигналы — сегодняшние, консервативно.
+    (State copy with the projected rule-17 counter and the plan-day offset.)"""
+    signals = {**(state.signals or {}), "day_offset": day}   # #322: правило 21 знает день плана
+    if day in counts:
+        signals["easy_too_hard_7d"] = counts[day]
+    return replace(state, signals=signals)
 
 
 def quality_reopens_at(state: AthleteState, counts: dict[int, int], *, now: datetime,

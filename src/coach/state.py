@@ -21,6 +21,7 @@ from src.coach.config import (
     READINESS_WEIGHTS,
 )
 from src.coach.contracts import AthleteState, SkillResult
+from src.coach.illness import illness_signals, illness_state
 from src.coach.skills import distribution, fatigue, load, pain, progress, recovery
 from src.coach.util import clamp_value, effective_training_type, safe_div
 from src.models import User
@@ -288,6 +289,8 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
         # M4.1/M4.3 (F5/F6): структура недели и пауза — сырьё правил 12–14 p1_safety
         # (weekly-structure and layoff signals for the safety rules)
         **_week_signals(user_id, today_local, user_row, db=db),
+        # #322: болезнь/пауза после неё — правило 21 (illness block for the safety rule)
+        **illness_signals(illness_state(user_id, db=db), today_local),
         # правило 16: перекос последних 7 дней в интенсивность (weekly intensity skew)
         "hard_share_7d": hard_share_7d,
         # P0 #289 (04.09.2026): замыкания флагов разбора — правила 17–19

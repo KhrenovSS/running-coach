@@ -32,6 +32,7 @@ from src.coach.config import (
     long_run_max_pct,
 )
 from src.coach.contracts import AthleteState, Prescription, WorkoutProposal
+from src.coach.illness import context_block, illness_state, paused_dates
 from src.coach.planning_safety import long_run_min_hint
 from src.coach.planning_window import local_week_volumes, plan_window, week_done
 from src.coach.prescriber import finalize, save_prescription
@@ -184,6 +185,10 @@ def week_targets(user_id: int, *, db: Session, today: date | None = None,
     # #294: окно доступности — дни недели из params_json + даты, отменённые подопечным
     avail = availability(user_id, db=db)
     blocked_dates = unavailable_dates(user_id, db=db, week_start=week_start)
+    # #322: дни болезни/паузы после неё закрыты для плана (гайд 50)
+    ill = illness_state(user_id, db=db)
+    blocked_dates = sorted(set(blocked_dates) | set(paused_dates(
+        ill, today, today + timedelta(days=first_offset), today + timedelta(days=last_offset))))
     days_allowed = [
         d for d in range(first_offset, last_offset + 1)
         if (today + timedelta(days=d)) not in blocked_dates
@@ -237,6 +242,7 @@ def week_targets(user_id: int, *, db: Session, today: date | None = None,
         "long_run_min_hint": long_run_min_hint(user_id, user, long_run_km_max, db=db),
         "hard_days_max": hard_days_max,
         "detraining_return": detraining_return,     # #289: возврат после паузы — объём ≤ 65% пика
+        "illness": context_block(ill, today),       # #322: болезнь/пауза — что знает система
         "days_off": days_off,
         # Беговых дней ≤ и дней полного отдыха ≥ (решение владельца 02.09.2026)
         "run_days_max": run_days_max,

@@ -7,6 +7,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from src.coach.contracts import Prescription
+from src.coach.illness import context_block, illness_state
 from src.coach.knowledge.loader import review_guides_queries
 from src.coach.knowledge.loader import search as guide_search
 from src.coach.llm.config import (
@@ -105,6 +106,10 @@ def build_extras(user_id: int, *, db: Session,
             "athlete_unavailable": is_athlete_unavailable(r),
         } for r in sorted(latest_by_date.values(),
                           key=lambda r: r.for_date)[:COACH_PLANNED_DAYS]]
+    ill = context_block(illness_state(user_id, db=db), today_local)
+    if ill:
+        # #322: система знает о болезни/паузе — LLM не назначает и не спорит со сроками
+        extras["illness (params)"] = ill
     if session_id is not None:
         detail = run_tool(
             "get_workout_detail", {"session_id": session_id}, user_id=user_id, db=db)

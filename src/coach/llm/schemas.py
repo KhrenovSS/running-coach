@@ -140,6 +140,13 @@ class ReviewAssessment(BaseModel):
         return out[:4]
 
 
+class IllnessReport(BaseModel):
+    """#322: подопечный сообщил, что заболел или выздоровел — паузу ведёт код (гайд 50)."""
+    status: Literal["sick", "recovered"]
+    kind: Literal["cold", "flu", "angina", "pneumonia", "other"] | None = None
+    days_ago: Annotated[int, Field(ge=0, le=60)] = 0   # когда заболел / прошли симптомы (0 = сегодня)
+
+
 class CoachTurn(BaseModel):
     """Полный ход коуча: проза + опциональное предложение (full coach turn)."""
     message: str = Field(max_length=1500)
@@ -167,6 +174,9 @@ class CoachTurn(BaseModel):
     # бегать; [] — снять ограничение. Код персистит и учитывает в /plan.
     available_weekdays: list[Annotated[int, Field(ge=0, le=6)]] | None = Field(
         default=None, max_length=7)
+    # #322: болезнь/выздоровление — код закрывает тренировки на болезнь и паузу после неё
+    # (Illness report → deterministic training block and post-illness pause.)
+    illness: IllnessReport | None = None
 
 
 def _strictify(schema: dict) -> dict:
