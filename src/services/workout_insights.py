@@ -179,6 +179,11 @@ def compute_workout_metrics(session: TrainingSession, *,
             # Якорь зон: наблюдаемость тихого fallback LTHR→%max_hr (1d, 02.09.2026)
             # (zone anchor visibility: catches a silent LTHR→%max_hr fallback)
             "zone_anchor": "lthr" if lthr_valid(max_hr or 0, lthr) else "max_hr",
+            # #302: откуда сегменты — laps (структурные лапы часов) | pace/km (эвристика)
+            "segmentation_source": (
+                (session.segments_json[0].get("source") or "pace")
+                if isinstance(session.segments_json, list) and session.segments_json
+                and isinstance(session.segments_json[0], dict) else None),
             # F2 (#286): кросс-чек пайплайна с эталоном часов; при gps_unreliable
             # эталон часов сам мусорный — не считаем
             # (pipeline vs watch cross-check; skipped when the watch data is garbage)

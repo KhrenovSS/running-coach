@@ -94,8 +94,12 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
         pauses = ((activity.get('device_summary') or {}).get('pauses') if from_raw else None) \
             or ((session.device_summary or {}).get('pauses')
                 if isinstance(session.device_summary, dict) else None)
+        # #302: лапы — из сырья (FIT) или из сохранённой колонки (кэш-путь)
+        laps = ((activity.get('laps') if from_raw else None)
+                or (session.laps_json if isinstance(session.laps_json, list) else None))
         result = process_trackpoints(
             trackpoints, session.begin_ts,
+            laps=laps,
             max_hr=user.max_hr or app_settings.default_max_hr,
             lthr=latest_lthr(user_id, db=db),
             max_credible_pace=user.max_credible_pace or 3.0,

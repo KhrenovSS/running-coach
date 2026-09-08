@@ -18,7 +18,7 @@ from src.services.repositories import FeedbackRepository, TrainingRepository, la
 from src.services.repositories_coach import CoachRepository
 from src.utils.timeutils import WEEKDAYS_RU, session_local_dt, user_now
 
-MAX_SEGMENTS = 20   # больше — только агрегат (above this, aggregate only)
+MAX_SEGMENTS = 32   # больше — только агрегат; 20 → 32 (#302: лап-сегменты 10×400 + отдых + разминка/заминка)
 MAX_POINTS = 60     # даунсэмпл рядов (series downsampling cap)
 
 

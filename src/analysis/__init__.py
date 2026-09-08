@@ -8,8 +8,9 @@ from src.parsers.gps import clean_trackpoints
 from src.parsers.weather import (fetch_weather, get_avg_temp_between,
                                  get_weather_code_at_time, get_temp_at_time)
 from src.analysis.hr_zones import get_zone
+from src.analysis.segment_laps import lap_segments
 from src.analysis.segment import build_time_in_zones, segment_by_pace
-from src.analysis.segment_km import km_segment_fallback
+from src.analysis.segment_km import compute_km_variability, km_segment_fallback
 from src.analysis.classify import classify_training
 from src.analysis.oscillation import detect_pace_oscillations, compute_hr_lag_correlation
 from src.analysis.utils import (
@@ -37,7 +38,8 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
                          interval_min_phase_distance_m: int = 200,
                          interval_hr_lag_sec: int = 5,
                          interval_min_oscillations: int = 3,
-                         watch_stride_m: float | None = None) -> AnalysisResult | None:
+                         watch_stride_m: float | None = None,
+                         laps: list[dict] | None = None) -> AnalysisResult | None:
     """
     Полный пайплайн анализа тренировки из трекпоинтов.
     Full training analysis pipeline from trackpoints.
@@ -137,13 +139,19 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
     time_in_zone, z4_plus_segments, total_duration_min = build_time_in_zones(
         trackpoints, max_hr, lthr=lthr, pauses_sec=pauses_sec or None)
 
-    segments, var_count = segment_by_pace(
-        trackpoints, max_hr, total_dist_km, lthr=lthr,
-        min_oscillations=interval_min_oscillations,
-        pace_gap=pace_gap,
-        min_phase_duration_sec=interval_min_phase_duration,
-        max_credible_pace=max_credible_pace,
-    )
+    # #302: структурные лапы часов (программа/ручные отсечки) — сегменты как есть; авто-км и
+    # TCX без лапов — темповая эвристика (structured laps win; auto-km/TCX → pace heuristics)
+    lap_segs = lap_segments(laps, trackpoints, max_hr, lthr=lthr)
+    if lap_segs:
+        segments, var_count = lap_segs, compute_km_variability(trackpoints, total_dist_km)
+    else:
+        segments, var_count = segment_by_pace(
+            trackpoints, max_hr, total_dist_km, lthr=lthr,
+            min_oscillations=interval_min_oscillations,
+            pace_gap=pace_gap,
+            min_phase_duration_sec=interval_min_phase_duration,
+            max_credible_pace=max_credible_pace,
+        )
 
     # Осцилляции темпа + HR-lag корреляция (Pace oscillations + HR lag correlation)
     oscillation_count = 0
@@ -165,7 +173,7 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
 
     # Проверка: если сегменты — км-блоки, сбрасываем сигналы интервалов
     # (Check: if segments are km-based blocks, don't classify as interval)
-    if is_km_segmentation(segments, total_dist_km):
+    if not lap_segs and is_km_segmentation(segments, total_dist_km):
         var_count = 0
         oscillation_count = 0
         hr_correlated = False
@@ -197,7 +205,10 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
     # Для не-интервалов — всегда км-блоки (по умолчанию),
     # для интервалов — oscillation/change-point сегменты
     # (For non-interval trainings — always km-blocks, for interval — oscillation segments)
-    if t_type != 'interval':
+    # #302: лап-сегменты авторитетны для любого типа (ускорения в лёгком дне не затираются км-блоками)
+    if lap_segs:
+        segments_count = len(segments)
+    elif t_type != 'interval':
         km_segments, km_var = km_segment_fallback(trackpoints, max_hr, total_dist_km, lthr=lthr)
         if km_segments:
             segments = km_segments

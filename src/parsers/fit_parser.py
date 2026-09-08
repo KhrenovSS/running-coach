@@ -19,6 +19,12 @@ def _lap_row(ldata: dict) -> dict:
     speed = ldata.get('enhanced_avg_speed') or ldata.get('avg_speed')
     row = {
         'start_time': _iso(ldata.get('start_time')),
+        # #302 (08.09.2026): конец лапа и провенанс — структурная тренировка/ручная отсечка vs авто-км
+        # (lap end and provenance: structured workout / manual lap vs auto-km)
+        'end_time': _iso(ldata.get('timestamp')),
+        'trigger': ldata.get('lap_trigger'),
+        'intensity': ldata.get('intensity'),
+        'wkt_step_index': ldata.get('wkt_step_index'),
         'distance_m': round(ldata['total_distance']) if ldata.get('total_distance') is not None else None,
         'timer_s': round(ldata['total_timer_time']) if ldata.get('total_timer_time') is not None else None,
         'elapsed_s': round(ldata['total_elapsed_time']) if ldata.get('total_elapsed_time') is not None else None,
@@ -193,7 +199,8 @@ def parse_fit(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.
                                   max_gps_jump_m=max_gps_jump_m,
                                   min_hr_for_fast_pace=min_hr_for_fast_pace,
                                   pauses=(activity['device_summary'] or {}).get('pauses'),
-                                  watch_stride_m=watch_stride_m(activity['device_summary']))
+                                  watch_stride_m=watch_stride_m(activity['device_summary']),
+                                  laps=activity['laps'])   # #302: структурные лапы → сегменты
     if result is None:
         return None
     if activity['calories'] is not None:

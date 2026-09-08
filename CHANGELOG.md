@@ -2,6 +2,25 @@
 
 All notable changes to this project are tracked here.
 
+## [08.09.2026] — Сегментация по лапам часов: структурные тренировки видны поштучно (#302)
+
+### Added
+- `analysis/segment_laps.py`: `lap_windows` (окна лапов от старта трека: `end_time` → старт следующего →
+  `elapsed_s/timer_s`; aware/naive выравниваются) и `lap_segments` — если лапы структурные
+  (`intervals.structural_laps`: программа на часах или ручные отсечки, не авто-км), сегменты строятся из
+  лапов: дистанция и время — из лапа (часы надёжнее GPS, случай 01.09 с `gps_unreliable`), пульс/каденс/
+  высота — из среза трекпоинтов (`_build_segment_stats` + сводка по времени при нулевой GPS-дистанции),
+  `distance_km` 2 dp (ускорение 62 м = 0.06), ключи `source="laps"`, `lap`, `intensity`.
+- `process_trackpoints(laps=)`: лап-сегменты идут первыми и авторитетны для любого типа тренировки — км-override
+  для не-интервалов их не затирает, `is_km_segmentation` не сбрасывает сигналы; осцилляции и классификация
+  без изменений (7×18 с ускорений в лёгком дне остаются `easy` — решение владельца 06.09). Лапы передают
+  `fit_parser.parse_fit` (`activity['laps']`) и `reanalyze` (сырьё или сохранённый `laps_json`).
+- `fit_parser._lap_row`: `end_time` (timestamp), `trigger` (lap_trigger), `intensity`, `wkt_step_index`.
+- `computed.inputs.segmentation_source` (laps|pace); `history_tools.MAX_SEGMENTS` 20 → 32.
+- Тесты `tests/test_segment_laps.py`, `tests/test_reanalyze_laps.py`. METRICS_GUIDE §3 — строка «Сегменты».
+  BACKLOG: #302 ✅ (переформулирован), новый #327 (live-путь парсера не передаёт `interval_*` пользователя).
+- Прод: тренировка 01.09 после reanalyze — 16 сегментов вместо 5 км-блоков.
+
 ## [08.09.2026] — Набор/спуск высоты с гистерезисом, как у часов (#253)
 
 ### Changed
