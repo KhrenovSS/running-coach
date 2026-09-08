@@ -8,6 +8,8 @@ key_rules:
   post_run_hr_10min_target_bpm: 100
   post_run_hr_recovery_pct_min: 70
   shoe_size_extra: 1
+  wind_below_zero_more_dangerous_than_frost: true
+  deep_snow_or_ice_no_volume_day_shorten_stride: true
 ---
 
 ## Погода: ветер опаснее мороза

@@ -9,7 +9,8 @@ from src.coach.knowledge.loader import (
 )
 from src.coach.turn_context import _as_queries
 
-DIGEST_LINES_MAX = 60  # ориентир DEV_PLAN E2.1: 16 гайдов × ≤5 правил, кэшируемый system[0]
+DIGEST_LINES_MAX = 64  # ориентир DEV_PLAN E2.1: 16 гайдов × ≤4 правила в среднем (≤5 на гайд), кэшируемый system[0];
+                       # 60 → 64 08.09.2026: два правила зимы в гайде 49
 
 
 def _top_guide(query: str) -> str:
@@ -47,6 +48,17 @@ def test_review_queries_add_heat_last():
     assert "жара погода условия" not in review_guides_queries({"type": "easy"},
                                                              {"heat": {"heat_flag": False}})
     assert review_guides_queries({"type": "race"}, None) == ["соревнование гонка раскладка"]
+
+
+def test_review_queries_add_cold_when_frost():
+    """Зима (08.09.2026): cold_flag → запрос про мороз/ветер/снег/гололёд → гайд 49 Швеца;
+    при одновременной жаре (невозможно, но) приоритет у heat; без флагов запроса нет."""
+    queries = review_guides_queries({"type": "easy"}, {"heat": {"cold_flag": True, "heat_flag": False}})
+    assert queries[-1] == "мороз ветер снег гололёд покрытие погода"
+    assert _top_guide(queries[-1]).startswith("49_")
+    assert len(review_guides_queries({"type": "easy"}, {"heat": {"cold_flag": False}})) == 1
+    digest = key_rules_digest()
+    assert "wind_below_zero_more_dangerous_than_frost" in digest
 
 
 def test_plan_queries_switch_on_detraining_return():

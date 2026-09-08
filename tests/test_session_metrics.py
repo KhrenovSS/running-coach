@@ -368,3 +368,15 @@ def test_plan_vs_actual_distance_quality_marker():
     plain = plan_vs_actual(plan, "easy", 6.5, 40.0, zones,
                            volume_tol=0.15, intensity_tol=0.10)
     assert "distance_quality" not in plain
+
+
+def test_collect_flags_cold_is_context_flag_like_heat():
+    """Зима 08.09.2026: heat.cold_flag → флаг cold в computed.flags; в enum assessment его нет —
+    оркестратор отфильтрует, как heat."""
+    from typing import get_args
+    from src.analysis.session_metrics import collect_flags
+    from src.coach.llm.schemas import FlagValue
+    flags = collect_flags({"heat": {"cold_flag": True, "heat_flag": False}})
+    assert "cold" in flags and "heat" not in flags
+    assert "cold" not in get_args(FlagValue)
+    assert "cold" not in collect_flags({"heat": {"cold_flag": False}})

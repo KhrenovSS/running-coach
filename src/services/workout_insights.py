@@ -54,14 +54,17 @@ from src.services.insights_baseline import (  # noqa: F401 — реэкспор�
     stored_baseline as _stored_baseline,
 )
 from src.services.repositories_insights import InsightRepository
+from src.services.watch_temp_bias import recent_watch_bias
 from src.utils.logger import get_logger
 
 logger = get_logger("services.workout_insights")
 
-INSIGHTS_SCHEMA_VERSION = 9  # версия computed_json (v5 — F0; v6 — F3 HRR; v7 — F5/F6: week_structure/downhill/detraining/session_rpe;
+INSIGHTS_SCHEMA_VERSION = 10  # версия computed_json (v5 — F0; v6 — F3 HRR; v7 — F5/F6: week_structure/downhill/detraining/session_rpe;
                              # v8 — 07.09.2026: пол GAP-фактора на спусках #298, heat.temp_source #299;
                              # v9 — 08.09.2026: baseline v2 (#259) + detraining_shift_bpm в hr_vs_baseline,
-                             # контекст паузы в detraining (#289) — история пересчитывается лениво)
+                             # контекст паузы в detraining (#289);
+                             # v10 — 08.09.2026 (зима): heat.cold_flag, адаптивная поправка датчика часов,
+                             # watch_temp_c/watch_minus_weather_c — история пересчитывается лениво)
 
 _EMPTY_DRIFT = {"applicable": False, "reason": "no_trackpoints", "drift_pct": None,
                 "first_half_ef": None, "second_half_ef": None, "gap_adjusted": None,
@@ -143,11 +146,13 @@ def compute_workout_metrics(session: TrainingSession, *,
                             rpe_history: dict | None = None,
                             plan: dict | None = None,
                             history_briefs: list[dict] | None = None,
-                            session_dates: list[dict] | None = None) -> dict:
+                            session_dates: list[dict] | None = None,
+                            watch_bias: dict | None = None) -> dict:
     """Собрать computed_json одной тренировки (pure assembly, без БД).
 
     session_dates — даты тренировок за DETRAINING_LOOKBACK_DAYS (#289); None → detraining
-    считается по history_briefs (15 дней), как раньше.
+    считается по history_briefs (15 дней), как раньше. watch_bias — `recent_watch_bias`
+    (поправка датчика часов при отсутствии погоды; None → константа).
 
     Все ветки деградируют в applicable/available=false — исключений наружу нет.
     БД-входы (max_hr, week_km, rpe_history={"rpe","peers"}, plan — назначение
@@ -186,7 +191,9 @@ def compute_workout_metrics(session: TrainingSession, *,
         computed["drift"] = dict(_EMPTY_DRIFT)
         computed["gap"] = {"available": False}
         computed["hr_vs_baseline"] = {"available": False, "reason": "no_trackpoints"}
-        computed["heat"] = heat_block(session.avg_temperature, ds.get("avg_temperature_c"))
+        computed["heat"] = heat_block(session.avg_temperature, ds.get("avg_temperature_c"),
+                                      watch_bias_c=(watch_bias or {}).get("bias_c"),
+                                      recent_weather_c=(watch_bias or {}).get("weather_median_c"))
         computed["time_in_zones"] = {"available": False, "reason": "no_trackpoints"}
         computed["easy_discipline"] = {"applicable": False, "reason": "no_trackpoints"}
         computed["pace_stability"] = {"available": False, "reason": "no_trackpoints"}
@@ -218,7 +225,9 @@ def compute_workout_metrics(session: TrainingSession, *,
 
     # Жара и пауза — до отклонения от базовой линии: их ожидаемые сдвиги пульса входят в
     # ожидание (heat and layoff first: their expected HR shifts feed the baseline expectation)
-    heat = heat_block(session.avg_temperature, ds.get("avg_temperature_c"))
+    heat = heat_block(session.avg_temperature, ds.get("avg_temperature_c"),
+                      watch_bias_c=(watch_bias or {}).get("bias_c"),
+                      recent_weather_c=(watch_bias or {}).get("weather_median_c"))
     detrain = detraining(
         session_dates if session_dates is not None else (history_briefs or []),
         _session_day(session))
@@ -351,7 +360,9 @@ def upsert_workout_insights(user_id: int, session_id: int, *, db: Session,
         rpe_history=_rpe_history(user_id, session, db=db),
         plan=plan,
         history_briefs=_history_briefs(user_id, session, db=db),
-        session_dates=_session_dates(user_id, session, db=db))
+        session_dates=_session_dates(user_id, session, db=db),
+        watch_bias=(recent_watch_bias(user_id, session.begin_ts, db=db)
+                    if session.avg_temperature is None else None))
     # #246 (02.09.2026): статистика прогноз↔факт — только пишем, потребитель после M3.2
     try:
         from src.services.prediction_log import record_prediction_outcome

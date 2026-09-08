@@ -85,8 +85,9 @@ def test_heat_block_threshold():
     """heat_flag по порогу из констант; None-температура → None-флаг."""
     assert heat_block(HEAT_TEMP_THRESHOLD_C)["heat_flag"] is True
     assert heat_block(HEAT_TEMP_THRESHOLD_C - 1)["heat_flag"] is False
-    assert heat_block(None) == {"temp_c": None, "heat_flag": None,
-                                "expected_hr_shift_bpm": None, "temp_source": None}
+    empty = heat_block(None)
+    assert empty["temp_c"] is None and empty["heat_flag"] is None and empty["cold_flag"] is None
+    assert empty["expected_hr_shift_bpm"] is None and empty["temp_source"] is None
 
 
 def test_heat_block_expected_hr_shift():
@@ -147,9 +148,47 @@ def test_pace_cv_public_works_without_drift():
 
 
 def test_heat_block_watch_fallback_with_bias():
-    """#299: нет погоды → датчик часов минус WATCH_TEMP_BIAS_C, источник watch; погода главнее."""
+    """#299: нет погоды → датчик часов минус WATCH_TEMP_BIAS_C, источник watch; погода главнее.
+    Зима 08.09.2026: при погоде блок несёт сырое показание часов и расхождение (данные для #301)."""
     from src.config.constants import WATCH_TEMP_BIAS_C
     hb = heat_block(None, 25.3)
     assert hb["temp_c"] == round(25.3 - WATCH_TEMP_BIAS_C) and hb["temp_source"] == "watch"
-    assert heat_block(18, 30.0)["temp_c"] == 18 and heat_block(18, 30.0)["temp_source"] == "weather"
+    assert hb["bias_source"] == "default" and hb["watch_bias_c"] == WATCH_TEMP_BIAS_C
+    both = heat_block(18, 30.0)
+    assert both["temp_c"] == 18 and both["temp_source"] == "weather"
+    assert both["watch_temp_c"] == 30.0 and both["watch_minus_weather_c"] == 12.0
+    assert both["watch_bias_c"] is None and both["bias_source"] is None
     assert heat_block(None, None)["temp_source"] is None
+
+
+def test_heat_block_adaptive_bias_and_false_heat_guard():
+    """Зима: часы под куркой +24 при недавнем расхождении +15 → температура 9, не жара;
+    без истории — константа. Гвард: даже если поправленная ≥ порога, недавняя холодная погода
+    (медиана < порог − запас) снимает heat_flag — датчик под одеждой жару не доказывает."""
+    from src.config.constants import (COLD_TEMP_THRESHOLD_C, HEAT_TEMP_THRESHOLD_C,
+                                      WATCH_HEAT_CONFIRM_MARGIN_C)
+    jacket = heat_block(None, 24.0, watch_bias_c=15.0, recent_weather_c=-3.0)
+    assert jacket["temp_c"] == 9 and jacket["bias_source"] == "recent" and jacket["watch_bias_c"] == 15.0
+    assert jacket["heat_flag"] is False
+    assert jacket["cold_flag"] is False          # холод только по погоде, не по часам
+    # поправленная температура ≥ порога, но недавняя погода холодная → флаг снят
+    guarded = heat_block(None, 30.0, watch_bias_c=2.0,
+                         recent_weather_c=HEAT_TEMP_THRESHOLD_C - WATCH_HEAT_CONFIRM_MARGIN_C - 1)
+    assert guarded["temp_c"] == 28 and guarded["heat_flag"] is False
+    # недавняя погода тёплая → жара по часам подтверждается
+    confirmed = heat_block(None, 30.0, watch_bias_c=2.0, recent_weather_c=HEAT_TEMP_THRESHOLD_C + 2)
+    assert confirmed["heat_flag"] is True
+    # без истории погоды (None) — поведение как раньше: по температуре
+    assert heat_block(None, 30.0)["heat_flag"] is True
+
+
+def test_heat_block_cold_flag_only_from_weather():
+    """cold_flag ≤ COLD_TEMP_THRESHOLD_C по погоде; сдвиг пульса остаётся зажатым (−2), не −8."""
+    from src.config.constants import COLD_TEMP_THRESHOLD_C, HEAT_SHIFT_TEMP_MIN_C
+    frost = heat_block(-12)
+    assert frost["cold_flag"] is True and frost["heat_flag"] is False
+    assert frost["expected_hr_shift_bpm"] == heat_block(HEAT_SHIFT_TEMP_MIN_C)["expected_hr_shift_bpm"]
+    assert heat_block(COLD_TEMP_THRESHOLD_C)["cold_flag"] is True
+    assert heat_block(COLD_TEMP_THRESHOLD_C + 1)["cold_flag"] is False
+    # часы под куркой показывают +3 при отсутствии погоды: холод не утверждаем
+    assert heat_block(None, 3.0, watch_bias_c=15.0)["cold_flag"] is False

@@ -115,8 +115,9 @@ _TYPE_GUIDE_TERMS = {
     "race": "соревнование гонка раскладка",   # гайд 48 (Швец): день гонки и раскладка
 }
 
-# Запрос про погоду — при флаге жары в разборе (heat guide query, гайд 49 Швеца)
+# Запросы про погоду — при флаге жары/холода в разборе (weather guide queries, гайд 49 Швеца)
 _HEAT_GUIDE_TERMS = "жара погода условия"
+_COLD_GUIDE_TERMS = "мороз ветер снег гололёд покрытие погода"
 
 # Запросы для плана недели (weekly-plan guide queries): обычный — мезоцикл/прогрессия;
 # при возврате после паузы — ходьба→бег (гайд 47) + план возврата в % от пика (гайд 61).
@@ -136,9 +137,12 @@ def review_guides_queries(detail: dict, computed: dict | None) -> list[str]:
     type_terms = _TYPE_GUIDE_TERMS.get(detail.get("type") or "")
     if type_terms:
         queries.append(type_terms)
-    # Жара — третьим запросом: вытесняется болью/типом при лимите чанков (heat last)
-    if ((computed or {}).get("heat") or {}).get("heat_flag"):
+    # Погода — третьим запросом: вытесняется болью/типом при лимите чанков (weather last)
+    heat = (computed or {}).get("heat") or {}
+    if heat.get("heat_flag"):
         queries.append(_HEAT_GUIDE_TERMS)
+    elif heat.get("cold_flag"):
+        queries.append(_COLD_GUIDE_TERMS)
     return queries
 
 

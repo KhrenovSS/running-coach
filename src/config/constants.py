@@ -101,9 +101,8 @@ TYPE_SOURCE_MANUAL: Final[str] = "manual"
 # соседние качественные уровни различаются ~15–20 c/км; easy консервативно медленнее порога)
 LTSP_ZONE_OFFSET_S: Final[dict] = {1: 105, 2: 75, 3: 0, 4: -17, 5: -34}
 
-# Настройки погоды Open-Meteo (Open-Meteo weather settings)
+# Настройки погоды Open-Meteo (Open-Meteo weather settings; архив, без прогноза)
 WEATHER_API_URL: Final[str] = "https://archive-api.open-meteo.com/v1/archive"
-WEATHER_CACHE_TTL_SECONDS: Final[int] = 3600
 
 # Настройки отображения (Display settings)
 DISTANCE_DECIMALS: Final[int] = 1
@@ -241,8 +240,20 @@ HEAT_TEMP_THRESHOLD_C: Final[int] = 20       # температура старт
 # Open-Meteo за интервал бега, а не значение на старте (длинная пробежка греется к полудню)
 WEATHER_AVG_MIN_DURATION_MIN: Final[int] = 60
 # #299: датчик часов (FIT session avg_temperature) — второй источник при отсутствии погоды;
-# исследование 02.09.2026: выше воздуха в среднем на 3.3 °C (солнце/тело) — вычитаем
+# исследование 02.09.2026: выше воздуха в среднем на 3.3 °C (солнце/тело) — вычитаем.
+# 08.09.2026 (зима): расхождение растёт с холодом (0…2 °C при +25…30, 5…7 при +10…15; под куркой
+# будет больше) → поправка адаптивная: медиана (часы − погода) по последним тренировкам
+# пользователя (`services/watch_temp_bias.py`), константа — дефолт без истории
 WATCH_TEMP_BIAS_C: Final[float] = 3.3
+WATCH_BIAS_WINDOW_DAYS: Final[int] = 45      # окно истории для медианы расхождения
+WATCH_BIAS_MIN_SESSIONS: Final[int] = 5      # меньше пар (часы, погода) → дефолт
+WATCH_BIAS_MAX_SESSIONS: Final[int] = 10     # берём последние N пар
+# Гвард ложной жары от датчика под одеждой: heat_flag по часам только если недавняя погода
+# (та же выборка) не холоднее порога минус запас (watch can't prove heat if recent weather was cold)
+WATCH_HEAT_CONFIRM_MARGIN_C: Final[int] = 5
+# Холод (cold): информационный флаг ≤ порога, только по погоде (датчик под одеждой мороз не покажет);
+# формула сдвига пульса ниже +10 °C не экстраполируется до зимних данных (#301)
+COLD_TEMP_THRESHOLD_C: Final[int] = 0
 # Ожидаемый сдвиг пульса от температуры на равном GAP-темпе — исследование 02.09.2026 на
 # 39 тренировках: +0.5 уд/мин на °C воздуха (Open-Meteo), опорная точка 15 °C
 # (expected HR shift per °C of air temperature at equal GAP pace; reference temperature)

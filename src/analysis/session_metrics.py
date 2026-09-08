@@ -348,6 +348,8 @@ def collect_flags(computed: dict) -> list[str]:
         flags.append("decoupling_moderate")
     if computed.get("heat", {}).get("heat_flag"):
         flags.append("heat")
+    if computed.get("heat", {}).get("cold_flag"):
+        flags.append("cold")   # контекст-флаг как heat: в enum assessment его нет (зима 08.09.2026)
     if computed.get("gap", {}).get("hilly"):
         flags.append("hilly")
     dev_flag = deviation_flag(computed.get("hr_vs_baseline", {}))

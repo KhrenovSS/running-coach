@@ -205,6 +205,51 @@ def test_detraining_shift_relaxes_hr_above_baseline(db_session):
     assert "detraining_expected" in back["flags"]
 
 
+def test_watch_bias_adaptive_from_user_history(db_session):
+    """Зима 08.09.2026: погода отсутствует → поправка датчика — медиана (часы − погода) последних
+    тренировок пользователя (здесь +12, «под куркой»), не константа 3.3; heat_flag не ставится:
+    недавняя погода холодная. При погоде блок пишет watch_minus_weather_c."""
+    from src.services.watch_temp_bias import recent_watch_bias
+    user = _user(db_session)
+    for i in range(6):   # история: воздух +2…+7, часы на 12 выше
+        _session_with_track(db_session, user.id, ttype='easy',
+                            begin_ts=utcnow() - timedelta(days=2 + i * 3),
+                            avg_temperature=2 + i, device_summary={"avg_temperature_c": 14.0 + i})
+    bias = recent_watch_bias(user.id, utcnow(), db=db_session)
+    assert bias["n"] == 6 and bias["bias_c"] == 12.0 and 2 <= bias["weather_median_c"] <= 7
+    # сегодня погода не пришла, часы показывают +23 под куркой
+    s = _session_with_track(db_session, user.id, ttype='easy', begin_ts=utcnow(),
+                            avg_temperature=None, device_summary={"avg_temperature_c": 23.0})
+    computed = upsert_workout_insights(user.id, s.id, db=db_session)
+    heat = computed["heat"]
+    assert heat["temp_source"] == "watch" and heat["bias_source"] == "recent"
+    assert heat["watch_bias_c"] == 12.0 and heat["temp_c"] == 11
+    assert heat["heat_flag"] is False and "heat" not in computed["flags"]
+    # с погодой — расхождение фиксируется для #301
+    with_weather = _session_with_track(db_session, user.id, ttype='easy',
+                                       begin_ts=utcnow() - timedelta(hours=1),
+                                       avg_temperature=-3, device_summary={"avg_temperature_c": 9.5})
+    c2 = upsert_workout_insights(user.id, with_weather.id, db=db_session)
+    assert c2["heat"]["watch_minus_weather_c"] == 12.5 and c2["heat"]["temp_source"] == "weather"
+    assert c2["heat"]["cold_flag"] is True and "cold" in c2["flags"]
+
+
+def test_watch_bias_needs_min_pairs(db_session):
+    """< WATCH_BIAS_MIN_SESSIONS пар → None → heat_block берёт константу (bias_source=default)."""
+    from src.config.constants import WATCH_BIAS_MIN_SESSIONS
+    from src.services.watch_temp_bias import recent_watch_bias
+    user = _user(db_session)
+    for i in range(WATCH_BIAS_MIN_SESSIONS - 1):
+        _session_with_track(db_session, user.id, ttype='easy',
+                            begin_ts=utcnow() - timedelta(days=1 + i),
+                            avg_temperature=15, device_summary={"avg_temperature_c": 20.0})
+    assert recent_watch_bias(user.id, utcnow(), db=db_session) is None
+    s = _session_with_track(db_session, user.id, ttype='easy', begin_ts=utcnow(),
+                            avg_temperature=None, device_summary={"avg_temperature_c": 25.0})
+    computed = upsert_workout_insights(user.id, s.id, db=db_session)
+    assert computed["heat"]["bias_source"] == "default"
+
+
 def test_ensure_baseline_bootstraps_missing_insights(db_session):
     """Прод-кейс 26.08: insights пусты → ensure_baseline досчитывает их по
     steady-сессиям окна и строит линию; повторный вызов — из хранилища."""

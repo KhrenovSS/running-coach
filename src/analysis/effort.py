@@ -21,8 +21,10 @@ from src.config.constants import (
     DRIFT_WARMUP_MIN,
     HEAT_HR_BPM_PER_C,
     HEAT_REF_TEMP_C,
+    COLD_TEMP_THRESHOLD_C,
     HEAT_SHIFT_TEMP_MAX_C,
     HEAT_SHIFT_TEMP_MIN_C,
+    WATCH_HEAT_CONFIRM_MARGIN_C,
     HEAT_TEMP_THRESHOLD_C,
     WATCH_TEMP_BIAS_C,
 )
@@ -196,28 +198,51 @@ def compute_cardiac_drift(times_sec: list[float], dists: list[float],
     }
 
 
-def heat_block(temp_c: int | None, watch_temp_c: float | None = None) -> dict:
-    """Heat-блок: флаг жары по температуре + ожидаемый сдвиг пульса; источник — погода, при её
-    отсутствии датчик часов с поправкой WATCH_TEMP_BIAS_C (#299, temp_source=watch).
+def heat_block(temp_c: int | None, watch_temp_c: float | None = None,
+               watch_bias_c: float | None = None,
+               recent_weather_c: float | None = None) -> dict:
+    """Heat-блок: флаги жары/холода по температуре + ожидаемый сдвиг пульса; источник — погода,
+    при её отсутствии датчик часов с поправкой (#299; #зима 08.09.2026 — адаптивной).
 
+    watch_bias_c — недавняя медиана (часы − погода) этого пользователя (`recent_watch_bias`);
+    None → константа WATCH_TEMP_BIAS_C. recent_weather_c — медиана погоды той же выборки: при
+    источнике watch heat_flag ставится только если она не холоднее порога минус
+    WATCH_HEAT_CONFIRM_MARGIN_C (датчик под куркой жару доказать не может).
+    cold_flag (≤ COLD_TEMP_THRESHOLD_C) — только по погоде: под одеждой мороз часы не покажут.
     expected_hr_shift_bpm — на сколько уд/мин пульс на равном GAP-темпе ожидаемо выше (+)
     или ниже (−) опорной температуры HEAT_REF_TEMP_C (линейно, HEAT_HR_BPM_PER_C на °C;
     исследование 02.09.2026). Температура для сдвига зажата в [HEAT_SHIFT_TEMP_MIN_C,
     HEAT_SHIFT_TEMP_MAX_C] — диапазон исследования; при −20 °C сдвиг тот же, что при +10
-    (мороз пульс на равном темпе не снижает). temp_c в блоке — сырой.
-    Интерпретация — LLM; число уходит в hr_vs_baseline.
-    (Heat flag plus the expected temperature-driven HR shift at equal GAP pace; the
-    temperature is clamped to the studied range — no extrapolation into frost or extreme heat.)
+    (мороз пульс на равном темпе не снижает; пересмотр — #301). temp_c в блоке — сырой.
+    Наблюдаемость для #301: watch_temp_c (сырое показание часов) и watch_minus_weather_c при
+    обоих источниках. Интерпретация — LLM; число уходит в hr_vs_baseline.
+    (Heat/cold flags plus the expected temperature-driven HR shift; adaptive watch-sensor bias
+    with a false-heat guard; the shift is clamped to the studied range — no extrapolation.)
     """
     source = "weather"
-    if temp_c is None and watch_temp_c is not None:
-        # #299: датчик часов греется на солнце/от тела — вычитаем средний сдвиг исследования
-        temp_c = round(float(watch_temp_c) - WATCH_TEMP_BIAS_C)
+    bias_used, bias_source = None, None
+    watch_raw = round(float(watch_temp_c), 1) if watch_temp_c is not None else None
+    minus_weather = (round(watch_raw - temp_c, 1)
+                     if watch_raw is not None and temp_c is not None else None)
+    if temp_c is None and watch_raw is not None:
+        # датчик часов греется на солнце/от тела/под одеждой — вычитаем недавнее расхождение
+        bias_used = float(watch_bias_c) if watch_bias_c is not None else WATCH_TEMP_BIAS_C
+        bias_source = "recent" if watch_bias_c is not None else "default"
+        temp_c = round(watch_raw - bias_used)
         source = "watch"
     if temp_c is None:
-        return {"temp_c": None, "heat_flag": None, "expected_hr_shift_bpm": None,
-                "temp_source": None}
+        return {"temp_c": None, "heat_flag": None, "cold_flag": None,
+                "expected_hr_shift_bpm": None, "temp_source": None,
+                "watch_temp_c": watch_raw, "watch_bias_c": None, "bias_source": None,
+                "watch_minus_weather_c": None}
+    heat_flag = temp_c >= HEAT_TEMP_THRESHOLD_C
+    if source == "watch" and heat_flag and recent_weather_c is not None \
+            and recent_weather_c < HEAT_TEMP_THRESHOLD_C - WATCH_HEAT_CONFIRM_MARGIN_C:
+        heat_flag = False   # недавняя погода холодная — часы под одеждой, не жара
     t = max(HEAT_SHIFT_TEMP_MIN_C, min(HEAT_SHIFT_TEMP_MAX_C, temp_c))
-    return {"temp_c": temp_c, "heat_flag": temp_c >= HEAT_TEMP_THRESHOLD_C,
+    return {"temp_c": temp_c, "heat_flag": heat_flag,
+            "cold_flag": source == "weather" and temp_c <= COLD_TEMP_THRESHOLD_C,
             "expected_hr_shift_bpm": round(HEAT_HR_BPM_PER_C * (t - HEAT_REF_TEMP_C)),
-            "temp_source": source}
+            "temp_source": source,
+            "watch_temp_c": watch_raw, "watch_bias_c": bias_used, "bias_source": bias_source,
+            "watch_minus_weather_c": minus_weather}

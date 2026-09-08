@@ -1,5 +1,6 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import httpx
+from src.config.constants import WEATHER_API_URL
 from src.utils.logger import get_logger
 
 logger = get_logger("parsers.weather")
@@ -27,7 +28,7 @@ def fetch_weather(lat, lon, date):
     key = (round(lat, 2), round(lon, 2), date)
     if key in _weather_cache:
         return _weather_cache[key]
-    url = "https://archive-api.open-meteo.com/v1/archive"
+    url = WEATHER_API_URL
     params = {
         "latitude": lat, "longitude": lon,
         "start_date": date, "end_date": date,
@@ -53,6 +54,16 @@ def fetch_weather(lat, lon, date):
     return None
 
 
+def _epoch(t: str) -> float:
+    """Часовая метка Open-Meteo (`timezone=UTC`, naive ISO) → epoch. Без явного UTC naive-строка
+    трактовалась бы в поясе хоста — на не-UTC хосте все выборки сдвигались бы на его offset
+    (в контейнере UTC не проявлялось; найдено 08.09.2026). (Parse the naive UTC stamp as UTC.)"""
+    dt = datetime.fromisoformat(t)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
 def _get_nearest(weather, dt_local, key, cast=None):
     """Найти ближайшее по времени значение в погодных данных (Find nearest value in weather data)"""
     if not weather:
@@ -64,8 +75,7 @@ def _get_nearest(weather, dt_local, key, cast=None):
     for t, val in zip(weather["times"], values):
         if val is None:
             continue
-        t_dt = datetime.fromisoformat(t)
-        diff = abs(t_dt.timestamp() - target_ts)
+        diff = abs(_epoch(t) - target_ts)
         if diff < best_diff:
             best_diff = diff
             best = int(val) if cast == int else round(val)
@@ -92,7 +102,7 @@ def get_avg_temp_between(weather, start_local, end_local):
     for t, val in zip(weather["times"], weather.get("temps", [])):
         if val is None:
             continue
-        ts = datetime.fromisoformat(t).timestamp()
+        ts = _epoch(t)
         if lo <= ts <= hi:
             vals.append(float(val))
     if not vals:
