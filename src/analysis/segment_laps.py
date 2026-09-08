@@ -17,6 +17,7 @@ from src.analysis.hr_zones import get_band, get_zone
 from src.analysis.intervals import structural_laps
 from src.analysis.segment_km import _build_segment_stats
 from src.analysis.utils import format_duration, format_pace
+from src.config.constants import LAP_PACE_SANITY_MAX_MIN_KM, LAP_PACE_SANITY_MIN_MIN_KM
 
 LAP_SEGMENTS_MIN = 3   # меньше окон на треке → лапы не используем (прежний путь)
 
@@ -129,13 +130,16 @@ def lap_segments(laps: list[dict] | None, trackpoints: list[dict], max_hr: int,
         avg_hr = stats.get("avg_hr") or summary.get("avg_hr") or lap.get("avg_hr")
         dur_min = timer_s / 60.0
         pace = dur_min / (dist_m / 1000.0)
+        # Санити: темп лапа вне [3:00, 15:00] → дистанция часов мусорная (GPS-сбой) — оставляем
+        # время и пульс, дистанцию/темп не выдумываем (implausible lap pace → no distance/pace)
+        dist_ok = LAP_PACE_SANITY_MIN_MIN_KM <= pace <= LAP_PACE_SANITY_MAX_MIN_KM
         seg = {
             "duration_min": round(dur_min, 1),
             "duration": format_duration(dur_min),
-            "distance_km": round(dist_m / 1000.0, 2),      # 2 dp: ускорение 62 м = 0.06, не 0.1
+            "distance_km": round(dist_m / 1000.0, 2) if dist_ok else None,   # 2 dp: 62 м = 0.06
             "avg_hr": avg_hr,
-            "pace": format_pace(pace),
-            "pace_min_km": round(pace, 2),
+            "pace": format_pace(pace) if dist_ok else None,
+            "pace_min_km": round(pace, 2) if dist_ok else None,
             "avg_cadence": stats.get("avg_cadence") or summary.get("avg_cadence") or lap.get("avg_cadence"),
             "zone": get_zone(avg_hr, max_hr, lthr) if avg_hr else None,
             "band": get_band(avg_hr, max_hr, lthr) if avg_hr else None,
@@ -144,6 +148,8 @@ def lap_segments(laps: list[dict] | None, trackpoints: list[dict], max_hr: int,
             "source": "laps",
             "lap": i + 1,
         }
+        if not dist_ok:
+            seg["distance_unreliable"] = True
         if lap.get("intensity"):
             seg["intensity"] = lap["intensity"]
         segments.append(seg)

@@ -69,7 +69,8 @@ async def session_detail(request: Request, session_id: int, db: Session = Depend
         seg_el = str(el) if el is not None else "—"
         cad_seg = seg.get('avg_cadence')
         cad_seg_str = str(cad_seg) if cad_seg is not None else "—"
-        seg_rows += f"<tr class='{cls}'><td>{i}</td><td>Z{zone}</td><td>{dur}</td><td>{seg['distance_km']}</td><td>{seg['avg_hr']}</td><td>{cad_seg_str}</td><td>{pace}</td><td>{seg_eg}</td><td>{seg_el}</td></tr>"
+        dist_str = seg.get('distance_km') if seg.get('distance_km') is not None else "—"   # #302: лап без дистанции
+        seg_rows += f"<tr class='{cls}'><td>{i}</td><td>Z{zone}</td><td>{dur}</td><td>{dist_str}</td><td>{seg.get('avg_hr') or '—'}</td><td>{cad_seg_str}</td><td>{pace}</td><td>{seg_eg}</td><td>{seg_el}</td></tr>"
 
     eg_total = s.elevation_gain or 0
     el_total = s.elevation_loss or 0

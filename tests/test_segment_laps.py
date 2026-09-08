@@ -87,3 +87,16 @@ def test_lap_row_carries_end_time_and_provenance():
     assert row["end_time"].startswith("2026-09-01T13:04:56")
     assert row["trigger"] == "manual" and row["intensity"] == "warmup" and row["wkt_step_index"] == 0
     assert _lap_row({"total_distance": 1000.0}).get("trigger") is None
+
+
+def test_implausible_lap_pace_drops_distance_but_keeps_time_and_hr():
+    """GPS-сбой 01.09: часы насчитали в лапе 12.5 км за 25 мин (2:00/км) — дистанция/темп сегмента
+    не выдумываются (None, distance_unreliable), время и пульс остаются; остальные лапы обычные."""
+    meta = [(1500, 12504), (18, 62), (120, 280), (18, 62), (120, 280)]
+    tps = _track(minutes=sum(d for d, _ in meta) / 60 + 1)
+    segs = lap_segments(build_laps(meta), tps, max_hr=180)
+    assert segs is not None and len(segs) == 5
+    bad = segs[0]
+    assert bad["distance_km"] is None and bad["pace"] is None and bad["pace_min_km"] is None
+    assert bad["distance_unreliable"] is True and bad["duration_min"] == 25.0 and bad["avg_hr"] == 140
+    assert segs[1]["distance_km"] == 0.06 and "distance_unreliable" not in segs[1]

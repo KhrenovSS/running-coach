@@ -19,6 +19,9 @@ All notable changes to this project are tracked here.
 - `computed.inputs.segmentation_source` (laps|pace); `history_tools.MAX_SEGMENTS` 20 → 32.
 - Тесты `tests/test_segment_laps.py`, `tests/test_reanalyze_laps.py`. METRICS_GUIDE §3 — строка «Сегменты».
   BACKLOG: #302 ✅ (переформулирован), новый #327 (live-путь парсера не передаёт `interval_*` пользователя).
+- Санити темпа лапа (`LAP_PACE_SANITY_MIN/MAX_MIN_KM` 3:00–15:00): вне диапазона дистанция часов мусорная
+  (GPS-сбой 01.09: 12.5 км за 25 мин) → `distance_km`/`pace` None, `distance_unreliable`, время и пульс
+  остаются; web-строка сегмента None-безопасна.
 - Прод: тренировка 01.09 после reanalyze — 16 сегментов вместо 5 км-блоков.
 
 ## [08.09.2026] — Набор/спуск высоты с гистерезисом, как у часов (#253)
