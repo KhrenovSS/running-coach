@@ -58,7 +58,7 @@
 | Метрика | Где | Выход |
 |---|---|---|
 | Aerobic decoupling (Pa:HR, GAP-корректированный) | `analysis/effort.py::compute_cardiac_drift` | `drift{drift_pct, flag}` → флаги `decoupling_high/moderate` |
-| Темп↔HR против личной нормы | `analysis/hr_baseline.py::hr_vs_baseline` (OLS HR↔GAP, окно 120 дн) | `hr_vs_baseline{expected_hr, delta_bpm, z}` → `hr_above/below_baseline` |
+| Темп↔HR против личной нормы | `analysis/hr_baseline.py` — baseline v2 (#259, 08.09.2026): pooled OLS HR↔GAP по км-точкам steady-тренировок окна 120 дн, HR с вычтенным температурным сдвигом сессии (линия — при `HEAT_REF_TEMP_C`, сдвиг дня прибавляется один раз); σ для z — СКО сессионных остатков (`sigma_bpm`), не км-RMSE; наклон вне `[−15, −4]` → прайор −8 (`method=prior`). Замер на проде (35 сессий, `bin/research_hr_baseline_slope.py`): pooled −7.97 (bootstrap-CI −12.8…−4.6), сессионные средние −8.41, within-session −7.92, Deming δ=400 −9.8 — attenuation из #259 ушла с исключением хвостовых км (#283); прежняя линия завышала ожидание на ~2.4 уд/мин (интерсепт без темп. поправки). Калибровка: σ 3.4 уд/мин → `BASELINE_Z_FLAG` 2.0 (≈ 7 уд/мин; при 1.5 флаговалась бы каждая пятая пробежка), `RPE_BASELINE_Z_MAX` 1.5 (≈ 5 уд/мин, как прежде) | `hr_vs_baseline{expected_hr, delta_bpm, z, sigma_bpm, temp_shift_bpm, detraining_shift_bpm}` → `hr_above/below_baseline` |
 | GAP по-км (рельеф) | `analysis/gap.py` — Minetti 2002, на спусках фактор не ниже `GAP_FACTOR_MIN` 0.88 (#298, 07.09.2026: остаточный эффект уклона поверх GAP положительный, минимум HR-модели Strava 0.88 при −9 %; на маршрутах владельца км-GAP не меняется, посэмпловый средний фактор +0.3–0.9 %) | `gap.per_km[]` |
 | Жара | `heat_block` | `heat{temp_c, heat_flag, expected_hr_shift_bpm, temp_source}` — t: для тренировок ≥ `WEATHER_AVG_MIN_DURATION_MIN` (60) среднее часовых Open-Meteo за интервал бега (#300), иначе значение на старте; нет погоды → датчик часов минус `WATCH_TEMP_BIAS_C` (3.3 °C, `temp_source=watch`, #299); сдвиг `HEAT_HR_BPM_PER_C·(t−HEAT_REF_TEMP_C)` входит в ожидание `hr_vs_baseline` (`temp_shift_bpm`); t зажата в 10–30 °C (диапазон данных, мороз ≠ −18 уд/мин); исследование 02.09.2026: +0.5 уд/мин/°C, ~7 уд/мин между <16 и ≥24 °C на равном GAP-темпе |
 | Время в HR-зонах (посекундно из `computed_json`; сегментное приближение — fallback, F0/#281) | `history_tools.py::get_workout_detail` | `zone_minutes`, `band_minutes` |
@@ -245,7 +245,7 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
 | `hard_days_too_close` (M4.1) | ✅ правило 12 p1_safety: `earliest_next_hard` ≥ +1–2 дня |
 | `post_race_recovery_violated` (M4.1) | ✅ правило 13 p1_safety: `max_zone=2` + запрет hard на период 1 день/3 км |
 | `downhill_load_high` (M4.2) | ✅ правило 19 p1_safety `downhill_load`: `max_zone=3`, интенсив не раньше +24 ч (колено) — 04.09.2026 |
-| `detraining_expected` (M4.3) | 🟡 правило 14 (max_zone=2 + запрет hard) + потолок объёма плана ≤ 65% пика после паузы ≥ 14 дн (`detraining_return`, 04.09.2026); поправка ожиданий `hr_vs_baseline` — ⬜ #289 |
+| `detraining_expected` (M4.3) | ✅ правило 14 (max_zone=2 + запрет hard) + потолок объёма плана ≤ 65% пика после паузы ≥ 14 дн (`detraining_return`, 04.09.2026); поправка ожиданий `hr_vs_baseline` — `detraining_shift_bpm` (#289, 08.09.2026, см. M4.3) |
 
 Правило: **ограничения проходят через `evaluate_safety`/`clamp` — LLM может
 только сказать мягче, но не мягче границ.** Это уже инвариант проекта; новые
@@ -342,6 +342,15 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
   объёма — ⬜ потолок объёма не реализован, правило 14 режет зону/типы (guide 46).
 - Выход: поправка ожиданий для `hr_vs_baseline` (не ругать «замедлился» после отпуска)
   + потолок объёма на возврате. **Флаг**: `detraining_expected`.
+- ✅ Поправка ожиданий (#289, 08.09.2026): `detraining()` ищет последнюю паузу ≥ 6 дн в
+  `DETRAINING_LOOKBACK_DAYS` (90) датах тренировок (не в 15-дневных briefs) и, пока после возврата
+  прошло меньше длины паузы (восстановление ≈ длине паузы, гайд 61), несёт `pause_days`,
+  `days_since_return`, `return_progress`, `expected_vdot_drop_pct` (кап `DETRAINING_VDOT_DROP_MAX_PCT`
+  20 %, гайд 46). `hr_baseline.detraining_hr_shift` = |b| · средний GAP-темп · drop % · (1 − progress):
+  потеря VDOT переводится в эквивалент темпа и далее в пульс наклоном линии; 14 дн паузы на 6:00/км ≈
+  +1 уд/мин, 6 недель ≈ +5. Сдвиг входит в ожидание `hr_vs_baseline` рядом с `temp_shift_bpm`
+  (`detraining_shift_bpm` в блоке, промпт разбора знает), гаснет линейно за длину паузы. Флаг
+  `detraining_expected` — по-прежнему только у первой тренировки после паузы.
 
 ### M4.4 Session-RPE и индекс самооценки (F6)
 - **Session-RPE = RPE × минуты** (Фостер; `fitzgerald/_raw_notes.md:201`) — шкала нагрузки,

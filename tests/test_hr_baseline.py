@@ -8,7 +8,14 @@ from src.analysis.hr_baseline import (
     km_points,
     pace_at_hr_band,
 )
-from src.config.constants import BASELINE_MIN_POINTS, BASELINE_MIN_SESSIONS
+from src.analysis.hr_baseline import BASELINE_VERSION, detraining_hr_shift
+from src.config.constants import (
+    BASELINE_HR_PACE_SLOPE_DEFAULT,
+    BASELINE_MIN_POINTS,
+    BASELINE_MIN_SESSIONS,
+    BASELINE_Z_FLAG,
+    DETRAINING_VDOT_DROP_MAX_PCT,
+)
 
 
 def _points_by_law(n: int, a: float = 190.0, b: float = -8.0):
@@ -21,39 +28,130 @@ def _points_by_law(n: int, a: float = 190.0, b: float = -8.0):
     return points
 
 
+def _sessions_by_law(n_sessions: int, per_session: int = 8, a: float = 190.0, b: float = -8.0,
+                     session_shift: float = 0.0):
+    """Сессии по закону HR = a + b·pace: у каждой свой средний темп, свой «день»
+    (session_shift·(−1)^i — межсессионный сдвиг условий), внутри — шум ±2."""
+    sessions = []
+    for i in range(n_sessions):
+        base = 5.5 + (i % 6) * 0.25
+        day = session_shift * (1 if i % 2 else -1)
+        pts = [(base + (k % 4) * 0.1, a + b * (base + (k % 4) * 0.1) + (((i + k) * 7) % 5) - 2 + day)
+               for k in range(per_session)]
+        sessions.append(pts)
+    return sessions
+
+
 def test_fit_recovers_slope():
-    """OLS восстанавливает наклон закона (±15%)."""
-    baseline = fit_hr_pace_baseline(_points_by_law(60), n_sessions=8)
+    """OLS восстанавливает наклон закона (±15%); σ — сессионная, метод ols, версия 2."""
+    baseline = fit_hr_pace_baseline(_sessions_by_law(8))
     assert baseline is not None
     assert abs(baseline["b"] - (-8.0)) / 8.0 < 0.15
     assert baseline["rmse_bpm"] < 3.0
-    assert baseline["n_points"] == 60
+    assert baseline["sigma_bpm"] <= baseline["rmse_bpm"]   # средние сессий шумят меньше км-точек
+    assert baseline["n_points"] == 64 and baseline["n_sessions"] == 8
+    assert baseline["method"] == "ols" and baseline["version"] == BASELINE_VERSION == 2
+
+
+def test_fit_temperature_corrected_intercept():
+    """#259: HR сессий с вычтенным температурным сдвигом — линия «при опорной температуре»:
+    все сессии в жару (+6) → интерсепт как у закона, не +6; deviation в жару даёт delta ≈ 0."""
+    sessions = _sessions_by_law(8)
+    hot = [[(p, h + 6) for p, h in pts] for pts in sessions]
+    plain = fit_hr_pace_baseline(sessions)
+    corrected = fit_hr_pace_baseline(hot, temp_shifts=[6] * 8)
+    assert abs(corrected["a"] - plain["a"]) < 0.5
+    assert abs(corrected["b"] - plain["b"]) < 0.1
+    uncorrected = fit_hr_pace_baseline(hot)                   # без сдвигов → линия выше на 6
+    assert abs(uncorrected["a"] - plain["a"] - 6) < 0.5
+    per_km = [{"km": k, "gap_min_km": 6.0, "avg_hr": 190 - 48 + 6} for k in range(1, 8)]
+    dev = baseline_deviation(corrected, per_km, temp_shift_bpm=6)
+    assert abs(dev["delta_bpm"]) < 1.5
+
+
+def test_fit_session_sigma_reflects_day_to_day_spread():
+    """σ для z — разброс сессионных средних вокруг линии: межсессионный сдвиг ±4
+    (условия дня) даёт σ ≈ 4, хотя внутри сессии шум тот же."""
+    calm = fit_hr_pace_baseline(_sessions_by_law(10))
+    swingy = fit_hr_pace_baseline(_sessions_by_law(10, session_shift=4.0))
+    assert calm["sigma_bpm"] < 2.0
+    assert 3.0 <= swingy["sigma_bpm"] <= 5.0
 
 
 def test_too_few_points_or_sessions_no_baseline():
     """Мало точек или сессий → None (никакой ложной точности)."""
-    assert fit_hr_pace_baseline(_points_by_law(BASELINE_MIN_POINTS - 1),
-                                n_sessions=10) is None
-    assert fit_hr_pace_baseline(_points_by_law(60),
-                                n_sessions=BASELINE_MIN_SESSIONS - 1) is None
+    assert fit_hr_pace_baseline(_sessions_by_law(10, per_session=2)) is None   # 20 < 30 точек
+    assert fit_hr_pace_baseline(_sessions_by_law(BASELINE_MIN_SESSIONS - 1, per_session=10)) is None
+    assert BASELINE_MIN_POINTS == 30
 
 
-def test_degenerate_positive_slope_rejected():
-    """Положительный наклон (быстрее → ниже пульс?!) → вырожденный фит → None."""
-    points = [(5.0 + i * 0.05, 120 + i) for i in range(40)]  # HR растёт с pace
-    assert fit_hr_pace_baseline(points, n_sessions=10) is None
+def test_degenerate_or_attenuated_slope_falls_back_to_prior():
+    """Наклон вне санити [−15, −4] (положительный или занижённый — ловушка #259) →
+    прайор −8 (method=prior), интерсепт через среднюю точку данных; None не возвращаем."""
+    rising = [[(5.0 + (i * 8 + k) * 0.05, 120 + i * 8 + k) for k in range(8)] for i in range(5)]
+    baseline = fit_hr_pace_baseline(rising)
+    assert baseline is not None and baseline["method"] == "prior"
+    assert baseline["b"] == BASELINE_HR_PACE_SLOPE_DEFAULT
+    flat = fit_hr_pace_baseline(_sessions_by_law(8, a=150.0, b=-2.0))
+    assert flat["method"] == "prior" and flat["b"] == -8.0
+    mean_pace = sum(p for pts in _sessions_by_law(8) for p, _ in pts) / 64
+    assert abs((flat["a"] + flat["b"] * mean_pace) - (150 - 2 * mean_pace)) < 1.0
 
 
 def test_deviation_measures_delta():
-    """Сегодняшний HR +10 к закону → delta_bpm ≈ 10, z положительный."""
-    baseline = fit_hr_pace_baseline(_points_by_law(60), n_sessions=8)
+    """Сегодняшний HR +10 к закону → delta_bpm ≈ 10, z по сессионной σ, флаг при |z| ≥ порога."""
+    baseline = fit_hr_pace_baseline(_sessions_by_law(8))
     per_km = [{"km": i + 1, "gap_min_km": 6.0, "avg_hr": 190 - 8 * 6.0 + 10}
               for i in range(6)]
     dev = baseline_deviation(baseline, per_km)
     assert dev["available"] is True
     assert abs(dev["delta_bpm"] - 10.0) < 1.5
-    assert dev["z"] > 0
+    assert dev["sigma_bpm"] == baseline["sigma_bpm"]
+    assert abs(dev["z"] - dev["delta_bpm"] / baseline["sigma_bpm"]) < 0.5
+    assert dev["z"] >= BASELINE_Z_FLAG
     assert deviation_flag(dev) == "hr_above_baseline"
+
+
+def test_deviation_v1_baseline_uses_rmse_as_sigma():
+    """Совместимость: у v1-линии нет sigma_bpm → z по rmse_bpm."""
+    v1 = {"a": 190.0, "b": -8.0, "rmse_bpm": 5.0, "n_sessions": 6, "version": 1}
+    per_km = [{"km": k, "gap_min_km": 6.0, "avg_hr": 152} for k in range(1, 5)]  # закон 142 → +10
+    dev = baseline_deviation(v1, per_km)
+    assert dev["sigma_bpm"] == 5.0 and dev["z"] == 2.0
+
+
+def test_detraining_shift_enters_expectation():
+    """#289: после паузы ожидание выше на detraining_shift_bpm — тот же HR не даёт hr_above."""
+    baseline = {"a": 190.0, "b": -8.0, "sigma_bpm": 3.0, "n_sessions": 6, "version": 2}
+    per_km = [{"km": k, "gap_min_km": 6.0, "avg_hr": 149} for k in range(1, 6)]   # закон 142 → +7
+    plain = baseline_deviation(baseline, per_km)
+    assert deviation_flag(plain) == "hr_above_baseline"
+    after_pause = baseline_deviation(baseline, per_km, detraining_shift_bpm=5)
+    assert after_pause["expected_hr"] == 147.0 and after_pause["detraining_shift_bpm"] == 5
+    assert deviation_flag(after_pause) is None
+    assert plain["detraining_shift_bpm"] == 0
+
+
+def test_detraining_hr_shift_formula_and_gates():
+    """Сдвиг = |b|·темп·drop%·(1 − progress), кап 20 % VDOT; без паузы/линии/точек → None."""
+    baseline = {"a": 190.0, "b": -8.0, "sigma_bpm": 3.0}
+    per_km = [{"km": k, "gap_min_km": 6.0, "avg_hr": 140} for k in range(1, 6)]
+    # 6 недель паузы: (42−5)·0.3 = 11.1 % → 8·6·0.111 ≈ 5.3 → 5
+    six_weeks = {"available": True, "days_off": 42, "flag": True,
+                 "expected_vdot_drop_pct": 11.1, "return_progress": 0.0}
+    assert detraining_hr_shift(six_weeks, per_km, baseline) == 5
+    # затухание: половина возврата → половина сдвига
+    half = dict(six_weeks, return_progress=0.5)
+    assert detraining_hr_shift(half, per_km, baseline) == 3
+    assert detraining_hr_shift(dict(six_weeks, return_progress=1.0), per_km, baseline) is None
+    # кап: 40 % «потери» считается как 20 %
+    capped = dict(six_weeks, expected_vdot_drop_pct=40.0)
+    assert detraining_hr_shift(capped, per_km, baseline) == round(8 * 6 * DETRAINING_VDOT_DROP_MAX_PCT / 100)
+    # гейты
+    assert detraining_hr_shift({"available": True, "days_off": 2, "flag": False}, per_km, baseline) is None
+    assert detraining_hr_shift(six_weeks, per_km, None) is None
+    assert detraining_hr_shift(six_weeks, [], baseline) is None
+    assert detraining_hr_shift(None, per_km, baseline) is None
 
 
 def test_no_baseline_deviation_absent():

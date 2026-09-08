@@ -12,6 +12,7 @@ from math import ceil
 
 from src.config.constants import (
     DETRAINING_MIN_DAYS_OFF,
+    DETRAINING_VDOT_DROP_MAX_PCT,
     QUALITY_TEMPO_MIN_LTHR_PCT,
     QUALITY_TEMPO_MIN_MAXHR_PCT,
     DETRAINING_VDOT_PCT_PER_DAY,
@@ -107,19 +108,42 @@ def week_structure(history: list[dict], session_date: date | None,
 def detraining(history: list[dict], session_date: date | None) -> dict:
     """M4.3: пауза перед этой тренировкой. До 5 дней форма не теряется (гайд 46);
     дальше — ожидания вниз (~VDOT-декай), объём возврата ограничивает safety.
-    (Detraining: layoff before this session; expectations drop past 5 days off.)"""
+
+    #289: если в истории есть пауза ≥ DETRAINING_MIN_DAYS_OFF и возврат после неё ещё не
+    отработан (прошло меньше длины паузы — восстановление ≈ длине паузы, гайд 61), блок несёт
+    контекст возврата: pause_days, days_since_return, return_progress (0 — первая тренировка
+    после паузы, 1 — форма условно вернулась) и expected_vdot_drop_pct паузы. Флаг —
+    только у первой тренировки после паузы (days_off ≥ порога), как раньше.
+    (Detraining: layoff before this session; return context while fitness is still coming back.)"""
     if session_date is None:
         return {"available": False, "reason": "no_date"}
-    prev = [row["date"] for row in history
-            if row.get("date") is not None and row["date"] < session_date]
+    prev = sorted({row["date"] for row in history
+                   if row.get("date") is not None and row["date"] < session_date})
     if not prev:
         return {"available": False, "reason": "no_history"}
-    days_off = (session_date - max(prev)).days
+    days_off = (session_date - prev[-1]).days
     flag = days_off >= DETRAINING_MIN_DAYS_OFF
     out = {"available": True, "days_off": days_off, "flag": flag}
-    if flag:
+    # Последняя пауза в окне: разрывы между соседними датами (сегодняшняя — последняя)
+    seq = prev + [session_date]
+    pause_days, return_date = None, None
+    for earlier, later in zip(seq, seq[1:]):
+        gap = (later - earlier).days
+        if gap >= DETRAINING_MIN_DAYS_OFF:
+            pause_days, return_date = gap, later
+    if pause_days is None:
+        return out
+    days_since_return = (session_date - return_date).days
+    if days_since_return >= pause_days:
+        return out  # возврат отработан — ожидания обычные
+    out.update({
+        "pause_days": pause_days,
+        "days_since_return": days_since_return,
+        "return_progress": round(days_since_return / pause_days, 2),
         # Ожидаемое падение формы — поправка ожиданий, не приговор
         # (expected fitness drop — adjusts expectations, not a verdict)
-        out["expected_vdot_drop_pct"] = round(
-            (days_off - (DETRAINING_MIN_DAYS_OFF - 1)) * DETRAINING_VDOT_PCT_PER_DAY, 1)
+        "expected_vdot_drop_pct": round(min(
+            (pause_days - (DETRAINING_MIN_DAYS_OFF - 1)) * DETRAINING_VDOT_PCT_PER_DAY,
+            DETRAINING_VDOT_DROP_MAX_PCT), 1),
+    })
     return out

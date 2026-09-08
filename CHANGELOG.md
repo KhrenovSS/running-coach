@@ -2,6 +2,35 @@
 
 All notable changes to this project are tracked here.
 
+## [08.09.2026] — Базовая линия HR↔GAP v2 (#259) и поправка ожиданий пульса после паузы (#289)
+
+### Changed
+- **#259** — замер на проде (`bin/research_hr_baseline_slope.py`, read-only, 35 steady-сессий):
+  pooled OLS уже даёт −7.97 уд/мин за мин/км (эмпирика владельца −8) — attenuation ушла с
+  исключением хвостовых км (#283); сессионные средние −8.41, within-session −7.92, Deming −8.4…−9.8,
+  всё в пределах bootstrap-CI −12.8…−4.6. Оценщик не меняется; исправлено то, что замер показал:
+  `fit_hr_pace_baseline` принимает км-точки по сессиям с `heat.expected_hr_shift_bpm` и фитит HR
+  без температурного сдвига (прежняя линия завышала ожидание на ~2.4 уд/мин, deviation прибавляла
+  сдвиг дня второй раз); σ для z — СКО сессионных остатков `sigma_bpm` (3.4 вместо км-RMSE 5.5 —
+  deviation сравнивает средние сессии); наклон вне `[−15, −4]` → прайор −8 (`method=prior`) вместо
+  None. `BASELINE_VERSION` 2: сохранённая v1-линия пересчитывается при чтении (`stored_baseline`).
+  Калибровка порогов под новую σ: `BASELINE_Z_FLAG` 1.5 → 2.0 (≈ 7 уд/мин; при 1.5 флаговалась бы
+  каждая пятая пробежка), `RPE_BASELINE_Z_MAX` 1.0 → 1.5 (гейт RPE остаётся ≈ 5 уд/мин).
+- **#289** — `week_structure.detraining` ищет последнюю паузу ≥ 6 дн в датах тренировок за
+  `DETRAINING_LOOKBACK_DAYS` (90; `workout_insights._session_dates`, а не 15-дневные briefs) и пока
+  после возврата прошло меньше длины паузы несёт `pause_days`/`days_since_return`/`return_progress`/
+  `expected_vdot_drop_pct` (кап `DETRAINING_VDOT_DROP_MAX_PCT` 20 %). `hr_baseline.detraining_hr_shift`:
+  |b| · средний GAP-темп · drop % · (1 − progress) → `detraining_shift_bpm` в ожидании
+  `hr_vs_baseline` рядом с `temp_shift_bpm` (14 дн паузы на 6:00/км ≈ +1 уд/мин, 6 недель ≈ +5);
+  detraining считается до deviation; REVIEW_PROMPT знает о поправке. Флаг `detraining_expected` —
+  по-прежнему у первой тренировки после паузы; «экономичность» недельного отчёта получает
+  исправленный `delta_bpm` автоматически.
+- `INSIGHTS_SCHEMA_VERSION` 8 → 9 — `hr_vs_baseline`/`detraining` истории пересчитываются лениво.
+- Тесты: `test_hr_baseline.py` (темп. интерсепт, сессионная σ, прайор, v1-совместимость,
+  формула сдвига), `test_week_structure.py` (контекст возврата, кап), `test_workout_insights.py`
+  (v1 → v2 при чтении, та же пробежка после 4 недель паузы не флагуется `hr_above_baseline`).
+  Доки: METRICS_GUIDE §3/§7/§M4.3; BACKLOG #259/#289 закрыты, счётчик номеров → #324.
+
 ## [07.09.2026] — Шаг с часов при GPS-сбое (#275) и сверка прозы плана с картой (#316)
 
 ### Changed

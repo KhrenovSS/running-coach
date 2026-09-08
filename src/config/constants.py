@@ -60,6 +60,8 @@ QUALITY_MIN_GAP_DAYS: Final[int] = 2         # следующий качеств
 POST_RACE_KM_PER_EASY_DAY: Final[float] = 3.0  # 1 лёгкий день на каждые 3 км гонки (гайд 45)
 DETRAINING_MIN_DAYS_OFF: Final[int] = 6      # до 5 дней паузы форма не теряется (гайд 46)
 DETRAINING_VDOT_PCT_PER_DAY: Final[float] = 0.3  # ~-11% за 6 недель простоя → ≈0.3%/день после 5-го
+DETRAINING_VDOT_DROP_MAX_PCT: Final[float] = 20.0  # максимум потери формы ~20% к 10-й неделе (гайд 46)
+DETRAINING_LOOKBACK_DAYS: Final[int] = 90    # окно дат тренировок для поиска последней паузы (#289)
 # Downhill-нагрузка на колено (гайд 46). Пороги от эмпирики истории владельца 01.09.2026:
 # медиана доли спусков >3% — 7.9%, максимум — 12.7% → флаг заметно выше типичного рельефа
 DOWNHILL_GRADE: Final[float] = -0.03         # уклон круче → ударный спуск
@@ -203,12 +205,15 @@ GAP_MIN_ALT_COVERAGE: Final[float] = 0.8     # доля точек с высот
 GAP_FACTOR_MIN: Final[float] = 0.88
 HILLY_GAIN_M_PER_KM: Final[float] = 10.0     # набор на км выше → «холмистая» (hilly threshold)
 
-# Персональная базовая линия HR↔GAP-темп (personal HR↔pace baseline, OLS)
+# Персональная базовая линия HR↔GAP-темп (personal HR↔pace baseline, OLS по км-точкам,
+# HR с вычтенным температурным сдвигом; σ — по сессионным остаткам, #259 08.09.2026)
 BASELINE_WINDOW_DAYS: Final[int] = 120       # окно истории (history window)
 BASELINE_MIN_POINTS: Final[int] = 30         # минимум км-точек для регрессии (min km-points)
 BASELINE_MIN_SESSIONS: Final[int] = 5        # минимум сессий (min sessions)
 BASELINE_SKIP_FIRST_KM: Final[int] = 1       # первый км исключён: разогрев + колено (skip warmup km)
-BASELINE_Z_FLAG: Final[float] = 1.5          # |z| выше → флаг hr_above/below_baseline (z-flag threshold)
+# |z| выше → флаг hr_above/below_baseline. Калибровка 08.09.2026 (#259, 35 сессий прода):
+# σ сессионных остатков 3.4 уд/мин → порог 2.0 ≈ 7 уд/мин (1.5 флаговало бы каждую пятую пробежку)
+BASELINE_Z_FLAG: Final[float] = 2.0
 BASELINE_TYPES: Final[tuple] = ("easy", "long", "recovery")  # steady-типы для регрессии (steady types)
 BASELINE_PACE_PREDICT_MIN: Final[float] = 3.5   # прогноз темпа быстрее → None (prediction sanity floor, min/km)
 BASELINE_PACE_PREDICT_MAX: Final[float] = 12.0  # прогноз темпа медленнее → None (prediction sanity ceiling)
@@ -221,8 +226,10 @@ BASELINE_HR_PREDICT_MAX: Final[int] = 200       # прогноз пульса в
 # локальный наклон) → C (типичный темп типа) — только для СПРАВОЧНОГО ориентира, не для safety
 BASELINE_PACE_WIDE_BAND_BPM: Final[int] = 25      # двусторонняя полоса уровня B
 BASELINE_PACE_ADJUST_MAX_BPM: Final[int] = 15     # предохранитель экстраполяции (~1.9 мин/км)
-BASELINE_HR_PACE_SLOPE_DEFAULT: Final[float] = -8.0   # bpm за мин/км (эмпирика владельца)
-BASELINE_HR_PACE_SLOPE_MIN: Final[float] = -15.0      # санити локального OLS
+# bpm за мин/км: эмпирика владельца, подтверждена замером 08.09.2026 (pooled OLS −7.97,
+# bootstrap-CI −12.8…−4.6; `bin/research_hr_baseline_slope.py`); прайор при провале санити-гейта
+BASELINE_HR_PACE_SLOPE_DEFAULT: Final[float] = -8.0
+BASELINE_HR_PACE_SLOPE_MIN: Final[float] = -15.0      # санити наклона (глобального и локального OLS)
 BASELINE_HR_PACE_SLOPE_MAX: Final[float] = -4.0
 BASELINE_TYPICAL_MIN_SESSIONS: Final[int] = 3     # минимум сессий для медианы avg_pace
 # #263: км-точки темповых тоже идут в полосы «темп на пульсе / пульс на темпе» (не в OLS-базу)

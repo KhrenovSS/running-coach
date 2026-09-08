@@ -18,7 +18,7 @@ from src.analysis.hr_zones import lthr_valid, zone_ceiling_hr
 from src.analysis.week_structure import detraining, week_structure
 from src.analysis.intervals import interval_recovery
 from src.analysis.gap import compute_gap, downhill_block, local_grade_factors, smooth_altitudes
-from src.analysis.hr_baseline import baseline_deviation
+from src.analysis.hr_baseline import baseline_deviation, detraining_hr_shift
 from src.coach.config import (
     CADENCE_LOW_SPM,
     CADENCE_SANITY_MIN_SPM,
@@ -43,7 +43,7 @@ from src.coach.config import (
 )
 from src.coach.util import effective_training_type
 from src.config import settings
-from src.config.constants import BASELINE_TYPES, DRIFT_MAX_PACE_CV
+from src.config.constants import BASELINE_TYPES, DETRAINING_LOOKBACK_DAYS, DRIFT_MAX_PACE_CV
 from src.models import TrainingSession, User
 from src.services.repositories import FeedbackRepository, TrainingRepository
 from src.services.insights_baseline import (  # noqa: F401 — реэкспорт для потребителей
@@ -58,8 +58,10 @@ from src.utils.logger import get_logger
 
 logger = get_logger("services.workout_insights")
 
-INSIGHTS_SCHEMA_VERSION = 8  # версия computed_json (v5 — F0; v6 — F3 HRR; v7 — F5/F6: week_structure/downhill/detraining/session_rpe;
-                             # v8 — 07.09.2026: пол GAP-фактора на спусках #298, heat.temp_source #299 — история пересчитывается лениво)
+INSIGHTS_SCHEMA_VERSION = 9  # версия computed_json (v5 — F0; v6 — F3 HRR; v7 — F5/F6: week_structure/downhill/detraining/session_rpe;
+                             # v8 — 07.09.2026: пол GAP-фактора на спусках #298, heat.temp_source #299;
+                             # v9 — 08.09.2026: baseline v2 (#259) + detraining_shift_bpm в hr_vs_baseline,
+                             # контекст паузы в detraining (#289) — история пересчитывается лениво)
 
 _EMPTY_DRIFT = {"applicable": False, "reason": "no_trackpoints", "drift_pct": None,
                 "first_half_ef": None, "second_half_ef": None, "gap_adjusted": None,
@@ -88,6 +90,23 @@ def _history_briefs(user_id: int, session: TrainingSession, *,
     ).all()
     return [{"date": _session_day(r), "type": effective_training_type(r),
              "km": r.total_distance_km, "avg_hr": r.avg_heart_rate} for r in rows]
+
+
+def _session_dates(user_id: int, session: TrainingSession, *, db: Session,
+                   days: int = DETRAINING_LOOKBACK_DAYS) -> list[dict]:
+    """Даты тренировок за окно до сессии — вход detraining (#289): пауза и возврат ищутся
+    в 90 днях, а не в 15-дневных briefs. Лёгкая выборка: только begin_ts.
+    (Session dates over the detraining lookback — pause/return detection.)"""
+    if session.begin_ts is None:
+        return []
+    since = session.begin_ts - timedelta(days=days)
+    rows = db.query(TrainingSession.begin_ts, TrainingSession.user_id, TrainingSession.id).filter(
+        TrainingSession.user_id == user_id,
+        TrainingSession.begin_ts >= since,
+        TrainingSession.begin_ts <= session.begin_ts,
+    ).all()
+    from src.utils.timeutils import session_local_dt
+    return [{"date": session_local_dt(r.begin_ts, session, None).date()} for r in rows]
 
 
 def _parse_trackpoints(raw: list[dict] | None) -> tuple[list, list, list, list, datetime | None]:
@@ -123,8 +142,12 @@ def compute_workout_metrics(session: TrainingSession, *,
                             week_km: float | None = None,
                             rpe_history: dict | None = None,
                             plan: dict | None = None,
-                            history_briefs: list[dict] | None = None) -> dict:
+                            history_briefs: list[dict] | None = None,
+                            session_dates: list[dict] | None = None) -> dict:
     """Собрать computed_json одной тренировки (pure assembly, без БД).
+
+    session_dates — даты тренировок за DETRAINING_LOOKBACK_DAYS (#289); None → detraining
+    считается по history_briefs (15 дней), как раньше.
 
     Все ветки деградируют в applicable/available=false — исключений наружу нет.
     БД-входы (max_hr, week_km, rpe_history={"rpe","peers"}, plan — назначение
@@ -185,15 +208,20 @@ def compute_workout_metrics(session: TrainingSession, *,
         computed["interval_recovery"] = {"available": False, "reason": "no_trackpoints"}
         computed["week_structure"] = week_structure(
             history_briefs or [], _session_day(session), ttype)
-        computed["detraining"] = detraining(history_briefs or [], _session_day(session))
+        computed["detraining"] = detraining(
+            session_dates if session_dates is not None else (history_briefs or []),
+            _session_day(session))
         computed["downhill"] = {"available": False, "reason": "no_trackpoints"}
         computed["session_rpe"] = {"available": False, "reason": "no_rpe"}
         computed["flags"] = sm.collect_flags(computed)
         return computed
 
-    # Жара — до отклонения от базовой линии: её ожидаемый сдвиг пульса входит в ожидание
-    # (heat first: its expected HR shift feeds the baseline expectation)
+    # Жара и пауза — до отклонения от базовой линии: их ожидаемые сдвиги пульса входят в
+    # ожидание (heat and layoff first: their expected HR shifts feed the baseline expectation)
     heat = heat_block(session.avg_temperature, ds.get("avg_temperature_c"))
+    detrain = detraining(
+        session_dates if session_dates is not None else (history_briefs or []),
+        _session_day(session))
     if gps_unreliable:
         # Дистанции/темпы в trackpoints_json — мусор: pace-производные блоки честно
         # недоступны, а gap.available=false заодно исключает сессию из HR-baseline
@@ -208,8 +236,10 @@ def compute_workout_metrics(session: TrainingSession, *,
         drift = compute_cardiac_drift(times_sec, dists, hrs, training_type=ttype,
                                       grade_factors=factors,
                                       per_km=gap.get("per_km"))
-        deviation = (baseline_deviation(baseline, gap["per_km"],
-                                        temp_shift_bpm=heat.get("expected_hr_shift_bpm"))
+        deviation = (baseline_deviation(
+                        baseline, gap["per_km"],
+                        temp_shift_bpm=heat.get("expected_hr_shift_bpm"),
+                        detraining_shift_bpm=detraining_hr_shift(detrain, gap["per_km"], baseline))
                      if gap.get("available") else
                      {"available": False, "reason": "no_gap"})
     computed["gap"] = gap
@@ -280,7 +310,7 @@ def compute_workout_metrics(session: TrainingSession, *,
     computed["week_structure"] = week_structure(
         history_briefs or [], _session_day(session), ttype,
         session_avg_hr=session.avg_heart_rate, max_hr=max_hr, lthr=lthr)
-    computed["detraining"] = detraining(history_briefs or [], _session_day(session))
+    computed["detraining"] = detrain
     computed["downhill"] = (
         {"available": False, "reason": "gps_unreliable"} if gps_unreliable
         else downhill_block(dists, smooth_altitudes(alts)))
@@ -320,7 +350,8 @@ def upsert_workout_insights(user_id: int, session_id: int, *, db: Session,
                  if session.begin_ts else None),
         rpe_history=_rpe_history(user_id, session, db=db),
         plan=plan,
-        history_briefs=_history_briefs(user_id, session, db=db))
+        history_briefs=_history_briefs(user_id, session, db=db),
+        session_dates=_session_dates(user_id, session, db=db))
     # #246 (02.09.2026): статистика прогноз↔факт — только пишем, потребитель после M3.2
     try:
         from src.services.prediction_log import record_prediction_outcome

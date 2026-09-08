@@ -137,6 +137,74 @@ def test_baseline_accumulates_and_preserves_initiative(db_session):
     assert um.params_json["initiative"] == "low"  # merge, не перезапись
 
 
+def test_stale_v1_baseline_is_refreshed_to_v2(db_session):
+    """#259: сохранённая линия v1 (без sigma_bpm) при чтении пересчитывается в v2;
+    прочие ключи params_json целы."""
+    from src.analysis.hr_baseline import BASELINE_VERSION
+    from src.services.insights_baseline import stored_baseline
+    user = _user(db_session)
+    for i in range(6):
+        pace = 5.5 + i * 0.2
+        s = _session_with_track(db_session, user.id, duration_min=50.0,
+                                base_pace=pace, hr=round(190 - 8 * pace), ttype='easy',
+                                begin_ts=utcnow() - timedelta(days=i * 3))
+        upsert_workout_insights(user.id, s.id, db=db_session)
+    um = db_session.query(UserModel).filter_by(user_id=user.id).first()
+    params = dict(um.params_json)
+    params["hr_pace_baseline"] = {"a": 193.6, "b": -7.97, "rmse_bpm": 5.5, "n_points": 40,
+                                 "n_sessions": 6, "version": 1}
+    params["initiative"] = "high"
+    um.params_json = params
+    db_session.commit()
+    baseline = stored_baseline(user.id, db=db_session)
+    assert baseline["version"] == BASELINE_VERSION == 2
+    assert baseline["sigma_bpm"] > 0 and baseline["method"] in ("ols", "prior")
+    db_session.expire_all()
+    um = db_session.query(UserModel).filter_by(user_id=user.id).first()
+    assert um.params_json["hr_pace_baseline"]["version"] == 2
+    assert um.params_json["initiative"] == "high"
+
+
+def _steady_history(db, user_id, *, first_days_ago: int):
+    """6 easy-сессий по закону 190−8·pace с межсессионным разбросом ±2 уд/мин (реалистичная σ),
+    начиная first_days_ago дней назад с шагом 3 дня."""
+    for i in range(6):
+        pace = 5.5 + i * 0.2
+        offset = 2 if i % 2 else -2
+        s = _session_with_track(db, user_id, duration_min=50.0, base_pace=pace,
+                                hr=round(190 - 8 * pace) + offset, ttype='easy',
+                                begin_ts=utcnow() - timedelta(days=first_days_ago + i * 3))
+        upsert_workout_insights(user_id, s.id, db=db)
+
+
+def test_detraining_shift_relaxes_hr_above_baseline(db_session):
+    """#289: та же пробежка (+7 уд/мин к закону) без паузы флагуется hr_above_baseline,
+    а первой после 6 недель паузы — нет: ожидание несёт detraining_shift_bpm > 0,
+    а detraining видит паузу за пределами 15-дневных briefs."""
+    user = _user(db_session)
+    _steady_history(db_session, user.id, first_days_ago=3)      # регулярно, без пауз
+    baseline = refresh_hr_pace_baseline(user.id, db=db_session)
+    assert baseline is not None and 1.0 <= baseline["sigma_bpm"] <= 3.0
+    hot_hr = round(190 - 8 * 6.0) + 7
+    s_plain = _session_with_track(db_session, user.id, duration_min=50.0, base_pace=6.0,
+                                  hr=hot_hr, ttype='easy', begin_ts=utcnow())
+    plain = upsert_workout_insights(user.id, s_plain.id, db=db_session)
+    assert plain["detraining"]["flag"] is False
+    assert plain["hr_vs_baseline"]["detraining_shift_bpm"] == 0
+    assert "hr_above_baseline" in plain["flags"]
+    # та же пробежка первой после паузы 42 дня (у другого пользователя — чистая история)
+    user2 = _user(db_session)
+    _steady_history(db_session, user2.id, first_days_ago=42)
+    s_back = _session_with_track(db_session, user2.id, duration_min=50.0, base_pace=6.0,
+                                 hr=hot_hr, ttype='easy', begin_ts=utcnow())
+    back = upsert_workout_insights(user2.id, s_back.id, db=db_session)
+    assert back["detraining"]["flag"] is True and back["detraining"]["pause_days"] == 42
+    assert back["hr_vs_baseline"]["detraining_shift_bpm"] >= 4      # 8·6·11.1 % ≈ 5
+    assert back["hr_vs_baseline"]["expected_hr"] > plain["hr_vs_baseline"]["expected_hr"]
+    assert "hr_above_baseline" not in back["flags"]
+    assert "detraining_expected" in back["flags"]
+
+
 def test_ensure_baseline_bootstraps_missing_insights(db_session):
     """Прод-кейс 26.08: insights пусты → ensure_baseline досчитывает их по
     steady-сессиям окна и строит линию; повторный вызов — из хранилища."""

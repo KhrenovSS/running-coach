@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from src.analysis.hr_baseline import (
+    BASELINE_VERSION,
     pace_at_hr_adjusted,
     typical_pace_median,
     fit_hr_pace_baseline,
@@ -28,10 +29,15 @@ logger = get_logger("services.insights_baseline")
 
 
 def stored_baseline(user_id: int, *, db: Session) -> dict | None:
+    """Сохранённая линия; линия прежней версии математики пересчитывается на месте
+    (#259: v1 без темп. поправки и с км-RMSE → v2). (Stored baseline; stale version → refresh.)"""
     um = db.query(UserModel).filter(UserModel.user_id == user_id).first()
-    if um and um.params_json:
-        return um.params_json.get("hr_pace_baseline")
-    return None
+    baseline = um.params_json.get("hr_pace_baseline") if um and um.params_json else None
+    if baseline is not None and baseline.get("version") != BASELINE_VERSION:
+        logger.info("HR baseline v%s for user=%s is stale — refreshing to v%s",
+                    baseline.get("version"), user_id, BASELINE_VERSION)
+        return refresh_hr_pace_baseline(user_id, db=db)
+    return baseline
 
 
 def _bootstrap_window_insights(user_id: int, *, db: Session) -> list[int]:
@@ -130,13 +136,14 @@ def expected_hr_at_pace(user_id: int, pace_min_km: float, *, db: Session) -> dic
     return hr_at_pace_band(points, pace_min_km)
 
 
-def _collect_window_points(user_id: int, *, db: Session, include_quality: bool = False
-                           ) -> tuple[list[tuple[float, float]], int]:
-    """Км-точки (gap_pace, hr) тренировок окна из готовых insights.
+def _collect_window_sessions(user_id: int, *, db: Session, include_quality: bool = False
+                             ) -> list[tuple[list[tuple[float, float]], int | None]]:
+    """Км-точки (gap_pace, hr) тренировок окна из готовых insights — по сессиям, с
+    ожидаемым температурным сдвигом сессии (heat.expected_hr_shift_bpm) для фита v2.
 
     По умолчанию — steady-типы (база OLS); include_quality (#263) добавляет темповые —
     для полос «темп на пульсе»/«пульс на темпе» на высоких зонах (интервалы — нет: осцилляции).
-    (Window km-points from stored insights.) Возвращает (points, n_sessions).
+    (Per-session window km-points plus the session's expected heat shift.)
     """
     allowed = BASELINE_POINT_TYPES if include_quality else BASELINE_TYPES
     cutoff = datetime.now(timezone.utc) - timedelta(days=BASELINE_WINDOW_DAYS)
@@ -146,19 +153,26 @@ def _collect_window_points(user_id: int, *, db: Session, include_quality: bool =
         WorkoutInsight.user_id == user_id,
         TrainingSession.begin_ts >= cutoff,
     ).all()
-    points: list[tuple[float, float]] = []
-    n_sessions = 0
+    sessions: list[tuple[list[tuple[float, float]], int | None]] = []
     for insight, session in rows:
         if effective_training_type(session) not in allowed:
             continue
-        gap = (insight.computed_json or {}).get("gap") or {}
+        computed = insight.computed_json or {}
+        gap = computed.get("gap") or {}
         if not gap.get("available"):
             continue
         session_points = km_points(gap.get("per_km") or [])
         if session_points:
-            n_sessions += 1
-            points.extend(session_points)
-    return points, n_sessions
+            shift = (computed.get("heat") or {}).get("expected_hr_shift_bpm")
+            sessions.append((session_points, shift))
+    return sessions
+
+
+def _collect_window_points(user_id: int, *, db: Session, include_quality: bool = False
+                           ) -> tuple[list[tuple[float, float]], int]:
+    """Плоские км-точки окна для полос (bands): (points, n_sessions)."""
+    sessions = _collect_window_sessions(user_id, db=db, include_quality=include_quality)
+    return [pt for pts, _ in sessions for pt in pts], len(sessions)
 
 
 def refresh_hr_pace_baseline(user_id: int, *, db: Session) -> dict | None:
@@ -167,11 +181,15 @@ def refresh_hr_pace_baseline(user_id: int, *, db: Session) -> dict | None:
     Хранение — UserModel.params_json['hr_pace_baseline'] (merge: initiative и
     прочие ключи не затираются). Мало данных → ключ удаляется (нет ложной точности).
     """
-    points, n_sessions = _collect_window_points(user_id, db=db)
-    baseline = fit_hr_pace_baseline(points, n_sessions)
+    sessions = _collect_window_sessions(user_id, db=db)
+    baseline = fit_hr_pace_baseline([pts for pts, _ in sessions],
+                                    [shift for _, shift in sessions])
     if baseline is not None:
         baseline["computed_at"] = datetime.now(timezone.utc).date().isoformat()
         baseline["window_days"] = BASELINE_WINDOW_DAYS
+        logger.info("HR baseline user=%s: b=%s a=%s sigma=%s method=%s sessions=%s",
+                    user_id, baseline["b"], baseline["a"], baseline["sigma_bpm"],
+                    baseline["method"], baseline["n_sessions"])
 
     um = db.query(UserModel).filter(UserModel.user_id == user_id).first()
     if um is None:

@@ -140,6 +140,40 @@ def test_detraining_three_days_off_silent():
     assert "expected_vdot_drop_pct" not in dt
 
 
+def test_detraining_return_window_carries_pause_context():
+    """#289: пауза 14 дней в окне, сегодня 7-й день после возврата → контекст возврата:
+    pause_days=14, days_since_return=7, return_progress=0.5, drop по длине паузы; флага нет
+    (флаг — только у первой тренировки после паузы)."""
+    history = [_row(28, "easy"), _row(21, "easy"),        # до паузы
+               _row(7, "easy"), _row(5, "easy"), _row(2, "easy")]   # возврат: 7 дней назад
+    dt = detraining(history, D)
+    assert dt["flag"] is False and dt["days_off"] == 2
+    assert dt["pause_days"] == 14 and dt["days_since_return"] == 7
+    assert dt["return_progress"] == 0.5
+    assert dt["expected_vdot_drop_pct"] == pytest.approx((14 - 5) * 0.3)
+    # первая тренировка после паузы: флаг + progress 0
+    first = detraining([_row(28, "easy"), _row(14, "easy")], D)
+    assert first["flag"] is True and first["return_progress"] == 0.0
+    assert first["pause_days"] == 14 and first["days_since_return"] == 0
+
+
+def test_detraining_return_completed_or_no_pause_is_plain_block():
+    """Возврат отработан (прошло ≥ длины паузы) или паузы не было → блок без контекста."""
+    # пауза 8 дней (20→12), после возврата прошло 12 ≥ 8 → контекст снят
+    done = detraining([_row(20, "easy"), _row(12, "easy"), _row(9, "easy"),
+                       _row(6, "easy"), _row(4, "easy"), _row(2, "easy")], D)
+    assert done == {"available": True, "days_off": 2, "flag": False}
+    plain = detraining([_row(4, "easy"), _row(2, "easy")], D)
+    assert plain == {"available": True, "days_off": 2, "flag": False}
+
+
+def test_detraining_drop_capped():
+    """Пауза 12 недель: потеря формы не больше кап (~20 %, гайд 46)."""
+    from src.config.constants import DETRAINING_VDOT_DROP_MAX_PCT
+    dt = detraining([_row(84, "easy")], D)
+    assert dt["expected_vdot_drop_pct"] == DETRAINING_VDOT_DROP_MAX_PCT
+
+
 def test_detraining_no_history_degrades():
     assert detraining([_row(0, "easy")], D) == \
         {"available": False, "reason": "no_history"}

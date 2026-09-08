@@ -38,6 +38,7 @@ bin/*
 !bin/backfill_avg_pace.py
 !bin/backfill_external_ids.py
 !bin/backfill_raw_fits.py
+!bin/research_hr_baseline_slope.py
 
 # Egg info
 *.egg-info/
