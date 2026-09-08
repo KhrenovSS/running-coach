@@ -644,3 +644,17 @@ def test_insights_subtract_watch_pauses(db_session):
         assert km_paused <= km_plain
     dc = paused["inputs"]["device_check"]
     assert dc["mismatch"] is False and dc["time_diff_pct"] < 0.01
+
+
+def test_device_check_ascent_telemetry(db_session):
+    """#253/#285: набор высоты сверяется с total_ascent_m часов — телеметрия ascent_diff_pct/
+    ascent_mismatch, общий mismatch (дистанция/время) не затрагивается."""
+    from src.analysis.data_checks import device_check
+    ds = {"distance_m": 5000, "timer_s": 1800, "total_ascent_m": 40}
+    ok = device_check(ds, 5.0, 30.0, 42)
+    assert ok["ascent_diff_pct"] == 0.05 and ok["ascent_mismatch"] is False
+    assert ok["mismatch"] is False
+    off = device_check(ds, 5.0, 30.0, 60)
+    assert off["ascent_mismatch"] is True and off["mismatch"] is False
+    assert "ascent_diff_pct" not in device_check(ds, 5.0, 30.0, None)
+    assert "ascent_diff_pct" not in device_check({"distance_m": 5000, "timer_s": 1800}, 5.0, 30.0, 42)

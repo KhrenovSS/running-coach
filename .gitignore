@@ -39,6 +39,7 @@ bin/*
 !bin/backfill_external_ids.py
 !bin/backfill_raw_fits.py
 !bin/research_hr_baseline_slope.py
+!bin/backfill_elevation.py
 
 # Egg info
 *.egg-info/

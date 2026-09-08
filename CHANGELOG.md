@@ -2,6 +2,26 @@
 
 All notable changes to this project are tracked here.
 
+## [08.09.2026] — Набор/спуск высоты с гистерезисом, как у часов (#253)
+
+### Changed
+- `analysis/utils.calc_elevation`: вместо наивной суммы дельт — гистерезис `ELEV_HYSTERESIS_M` 2 м по
+  сырой forward-fill высоте (подъём засчитывается, когда высота ушла от опорного экстремума на ≥ 2 м;
+  разрывы барометра не дают фиктивной дельты; хвост — только ≥ порога; порог 0 = прежняя сумма).
+  Замер на 39 тренировках прода против `total_ascent_m` часов: наивная сумма ×1.22, сглаживание из
+  бэклога (`gap.smoothed_gain_loss`) ×1.16 и занижает холмы (23.08: 86 vs 105), гистерезис ×1.03
+  (p10 0.92, p90 1.14, медианная ошибка 2 м). Единый алгоритм для FIT и TCX; `process_trackpoints`
+  передаёт полный ряд высот с None. Сегменты (`segment_km`) — тем же алгоритмом; сумма сегментов может
+  отличаться от итога сессии на 1–3 м. Флаги `hilly`/`downhill_load_high` и GAP не затронуты.
+- `data_checks.device_check(..., elevation_gain)`: телеметрия `ascent_diff_pct`/`ascent_mismatch`
+  против `total_ascent_m` часов (`DEVICE_ELEV_MISMATCH_PCT` 25 %), в общий `mismatch` не входит —
+  замыкает хвост #285 (эталон парсился, но не сверялся).
+- `bin/backfill_elevation.py` (`--dry-run`, `--hysteresis`): пересчёт `elevation_gain/loss` и
+  `segments_json[].elevation_*` истории из `trackpoints_json` без полного reanalyze.
+- Тесты `tests/test_utils_elevation.py` (шум плато → 0, ступени, холм/долина, None, провал ниже порога),
+  `test_workout_insights.py::test_device_check_ascent_telemetry`. METRICS_GUIDE §3 — новая строка;
+  BACKLOG #253 ✅.
+
 ## [08.09.2026] — Готовность к зиме: адаптивная поправка датчика часов, путь «холод» в разборе
 
 ### Changed

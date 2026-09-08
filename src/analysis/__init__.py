@@ -215,8 +215,9 @@ def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datet
     weather_code = None
     total_elevation_gain = None
     total_elevation_loss = None
-    altitudes_all = [tp['alt'] for tp in trackpoints if tp['alt'] is not None]
-    if altitudes_all:
+    # #253: полный ряд с None — calc_elevation сам forward-fill'ит разрывы барометра
+    altitudes_all = [tp['alt'] for tp in trackpoints]
+    if any(a is not None for a in altitudes_all):
         total_elevation_gain, total_elevation_loss = calc_elevation(altitudes_all)
 
     if positions:

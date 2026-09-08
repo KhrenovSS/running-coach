@@ -32,6 +32,7 @@ RECORDING_GAP_MAX_SEC: Final[int] = 30       # дельта длиннее → �
                                              # в зоны/длительность не зачисляется (recording gap)
 BASELINE_MIN_KM_LEN_M: Final[float] = 500.0  # км-точка короче → не в HR-baseline (шумный хвост)
 DEVICE_MISMATCH_PCT: Final[float] = 0.05     # расхождение пайплайна с эталоном часов выше → флаг
+DEVICE_ELEV_MISMATCH_PCT: Final[float] = 0.25  # набор высоты vs total_ascent часов (#253/#285): телеметрия, без флага
                                              # качества данных (F2; при gps_unreliable не считается)
 
 # HRR — восстановление между интервалами (F3, METRICS_GUIDE §5 M2.1; Дэниелс: «полное
@@ -193,7 +194,12 @@ DRIFT_HIGH_PCT: Final[float] = 5.0           # drift выше → flag=high (м�
 # Высота и grade-adjusted pace (elevation smoothing + GAP, Minetti 2002)
 ALT_SMOOTH_MEDIAN_WINDOW: Final[int] = 5     # скользящая медиана — выбросы барометра/GPS (median window)
 ALT_SMOOTH_MEAN_WINDOW: Final[int] = 5       # скользящее среднее — ступеньки квантования (mean window)
-ELEV_MIN_DELTA_M: Final[float] = 1.0         # гистерезис набора/спуска (gain/loss hysteresis)
+ELEV_MIN_DELTA_M: Final[float] = 1.0         # гистерезис набора/спуска на СГЛАЖЕННОЙ высоте (gap.smoothed_gain_loss)
+# #253 (08.09.2026): набор/спуск сессии и сегментов — гистерезис по сырой (forward-fill) высоте, как
+# считают часы: разворот засчитывается при уходе от экстремума на ≥ порога. Замер на 39 тренировках прода
+# против total_ascent часов: наивная сумма ×1.22, сглаживание ×1.16 (занижает холмы), гистерезис 2 м
+# ×1.03 (p10 0.92, p90 1.14), медианная ошибка 2 м. Работает и для TCX (эталона нет).
+ELEV_HYSTERESIS_M: Final[float] = 2.0
 GAP_MAX_GRADE: Final[float] = 0.30           # клип уклона — граница валидности полинома Minetti (grade clip)
 GAP_GRADE_WINDOW_M: Final[float] = 60.0      # окно локального уклона для посэмплового фактора (local grade window)
 GAP_MIN_ALT_COVERAGE: Final[float] = 0.8     # доля точек с высотой, ниже → GAP недоступен (min alt coverage)

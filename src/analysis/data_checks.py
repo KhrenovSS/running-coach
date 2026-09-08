@@ -7,16 +7,20 @@
 
 from __future__ import annotations
 
-from src.config.constants import DEVICE_MISMATCH_PCT
+from src.config.constants import DEVICE_ELEV_MISMATCH_PCT, DEVICE_MISMATCH_PCT
 from src.utils.logger import get_logger
 
 logger = get_logger("analysis.data_checks")
 
 
 def device_check(device_summary: dict | None, total_distance_km: float | None,
-                 duration_minutes: float | None) -> dict | None:
+                 duration_minutes: float | None,
+                 elevation_gain: int | None = None) -> dict | None:
     """Расхождение с эталоном часов; None — эталона нет (legacy/TCX).
-    (Pipeline vs watch-reported distance/time; None when no summary stored.)"""
+    Набор высоты (#253/#285): `ascent_diff_pct` против total_ascent_m часов — телеметрия
+    (`ascent_mismatch`), в общий `mismatch` не входит: барометр часов и наш гистерезис
+    расходятся сильнее дистанции, это не «мусорные данные».
+    (Pipeline vs watch-reported distance/time; ascent is telemetry only.)"""
     ds = device_summary if isinstance(device_summary, dict) else None
     if not ds:
         return None
@@ -33,6 +37,11 @@ def device_check(device_summary: dict | None, total_distance_km: float | None,
         out["time_diff_pct"] = round(diff, 3)
         if diff > DEVICE_MISMATCH_PCT:
             out["mismatch"] = True
+    dev_ascent = ds.get("total_ascent_m")
+    if dev_ascent and elevation_gain is not None:
+        diff = abs(elevation_gain - dev_ascent) / dev_ascent
+        out["ascent_diff_pct"] = round(diff, 3)
+        out["ascent_mismatch"] = diff > DEVICE_ELEV_MISMATCH_PCT
     return out
 
 

@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from timezonefinder import TimezoneFinder
 
 from src.config.constants import (
+    ELEV_HYSTERESIS_M,
     CHART_MIN_PACE_MIN_PER_KM, CHART_MAX_PACE_MIN_PER_KM, HR_SMOOTH_MEDIAN_WINDOW,
 )
 
@@ -82,20 +83,51 @@ def format_duration(duration_min: float | None) -> str | None:
     return f"{m}:{s:02d}"
 
 
-def calc_elevation(altitudes: list[float | None]) -> tuple[int, int]:
+def calc_elevation(altitudes: list[float | None],
+                   hysteresis_m: float = ELEV_HYSTERESIS_M) -> tuple[int, int]:
+    """Набор и спуск высоты с гистерезисом (#253): подъём засчитывается, когда высота ушла от
+    опорного экстремума на ≥ hysteresis_m — так считают часы; шум барометра ±0.5 м в сумму не
+    попадает. None внутри ряда — forward-fill (разрыв барометра не даёт фиктивной дельты).
+    hysteresis_m=0 → прежняя наивная сумма дельт (совместимость).
+    (Elevation gain/loss with hysteresis: a reversal counts only after the altitude moves
+    ≥ threshold away from the last extremum; None gaps are forward-filled.)
     """
-    Рассчитать набор и спуск высоты из списка altitude
-    Calculate elevation gain and loss from altitude list
-    """
-    gain = 0.0
-    loss = 0.0
-    for i in range(1, len(altitudes)):
-        if altitudes[i] is not None and altitudes[i-1] is not None:
-            diff = altitudes[i] - altitudes[i-1]
+    known = [a for a in altitudes if a is not None]
+    if len(known) < 2:
+        return 0, 0
+    gain = loss = 0.0
+    ref = ext = float(known[0])   # ref — подтверждённый экстремум, ext — текущий кандидат
+    direction = 0                 # 0 — ещё не определено, +1 вверх, −1 вниз
+    prev = ref
+    for a in altitudes:
+        if a is None:
+            continue
+        a = float(a)
+        if hysteresis_m <= 0:
+            diff = a - prev
             if diff > 0:
                 gain += diff
             else:
-                loss += abs(diff)
+                loss -= diff
+            prev = a
+            continue
+        if direction >= 0:
+            if a > ext:
+                ext = a
+            if ext - a >= hysteresis_m:          # разворот вниз подтверждён
+                gain += max(0.0, ext - ref)
+                ref, ext, direction = ext, a, -1
+        else:
+            if a < ext:
+                ext = a
+            if a - ext >= hysteresis_m:          # разворот вверх подтверждён
+                loss += max(0.0, ref - ext)
+                ref, ext, direction = ext, a, 1
+    if hysteresis_m > 0:                         # хвост по текущему направлению — только ≥ порога
+        if direction >= 0 and ext - ref >= hysteresis_m:
+            gain += ext - ref
+        elif direction < 0 and ref - ext >= hysteresis_m:
+            loss += ref - ext
     return round(gain), round(loss)
 
 

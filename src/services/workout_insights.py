@@ -183,7 +183,7 @@ def compute_workout_metrics(session: TrainingSession, *,
             # эталон часов сам мусорный — не считаем
             # (pipeline vs watch cross-check; skipped when the watch data is garbage)
             "device_check": (device_check(session.device_summary, session.total_distance_km,
-                             session.duration_minutes)
+                             session.duration_minutes, session.elevation_gain)
                  if not gps_unreliable else None),
         },
     }
