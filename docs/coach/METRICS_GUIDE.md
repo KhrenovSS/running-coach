@@ -175,8 +175,9 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
 - `min_hr_recovery` по каждому отдыху (до какого пульса реально восстановился —
   сверка с назначением `recovery.until_hr`);
 - тренд пиковых ЧСС по повторам (OLS-наклон; растут при том же темпе → накопление);
-- **Флаг**: `poor_interval_recovery` (hrr60 < `HRR60_LOW_BPM`, порог — конфиг, стартово
-  из литературы ~12 уд, калибруется по своим данным). Замыкание — §7.
+- **Флаг**: `poor_interval_recovery` (hrr60 < `HRR60_LOW_BPM` = 12 — константа в
+  `src/config/constants.py`, не в `coach/config.py`; стартово из литературы, калибруется по своим
+  данным). Замыкание — §7.
 Закрывает главную дыру: у interval сейчас метрик почти нет. Литература: Дэниелс —
 «полное восстановление между повторами, бег не через силу» (guides 44/45).
 
@@ -341,7 +342,9 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
 ### M4.3 Детренированность после пауз (F6, связка с M3/VDOT)
 - До 5 дней паузы форма не теряется; далее VDOT-декай Дэниелса по неделям простоя
   (−11% к 6-й неделе без кросс-тренинга); первая треть возврата ≤ ⅓ прежнего пикового
-  объёма — ⬜ потолок объёма не реализован, правило 14 режет зону/типы (guide 46).
+  объёма — ✅ потолок объёма реализован (`detraining_return`, 04.09.2026): ≤ `DETRAINING_RETURN_VOLUME_PCT`
+  (0.65) пика за `DETRAINING_PEAK_WEEKS` (8) недель после паузы ≥ `DETRAINING_RETURN_MIN_DAYS_OFF` (14) —
+  `src/coach/config.py`; правило 14 режет зону/типы (guide 46), см. таблицу §7.
 - Выход: поправка ожиданий для `hr_vs_baseline` (не ругать «замедлился» после отпуска)
   + потолок объёма на возврате. **Флаг**: `detraining_expected`.
 - ✅ Поправка ожиданий (#289, 08.09.2026): `detraining()` ищет последнюю паузу ≥ 6 дн в
@@ -374,19 +377,23 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
 |---|---|---|
 | `km`, `minutes`, `runs` | сумма по сессиям недели | гайд 20 (шаг ≤10%), 42 (частота) |
 | `quality_runs` | `is_quality_session` (пульс, не ярлык) | гайд 45 |
-| `long_run_km`, `long_run_share` | самая длинная / км недели (от 2 пробежек) | гайд 45: ≤25–30% или 150 мин |
-| `easy_time_share` | минуты Z1–2 / все минуты в зонах (посекундно из разборов, fallback сегменты) | гайд 10: доля ВРЕМЕНИ, Z3+ >30% — перегруз |
+| `long_run_km`, `long_run_min`, `long_run_share` | самая длинная (км, мин) / км недели (доля — от 2 пробежек) | гайд 45: ≤25–30% или 150 мин |
+| `easy_time_share`, `hard_time_share` | минуты Z1–2 / все минуты в зонах (посекундно из разборов, fallback сегменты); `hard` = 1 − `easy` | гайд 10: доля ВРЕМЕНИ, Z3+ >30% — перегруз |
 | `load_points` | Σ минуты в зоне × `POINTS_PER_MIN` | гайд 44 (≈50/нед новичку) |
 | `efficiency_delta_bpm`, `efficiency_n` | среднее `hr_vs_baseline.delta_bpm` разборов | гайд 00: пульс на том же темпе — главный маркер базы |
+| `cadence_median` | медиана каденса по сессиям недели | гайд 46 (M1.7, колено) |
 | `pain_days` | дни недели с болью > 0 (feedback + wellness) | гайд 30: рост после боли = 0 |
 | `flags` | счётчик флагов разборов | §6 |
+| `monotony`, `strain`, `trained_days` | Фостер по дневным баллам за 7 дней (`coach/load_monotony.py`; только `this`) | §7: правило 20, #308 |
 
 Сигналы (пороги — `src/coach/config.py`): `efficiency_gain` (≤ `EFFICIENCY_GAIN_BPM` при n≥2) /
 `efficiency_loss` (≥ `EFFICIENCY_LOSS_BPM`); `easy_share_ok` / `easy_share_low` / `intensity_overload`
 (Z3+ > `HARD_SHARE_OVERLOAD`); `volume_step_ok` / `volume_jump` (`LOAD_PROGRESSION`);
 `long_run_share_high` (`LONG_RUN_MAX_PCT_WEEK`/`LONG_RUN_MAX_MIN`); `pain_days` / `pain_free_week`;
 `frequency_up`; `acwr_high` (> `WEEK_REPORT_ACWR_HIGH`); `easy_runs_too_hard`
-(≥ `EASY_TOO_HARD_WEEK_FLAGS`); `plan_complete` / `plan_missed`; `no_runs`.
+(≥ `EASY_TOO_HARD_WEEK_FLAGS`); `plan_complete` / `plan_missed`; `no_runs`; `monotony_high`
+(`monotony` > `MONOTONY_HIGH` при `trained_days` ≥ `MONOTONY_MIN_TRAIN_DAYS`).
 Сравнение: `prev`, `avg_prev` (среднее за `WEEK_REPORT_AVG_WEEKS` прошлых недель с пробежками),
 `series` (`WEEK_REPORT_SERIES_WEEKS`). Метрики здоровья (HRV/RHR/сон) в отчёт не входят
-(решение владельца 03.09.2026). Не реализовано: монотонность/страйн Фостера (#308).
+(решение владельца 03.09.2026). Монотонность/страйн Фостера (#308) — ✅ реализованы 04.09.2026:
+`coach/load_monotony.py` → строка карточки `render_week_report` (⚠ при `monotony_high`) и правило 20 `p1_safety`.

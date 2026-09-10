@@ -23,9 +23,11 @@ running-coach/
 │   ├── versions/               # Файлы миграций
 │   └── env.py                  # Конфигурация Alembic
 ├── bin/                        # Ops-скрипты и рантайм-компоненты хоста
-│   ├── docker.sh               # Защищённая обёртка docker compose (700, вне git — создать вручную)
+│   ├── docker.sh               # Защищённая обёртка docker compose (700; в git, после клонирования chmod 700)
 │   ├── backup_db.sh            # Бэкап БД (обязателен перед деплоем)
-│   ├── backfill_*.py           # Разовые backfill-скрипты (external_ids, raw_fits, avg_pace; --dry-run по умолчанию)
+│   ├── backfill_*.py           # Разовые backfill-скрипты (external_ids, raw_fits, avg_pace, elevation; --dry-run по умолчанию)
+│   ├── coros_probe_sleep.py    # Зонд Coros API: что отдаёт по сну (диагностика)
+│   ├── research_hr_baseline_slope.py # Замер наклона базовой линии HR↔GAP (#259)
 │   ├── distill_books.py        # Дистилляция книг → guides (E1; читает books/, пишет books/_distilled)
 │   ├── coach_llm_bridge.py     # НЕ backfill — рантайм прода: LLM-мост коуча (systemd :8765, /complete + /vision)
 │   └── sudoers-bridge-restart + install_bridge_sudoers.sh  # рестарт моста агентом без пароля (ставится под root один раз)
@@ -39,7 +41,8 @@ running-coach/
 │   ├── scheduler.py            # AutoSyncScheduler (threading.Event)
 │   ├── models.py               # Shim: реэкспорт из src/domain/models/ + хелперы
 │   ├── deps.py                 # Jinja2Templates, local_dt helper
-│   ├── exceptions.py           # WatchAPIError, NotFoundError…; CoachError → LLMUnavailableError/ToolExecutionError
+│   ├── exceptions.py           # WatchAPIError, NotFoundError…; CoachError → LLMUnavailableError (→ LLMTransientError:
+│   │                           #   транзиентные 502/timeout моста, ретраи post_with_retry) / ToolExecutionError
 │   ├── crypto.py               # Fernet encrypt/decrypt (пароли часов, email)
 │   ├── config/                 # Конфигурация
 │   │   ├── __init__.py         #   Экспорт settings + constants
@@ -59,7 +62,7 @@ running-coach/
 │   ├── api/                    # FastAPI роуты и middleware
 │   │   ├── __init__.py
 │   │   ├── deps.py             # get_current_user dependency (session-cookie)
-│   │   ├── middleware.py       # SessionMiddleware, error handlers, request logging
+│   │   ├── middleware.py       # SessionMiddleware, CSRFProtectMiddleware, error handlers, request logging
 │   │   └── routes/
 │   │       ├── auth.py         # /auth/telegram, /auth/login, /auth/register, /auth/logout
 │   │       └── health.py       # /health/ endpoint
@@ -68,9 +71,10 @@ running-coach/
 │   │   ├── templates/          # 6 Jinja2-шаблонов
 │   │   └── routes/
 │   │       ├── __init__.py     # web_router = pages + uploads + sync + logs
-│   │       ├── pages/          # Пакет: auth (48), index (242), session (213), settings (149)
+│   │       ├── pages/          # Пакет: auth (48), index (242), session (216), settings (149)
 │   │       ├── uploads.py      # POST /upload, /upload/confirm, /upload/confirm_deleted
-│   │       ├── sync.py         # POST /sync/{brand}/run, /sync/{brand}/health
+│   │       ├── sync.py         # POST /sync/{brand}/run, /sync/{brand}/health, GET /sync/status/{task_id};
+│   │       │                   #   legacy-алиасы POST /coros/sync, /coros/sync/health, GET /coros/sync/status/{task_id}
 │   │       └── logs.py         # GET /logs
 │   ├── services/               # Бизнес-логика по доменам
 │   │   ├── audit.py            # AuditService (БД + файл)
@@ -101,7 +105,9 @@ running-coach/
 │   │   ├── insights_baseline.py# Базовая линия HR↔GAP-темп и ожидаемый темп на пульсе (окно 120 дн)
 │   │   ├── repositories_insights.py # InsightRepository: очередь разборов (claim/finish), флаги для safety
 │   │   ├── prediction_log.py   # Продюсер residuals прогноз↔факт (идемпотентно по session_id; #246)
-│   │   └── sleep_ingest.py     # Сон из скриншота: vision → DailyMetrics.sleep_*
+│   │   ├── sleep_ingest.py     # Сон из скриншота: vision → DailyMetrics.sleep_*
+│   │   ├── type_resolution_backfill.py # relabel_sessions — переразметка ярлыков истории (04.09)
+│   │   └── watch_temp_bias.py  # Адаптивная поправка датчика температуры часов (фолбэк к Open-Meteo)
 │   ├── coach/                  # Гибридный ИИ-коуч (в проде). Карта модулей и ADR — docs/coach/ARCHITECTURE.md;
 │   │                           #   config.py — единственный исполняемый источник порогов; knowledge/guides/*.md —
 │   │                           #   runtime-данные (loader + тесты), не документация
@@ -127,7 +133,7 @@ running-coach/
 │   │   ├── weather.py          # fetch_weather (Open-Meteo, httpx)
 │   │   ├── tcx_parser.py       # Парсинг TCX (XML)
 │   │   └── fit_parser.py       # Парсинг FIT (бинарный, check_crc)
-│   ├── analysis/               # Пакет анализа тренировок (15 модулей)
+│   ├── analysis/               # Пакет анализа тренировок (17 модулей)
 │   │   ├── __init__.py         #   process_trackpoints() — оркестратор
 │   │   ├── oscillation.py      #   detect_pace_oscillations, compute_hr_lag_correlation
 │   │   ├── classify.py         #   classify_training (interval/tempo/long/recovery/easy)
@@ -143,6 +149,7 @@ running-coach/
 │   │   ├── intervals.py        #   HRR-разбор интервалов
 │   │   ├── week_structure.py   #   структура недели / детренированность
 │   │   ├── type_resolution.py  #   ярлык по плану дня: «план — назначение, факт — интенсивность» (04.09)
+│   │   ├── segment_laps.py     #   сегменты по структурным лапам часов (программа/ручные отсечки, #302)
 │   │   └── utils.py            #   format_pace, calc_elevation, find_timezone, rolling pace,
 │   │                           #   early_peak_suspect (#238), pauses_to_offsets/pause_overlap_sec (#286)
 │   └── utils/
@@ -184,8 +191,8 @@ running-coach/
 | Настройка из env | `src/config/settings.py` | `class Settings(BaseSettings)` |
 | Новое исключение | `src/exceptions.py` | `class WatchAPIError` |
 | Утилита общего назначения | `src/utils/` | `src/utils/logger.py` |
-| Тест | `tests/` | `tests/test_analysis.py` |
-| Миграция БД | `alembic/versions/` | `f7g8h9i0j1k2_data_integrity.py` |
+| Тест | `tests/` | `tests/test_classify.py` |
+| Миграция БД | `alembic/versions/` | `f7g8h9i0j1k2_data_integrity_not_null_fks_cascade_json.py` |
 | Документация | `docs/` | `docs/CHECKLIST_NEW_PROVIDER.md` |
 
 ### Принцип тонких роутов

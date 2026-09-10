@@ -116,7 +116,7 @@ HRV, измеренная во время сна, отслеживает бал�
 |---|---|---|---|---|---|
 | `avg_sleep_hrv` | Float | мс | 30–75+ | Средняя HRV за ночь (RMSSD) | ✅ из dayDetail |
 | `sleep_hrv_baseline` | Float | мс | 30–55 | 30-дневное скользящее среднее HRV | ✅ из dayDetail |
-| `sleep_hrv_sd` | Float | мс | — | Стандартное отклонение baseline | ⬜ API не отдаёт |
+| `sleep_hrv_sd` | Float | мс | — | Стандартное отклонение baseline | ✅ `sleepHrvSd` из dashboard `sleepHrvList` и dayDetail (`services/sync/health.py`) |
 | `rhr` | Integer | уд/мин | 40–65 | Пульс покоя (ночной) | ✅ из dayDetail |
 | `tired_rate` | Integer | у.е. | −10..+10 | Уровень усталости | ✅ из dayDetail |
 | `training_load` | Float | у.е. | 0–500+ | Дневная тренировочная нагрузка | ✅ из dayDetail |
@@ -129,6 +129,10 @@ HRV, измеренная во время сна, отслеживает бал�
 | `stamina_level` | Float | % | 0–100 | Уровень выносливости | ✅ dayDetail + analyse |
 | `ltsp` | Float | с/км | 180–360 | Lactate Threshold Pace → нормативный темп сегментов (F4/M3.1, `LTSP_ZONE_OFFSET_S`) | ✅ из analyse |
 | `stamina_level_7d` | Float | % | 0–100 | Тренд выносливости за 7 дней | ✅ из analyse |
+| `recovery_pct` | Integer | % | 0–100 | Recovery % Coros (§12) | ✅ `recoveryPct` из dashboard |
+| `sleep_hrv_interval_list` | JSON | мс | — | Границы HRV [min, low, normal_start, normal_end] | ✅ `lastSleepHrvIntervalList` из dashboard |
+| `form_score` / `load_impact` / `intensity_trend` | Float | у.е. | — | «Базовая форма» / «Влияние нагрузки» / «Тренд интенсивности» | ⬜ колонки есть, синк их НЕ заполняет (мёртвые; «Базовая форма» в вебе берётся из `cti`) |
+| `sleep_duration_min`, `sleep_deep_min`, `sleep_light_min`, `sleep_rem_min`, `sleep_awake_min`, `sleep_score`, `sleep_extra`, `sleep_source` | Integer/JSON/String | мин | — | Сон из скриншота (#257) | ✅ vision → `sleep_ingest.py`, не из API |
 
 **Легенда:**
 - ✅ = загружается из Coros API
@@ -191,16 +195,20 @@ if rhr < rhr_baseline - 3:
     → "Пульс покоя аномально низкий. Проверить самочувствие."
 ```
 
-## 7. ATI/CTI ratio (перетренированность)
+## 7. ATI/CTI ratio (перекос в анаэробную нагрузку)
 
 ```
 ratio = ati / cti   (если cti > 0)
 
 if ratio > 1.3   → риск перетренированности (нагрузка растёт быстрее адаптации)
-if ratio > 1.5   → высокая вероятность перетренированности, нужна разгрузочная неделя
+if ratio > 1.5   → перекос в анаэробную нагрузку (код: ATI_CTI_HIGH в coach/config.py), нужна разгрузочная неделя
 if ratio < 0.8   → недостаточная нагрузка (тренировки слишком лёгкие)
 if 0.8-1.3       → оптимальный диапазон
 ```
+
+В коде порогов два набора: ярлык нагрузки `LOAD_RATIO_LOW=0.8` / `LOAD_RATIO_HIGH=1.2` (`coach/config.py`,
+display-ярлык UI; травмоопасные пороги ACWR — `INJURY_RISK_THRESHOLDS`) и `WEEK_REPORT_ACWR_HIGH=1.3`
+(недельный отчёт: выше → разгрузка).
 
 ## 8. Комбинированные правила для рекомендаций
 
@@ -301,8 +309,10 @@ def anomaly(rhr, rhr_baseline):
 # Часть C. Справочник метрик EvoLab (из документации COROS) — в проекте НЕ реализовано
 
 > Реализованы только: §12 Recovery % (шкала 20/70/90 приведена к коду 04.09.2026: `RECOVERY_PCT_MODERATE/READY/FRESH`),
-> §13 Training Effect (колонки `training_effect`/`anaerobic_training_effect`), §18 пороги LTHR/LTSP
-> (зоны и нормативные темпы, F4). §11, §14–§17, §19–§20 — справочник без кода.
+> §13 Training Effect (колонки `training_effect`/`anaerobic_training_effect`), §15 Running Efficiency
+> (в своей форме: пульс к базовой линии HR↔GAP на своём темпе, `coach/week_report.py` + `render_week_report.py`,
+> пороги `EFFICIENCY_GAIN_BPM` −2 / `EFFICIENCY_LOSS_BPM` +3 уд/мин), §18 пороги LTHR/LTSP
+> (зоны и нормативные темпы, F4). §11, §14, §16–§17, §19–§20 — справочник без кода.
 
 Источник: https://support.coros.com/hc/en-us/articles/360061452651-EvoLab-Metrics
           https://coros.com/stories/coros-metrics/c/your-coros-recovery-metrics-explained
@@ -316,7 +326,7 @@ def anomaly(rhr, rhr_baseline):
 | Recovery % | 🧮 Оценить | Мэппинг performance → Recovery % (см. секцию 22) |
 | Training Effect | 🧮 Рассчитать | training_load / duration_minutes + зоны |
 | Training Focus | ✅ из TrainingSession | training_type (Easy/Base/Tempo/Threshold/VO2Max/Anaerobic) |
-| Running Efficiency | 🧮 Рассчитать | Сравнение pace vs HR относительно исторической нормы |
+| Running Efficiency | ✅ реализовано (в своей форме) | Δ пульса к базовой линии HR↔GAP на своём темпе за неделю — `coach/week_report.py`, пороги `EFFICIENCY_GAIN_BPM`/`EFFICIENCY_LOSS_BPM`; шкала 80–120 % Coros не воспроизводится |
 | Race Predictor | ❌ | Только официальный COROS MCP (OAuth) |
 | Running Fitness Score | ❌ | Только официальный COROS MCP (OAuth) |
 | Threshold HR Zones | ✅ реализовано (F4/M3.1, 01.09.2026) | 5 зон Z1–Z5 от LTHR (81/89/100/105%, `analysis/hr_zones.py`), fallback %max_hr; 6-зонная модель Coros 1:1 не переносится |
@@ -577,4 +587,3 @@ COROS рекомендует недельный TL на основе 3:1 цик�
 - performance = −2 → 0–19% Exhausted
 
 **Проверить:** сравнить значения при наличии данных из обоих источников.
-```

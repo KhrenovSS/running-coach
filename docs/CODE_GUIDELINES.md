@@ -94,7 +94,7 @@ def delete_training(db: Session, user_id: int, session_id: int) -> bool:
 проверками диапазонов в сервисе/роуте с понятным ответом пользователю
 (`src/web/routes/pages/settings.py::settings_save` — 15 полей формы). Pydantic-моделей запроса в
 проекте нет; вводить их ради одного роута не нужно. Границы значений — из `constants.py`
-(например, `HR_MAX_SANITY_*`), не литералами.
+(например, `MAX_HR_CAP`, `MAX_HR_CONFIRM_COUNT`, `MAX_HR_CONFIRM_WINDOW_DAYS`), не литералами.
 
 Данные с часов/из файлов **не доверяем**: парсеры и `src/analysis/gps_quality.py` помечают
 недостоверное (`suspect_flags`, `gps_quality.unreliable`), а не отбрасывают молча.

@@ -13,8 +13,12 @@
 «Беговой старший товарищ» в Telegram: видит, как пользователь переносит нагрузки, и подстраивает
 их — бег в удовольствие + медленный устойчивый прогресс (темп растёт, пульс/усталость падают).
 Сценарии: утренний вердикт, разбор тренировки, свободный чат, план на недели.
-Контекст пользователя: цель — сбросить вес и вернуться к прошлым результатам; **колено** — травма
-почти прошла (дискомфорт первые 400–800 м, к 5 км уходит), боится перетренированности.
+Контекст пользователя: цель — сбросить вес и вернуться к прошлым результатам; боится
+перетренированности. Колено (травма на излёте: дискомфорт первые 400–800 м, к 5 км уходит) было
+контекстом на старте (08.2026); **с 10.09.2026 травмы/проблемы — данные, а не константы промпта**:
+`coach/concerns.py` ведёт активные проблемы в `UserModel.params_json["concerns"]` (без миграции),
+LLM только сообщает факт (`CoachTurn.concern`), код снимает проблему с контроля без боли и упоминаний
+за `CONCERN_EXPIRE_DAYS` = 14 дн.; в промптах/профиле колено не захардкожено.
 Ключевая проблема данных: **4 оценки RPE из 36 тренировок (11%)** — кнопки не работают, обратную
 связь собираем разговором и лёгкими тапами. Ничего про боль в БД нет — добавляем.
 
@@ -40,7 +44,10 @@
 7. **Всё работает без ключа.** `NullLLM` + `fallback.py`: детерминированный вердикт/разбор/ответ.
    Весь тестовый набор зелёный при отсутствующем `ANTHROPIC_API_KEY`; ни один тест не ходит в сеть.
 8. Дисциплина CLAUDE.md действует полностью: ~400 строк/файл, пороги только из `coach/config.py`,
-   `db: Session` обязательным keyword-only параметром, ни одного `coros` в `src/coach/**`.
+   `db: Session` обязательным keyword-only параметром; код коуча бренд-независим (в логике
+   `src/coach/**` нет `coros`; единственное исключение — `vision.py`: промпт распознавания скриншота
+   сна конкретного приложения, при новом бренде — параметризовать; упоминания в комментариях и
+   ссылки на `docs/coros_health_metrics.md` — не код).
 
 ## 2. Судьба каркаса Этапа 0 (что удаляем и почему)
 
@@ -67,9 +74,15 @@
   LLM обязан видеть, чего не знает; += `signals: dict` — сырьё для чистой safety-функции
   (hrv_status, rhr_status, recovery_pct, ati_cti_ratio, acwr_ratio, consecutive_hard_days,
   pain_level, pain_days; с 01.09 также poor_interval_recovery, days_since_quality,
-  quality_days_7d, post_race_days_left, days_off — сырьё правил 11–14; заполняется в
-  `state.py`/`_week_signals`, LLM в tool `get_athlete_state` НЕ отдаётся —
-  модель видит вердикт, не сырьё).
+  quality_days_7d, post_race_days_left, days_off — сырьё правил 11–14; с 02–07.09 также
+  sleep_duration_min (правило 15), recovery_ready_at (#306 — якорь срока интенсива от начала
+  последней тренировки), hard_share_7d, easy_too_hard_7d, quality_volume_exceeded_recent,
+  downhill_load_recent, monotony_7d, trained_days_7d (правила 16–20),
+  illness_block_days/illness_status/illness_pause_until (правило 21, `illness.illness_signals`);
+  заполняется в `state.py`/`_week_signals`, LLM в tool `get_athlete_state` НЕ отдаётся —
+  модель видит вердикт, не сырьё. `day_offset` в сигналы добавляет не state, а
+  `planning_safety.project_state` — день плана, по которому финализируется каждый день недели,
+  там же по дню подменяются `easy_too_hard_7d`/`hard_share_7d`, #315).
 - Новые: `SafetyVerdict(allow_training, max_zone, max_duration_min, allowed_types,
   earliest_next_hard, triggered, reasons)`; `WorkoutProposal(workout_type, target_zone,
   duration_min, distance_km, target_pace_min_km, structure, segments, rationale, for_days_ahead)`.
@@ -124,7 +137,7 @@
 | 1 | `rhr_status == "critical_elevated"` (Δ ≥ `RHR_CRITICAL_DIFF`, порог применяется в `recovery_view.rhr_anomaly`) | `allow_training=False` |
 | 2 | HRV `very_low` | `max_zone=2`, без `HARD_TYPES` и `long` (allowed `{rest,recovery,easy}`) |
 | 3 | HRV `low` | `max_zone=2`, без `HARD_TYPES` (tempo/interval/race) |
-| 4 | `recovery_pct < RECOVERY_PCT_MODERATE` | `max_zone=2` |
+| 4 | `recovery_pct` — шкала Coros §12 (#249, 04.09.2026), два шага: `< RECOVERY_PCT_MODERATE` (20, Exhausted) → `recovery_low`; иначе `< RECOVERY_PCT_READY` (70, Fatigued) → `recovery_fatigued`; ≥ 70 — молчит | `recovery_low`: `max_zone=2`, без `HARD_TYPES`; `recovery_fatigued`: без `HARD_TYPES` |
 | 5 | ati/cti > `ATI_CTI_HIGH` (1.5) | `max_zone=3`, без `interval` |
 | 6 | ACWR > `INJURY_RISK_THRESHOLDS['load_ratio_high']` (1.5) | `max_zone=3` |
 | 7 | `consecutive_hard_days >= 4` | `max_zone=2` |
@@ -132,13 +145,23 @@
 | 9 | `pain_level >= PAIN_CAUTION_LEVEL` (3) или боль ≥ `PAIN_PERSIST_DAYS` дней подряд | `max_zone=2`, `max_duration_min=40`, без `HARD_TYPES` |
 | 10 | `recovery_hours_left > 0` | `earliest_next_hard` |
 | 11 | `poor_interval_recovery` — плохой HRR в недавнем разборе (F3, окно `HRR_POOR_RECOVERY_LOOKBACK_DAYS`) | `earliest_next_hard` ≥ +`HRR_POOR_RECOVERY_EXTRA_H` (48 ч) |
-| 12 | `days_since_quality < QUALITY_MIN_GAP_DAYS` или `quality_days_7d ≥ QUALITY_MAX_PER_WEEK` (M4.1) | `earliest_next_hard` ≥ +1–2 дня |
+| 12 | `days_since_quality < QUALITY_MIN_GAP_DAYS` или `quality_days_7d > QUALITY_MAX_PER_WEEK` (M4.1; длительная — тоже качественный день, 04.09) | `hard_days_too_close`: `earliest_next_hard` ≥ +max(1, `QUALITY_MIN_GAP_DAYS` − `days_since_quality`) дн. |
 | 13 | `post_race_days_left > 0` — восстановление после гонки, 1 лёгкий день/3 км (M4.1) | `max_zone=2`, без `HARD_TYPES` |
 | 14 | `days_off ≥ DETRAINING_MIN_DAYS_OFF` (6) — возврат после паузы (M4.3) | `max_zone=2`, без `HARD_TYPES` |
 | 15 | `sleep_duration_min` < `SLEEP_SHORT_MIN`/`SLEEP_VERY_SHORT_MIN` (#254, скриншот сна за сегодня; нет данных → молчит) | без `HARD_TYPES`; при <5 ч ещё `max_zone=2`, ≤40 мин |
+| 16 | `hard_share_7d > HARD_SHARE_OVERLOAD` (0.30 — доля времени Z3+ за `HARD_SHARE_LOOKBACK_DAYS` 7 дн; считается только при ≥ `HARD_SHARE_MIN_MINUTES_7D` 60 мин зон; гайд 10, 04.09.2026) | `week_intensity_overload`: `max_zone=2`, без `HARD_TYPES` |
+| 17 | `easy_too_hard_7d ≥ EASY_TOO_HARD_WEEK_FLAGS` (2 флага `easy_run_too_hard` в разборах за `EASY_TOO_HARD_LOOKBACK_DAYS` 7 дн; #289, гайд 10) | `easy_runs_too_hard`: `max_zone=2`, без `HARD_TYPES` |
+| 18 | `quality_volume_exceeded_recent` — флаг `quality_volume_exceeded` в разборе за `QUALITY_VOLUME_LOOKBACK_DAYS` 3 дн (#289, гайд 44) | `quality_volume_exceeded`: `earliest_next_hard` ≥ +`QUALITY_VOLUME_EXTRA_H` (48 ч) |
+| 19 | `downhill_load_recent` — флаг `downhill_load_high` в разборе за `DOWNHILL_LOOKBACK_DAYS` 2 дн (#289, гайд 46 — колено) | `downhill_load`: `max_zone=3`, `earliest_next_hard` ≥ +`DOWNHILL_EXTRA_H` (24 ч) |
+| 20 | `monotony_7d > MONOTONY_HIGH` (2.0) и `trained_days_7d ≥ MONOTONY_MIN_TRAIN_DAYS` (5) — монотонность Фостера (#308, `coach/load_monotony.py`) | `monotony_high`: без `HARD_TYPES` |
+| 21 | `illness_block_days` задан и `day_offset < illness_block_days` (#322, гайд 50; `illness_status` sick → до сообщения о выздоровлении, recovered → до `illness_pause_until` = `ILLNESS_PAUSE_DAYS[kind]`; `day_offset` — день плана из `planning_safety.project_state`, вне плана 0) | `illness`: `allow_training=False` |
 
-Константы правил 11–15: `HRR_POOR_RECOVERY_EXTRA_H/LOOKBACK_DAYS`, `SLEEP_SHORT_MIN`,
-`SLEEP_VERY_SHORT_MIN`, `PAIN_FRESH_DAYS` (свежесть боли — фикс 02.09) — `coach/config.py`;
+Константы правил 11–21: `HRR_POOR_RECOVERY_EXTRA_H/LOOKBACK_DAYS`, `SLEEP_SHORT_MIN`,
+`SLEEP_VERY_SHORT_MIN`, `PAIN_FRESH_DAYS` (свежесть боли — фикс 02.09), `HARD_SHARE_OVERLOAD=0.30`,
+`HARD_SHARE_LOOKBACK_DAYS=7`, `HARD_SHARE_MIN_MINUTES_7D=60`, `EASY_TOO_HARD_WEEK_FLAGS=2`,
+`EASY_TOO_HARD_LOOKBACK_DAYS=7`, `QUALITY_VOLUME_LOOKBACK_DAYS=3`, `QUALITY_VOLUME_EXTRA_H=48`,
+`DOWNHILL_LOOKBACK_DAYS=2`, `DOWNHILL_EXTRA_H=24`, `MONOTONY_HIGH=2.0`, `MONOTONY_MIN_TRAIN_DAYS=5`,
+`ILLNESS_PAUSE_DAYS={cold:14, flu:14, angina:21, pneumonia:30, other:7}` — `coach/config.py`;
 `QUALITY_MAX_PER_WEEK`, `QUALITY_MIN_GAP_DAYS`, `POST_RACE_KM_PER_EASY_DAY`,
 `DETRAINING_MIN_DAYS_OFF` — `src/config/constants.py` (чистая математика M4).
 Константы границы в `coach/config.py`: `PAIN_SCALE_MAX=10`, `PAIN_CAUTION_LEVEL=3`,
@@ -248,7 +271,7 @@ base64 → temp-файл на хосте → `claude -p --allowedTools Read --ad
 - ✅ **C0 — этот документ + сверка руководящих md.** `docs/coach/DEV_PLAN.md`; правка секции коуча
   в `CLAUDE.md`; `AGENTS.md` («следующий шаг» → ссылка сюда); `README.md` (секция прежнего поэтапного плана →
   3–5 строк + ссылка); дисклеймер SUPERSEDED в decision_module_design (файл удалён 02.09.2026, история git); BACKLOG #9.
-  Проверка: grep-набор из §11.3; `pytest -q` зелёный.
+  Проверка: гвард `tests/test_docs_links.py` (бывший ручной grep-набор — §11, п. 3); `pytest -q` зелёный.
 - ✅ **C1 — Фундамент** (без LLM/Telegram): `contracts.py`, `config.py` (+константы §4),
   `skills/base.py`, скиллы `fatigue/recovery/load/distribution/progress/workout` на
   `recovery_view`/`repositories`/`analytics_helpers`, `state.py::assess_state`, `util.py`
@@ -301,7 +324,8 @@ base64 → temp-файл на хосте → `claude -p --allowedTools Read --ad
   гейт initiative ∈ {normal, high}), `/coach_settings` (4 уровня инициативы кнопками).
   Критерий кэша (`cache_read_input_tokens > 0`) в режиме моста неприменим — заменён на
   «ходы записаны с cost_usd». **Live e2e пройден 23.08 из контейнера бота**: SOURCE=llm,
-  проза + карточка «Лёгкий бег Z2 35 мин» + earliest + вопрос про колено; usage/cost в
+  проза + карточка «Лёгкий бег Z2 35 мин» + earliest + вопрос про колено (с 10.09 — только при
+  активной проблеме, `concerns.py`); usage/cost в
   `coach_messages`. Граница pain=6 → «Отдых» закрыта юнит-тестами (`test_safety_clamp`,
   `test_pain_flow`); живой повтор — по желанию владельца.
 - ✅ **C8 — Разбор + недельный отчёт + инициатива (24.08.2026)**: `on_workout_completed`
@@ -323,7 +347,8 @@ base64 → temp-файл на хосте → `claude -p --allowedTools Read --ad
   опускаются) + `WEEKLY_PROMPT` «интерпретация, не пересказ» + `/report`. Джоб вс 19:00 считает
   числа один раз для отчёта и плана (`generate_weekly_plan(week_report=)`). Решения владельца:
   полная карточка, только тренировки (без HRV/RHR/сна), сравнение — прошлая + среднее 4 нед +
-  ряд 6 недель. Открыто: монотонность/страйн (#308), тренды в web (#309).
+  ряд 6 недель. Монотонность/страйн (#308) — ✅ 04.09.2026 (`coach/load_monotony.py`,
+  `monotony`/`strain` в `week_report`, правило 20 safety). Открыто: тренды в web (#309).
 - ✅ **C9 — Финальная сверка доков (23.08.2026)**: три параллельных аудита нашли 55+
   несоответствий — все исправлены. Создан `docs/coach/ARCHITECTURE.md` (ADR: гибрид, ручной
   tool-loop, мост и его ограничения, остаточный риск прозы + полная карта модулей).
@@ -331,7 +356,8 @@ base64 → temp-файл на хосте → `claude -p --allowedTools Read --ad
   AGENTS.md (сессии 06.08/23.08, карты src/), README.md (коуч в возможностях/командах/env/
   systemd-секция, анти-протухание чисел), docs/{ARCHITECTURE,TESTING,ERROR_HANDLING,LOGGING}.md,
   BACKLOG (#240 закрыт; #243–#250 заведены), coros-док (обратная ссылка на config),
-  комментарии config/contracts. Grep-набор §11.3 перекалиброван и чист.
+  комментарии config/contracts. Grep-набор (ныне гвард `tests/test_docs_links.py`, §11 п. 3)
+  перекалиброван и чист.
 
 Зависимости: C0 первым; C1–C2 и seed-guides независимы; C3→C4; C5→C6→C7 последовательны.
 
@@ -445,7 +471,8 @@ PDF-текст). Книги → конспекты-гайды своими сл�
   Подключение: `_TYPE_GUIDE_TERMS["race"]` → гайд 48; флаг жары в разборе → третий запрос
   (гайд 49); план недели при `detraining_return` → `plan_guides_queries` (гайды 47 + 61;
   `build_extras.guides_query` принимает список). Дайджест — 60 строк (ориентир поднят до ≤ 60,
-  гвард `tests/coach/test_guide_queries.py`). Детерминированный гейт болезни — BACKLOG #322.
+  гвард `tests/coach/test_guide_queries.py`). Детерминированный гейт болезни — ✅ 07.09.2026 (#322:
+  `coach/illness.py`, `ILLNESS_PAUSE_DAYS`, правило 21 safety, `CoachTurn.illness`).
 - ✅ **E3 — чанки методики инлайном (#242, 25.08.2026)**: `_build_extras` +=
   `method_guides` — для разбора запросы из фактов (`knowledge/loader.review_guides_queries`:
   боль отдельным запросом + тип тренировки, по 1 чанку, максимум 2), для weekly —
@@ -512,7 +539,9 @@ lap-сообщения (готовая разметка интервалов) и
   `detraining_expected` + VDOT-декай-оценка, p1 правило 14 (мягкий возврат:
   max_zone=2); `session_rpe` (Foster: RPE×минуты) в computed; `wellness_trend`
   (7 vs 28 дней mood/soreness/pain/sleep_quality_self) в weekly summary — без новых
-  вопросов пользователю. Схема insights v7.
+  вопросов пользователю. Схема insights v7 (на 10.09.2026 `INSIGHTS_SCHEMA_VERSION = 10`
+  в `src/services/workout_insights.py`: v8 — пол GAP-фактора на спусках #298, v9 — базовая линия
+  v2 #259/#289, v10 — путь «холод»/адаптивная поправка датчика; история пересчитывается лениво).
 - ✅ **F4 — M3.1 зоны/темпы от LTHR/LTSP (01.09.2026)**: 🛑 стоп-поинт пройден — владельцу
   показано сравнение на истории (доля лёгкого 72% → 47%, 31/42 тренировок сдвигаются;
   Z2-потолок 144 → 139) — решение «включить полностью + пересчитать историю».
@@ -546,11 +575,68 @@ Literal-перечень флагов assessment — `schemas.FlagValue` (append
 - ✅ **P1**: локальные недели в `week_targets` (#220), утро подтверждает последнюю строку дня
   (#292/#305), окно доступности `available_weekdays` + отмены переживают `/plan` (#294), потолок пульса
   в назначении (#295), ступени ориентира темпа A→B→C (#264) + темповые км-точки (#263),
-  moving-time (#286), проза отчёта по `is_quality` (#311). Открыто: #259 (наклон базовой линии,
-  research), #243 (план к гонке — ТЗ зафиксировано, ждёт даты старта).
+  moving-time (#286), проза отчёта по `is_quality` (#311). #259 — ✅ 08.09.2026: базовая линия
+  HR↔GAP v2 (`analysis/hr_baseline.py`: фит без температурного сдвига, сессионная σ `sigma_bpm`,
+  прайор наклона −8 при выходе из [−15, −4], `BASELINE_VERSION` 2; `detraining_shift_bpm` — остаток
+  #289 закрыт). Открыто: #243 (план к гонке — ТЗ зафиксировано, ждёт даты старта).
 - ✅ Смежное 03–04.09: недельный отчёт v2 (C8.1 выше), отмена дней подопечным + гвард
   `blocked_by_unavailable`, ярлык тренировки по плану дня (`analysis/type_resolution.py`, миграция
   `v5w6x7y8z9a0`, переразметка 27/44).
+
+### 06–10.09.2026 — потолки кодом, прогноз правил, болезнь, данные (детали — CHANGELOG по дням; записей за 05.09 нет)
+
+- ✅ **06.09 — потолок длительной и объёма недели — кодом**: `planning_safety.cap_long_run` при финализации
+  плана (км по `predicted.distance_km`, допуск `LONG_RUN_CAP_TOLERANCE_KM` 0,3 км; минуты по
+  `long_run_min_max` 150; повторный `finalize`, строка «⚠️ Длительная урезана…», `meta.long_run_capped`) и
+  `cap_week_volume` (лёгкие/восстановительные дни пропорционально до `target_km`, допуск
+  `WEEK_VOLUME_TOLERANCE_PCT` 5 %, дни с сегментами фиксированы, `meta.week_volume_capped`); при закрытом
+  интенсиве `apply_safety_to_targets` ставит `target_km = prev_week_km` (`volume_held_by_safety`, шапка «объём
+  без роста») — решение владельца 06.09; цикл финализации — два прохода; `recent_athlete_requests` (7 дн) в
+  контексте плана.
+- ✅ **06.09 — ускорения по усилию и честный даунгрейд**: `is_stride`-сегменты (15–20 с) не клэмпятся по
+  зоне/пульсу, усилие `STRIDE_DEFAULT_EFFORT` «свободно», компактная строка включает отдых («5×20 сек
+  свободно (отдых 2 мин трусцой)»), длительность структурного дня — из суммы сегментов; `safety._downgrade`:
+  урезанные tempo/interval/race → `easy`, не `long` (инцидент 06.09 «Длительный бег 40 мин»); карточка недели
+  называет замену и причину по дням (`render_week._clamp_notes`); элементы плана несут `segments`
+  (`segments_from_schema`); ускорения при `hard_days_max = 0` допустимы.
+- ✅ **07.09 — прогноз правил 16/17 по дню плана (#315)**: `planning_safety.hard_share_by_day` /
+  `easy_too_hard_counts_by_day` → `quality_reopens_at` → `quality_allowed_from_days_ahead`, каждый день плана
+  финализируется по `project_state`; шапка «интенсив не раньше Чт (safety)»; `HARD_SHARE_LOOKBACK_DAYS = 7`.
+  Смежно (методика): `EASY_RUN_Z3_TOLERANCE_PCT` 10 → 20 % + критерий среднего пульса выше Z2,
+  `long_run_max_pct` 40 % при < 30 км/нед или ≤ 4 пробежек, `PLAN_EASY_MIN_MINUTES` 25 → 30, при плоском
+  объёме `run_days_max` не больше прошлой недели.
+- ✅ **07.09 — гейт болезни (#322)**: `CoachTurn.illness` (`IllnessReport`: sick/recovered, kind, days_ago),
+  `coach/illness.py` (`params_json["illness"]`, без миграции; `record_illness`, `blocked_reason`),
+  `ILLNESS_PAUSE_DAYS[kind]` (ОРЗ/грипп 14, ангина 21, пневмония 30, другое 7 дн.), правило 21 safety,
+  `week_targets` исключает даты паузы из `days_ahead_allowed`, `project_state` несёт `day_offset`.
+- ✅ **07.09 — E2.1 гайды Швеца 47–50** (см. E-серию выше): `plan_guides_queries`, дайджест ≤ 60 строк,
+  гвард `tests/coach/test_guide_queries.py`.
+- ✅ **07.09 — `/plan` с текстом-триггером** (инцидент 07.09): реплика «переделай план, сегодня не смогу» едет
+  `athlete_text` в `generate_weekly_plan`, сохраняется как chat-сообщение, LLM видит её в контексте,
+  `_apply_availability_from_turn` + `planning.cancel_days` применяют отмены после гашения прежнего плана,
+  `meta.cancelled_days`.
+- ✅ **08.09 — базовая линия HR↔GAP v2 (#259/#289)**: замер `bin/research_hr_baseline_slope.py` (pooled OLS
+  −7.97 ≈ эмпирика −8); `fit_hr_pace_baseline` фитит HR без температурного сдвига, σ — сессионная
+  `sigma_bpm` (3.4 вместо км-RMSE 5.5), наклон вне [−15, −4] → прайор −8 (`method=prior`),
+  `BASELINE_VERSION` 2 (v1 пересчитывается при чтении); `detraining_shift_bpm` в ожидании `hr_vs_baseline`
+  (`week_structure.detraining`, `DETRAINING_LOOKBACK_DAYS` 90, кап 20 %); `BASELINE_Z_FLAG` 1.5 → 2.0,
+  `RPE_BASELINE_Z_MAX` 1.0 → 1.5; insights v9.
+- ✅ **08.09 — готовность к зиме**: датчик температуры часов — только фолбэк с адаптивной поправкой
+  `services/watch_temp_bias.recent_watch_bias` (медиана «часы − погода» за 45 дн) и гвардом ложной жары
+  (`WATCH_HEAT_CONFIRM_MARGIN_C` 5); `cold_flag` при t ≤ `COLD_TEMP_THRESHOLD_C` 0 → контекст-флаг `cold` +
+  гайд 49; метки Open-Meteo — UTC; insights v10; сдвиг пульса в мороз не расширен (#301).
+- ✅ **08.09 — набор/спуск высоты с гистерезисом (#253)**: `calc_elevation` — `ELEV_HYSTERESIS_M` 2 м
+  (×1.03 к `total_ascent_m` часов на 39 тренировках); `device_check` сверяет набор с часами
+  (`DEVICE_ELEV_MISMATCH_PCT` 25 %, хвост #285); `bin/backfill_elevation.py`.
+- ✅ **08.09 — сегменты по структурным лапам часов (#302)**: `analysis/segment_laps.py` (`lap_windows` /
+  `lap_segments`), дистанция и время — из лапа, лап-сегменты авторитетны в `process_trackpoints(laps=)`,
+  санити темпа лапа `LAP_PACE_SANITY_MIN/MAX_MIN_KM` 3:00–15:00, `computed.inputs.segmentation_source`;
+  новый #327.
+- ✅ **10.09 — актуальные проблемы подопечного (concerns)**: `coach/concerns.py` (`params_json["concerns"]`,
+  `record_concern` / `refresh_from_pain` / `expire` / `resolve`, `CONCERN_EXPIRE_DAYS` 14), `CoachTurn.concern`
+  (`ConcernReport`), `context_block` → `extras["concerns (params)"]`; колено убрано из профиля
+  (`turn_context.profile`), промпта, `skills/pain.py`, вечернего вопроса (только при активной проблеме) и
+  `handlers/pain.py` (`pain_location` — из активной травмы или `unspecified`); новый #328.
 
 ### Дальше (приоритеты, согласованы владельцем 25.08.2026)
 
@@ -628,8 +714,12 @@ CoachError → сообщение погибло. Исправлено: `send_md
 
 4. **Перевешивание catch-all** — самое рискованное изменение: после C4 каждый текст = обращение к
    коучу (после C7 — платное). Митигация: приоритет веса, `turns_today`, `COACH_ENABLED`.
-5. **Проза LLM может исказить число** — гарантирована только карточка. Numeric-checker → BACKLOG.
-6. **Мульти-брендовость:** ни одного `coros` в `src/coach/**`.
+5. **Проза LLM может исказить число** — гарантирована только карточка. Numeric-checker v1 —
+   ✅ 29.08.2026 (`coach/numeric_check.py`: сверка чисел прозы с карточкой, детект); v2 — обрезание
+   прозы при расхождении — BACKLOG #247.
+6. **Мульти-брендовость:** код коуча бренд-независим — в логике `src/coach/**` нет `coros`;
+   исключение — `vision.py` (промпт распознавания скриншота сна конкретного приложения; при новом
+   бренде — параметризовать). Комментарии/ссылки на `docs/coros_health_metrics.md` — не нарушение.
 7. `training_type_override` в остальном приложении не слит с `training_type` → BACKLOG, не «заодно».
 
 ## 12. Принятые допущения (менять по слову владельца)
@@ -656,9 +746,10 @@ CoachError → сообщение погибло. Исправлено: `send_md
   прошедшие дни — факт связанной тренировки (✓) или пропуск (✗), план не «меняется» задним числом.
   Многонедельный план к гонке (#243) — по-прежнему только прозой до реализации.
 - Инициатива стартует на `high`.
-- Пороги `RECOVERY_PCT_MODERATE=30` / `LOAD_RATIO_HIGH=1.2` не трогаем (потребители — display-слой
-  и тесты; для ACWR — отдельный `INJURY_RISK_THRESHOLDS['load_ratio_high']=1.5`). Приведение шкалы
-  к Coros (20/70/90) → BACKLOG.
+- Шкала Recovery % — Coros §12, приведена ✅ 04.09.2026 (#249): `RECOVERY_PCT_FRESH=90` /
+  `RECOVERY_PCT_READY=70` / `RECOVERY_PCT_MODERATE=20` (`coach/config.py`; правило 4 §4 — два шага).
+  `LOAD_RATIO_HIGH=1.2` — display-ярлык UI, не трогаем; для ACWR — отдельный
+  `INJURY_RISK_THRESHOLDS['load_ratio_high']=1.5`.
 - LLM: три бэкенда за `CoachLLM` Protocol; в проде — мост подписки
   (`BRIDGE_MODEL=sonnet` по умолчанию) — **постоянный режим** (решение владельца
   25.08.2026: корпоративная подписка); API-режим (`claude-opus-5`) остаётся опцией (#241 ⏸).

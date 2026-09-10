@@ -49,12 +49,12 @@
 ### Стек
 - **Backend**: Python + FastAPI + SQLAlchemy + PostgreSQL 16 (через Docker Compose)
 - **Frontend**: HTML/CSS/JS (Vanilla) + Chart.js
-- **Анализ**: `src/analysis/` — пакет анализа (15 модулей): `__init__.py` (оркестратор process_trackpoints), `oscillation.py` (детекция интервалов: base_pace + pace_gap + HR-lag), `classify.py` (interval/tempo/long/recovery/easy), `segment.py` (change-point detection + осцилляции), `segment_km.py` (km-fallback, вариативность), `hr_zones.py` (зоны от LTHR c fallback %max_hr: get_zone/get_band/zone_bounds/zone_ceiling_hr), `gap.py` (GAP/Minetti + downhill_block), `effort.py` (кардиодрейф/HR-стабильность), `hr_baseline.py` (базовая линия HR↔темп), `session_metrics.py` (метрики M1 разбора), `gps_quality.py` (квалиметрия GPS + оценка по шагам), `data_checks.py` (кросс-чеки с часами), `intervals.py` (HRR интервалов), `week_structure.py` (структура недели/детренированность), `utils.py`
+- **Анализ**: `src/analysis/` — пакет анализа (17 модулей): `__init__.py` (оркестратор process_trackpoints), `oscillation.py` (детекция интервалов: base_pace + pace_gap + HR-lag), `classify.py` (interval/tempo/long/recovery/easy), `segment.py` (change-point detection + осцилляции), `segment_km.py` (km-fallback, вариативность), `hr_zones.py` (зоны от LTHR c fallback %max_hr: get_zone/get_band/zone_bounds/zone_ceiling_hr), `gap.py` (GAP/Minetti + downhill_block), `effort.py` (кардиодрейф/HR-стабильность), `hr_baseline.py` (базовая линия HR↔темп), `session_metrics.py` (метрики M1 разбора), `gps_quality.py` (квалиметрия GPS + оценка по шагам), `data_checks.py` (кросс-чеки с часами), `intervals.py` (HRR интервалов), `week_structure.py` (структура недели/детренированность), `type_resolution.py` (ярлык: сырой тип + план дня), `segment_laps.py` (сегменты по структурным лапам часов, #302), `utils.py`
 - **Парсеры**: `src/parsers/` — `tcx_parser.py` (XML), `fit_parser.py` (бинарный), `gps.py` (очистка GPS), `weather.py` (Open-Meteo API, httpx)
 - **Интеграции**: Coros Training Hub (неофициальное API), Open‑Meteo (погода), Telegram Bot API. Мульти-бренд: `BaseWatchClient` ABC + `factory.py` реестр.
 - **Аутентификация**: email+пароль (bcrypt), одноразовые токены регистрации (`secrets`), session-cookie (`SessionMiddleware`)
 - **Логирование**: структурированное, ежедневная ротация (`TimedRotatingFileHandler`), JSON/text
-- **Аудит**: события в БД (`audit_events`) + файл (`logs/audit_*.log`)
+- **Аудит**: события в БД (`audit_events`) + файл (`logs/audit.log`, ротация по дням → `audit.log.YYYY-MM-DD`)
 - **Планировщик**: `threading.Thread` с jitter (фоновые задачи, автосинхронизация)
 - **Шифрование**: Fernet (ключ из окружения)
 - **ИИ-коуч**: `src/coach/` — скиллы/граница безопасности/tools/LLM-слой (`anthropic==1.0.0`);
@@ -71,6 +71,8 @@ docker compose up db -d          # Запустить PostgreSQL
 DATABASE_URL=postgresql://running_coach:${POSTGRES_PASSWORD}@localhost:5432/running_coach
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
+Проброс порта `db` в `docker-compose.yml` закомментирован — для этого рецепта раскомментируйте
+`ports: "5432:5432"` у сервиса `db` (или работайте через `docker compose exec db psql`).
 
 ### Таблицы и схемы (дополнительные)
 
@@ -110,7 +112,8 @@ max_gps_jump_m FLOAT DEFAULT 100.0      -- Макс. скачок GPS между
 min_hr_for_fast_pace INTEGER DEFAULT 130-- Мин. пульс для быстрого темпа (уд/мин)
 timezone VARCHAR(50)                     -- IANA-таймзона пользователя (e.g. "Europe/Moscow")
 interval_pace_threshold FLOAT             -- Порог темпа: разница с базовым (мин/км, default 1.0)
-interval_min_phase_duration INTEGER       -- Мин. длительность фазы (сек, default 15)
+interval_min_phase_duration INTEGER       -- Мин. длительность фазы (сек, default 60)
+interval_min_phase_distance_m INTEGER     -- Мин. дистанция фазы (м) — используется reanalyze
 interval_hr_lag_sec INTEGER               -- Лаг пульса (сек, default 5)
 interval_min_oscillations INTEGER         -- Мин. число осцилляций для interval (default 3)
 is_active BOOLEAN DEFAULT TRUE          -- Активен ли пользователь
@@ -129,6 +132,8 @@ avg_heart_rate INTEGER                  -- Средний пульс (уд/ми�
 max_heart_rate INTEGER                  -- Максимальный пульс (уд/мин)
 training_type VARCHAR(50)               -- Тип: interval/tempo/long/recovery/easy
 training_type_override VARCHAR(50)      -- Ручная установка типа (NULL = автоопределение)
+training_type_auto VARCHAR(50)          -- Сырой ответ классификатора (до сверки с планом)
+training_type_source VARCHAR(20)        -- auto | plan | manual — кто дал training_type
 trackpoints_json JSON                   -- Сырые трекпоинты для пересчёта (reanalyze)
 segments_count INTEGER DEFAULT 1        -- Количество сегментов
 duration_minutes FLOAT DEFAULT 0        -- Длительность (минуты)
@@ -162,14 +167,14 @@ device_summary JSON                     -- Эталоны session-сообщен
 id INTEGER PRIMARY KEY
 user_id INTEGER FOREIGN KEY(users.id)
 date DATE NOT NULL                     -- Дата метрики
-avg_sleep_hrv FLOAT                    -- HRV (SDNN) за сон
+avg_sleep_hrv FLOAT                    -- HRV (RMSSD) за сон
 sleep_hrv_baseline FLOAT               -- Базовый HRV
 sleep_hrv_sd FLOAT                     -- Стандартное отклонение HRV
 rhr INTEGER                            -- Пульс покоя (RHR)
 tired_rate INTEGER                     -- Усталость (-10…+10)
 training_load FLOAT                    -- Тренировочная нагрузка
 training_load_ratio FLOAT              -- Отношение нагрузки к норме
-performance INTEGER                    -- Эффективность (0‑100)
+performance FLOAT                      -- Coros performance (−2…+2)
 ati FLOAT                              -- Аэробный тренировочный эффект (ATI)
 cti FLOAT                              -- Анаэробный тренировочный эффект (CTI)
 vo2max FLOAT                          -- VO₂max
@@ -209,6 +214,8 @@ training_effect FLOAT                  -- Training Effect
 vo2max FLOAT                          -- VO₂max
 calories INTEGER                       -- Калории
 avg_pace FLOAT                         -- Средний темп (мин/км)
+external_activity_id VARCHAR(64)       -- ID активности у провайдера (точный матчинг при ре-синке)
+source_brand VARCHAR(50)               -- Бренд-источник
 deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP -- Когда удалена
 ```
 
@@ -227,12 +234,15 @@ user_id INTEGER FOREIGN KEY(users.id)
 brand VARCHAR(50) NOT NULL               -- Бренд часов (coros, polar, garmin, suunto, …)
 encrypted_user VARCHAR(255)               -- Зашифрованный email/логин
 encrypted_password VARCHAR(255)           -- Зашифрованный пароль
+api_user_id VARCHAR(64)                   -- ID пользователя в API бренда (resume токена)
 access_token VARCHAR(512)                 -- Временный токен доступа (nullable)
 token_expires_at DATETIME                 -- Срок токена доступа (nullable)
 last_activity_sync_at DATETIME            -- Время последней синхронизации тренировок
 last_health_sync_at DATETIME              -- Время последней синхронизации метрик здоровья
 activity_sync_interval INTEGER            -- Интервал синхронизации тренировок (мин, nullable)
 health_sync_interval INTEGER              -- Интервал синхронизации здоровья (мин, nullable)
+activity_sync_failures INTEGER DEFAULT 0  -- Подряд неудачных синков тренировок
+health_sync_failures INTEGER DEFAULT 0    -- Подряд неудачных синков здоровья
 is_active BOOLEAN DEFAULT TRUE            -- Активны ли учётные данные
 created_at DATETIME
 updated_at DATETIME
@@ -245,6 +255,9 @@ session_id INTEGER FOREIGN KEY(training_sessions.id)
 user_id INTEGER FOREIGN KEY(users.id)
 rating INTEGER NOT NULL                -- Оценка тяжести (0–10)
 notes VARCHAR(500)                     -- Комментарий
+pain_level INTEGER                     -- Боль 0–10
+pain_location VARCHAR(30)              -- knee_left/knee_right/…
+pain_phase VARCHAR(20)                 -- start/middle/end/after/none
 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 ```
 
@@ -263,7 +276,9 @@ created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   `coach_messages`, наблюдаемость решений в `recommendations`
 - `q0r1s2t3u4v5` (workout_insights) → `r1s2t3u4v5w6` (сон из скриншота, `sleep_*` в daily_metrics)
   → `s2t3u4v5w6x7` (sleep_extra) → `t3u4v5w6x7y8` (gps_quality)
-  → `u4v5w6x7y8z9` — **текущий head** (laps_json/device_summary)
+  → `u4v5w6x7y8z9` (laps_json/device_summary)
+  → `v5w6x7y8z9a0` — **текущий head** (провенанс ярлыка: `training_type_auto` — сырой ответ
+  классификатора, `training_type_source` — auto|plan|manual)
 
 Файлы миграций: `alembic/versions/`. Конфигурация: `alembic.ini`, `alembic/env.py` (`DATABASE_URL` из env).
 
@@ -307,9 +322,12 @@ training_sessions.id                     │
 
 ## 🧠 Классификация тренировок
 
-- **Интервальная** – 3+ вариативных километров ИЛИ 3+ work→recovery циклов (темп ≥ 1 мин/км быстрее среднего)
-- **Темповая** – 1–2 вариативных километра
-- **Long / Recovery** – 0 вариативных километров (определяется по ЧСС и длительности)
+Приоритет проверок в `src/analysis/classify.py` (первое совпавшее правило):
+- **Интервальная** – `oscillation_count ≥ 2` И (пульс коррелирует с темпом ИЛИ средний пульс ≥ порога интервала: LTHR, без LTHR — 87 % max_hr) И сегментов ≥ 3 (при < 3 сегментах осцилляции обнуляются)
+- **Длительная** – ≥ 90 мин, Z1+Z2 ≥ 50 % времени, Z4+ < 15 %
+- **Восстановительная** – средний пульс ≤ гейта recovery (от LTHR / % max_hr), мало Z4+, средний темп > 6.0 мин/км
+- **Лёгкая** – средний пульс ≤ гейта easy, Z1+Z2 доминируют, нет длинного Z4+-сегмента
+- **Темповая** – всё остальное (fallback)
 
 ### Детекция интервалов (новый алгоритм)
 - **Base pace** = средний темп всей пробежки (разминка + заминка учитываются)
@@ -319,7 +337,7 @@ training_sessions.id                     │
 - HR-lag корреляция: пульс растёт через 5 сек после ускорения = подтверждение интервала
 
 ### Сегментация
-- Change-point detection: анализ smoothed tempo по всему треку (rolling window 50м)
+- Change-point detection: анализ smoothed tempo по всему треку (окно `CHANGE_POINT_WINDOW_M` = 200 м; 50 м — окно темпа по точкам в `segment_km.py`)
 - Слайдящее окно находит точки смены темпа, пиковая детекция для обработки плато
 - Минимальная длина сегмента — 200м
 - Fallback: осцилляции → км-блоки
@@ -389,11 +407,11 @@ training_sessions.id                     │
 - **Graceful error handling** – ошибки API не роняют планировщик
 
 ### Метрики здоровья (DailyMetrics)
-- **HRV (SDNN)** – вариабельность сердечного ритма за сон
+- **HRV (RMSSD)** – вариабельность сердечного ритма за сон
 - **RHR** – пульс покоя
 - **Tiredness** – уровень усталости (-10…+10)
 - **Training Load** – нагрузка (лёгкая/средняя/высокая)
-- **Readiness** – готовность к тренировкам (-10…+10)
+- **Готовность** – отдельной метрики нет: складывается из `performance` (−2…+2) и `recovery_pct` (0–100 %)
 - **ATI / CTI** – аэробный/анаэробный тренировочный эффект
 - **VO₂max** – максимальное потребление кислорода
 - **LTHR** – порог лактата (ЧСС)
@@ -416,9 +434,9 @@ training_sessions.id                     │
 - **max_gps_jump_m** – максимальный скачок GPS между точками
 - **min_hr_for_fast_pace** – минимальный пульс для быстрого темпа (проверка правдоподобия)
 - **Порог ускорения (interval_pace_threshold)** – разница с базовым темпом (по умолчанию 1:00 мин/км). Участки быстрее = work‑фаза (интервал).
-- **Мин. длительность фазы (interval_min_phase_duration)** – минимум 15 сек (по умолчанию)
+- **Мин. длительность фазы (interval_min_phase_duration)** – минимум 60 сек (по умолчанию, `DEFAULT_MIN_PHASE_DURATION_SEC`)
 - **Лаг пульса (interval_hr_lag_sec)** – задержка пульса после смены темпа (по умолчанию 5 сек)
-- **Мин. число осцилляций (interval_min_oscillations)** – циклов work→recovery для interval (по умолчанию 3)
+- **Мин. число осцилляций (interval_min_oscillations)** – циклов work→recovery для interval (по умолчанию 3). Честно: параметр хранится и передаётся в `classify_training(min_oscillations=…)`, но правило `is_interval` его не читает — порог захардкожен как `oscillation_count >= 2`
 - **Учётные данные часов** – для каждого подключённого бренда (Coros, Polar, Garmin, …): email/логин + пароль (шифруются Fernet), интервал синхронизации тренировок и здоровья (per‑user)
 
 ---
@@ -440,7 +458,8 @@ LOGS_DIR=logs                    # Папка логов
 SLOW_REQUEST_MS=1000            # Порог медленного запроса для лога
 GITHUB_TOKEN=                    # Токен для пуша в GitHub
 SUDO_PASSWORD=                   # Для bin/backup_db.sh и docker-обёртки (только локально)
-RAW_FILES_DIR=uploads/raw        # Хранилище исходных FIT/TCX
+RAW_FILES_DIR=uploads/raw        # Хранилище исходных FIT/TCX (поле settings.raw_files_dir, в .env.example нет)
+PENDING_DIR=uploads/pending      # Очередь загрузок веба (src/web/state.py, читается из env)
 
 # --- ИИ-коуч ---
 COACH_ENABLED=true               # Рубильник коуча (свободный чат + проактивность)
@@ -495,7 +514,7 @@ LLM-часть коуча дополнительно требует host-сер�
 `sudo systemctl {status|restart} running-coach-llm-bridge`. Правка `bin/coach_llm_bridge.py`
 или `.env.bridge` требует только рестарта юнита, не пересборки контейнеров.
 
-> **Примечание:** `bin/docker.sh` — защищённая обёртка (права 700, пароль из .env). Не отслеживается git — создать вручную по образцу из `.env.example` или использовать `docker compose` напрямую.
+> **Примечание:** `bin/docker.sh` — защищённая обёртка (права 700, пароль из .env); отслеживается git, после клонирования выставить `chmod 700`. Можно использовать `docker compose` напрямую.
 
 ```bash
 # Запуск
@@ -530,7 +549,8 @@ volume: pgdata      uploads/ logs/      (нет volumes)
 ```bash
 cd /home/nimda/projects/running-coach
 
-# Веб-сервер (требуется запущенный PostgreSQL через docker compose up db -d)
+# Веб-сервер (требуется запущенный PostgreSQL через docker compose up db -d;
+# порт 5432 наружу — раскомментировать ports у db в docker-compose.yml)
 DATABASE_URL=postgresql://running_coach:${POSTGRES_PASSWORD}@localhost:5432/running_coach uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 # Telegram-бот (отдельный терминал)
@@ -598,4 +618,12 @@ LOGS_DIR=logs
 
 ---
 
-*Последнее обновление: 01.09.2026 — синхронизация с кодом: тренировки по сегментам (M2.1), устойчивость к сбою LLM-моста, F-серия «сырые данные и физиология» (см. выше)*
+*Последнее обновление: 10.09.2026 — сверка с кодом.*
+
+Что нового с 01.09.2026:
+- сегментация по структурным лапам часов — `src/analysis/segment_laps.py` (#302)
+- набор/спуск высоты с гистерезисом 2 м, как у часов — `ELEV_HYSTERESIS_M` (#253)
+- адаптивная поправка датчика температуры часов — `src/services/watch_temp_bias.py`
+- гейт болезни — `src/coach/illness.py` (#322)
+- актуальные проблемы подопечного — `src/coach/concerns.py` (10.09)
+- базовая линия HR↔GAP v2 (#259/#289)

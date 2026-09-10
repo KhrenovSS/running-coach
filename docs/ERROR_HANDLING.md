@@ -25,6 +25,7 @@ Exception
         ├── RateLimitError         # 429
         └── CoachError             # 500 — модуль коуча; НЕ должен ронять синк/бот
               ├── LLMUnavailableError   # LLM недоступен → детерминированный fallback (не 5xx юзеру)
+              │     └── LLMTransientError # транзиентный сбой моста (502/timeout/сеть) → ретрай post_with_retry
               └── ToolExecutionError    # сбой tool'а LLM → is_error tool_result, не крах хода
 ```
 
@@ -42,6 +43,7 @@ Exception
 | `RateLimitError(message, retry_after)` | 429 | Превышен лимит запросов |
 | `CoachError(message)` | 500 | Ошибки коуча; вызывающий код обязан ловить — падение коуча не роняет синк |
 | `LLMUnavailableError(message)` | — | Нет ключа/моста/сети: оркестратор уходит в fallback, пользователю не 5xx |
+| `LLMTransientError(message)` | — | Подкласс `LLMUnavailableError`: временный сбой моста (5xx/timeout/сеть) — ретрай `post_with_retry` (`coach/llm/bridge_client.py`); постоянные сбои (нет ключа, 401, 400) остаются `LLMUnavailableError` |
 | `ToolExecutionError(message)` | — | Ошибка tool'а: агент возвращает её модели как is_error tool_result |
 
 ## Примеры
@@ -74,7 +76,9 @@ def get_training(db: Session, training_id: int) -> TrainingSession:
 import httpx
 from src.config import settings
 from src.exceptions import WatchAPIError
-from src.utils.logger import logger
+from src.utils.logger import get_logger
+
+logger = get_logger("watch.coros")
 
 async def fetch_activities(access_token: str, api_base: str, endpoint: str):
     """Загрузить список активностей (Fetch activities)"""
@@ -195,4 +199,4 @@ except FileNotFoundError:
 
 ---
 
-**Последнее обновление:** 16.07.2026
+**Последнее обновление:** 10.09.2026

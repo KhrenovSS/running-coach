@@ -60,7 +60,7 @@ Z1 и ниже · пульс до 125 уд/мин · 30 мин
 ```bash
 docker exec running-coach-bot-1 python -c "
 from src.domain.models.base import SessionLocal
-from src.services.workout_insights import _collect_window_points
+from src.services.insights_baseline import _collect_window_points   # переехал из workout_insights (services/insights_baseline.py)
 from src.analysis.hr_baseline import pace_at_hr_band
 from src.analysis.hr_zones import zone_ceiling_hr
 db = SessionLocal(); pts,_ = _collect_window_points(2, db=db)
@@ -168,6 +168,7 @@ BASELINE_TYPICAL_MIN_SESSIONS: Final[int] = 3     # минимум сессий 
 | `band` | `Ориентир по твоим пробежкам: ~6:47/км → ≈4.4 км` (как сейчас) |
 | `adjusted` | `Прикидка (данных на этом пульсе мало): ~8:16/км → ≈3.6 км` |
 | `typical` | `По твоим прошлым таким пробежкам: ~7:10/км → ≈4.2 км (без привязки к пульсу)` |
+| `threshold` | `Нормативный темп зоны от ПАНО часов: ~6:30/км → ≈4.6 км` (M3.1: `ltsp + LTSP_ZONE_OFFSET_S[зона]` при пустой истории) |
 
 Целевая карточка инцидента:
 

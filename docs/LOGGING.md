@@ -43,9 +43,13 @@ logger.info("Sync completed", extra={"count": 5})
 ### Конвенция имён логгеров
 
 Имя — иерархическое, по модулю: `get_logger("coach.orchestrator")`, `get_logger("telegram.handlers.coach")`.
-Используемые пространства: `app` (общий), `coach.*` (agent, llm, orchestrator, prescriber, tools),
-`telegram.handlers.*`, `telegram.jobs.*`, `telegram.main`. Новый модуль коуча/бота получает
-логгер по своему пути — не переиспользуй `"app"`.
+Используемые пространства: `app` (общий), `coach.*` (agent, llm, orchestrator, prescriber, tools,
+week_report, weekly_plan), `telegram.handlers.*`, `telegram.jobs.*`, `telegram.main`,
+`telegram.utils`, `telegram.sync_runner`, `analysis` / `analysis.*` (segment, gps_quality,
+data_checks), `parsers.*` (gps, weather), `services.*` (workout_insights, insights_baseline,
+prediction_log, sleep_ingest, type_resolution_backfill), `api.deps`, `auth`, `crypto`,
+`rate_limit`, `raw_files`, `training_service`, `watch.coros`, `watch_credentials`.
+Новый модуль получает логгер по своему пути — не переиспользуй `"app"`.
 
 ## Аудит-события (Audit events)
 
@@ -93,9 +97,10 @@ audit.log_settings_changed(user_id=1, changes={"max_hr": {"old": 170, "new": 175
 
 ```
 GET /logs?lines=100
+GET /logs?lines=100&day=YYYY-MM-DD
 ```
 
-Показывает последние N строк из текущего лог-файла приложения.
+Показывает последние N строк из текущего лог-файла приложения; `day` — ротированный файл за указанный день (`<log_file>.YYYY-MM-DD`, формат проверяется, иначе 400).
 
 ## Рекомендации (Best practices)
 

@@ -69,7 +69,8 @@ API-ключа: Read-tool ограничен temp-каталогом (`--add-dir
 expired/error) с атомарным claim (`UPDATE ... WHERE status='pending'`, rowcount==1):
 синк из любого контейнера только создаёт строки, исполняет разбор только бот (хендлеры
 тапов + периодическая джоба). Переживает рестарты, дедуп гарантирован БД, in-memory
-состояния нет. Та же строка — персистентный итог разбора: `computed_json` **schema v7** (детерминированные
+состояния нет. Та же строка — персистентный итог разбора: `computed_json` **schema v10** (`INSIGHTS_SCHEMA_VERSION`
+в `services/workout_insights.py`; детерминированные
 метрики: кардиодрейф Pa:HR, GAP/уклон, отклонение от базовой линии HR↔темп, heat, время в
 зонах, потолки качества, план-vs-факт; с 01.09 также кросс-чеки с часами `device_check`/
 `lap_check`, HRR интервалов `interval_recovery`, структура недели `week_structure`,
@@ -155,7 +156,21 @@ apply_type_resolution`) чистый `analysis/type_resolution.resolve_training_
 (long/easy/recovery) и никогда не tempo. Источник — `training_type_source` (auto|plan|manual), ручной
 override главнее. Обратимо: `training_type = training_type_auto`. Решение владельца 04.09.2026.
 
-## Карта модулей `src/coach/` (фактическая, на 02.09.2026)
+## Решение 11: факты от LLM, сроки — кодом: болезнь и актуальные проблемы (07.09 / 10.09.2026)
+
+Болезнь (#322, 07.09.2026) и актуальные проблемы подопечного — травма/боль, долгий перерыв
+(решение владельца 10.09.2026) — устроены одинаково: **LLM только сообщает факт**
+(`CoachTurn.illness`: sick/recovered, kind, days_ago; `CoachTurn.concern`: new/ongoing/resolved),
+**даты и сроки считает код** — `coach/illness.py` (пауза `ILLNESS_PAUSE_DAYS[kind]`, гайд 50) и
+`coach/concerns.py`. Состояние — `UserModel.params_json["illness"]` / `["concerns"]`, без миграции.
+Читатели детерминированы: safety (правило 21 `p1_safety`, прогноз по дню плана через `day_offset`),
+`/plan` (закрытые даты), чат/утро (`blocked_reason`), вечерний вопрос и подпись кнопок боли —
+только при активной проблеме (колено больше не захардкожено). Проблема снимается с контроля сама,
+когда `CONCERN_EXPIRE_DAYS` (14) подряд нет ни боли > 0 (тапы), ни упоминаний в чате. Оба блока —
+волатильны и в кэшируемый профиль system-блока **не кладутся** (`turn_context`: today-блоки
+`illness (params)` / `concerns (params)`).
+
+## Карта модулей `src/coach/` (фактическая, на 10.09.2026)
 
 ```
 coach/
@@ -185,9 +200,15 @@ coach/
 │                      #   + cap_long_run: потолок длительной (30 % недели / 150 мин) кодом при финализации
 │                      #   + cap_week_volume: сумма плана ≤ target_km (лёгкие ужимаются); объём плоский при закрытом интенсиве
 ├── segments.py        # enrich_and_clamp_segments: числа сегментам из зон/истории, per-segment clamp (M2.1)
+├── illness.py         # #322 (07.09): гейт болезни — params_json["illness"], пауза ILLNESS_PAUSE_DAYS[kind],
+│                      #   правило 21 safety / закрытые даты плана / blocked_reason; LLM сообщает факт, сроки — код
+├── concerns.py        # 10.09: актуальные проблемы (травма/боль/перерыв) — params_json["concerns"],
+│                      #   протухание CONCERN_EXPIRE_DAYS=14 без боли и упоминаний; вечерний вопрос и подпись
+│                      #   кнопок боли — только при активной проблеме
 ├── orchestrator.py    # morning_verdict (подтверждает план дня), handle_chat, on_workout_completed
+│                      #   (+ _merged_flags: слияние флагов LLM с computed), weekly_report; ChatReply
 ├── review_flow.py     # ensure_insights_for_batch, run_pending_review, due_review_sessions
-│                      #   (+ слияние флагов из computed), weekly_report; ChatReply
+│                      #   (очередь отложенного разбора: claim → orchestrator.on_workout_completed)
 ├── turn_context.py    # build_extras / unchanged_today / history (вынос из orchestrator, #266)
 ├── planning.py        # детерминированные числа недели (мезоцикл 3:1, прогрессия, потолки,
 │                      #   long_run_hold/detraining_return, availability #294), week_plan_review,
@@ -196,8 +217,9 @@ coach/
 ├── weekly_plan.py     # generate_weekly_plan (вс 19:00, строки recommendations status=planned)
 ├── numeric_check.py   # #247: сверка чисел прозы LLM с карточкой (детект+лог)
 ├── vision.py          # #257: SleepShot + extract_sleep (скриншот → мост /vision)
-├── rules/p1_safety.py # evaluate_safety(state) — правила 1–20 (шкала Recovery Coros, флаги разбора
-│                      #   17–19, монотонность 20, перекос недели 16); safety.effective_workout_type —
+├── rules/p1_safety.py # evaluate_safety(state) — правила 0–21 (0 — нет данных → консервативный потолок;
+│                      #   шкала Recovery Coros, флаги разбора 17–19, монотонность 20, перекос недели 16,
+│                      #   болезнь 21); safety.effective_workout_type —
 │                      #   интенсивность по сегментам, не по ярлыку (04.09)
 ├── skills/            # base(SkillFn, SKILL_KEYS=6) + fatigue, recovery, load,
 │                      #   distribution, progress, pain (state) + workout (per-session)
@@ -207,7 +229,8 @@ coach/
 │   └── guides/        #   методика: Лидьярд/80-20/прогрессия/колено + Дэниелс/Фицджеральд
 └── llm/               # client (get_llm: ключ→мост→Null), config, schemas (CoachTurn: proposal, weekly_plan,
                        #   unavailable/available_again_days_ahead, available_weekdays, show_week_plan),
-                       #   prompts (кэш-блоки + today + PLAN/MORNING/REVIEW), agent, anthropic/bridge/null
+                       #   illness: IllnessReport, concern: ConcernReport),
+                       #   prompts (кэш-блоки + today + REVIEW/WEEKLY/MORNING/PLAN_PROMPT), agent, anthropic/bridge/null
 
 # Смежное: analysis/session_metrics.py (метрики M1), services/{workout_insights,sleep_ingest,
 #   repositories_insights}.py, telegram/{handlers/sleep_photo, jobs/{sleep_reminder,coach_weekly}}.py,
@@ -226,4 +249,5 @@ hr_baseline}.py` — Minetti-GAP, decoupling Pa:HR, базовая линия HR
 `src/services/sync/activities.py::_coach_reviews` (post-sync разборы в daemon-треде:
 гейт initiative, LLM только для самой свежей тренировки батча),
 `src/domain/models/coach.py` (6 таблиц, включая `WorkoutInsight`) + `WellnessReport` в
-`health.py`, миграции `p9q0r1s2t3u4`/`q0r1s2t3u4v5`, `tests/coach/` (~34 модуля + fakes).
+`health.py`, миграции `p9q0r1s2t3u4`/`q0r1s2t3u4v5`, `tests/coach/` (45 модулей `test_*.py` + fakes,
+на 10.09.2026).

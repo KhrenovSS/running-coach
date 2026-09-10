@@ -2,6 +2,46 @@
 
 All notable changes to this project are tracked here.
 
+## [10.09.2026] — Аудит документации: доки приведены к коду, go.sh обновлён
+
+### Changed
+- **Аудит документации против кода** (три параллельные проверки: общие доки, доки коуча, CLAUDE.md/BACKLOG/go.sh).
+  Итог: инструкции агента и чек-листы актуальны; README, `docs/coach/DEV_PLAN.md` и `~/go.sh` отстали.
+- `README.md`: head миграций `v5w6x7y8z9a0` (провенанс ярлыка); дефолт `interval_min_phase_duration` 60 с (было 15);
+  `performance FLOAT −2…+2` (было INTEGER 0–100), «Readiness» → performance + recovery_pct; HRV RMSSD (не SDNN);
+  DDL дополнены реальными колонками (`training_type_auto/_source`, `api_user_id`, `*_sync_failures`,
+  `interval_min_phase_distance_m`, `pain_*`); правила классификации переписаны по `analysis/classify.py`
+  (осцилляции ≥ 2, long ≥ 90 мин, tempo — fallback; `min_oscillations` в `is_interval` не участвует);
+  окно change-point 200 м; пакет анализа 17 модулей (+`type_resolution.py`, `segment_laps.py`); `bin/docker.sh`
+  в git; порт db в compose закомментирован — оговорка в рецепте локального запуска; аудит-лог `logs/audit.log`;
+  «что нового с 01.09» и дата 10.09.2026.
+- `docs/ARCHITECTURE.md`: все 6 sync-роутов (+status, legacy `/coros/*`), `LLMTransientError`, `CSRFProtectMiddleware`,
+  недостающие модули `services/`, `bin/`, `analysis/segment_laps.py`; имена примеров теста/миграции.
+- `docs/coach/DEV_PLAN.md`: §0 — колено как контекст старта, с 10.09 проблемы — данные (`concerns.py`); §1.8/§11.6 —
+  инвариант мульти-брендовости с явным исключением `vision.py`; §3 — полный список `signals`; **§4 — правила 16–21**
+  (были 0–15), правило 4 в две ступени (MODERATE 20 / READY 70), правило 12 — оператор `>`; константы правил 11–21;
+  §9 — статусы #308/#322/#259 закрыты, insights `INSIGHTS_SCHEMA_VERSION` = 10, новый блок «06–10.09.2026»
+  (11 датированных записей по CHANGELOG); §11.5 numeric-checker v1 ✅; §12 шкала Recovery 90/70/20 (была 30).
+- `docs/coach/ARCHITECTURE.md`: карта модулей на 10.09 (+`illness.py`, `concerns.py`), правила 0–21, schema v10,
+  `weekly_report`/`ChatReply`/`_merged_flags` — в `orchestrator.py` (не `review_flow`), `WEEKLY_PROMPT`, 45 тест-модулей;
+  **новое Решение 11** «факты от LLM, сроки — кодом: болезнь и concerns».
+- `docs/coach/METRICS_GUIDE.md`: монотонность/страйн и потолок объёма после паузы — ✅ (были «не реализовано»);
+  таблица this/prev недельного отчёта дополнена (`long_run_min`, `hard_time_share`, `cadence_median`, `monotony`,
+  `strain`, `trained_days`, сигнал `monotony_high`); `HRR60_LOW_BPM` — в `config/constants.py`.
+- `docs/coach/TASK_pace_estimate_fallback.md`: импорт `_collect_window_points` из `insights_baseline`; ветка `threshold`
+  в таблице рендера.
+- `docs/TESTING.md` (45 модулей коуча, 7 недостающих файлов, фикстуры только TCX, ≈ 1009 тестов),
+  `docs/ERROR_HANDLING.md` (`LLMTransientError`, пример `get_logger`), `docs/LOGGING.md` (пространства логгеров,
+  `GET /logs?day=`), `docs/CHECKLIST_MIGRATION.md` (26 миграций), `docs/CODE_GUIDELINES.md` (`MAX_HR_CAP`/`MAX_HR_CONFIRM_*`),
+  `docs/coros_health_metrics.md` (`sleep_hrv_sd` читается; мёртвые колонки `form_score/load_impact/intensity_trend`;
+  Running Efficiency реализована; ACWR 0.8/1.2 UI и 1.3 недельный отчёт; лишний ``` в конце убран).
+- `CLAUDE.md`: пути с каталогами (`services/workout_insights.py`, `services/sleep_ingest.py`, `telegram/jobs/sleep_reminder.py`,
+  `tests/conftest.py`, `src/coach/knowledge/…`), insights v10, #273 закрыт, «Где продолжать» на 10.09.2026.
+- `BACKLOG.md`: закрытые #253/#259/#289/#302 — в архив (248 закрытых); дубль #324 схлопнут в #328; новые #329
+  (4 файла > 400 строк: `planning.py` 532, `workout_insights.py` 488, `orchestrator.py` 435, `analysis/utils.py` 404)
+  и #330 (CI на Python 3.12 при Dockerfile 3.13); ссылки #121/#326 поправлены; следующий номер — #331.
+- `~/go.sh` (вне репозитория): статусный блок на 10.09.2026 (был 04.09).
+
 ## [10.09.2026] — Актуальные проблемы подопечного (concerns): колено больше не захардкожено
 
 ### Added

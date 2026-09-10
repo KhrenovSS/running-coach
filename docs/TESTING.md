@@ -10,9 +10,9 @@ tests/
 ├── helpers.py               # Фабрики: build_trackpoints, make_user, build_training_session, build_daily_metrics,
 │                            #   build_training_feedback, build_gps_glitch_trackpoints
 ├── helpers_intervals.py     # Фабрики HRR-синтетики: build_hr_series/build_laps/interval_workout/build_hrr_trackpoints
-├── fixtures/                # TCX/FIT файлы для тестов (tempo_run.tcx, short_walk.tcx)
+├── fixtures/                # TCX-файлы для тестов (tempo_run.tcx, short_walk.tcx) + README.md; FIT-фикстур нет
 ├── skills/                  # Фикстуры каркаса коуча (conftest + scaffold-гейт)
-├── coach/                   # Тесты гибридного коуча (~34 модуля): скиллы, state, safety/clamp (табличный),
+├── coach/                   # Тесты гибридного коуча (45 модулей): скиллы, state, safety/clamp (табличный),
 │                            #   source-гварды (Prescription только из clamp; tools read-only),
 │                            #   tools, agent (ScriptedLLM), промпт-стабильность, оркестратор,
 │                            #   pain-флоу, рендер, BridgeLLM (httpx.MockTransport); fakes.py;
@@ -25,6 +25,9 @@ tests/
 ├── test_hr_zones.py         # get_zone/get_band/zone_bounds (LTHR-лестница + fallback %max_hr)
 ├── test_oscillation.py      # detect_pace_oscillations, compute_hr_lag_correlation
 ├── test_segment.py          # segment_by_pace, km_segment_fallback
+├── test_segment_laps.py     # сегменты по структурным лапам часов (#302); test_reanalyze_laps.py — reanalyze по лапам
+├── test_utils_elevation.py  # набор/спуск высоты с гистерезисом (#253)
+├── test_weather_avg.py      # средняя температура за окно бега по часовым значениям Open-Meteo (#300)
 ├── test_gps_quality.py      # квалиметрия GPS / оценка дистанции по шагам
 ├── test_intervals.py        # HRR-разбор интервалов
 ├── test_week_structure.py   # структура недели / детренированность (M4)
@@ -47,12 +50,17 @@ tests/
 ├── test_auto_sync.py        # коды возврата sync (-1 = не двигать таймстемп), счётчики, notify, backoff
 ├── test_dedup.py            # дедуп по external_activity_id + частичные UNIQUE-индексы
 ├── test_raw_files.py        # хранилище сырых FIT/TCX + reanalyze от сырья
+├── test_prediction_log.py   # продюсер residuals прогноз↔факт (#246)
+├── test_logs_route.py       # GET /logs (lines, day)
+├── test_docs_links.py       # ГВАРД: ссылки на файлы в docs/*.md и CLAUDE.md существуют
 ├── test_weight_service.py   # save_weight/current_weight
 ├── test_session_ownership.py# ГВАРД: SessionLocal() только в композиционных корнях (allowlist)
 ├── test_stage0_fixes.py     # регрессы Этапа 0 (stats бота, reanalyze, performance Float)
 ├── test_hr_max.py           # адаптивный max_hr (повышение/снижение)
 └── test_backfill.py         # backfill-скрипты
 ```
+
+Всего собирается ≈ 1009 тестов (`pytest --co -q`, на 10.09.2026).
 
 ## Инвариант: тесты не ходят в сеть
 
