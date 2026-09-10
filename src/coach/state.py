@@ -22,6 +22,7 @@ from src.coach.config import (
     READINESS_WEIGHTS,
 )
 from src.coach.contracts import AthleteState, SkillResult
+from src.coach import concerns
 from src.coach.illness import illness_signals, illness_state
 from src.coach.skills import distribution, fatigue, load, pain, progress, recovery
 from src.coach.util import clamp_value, effective_training_type, safe_div
@@ -133,8 +134,13 @@ def _hrv_very_low_days(user_id: int, *, db: Session) -> int:
     return count
 
 
-def _missing(dm, rpe_coverage: float | None, pain_known: bool) -> list[str]:
-    """Чего система не знает — честность для LLM (what the system does not know)."""
+def _missing(dm, rpe_coverage: float | None, pain_known: bool,
+             pain_relevant: bool = True) -> list[str]:
+    """Чего система не знает — честность для LLM (what the system does not know).
+
+    pain — пробел только при активной травме (concerns): без неё «жалоб нет» — знание,
+    а не пропуск (10.09.2026; иначе LLM бессрочно спрашивал про колено).
+    """
     missing = ["stress", "per_session_tss"]
     # sleep — известен, если есть данные из скриншота (#257); иначе честно missing
     if dm is None or dm.sleep_duration_min is None:
@@ -143,7 +149,7 @@ def _missing(dm, rpe_coverage: float | None, pain_known: bool) -> list[str]:
         missing.append("hrv")
     if rpe_coverage is None or rpe_coverage < 0.5:
         missing.append("rpe")
-    if not pain_known:
+    if pain_relevant and not pain_known:
         missing.append("pain")
     return missing
 
@@ -327,6 +333,9 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
         progress={"message": skills["progress"].message} if skills["progress"].value is not None else {},
         skills=skills,
         data_confidence=data_confidence,
-        missing=_missing(dm, rpe_coverage, pain_res.value is not None),
+        missing=_missing(dm, rpe_coverage, pain_res.value is not None,
+                         pain_relevant=any(
+                             c.get("kind") == "injury" for c in
+                             concerns.active_concerns(user_id, db=db, today=today_local))),
         signals=signals,
     )

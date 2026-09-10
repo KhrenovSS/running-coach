@@ -337,7 +337,7 @@ def _signals(r: dict) -> tuple[list[dict], list[dict]]:
         c("pain_days", "были дни с болью — рост нагрузки после боли равен нулю (гайд 30)",
           days=this["pain_days"])
     elif prev and prev["pain_days"] > 0:
-        h("pain_free_week", "неделя без боли после недели с болью — колено отвечает на нагрузку правильно")
+        h("pain_free_week", "неделя без боли после недели с болью — боль не вернулась при нагрузке")
 
     if prev and this["runs"] > prev["runs"] and this["pain_days"] == 0:
         h("frequency_up", "пробежек больше, чем неделей раньше, и без боли — сначала частота, потом объём (Дэниелс/Лидьярд)",

@@ -1,6 +1,7 @@
 # Скилл боли — ранний датчик (Pain skill — early sensor) — DEV_PLAN §7
-# Колено: «дискомфорт первые 400–800 м, к 5 км уходит» — паттерн, который надо
-# отличать от боли, которая усиливается. Источники: training_feedback + wellness_reports.
+# «Дискомфорт первые 400–800 м, к 5 км уходит» — паттерн, который надо отличать от боли,
+# которая усиливается. Источники: training_feedback + wellness_reports. Локализация — из
+# активной проблемы (coach/concerns.py), не захардкожена.
 
 from __future__ import annotations
 
@@ -8,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from src.coach.config import (PAIN_CAUTION_LEVEL, PAIN_FRESH_DAYS,
+from src.coach.config import (PAIN_CAUTION_LEVEL, PAIN_FRESH_DAYS, PAIN_LOOKBACK_DAYS,
                               PAIN_PERSIST_DAYS, PAIN_STOP_LEVEL)
 from src.coach.contracts import SkillResult
 from src.coach.skills.base import unknown_result
@@ -39,7 +40,7 @@ def recent_pain_by_day(user_id: int, days: int, *, db: Session) -> dict:
 
 def consecutive_pain_days(user_id: int, *, db: Session) -> int:
     """Дней подряд с болью > 0, начиная с последнего дня с данными (consecutive pain days)."""
-    by_day = recent_pain_by_day(user_id, days=14, db=db)
+    by_day = recent_pain_by_day(user_id, days=PAIN_LOOKBACK_DAYS, db=db)
     if not by_day:
         return 0
     day = max(by_day)
@@ -55,7 +56,7 @@ def evaluate(user_id: int, *, db: Session) -> SkillResult:
 
     (Pain over the last 14 days: latest level plus streak length.)
     """
-    by_day = recent_pain_by_day(user_id, days=14, db=db)
+    by_day = recent_pain_by_day(user_id, days=PAIN_LOOKBACK_DAYS, db=db)
     if not by_day:
         return unknown_result("pain", "no pain reports")
 
@@ -66,7 +67,7 @@ def evaluate(user_id: int, *, db: Session) -> SkillResult:
     # Свежесть (фикс 02.09.2026): отметка старше PAIN_FRESH_DAYS не блокирует
     # тренировки (один тап «мешало» держал «Отдых» до 14 дней — вечерний
     # вопрос-сброс гейтится initiative). value=None → правила 8–9 молчат;
-    # факт остаётся в message/evidence — LLM спросит, как колено.
+    # факт остаётся в message/evidence как контекст; спрашивать ли — решают concerns.
     # (Stale pain must not lock training; keep it as LLM context only.)
     age_days = (datetime.now(timezone.utc).date() - latest_day).days
     if age_days > PAIN_FRESH_DAYS:
@@ -76,7 +77,7 @@ def evaluate(user_id: int, *, db: Session) -> SkillResult:
             value=None,
             confidence=0.5,
             message=(f"последняя отметка боли {latest}/10 — {age_days} дн. назад "
-                     f"(устарела, не ограничивает; спроси про колено)"),
+                     f"(устарела, не ограничивает)"),
             evidence=f"days_reported={len(by_day)}; latest={latest_day.isoformat()}; stale=True",
             unit="0-10",
             as_of=latest_day,

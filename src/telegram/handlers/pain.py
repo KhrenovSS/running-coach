@@ -11,15 +11,18 @@ from datetime import datetime, timezone
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from src.coach import concerns
+from src.coach.config import PAIN_LOCATION_UNSPECIFIED
 from src.models import SessionLocal, TrainingFeedback, WellnessReport
 from src.telegram.utils import get_user
 from src.utils.logger import get_logger
+from src.utils.timeutils import user_now
 
 logger = get_logger("telegram.handlers.pain")
 
 PAIN_LEVELS = ((0, "🚫 не беспокоило"), (2, "🟡 немного"), (5, "🔴 мешало"))
 PAIN_PHASES = (("start", "старт"), ("middle", "середина"), ("end", "конец"), ("after", "после"))
-DEFAULT_LOCATION = "knee"  # контекст владельца: колено (owner context: the knee)
+# Локализация боли — из активной проблемы (coach/concerns.py), иначе «не уточнена» (10.09.2026)
 
 
 def pain_keyboard(session_id: int | str) -> InlineKeyboardMarkup:
@@ -37,8 +40,22 @@ def _phase_keyboard(session_id: int) -> InlineKeyboardMarkup:
     ]])
 
 
-def _upsert_wellness_pain(db, user_id: int, level: int) -> None:
+def _location_for(db, user) -> str:
+    """pain_location для записи: активная травма из concerns или «не уточнена»."""
+    return (concerns.primary_location(user.id, db=db, today=user_now(user).date())
+            or PAIN_LOCATION_UNSPECIFIED)
+
+
+def _note_pain(db, user, level: int, location: str) -> None:
+    """Боль > 0 продлевает/заводит активную проблему (pain tap refreshes the concern)."""
+    concerns.refresh_from_pain(user.id, level, db=db, today=user_now(user).date(),
+                               location=None if location == PAIN_LOCATION_UNSPECIFIED else location)
+
+
+def _upsert_wellness_pain(db, user, level: int) -> None:
     """Записать боль в сегодняшний wellness-отчёт (upsert today's wellness pain)."""
+    user_id = user.id
+    location = _location_for(db, user)
     today = datetime.now(timezone.utc).date()
     report = db.query(WellnessReport).filter(
         WellnessReport.user_id == user_id,
@@ -48,8 +65,9 @@ def _upsert_wellness_pain(db, user_id: int, level: int) -> None:
         report = WellnessReport(user_id=user_id, report_date=today)
         db.add(report)
     report.pain_level = level
-    report.pain_location = DEFAULT_LOCATION if level > 0 else None
+    report.pain_location = location if level > 0 else None
     db.commit()
+    _note_pain(db, user, level, location)
 
 
 async def pain_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -73,7 +91,7 @@ async def pain_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     try:
         if sid_str == "today":  # боль вне тренировки — из чата/log_suggestion
-            _upsert_wellness_pain(db, user.id, level)
+            _upsert_wellness_pain(db, user, level)
             await query.edit_message_reply_markup(reply_markup=None)
             await context.bot.send_message(
                 update.effective_chat.id,
@@ -86,17 +104,19 @@ async def pain_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ).first()
         if fb is None:
             # Боль без RPE: кнопки идут после оценки, но страхуемся (guard anyway)
-            _upsert_wellness_pain(db, user.id, level)
+            _upsert_wellness_pain(db, user, level)
             await query.edit_message_reply_markup(reply_markup=None)
             return
+        location = _location_for(db, user)
         fb.pain_level = level
-        fb.pain_location = DEFAULT_LOCATION if level > 0 else None
+        fb.pain_location = location if level > 0 else None
         fb.pain_phase = None if level > 0 else "none"
         db.commit()
+        _note_pain(db, user, level, location)
         if level == 0:
             await query.edit_message_reply_markup(reply_markup=None)
             await context.bot.send_message(update.effective_chat.id,
-                                           "✅ Отлично, колено не беспокоило!")
+                                           "✅ Отлично, ничего не беспокоило!")
             # Фидбек полный (2 тапа) → отложенный разбор сейчас (D5)
             # (feedback complete — fire the deferred review now)
             from src.telegram.jobs.coach_review import trigger_review
@@ -171,10 +191,10 @@ async def wellness_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     db = SessionLocal()
     try:
-        _upsert_wellness_pain(db, user.id, level)
+        _upsert_wellness_pain(db, user, level)
         await query.edit_message_text(
             "✅ Спасибо! Хорошего вечера." if level == 0
-            else f"✅ Записал: колено {level}/10. Учту в завтрашнем вердикте.")
+            else f"✅ Записал: дискомфорт {level}/10. Учту в завтрашнем вердикте.")
     except Exception as e:
         db.rollback()
         logger.error("Wellness save error: %s", e, exc_info=True)

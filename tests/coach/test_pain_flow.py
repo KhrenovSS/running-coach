@@ -1,7 +1,7 @@
 # Сквозной тест боли: запись → скилл → safety → рендер (pain flow) — DEV_PLAN §10
 from datetime import datetime, timezone
 
-from src.coach import orchestrator
+from src.coach import concerns, orchestrator
 from src.coach.rules.p1_safety import evaluate_safety
 from src.coach.render import render_prescription
 from src.coach.prescriber import finalize
@@ -43,25 +43,30 @@ def test_wellness_pain_counts_on_rest_days(db_session):
 
 
 def test_evening_check_skipped_when_pain_recorded(db_session):
-    """Вечерний вопрос пропускается, если боль сегодня уже записана (skip logic)."""
+    """Вечерний вопрос — только при активной проблеме; пропускается, если боль сегодня уже записана."""
     user = _unique_user(db_session)
-    assert orchestrator.evening_check_needed(user.id, db=db_session) is True
+    assert concerns.evening_check_needed(user.id, db=db_session) is False   # нет проблем — молчим
+    concerns.refresh_from_pain(user.id, 2, db=db_session,
+                               today=datetime.now(timezone.utc).date(), location="knee")
+    assert concerns.evening_check_needed(user.id, db=db_session) is True
     db_session.add(WellnessReport(user_id=user.id,
                                   report_date=datetime.now(timezone.utc).date(),
                                   pain_level=0))
     db_session.commit()
-    assert orchestrator.evening_check_needed(user.id, db=db_session) is False
+    assert concerns.evening_check_needed(user.id, db=db_session) is False
 
 
 def test_pain_recorded_via_feedback_skips_evening(db_session):
     """Боль из тренировочного feedback тоже гасит вечерний вопрос."""
     user = _unique_user(db_session)
+    concerns.refresh_from_pain(user.id, 2, db=db_session,
+                               today=datetime.now(timezone.utc).date(), location="knee")
     session = build_training_session(db_session, user.id)
     fb = build_training_feedback(db_session, session.id, user.id, rating=4)
     fb.pain_level = 0
     fb.pain_phase = "none"
     db_session.commit()
-    assert orchestrator.evening_check_needed(user.id, db=db_session) is False
+    assert concerns.evening_check_needed(user.id, db=db_session) is False
 
 
 def test_initiative_roundtrip(db_session):

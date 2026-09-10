@@ -167,6 +167,17 @@ DETRAINING_PEAK_WEEKS = 8          # окно поиска пика недель
 # (Post-illness pause in days by kind, lower bound of the guide-50 table.)
 ILLNESS_PAUSE_DAYS = {"cold": 14, "flu": 14, "angina": 21, "pneumonia": 30, "other": 7}
 
+# --- Актуальные проблемы подопечного (coach/concerns.py, решение владельца 10.09.2026): травма/боль,
+# долгий перерыв и т.п. LLM только сообщает факт (CoachTurn.concern), код ведёт params_json["concerns"]
+# и снимает проблему с контроля без жалоб CONCERN_EXPIRE_DAYS. Колено больше не захардкожено.
+# (Active athlete concerns: LLM reports, code keeps dates; auto-expire without complaints.)
+CONCERN_EXPIRE_DAYS = 14          # нет боли > 0 и упоминаний столько дней → проблема не актуальна
+CONCERN_HISTORY_MAX = 10          # записей в params_json["concerns"] (активные + история)
+CONCERN_KINDS = ("injury", "long_break", "other")
+PAIN_LOCATIONS = ("knee", "ankle", "foot", "shin", "calf", "achilles", "hamstring", "hip", "back", "other")
+PAIN_LOCATION_UNSPECIFIED = "unspecified"   # pain_location без локализации (колонка String(30))
+PAIN_LOOKBACK_DAYS = 14           # окно скилла боли (последняя отметка + серия)
+
 # --- Недельный отчёт (coach/week_report.py) — METRICS_GUIDE §12, решение владельца 03.09.2026 ---
 WEEK_REPORT_SERIES_WEEKS = 6       # ряд недель в карточке «N недель: … км»
 WEEK_REPORT_AVG_WEEKS = 4          # среднее за прошлые недели для сравнения

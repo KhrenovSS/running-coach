@@ -147,6 +147,20 @@ class IllnessReport(BaseModel):
     days_ago: Annotated[int, Field(ge=0, le=60)] = 0   # когда заболел / прошли симптомы (0 = сегодня)
 
 
+class ConcernReport(BaseModel):
+    """Подопечный назвал актуальную проблему (травма/боль, долгий перерыв) или сказал, что она прошла.
+
+    Сроки контроля и снятие ведёт код — coach/concerns.py, CONCERN_EXPIRE_DAYS (10.09.2026).
+    (Athlete-stated concern; code owns the dates and the expiry.)
+    """
+    status: Literal["new", "ongoing", "resolved"]
+    kind: Literal["injury", "long_break", "other"] = "injury"
+    location: Literal["knee", "ankle", "foot", "shin", "calf", "achilles", "hamstring",
+                      "hip", "back", "other"] | None = None
+    label: str | None = Field(default=None, max_length=60)   # 3–6 слов словами подопечного
+    days_ago: Annotated[int, Field(ge=0, le=90)] = 0        # когда началось (0 = сегодня)
+
+
 class CoachTurn(BaseModel):
     """Полный ход коуча: проза + опциональное предложение (full coach turn)."""
     message: str = Field(max_length=1500)
@@ -177,6 +191,9 @@ class CoachTurn(BaseModel):
     # #322: болезнь/выздоровление — код закрывает тренировки на болезнь и паузу после неё
     # (Illness report → deterministic training block and post-illness pause.)
     illness: IllnessReport | None = None
+    # 10.09.2026: актуальная проблема (травма/боль/перерыв) — код ведёт контроль и снятие
+    # (Athlete concern → deterministic tracking with auto-expiry.)
+    concern: ConcernReport | None = None
 
 
 def _strictify(schema: dict) -> dict:

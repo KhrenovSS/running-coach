@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from src.coach import illness, planning
+from src.coach import concerns, illness, planning
 from src.coach.contracts import Prescription, WorkoutProposal
 from src.coach.numeric_check import check_prose, prose_numbers
 from src.coach.llm.agent import run_turn
@@ -55,7 +55,7 @@ from src.coach.render_week_report import render_week_report
 from src.coach.week_report import build_week_report
 from src.coach.week_view import render_stored_week_plan
 from src.exceptions import CoachError, LLMTransientError, LLMUnavailableError
-from src.models import TrainingFeedback, User, UserModel, WellnessReport
+from src.models import User, UserModel
 from src.services.repositories import latest_lthr
 from src.services.repositories_coach import CoachRepository
 from src.utils.logger import get_logger
@@ -192,6 +192,9 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
     if turn.illness is not None and kind in ("chat", "morning"):
         # #322: болезнь/выздоровление — паузу ведёт код (гайд 50); safety закрывает тренировки
         text += "\n\n" + illness.record_illness(turn.illness, user_id, db=db, now=user_now(user))
+    if turn.concern is not None and kind in ("chat", "morning"):
+        # 10.09.2026: «подвернул ногу» / «уже не беспокоит» — контроль и снятие ведёт код
+        text += "\n\n" + concerns.record_concern(turn.concern, user_id, db=db, now=user_now(user))
     if proposal is not None and proposal.workout_type != "rest" and kind in ("chat", "morning"):
         # Детерминированный гвард (инцидент 04.09.2026): на день, который подопечный
         # отменил сам, тренировку не назначаем — предложение LLM отбрасывается.
@@ -430,27 +433,3 @@ def weekly_report(user_id: int, *, db: Session,
         CoachRepository.save_message(user_id, "assistant", text, db=db,
                                      kind="weekly", meta={"fallback": True})
         return ChatReply(text=text, source="fallback")
-
-
-def evening_check_needed(user_id: int, *, db: Session) -> bool:
-    """Нужен ли вечерний вопрос: пропускаем, если боль сегодня уже записана.
-
-    (Evening question needed? Skipped when today's pain is already recorded.)
-    """
-    # «Сегодня» — по поясу пользователя (#267: вечер 21:00 MSK = уже завтра в UTC+)
-    user = db.query(User).filter(User.id == user_id).first()
-    today = user_now(user).date()
-    wellness = db.query(WellnessReport).filter(
-        WellnessReport.user_id == user_id,
-        WellnessReport.report_date == today,
-        WellnessReport.pain_level.isnot(None),
-    ).first()
-    if wellness is not None:
-        return False
-    since = datetime.now(timezone.utc) - timedelta(hours=20)
-    fb = db.query(TrainingFeedback).filter(
-        TrainingFeedback.user_id == user_id,
-        TrainingFeedback.created_at >= since,
-        TrainingFeedback.pain_level.isnot(None),
-    ).first()
-    return fb is None

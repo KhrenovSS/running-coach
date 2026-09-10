@@ -161,6 +161,13 @@
   без миграции): болен → правило 21 safety `allow_training=false`; выздоровел → пауза
   `ILLNESS_PAUSE_DAYS[kind]` (гайд 50, нижняя граница), `/plan` исключает закрытые даты, чат/утро
   отбрасывают назначение (`blocked_reason`), `project_state` несёт `day_offset` — дни после паузы открыты.
+- **Актуальные проблемы — concerns (10.09.2026)**: колено НЕ захардкожено. LLM сообщает факт
+  (`CoachTurn.concern`: new/ongoing/resolved, kind injury|long_break|other, location, label), код ведёт
+  `UserModel.params_json["concerns"]` (`coach/concerns.py`, без миграции) и снимает проблему без боли > 0
+  и упоминаний `CONCERN_EXPIRE_DAYS` = 14 дн. Тап боли > 0 продлевает/заводит травму (`refresh_from_pain`).
+  Пока активна — блок `concerns (params)` в today-контексте (в кэшируемый профиль не кладём), вечерний
+  вопрос 21:00 называет её и **без активной проблемы не шлётся** (решение владельца), подпись строки боли
+  после RPE — `pain_prompt_label`, `missing: pain` — только при активной травме. Болезнь — отдельно (`illness`).
 - **Safety по содержимому (04.09.2026)**: `safety.effective_workout_type` классифицирует
   предложение по рабочим сегментам (отрезки > `STRIDE_MAX_SEC` в Z3+ = tempo/interval), ярлык
   «easy» гейты интенсива не обходит; длительная — качественный день для правила 12; правила 16–20

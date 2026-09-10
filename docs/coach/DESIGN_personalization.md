@@ -33,7 +33,7 @@
       "intervals": 48, "threshold": 36, "long": 30, "tempo": 24, "recovery": 12
   },
   "preferences": {"days": ["пн","ср","пт","сб"], "dislikes": ["дорожка"]},
-  "injuries": ["левое колено"],
+  "injuries": ["левое колено"],  # реализовано иначе: params_json["concerns"] (coach/concerns.py, 10.09.2026)
   "updated_at": "..."
 }
 ```

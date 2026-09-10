@@ -136,7 +136,7 @@ def test_stale_pain_becomes_context_not_blocker(db_session):
     assert res.status == "ok"
     assert res.value is None                       # не сырьё для правил 8–9
     assert "устарела" in res.message
-    assert "спроси про колено" in res.message       # LLM получает контекст
+    assert "колено" not in res.message              # локализацию скилл не выдумывает (10.09.2026)
     assert "stale=True" in res.evidence
     assert res.as_of == stale_day
 

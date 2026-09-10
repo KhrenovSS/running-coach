@@ -2,6 +2,31 @@
 
 All notable changes to this project are tracked here.
 
+## [10.09.2026] — Актуальные проблемы подопечного (concerns): колено больше не захардкожено
+
+### Added
+- `coach/concerns.py`: память «активных проблем» (травма/боль, долгий перерыв) в `UserModel.params_json["concerns"]`
+  без миграции. LLM только сообщает факт (`CoachTurn.concern`: new/ongoing/resolved, kind, location, label,
+  days_ago — `llm/schemas.ConcernReport`), код ведёт даты: `record_concern` (чат и `/plan`), `refresh_from_pain`
+  (тап боли > 0 продлевает/заводит травму), автоснятие без боли и упоминаний `CONCERN_EXPIRE_DAYS` = 14 дн.
+  (`is_active`/`expire`), `resolve`. Представления: `context_block` → `extras["concerns (params)"]` в today-блоке
+  (в кэшируемый профиль не кладётся — протухает по дизайну), `evening_question`, `pain_prompt_label`,
+  `primary_location`. Константы `CONCERN_*`, `PAIN_LOCATIONS`, `PAIN_LOCATION_UNSPECIFIED`, `PAIN_LOOKBACK_DAYS`.
+- Промпт: пункт `concern` в контракте; персона без «травмы колена»/«беречь колено» — «нет блока concerns —
+  проблем нет, не спрашивай о старых». Тесты `tests/coach/test_concerns.py`.
+
+### Changed
+- Причина бессрочных вопросов «как колено?» устранена в трёх каналах: (1) `turn_context.profile` без ключа
+  `injuries` (был текст-константа в system-блоке); (2) `skills/pain.py` при устаревшей отметке больше не
+  вкладывает «спроси про колено», `state._missing` ставит `pain` только при активной травме (раньше — навсегда
+  после 2 дней без тапа); (3) вечерний вопрос 21:00 (`jobs/coach_evening.py`) уходит **только при активной
+  проблеме** и называет её («Голеностоп сегодня?») — решение владельца 10.09.2026; `evening_check_needed`
+  переехал в `concerns.py` (orchestrator.py был > 400 строк).
+- `handlers/pain.py`: `pain_location` — из активной травмы или `unspecified` (был захардкожен `knee`); тексты
+  ответов и подпись после RPE (`handlers/feedback.py`) без «колено»; `week_report` highlight `pain_free_week`
+  нейтральный. Гайды/правила про колено (даунхилл, гайд 30) — методика, оставлены.
+- BACKLOG: новый #328 (датозависимый `test_week_targets_exclude_paused_days`, падает и на чистом дереве).
+
 ## [08.09.2026] — Сегментация по лапам часов: структурные тренировки видны поштучно (#302)
 
 ### Added

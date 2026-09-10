@@ -7,6 +7,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from src.coach.contracts import Prescription
+from src.coach import concerns
 from src.coach.illness import context_block, illness_state
 from src.coach.knowledge.loader import review_guides_queries
 from src.coach.knowledge.loader import search as guide_search
@@ -34,7 +35,8 @@ def profile(user: User) -> dict:
         "age": user.age, "max_hr": user.max_hr, "sport_level": user.sport_level,
         "goal_type": user.goal_type, "goal_target": user.goal_target,
         "weight_kg": user.weight_kg,
-        "injuries": "колено — возврат после травмы (беречь)",
+        # Травмы/проблемы — НЕ здесь: они протухают (coach/concerns.py) и живут в today-блоке
+        # (concerns expire by design → volatile block, never the cached profile)
     }
 
 
@@ -110,6 +112,10 @@ def build_extras(user_id: int, *, db: Session,
     if ill:
         # #322: система знает о болезни/паузе — LLM не назначает и не спорит со сроками
         extras["illness (params)"] = ill
+    active = concerns.active_concerns(user_id, db=db, today=today_local)
+    if active:
+        # 10.09.2026: актуальные проблемы (травма/боль/перерыв) — только пока активны
+        extras["concerns (params)"] = concerns.context_block(active, today_local)
     if session_id is not None:
         detail = run_tool(
             "get_workout_detail", {"session_id": session_id}, user_id=user_id, db=db)
