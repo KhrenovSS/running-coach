@@ -620,3 +620,47 @@ def test_rehydrate_keeps_unavailable_marker_for_week_card():
         proposal_json={"workout_type": "rest", "target_zone": 1,
                        "rationale": [UNAVAILABLE_RATIONALE]})
     assert _is_athlete_unavailable(rehydrate(row))
+
+
+def test_render_week_plan_past_rest_day_is_neutral():
+    """#331 (11.09.2026): прошедший день отдыха рендерился как «✗ … 🛌 Отдых · пропущен».
+    Отдых в прошлом — нейтральная строка без ✓/✗/минут; отмена подопечным — «по твоей просьбе»;
+    беговой прошедший день без факта — по-прежнему «✗ … пропущен»."""
+    from datetime import date
+
+    from src.coach.config import UNAVAILABLE_RATIONALE
+    from src.coach.render_week import render_week_plan
+
+    state = _state()
+    verdict = evaluate_safety(state)
+    missed, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2, duration_min=30),
+                      verdict, state)
+    cancelled, _ = clamp(WorkoutProposal(workout_type="rest", target_zone=1,
+                                         rationale=[UNAVAILABLE_RATIONALE]), verdict, state)
+    coach_rest, _ = clamp(WorkoutProposal(workout_type="rest", target_zone=1,
+                                          rationale=["день паузы"]), verdict, state)
+    future, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2, duration_min=35),
+                      verdict, state)
+    missed.when, cancelled.when, coach_rest.when, future.when = (
+        date(2026, 9, 8), date(2026, 9, 9), date(2026, 9, 10), date(2026, 9, 12))
+    today = date(2026, 9, 11)
+    facts = {missed.when: None, cancelled.when: None, coach_rest.when: None}
+
+    text = render_week_plan([missed, cancelled, coach_rest, future], {"week_start": "2026-09-07"},
+                            max_hr=177, today=today, facts=facts)
+    lines = text.splitlines()
+    tue = next(l for l in lines if "Вт 08.09" in l)
+    wed = next(l for l in lines if "Ср 09.09" in l)
+    thu = next(l for l in lines if "Чт 10.09" in l)
+    assert tue.startswith("✗") and "пропущен" in tue and "30 мин" in tue
+    assert wed == "Ср 09.09 — 🛌 Отдых · по твоей просьбе"
+    assert thu == "Чт 10.09 — 🛌 Отдых"
+    for line in (wed, thu):
+        assert "✗" not in line and "✓" not in line and "пропущен" not in line and "мин" not in line
+    assert "✓ факт · ✗ пропущен" in lines[-1]           # есть беговой прошедший день
+
+    # Только отдых в прошлом → легенда ✓/✗ не нужна
+    text2 = render_week_plan([coach_rest, future], {"week_start": "2026-09-07"}, max_hr=177,
+                             today=today, facts={coach_rest.when: None})
+    assert "✓ факт" not in text2.splitlines()[-1]
+

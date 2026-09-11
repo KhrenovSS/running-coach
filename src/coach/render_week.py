@@ -116,6 +116,11 @@ def _fact_line(day: str, p: Prescription, fact: dict | None,
     """Прошедший день: факт связанной тренировки (✓) или пропуск (✗) — без потолка
     пульса и ≈км плана, которые дрейфуют со сменой якоря зон (past day as fact)."""
     label = _TYPE_LABEL.get(p.workout_type, p.workout_type)
+    if p.workout_type == "rest":
+        # #331 (11.09.2026): прошедший отдых — не «пропущен» и не «факт», просто отдых;
+        # отмена подопечным подписана как у будущих дней. (Past rest day: neutral line.)
+        suffix = " · по твоей просьбе" if _is_athlete_unavailable(p) else ""
+        return f"{day} — {label}{suffix}"
     # Плановая структура прошедшего дня (ускорения и т.п.) — рядом с фактом
     segs = visible_segments(p.target)
     structure = compact_segments(segs, max_hr, lthr) if segs else ""
@@ -182,7 +187,7 @@ def render_week_plan(prescriptions: list[Prescription], targets: dict,
     has_facts = False
     for p in sorted(prescriptions, key=lambda x: x.when):
         if facts is not None and today is not None and p.when < today:
-            has_facts = True
+            has_facts = has_facts or p.workout_type != "rest"   # легенда ✓/✗ — не про отдых
             lines.append(_fact_line(
                 _day_label(p.when), p, facts.get(p.when),
                 max_hr, lthr))
