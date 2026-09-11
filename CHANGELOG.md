@@ -2,6 +2,31 @@
 
 All notable changes to this project are tracked here.
 
+## [11.09.2026] — Техдолг: файлы > 400 строк разнесены по модулям (#329)
+
+### Changed
+- **Четыре файла превышали лимит CLAUDE.md §1 (~400 строк) — логика разнесена без изменения поведения**, прежние
+  имена реэкспортируются из старых мест (`# noqa: F401`), поэтому вызовы `planning.cancel_days(...)`,
+  `orchestrator.handle_chat(...)`, `workout_insights.apply_type_resolution(...)` и monkeypatch в тестах не менялись:
+  - `coach/planning.py` 532 → 287: строки плана в `recommendations` (`PLAN_STATUSES`, `supersede_*`,
+    `latest_rows_for_dates`, `week_plan_review`, `confirm_or_adjust_morning`) → **`coach/planning_rows.py`**;
+    доступность и отмены подопечного (`availability`/`set_availability`, `unavailable_dates`, `cancel_days`,
+    `reopen_days`, `blocked_by_unavailable`) → **`coach/planning_availability.py`**. В `planning.py` — числа недели
+    (`week_targets`), потолок беговых дней, мезоцикл.
+  - `coach/orchestrator.py` 435 → 184: LLM-ход чата/утра (`ChatReply`, `_llm_chat_turn`, `handle_chat`,
+    `morning_verdict`, `get/set_initiative`) → **`coach/chat_flow.py`**; в оркестраторе — разбор тренировки
+    (`on_workout_completed`, `_merged_flags`) и недельный отчёт (`weekly_report`).
+  - `services/workout_insights.py` 488 → 349: окружение сессии (`_plan_for_session` + линк план↔факт,
+    `_history_briefs`, `_session_dates`, `_rpe_history`, `_user_max_hr`) и ярлык по плану `apply_type_resolution`
+    → **`services/workout_insights_context.py`**; в сервисе — `compute_workout_metrics`, upsert, lazy-пересчёт.
+  - `analysis/utils.py` 404 → 269: ряды темпа (`compute_rolling_pace`, `interpolate_paces`, `smooth_paces`,
+    `build_hr_pace_series`) → **`analysis/pace_series.py`**; импортёры (`analysis/__init__.py`, `intervals.py`)
+    переведены напрямую, реэкспорта нет; заодно снят мёртвый импорт `ZoneInfo`.
+  - Доки: карты модулей `docs/ARCHITECTURE.md`, `docs/coach/ARCHITECTURE.md`, `CLAUDE.md` (недельный план, ярлык,
+    «Где продолжать»). `BACKLOG.md`: #329 — в архив (253 закрытых). Проверка: 1011 тестов, import-smoke app/bot,
+    `find src -name '*.py' | xargs wc -l | awk '$1>400'` — пусто. Docker: `src/coach`+`src/services`+`src/analysis`
+    → пересборка `app` + `bot` при следующем деплое.
+
 ## [11.09.2026] — Техдолг: гигиена тестов и CI (#233, #330)
 
 ### Changed

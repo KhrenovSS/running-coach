@@ -117,8 +117,9 @@
 - LLM-бэкенды: `get_llm()` = ключ → **мост подписки** (прод; **постоянный режим** — решение
   владельца 25.08.2026, корпоративная подписка; `bin/coach_llm_bridge.py`, ограничение —
   tool-цикл неактивен) → NullLLM/fallback. Решения и причины — `docs/coach/ARCHITECTURE.md`.
-- **Недельный план** (`weekly_plan.py` + детерминированные числа `planning.py`, вс 19:00 после
-  отчёта, команда `/plan`): строки `recommendations` со `status` planned→confirmed/adjusted;
+- **Недельный план** (`weekly_plan.py` + детерминированные числа `planning.py`; с 11.09 строки плана и утреннее
+  подтверждение — `planning_rows.py`, доступность/отмены — `planning_availability.py`, имена реэкспортируются из
+  `planning`; вс 19:00 после отчёта, команда `/plan`): строки `recommendations` со `status` planned→confirmed/adjusted;
   утренний вердикт подтверждает план дня. **Показ сохранённого плана — read-only**
   (`week_view.py`, `/week`, флаг `show_week_plan`; `weekly_plan` в чате не персистится,
   а рендерится сохранённый план — инцидент 02.09.2026; прошедшие дни — ✓ факт связанной
@@ -151,10 +152,11 @@
   (`llm/bridge_client.py`, `vision.py`) на транзиентные 502/timeout/сеть (константы
   `COACH_BRIDGE_RETRIES`/`COACH_MORNING_RETRY_*` — `llm/config.py`); при недоступности моста утренний
   вердикт — детерминированный со назначением (`orchestrator.handle_chat` kind="morning"), не
-  generic-«базовый режим»; отложенный upgrade-повтор `_morning_upgrade_job` (`telegram/jobs/coach_morning.py`).
+  generic-«базовый режим» (реализация — `chat_flow.py`); отложенный upgrade-повтор `_morning_upgrade_job` (`telegram/jobs/coach_morning.py`).
 - **Ярлык тренировки (04.09.2026)**: `training_type` = `analysis/type_resolution.resolve_training_type`
   (сырой `training_type_auto` + план дня; «план — назначение, факт — интенсивность»), применяется в
-  `workout_insights.apply_type_resolution`; `training_type_source` auto|plan|manual, override главнее;
+  `workout_insights_context.apply_type_resolution` (реэкспорт из `workout_insights`); `training_type_source`
+  auto|plan|manual, override главнее;
   история переразмечена `services/type_resolution_backfill.relabel_sessions`.
 - **Гейт болезни (#322, 07.09.2026)**: LLM только сообщает факт (`CoachTurn.illness`: sick/recovered,
   kind, days_ago), сроки считает код — `coach/illness.py` (состояние в `UserModel.params_json["illness"]`,
@@ -224,11 +226,13 @@
 
 ## Где продолжать (обновляется при смене фокуса)
 - **Порядок работ — `BACKLOG.md`, раздел «Приоритеты»** (P0 безопасность → P1 нагрузка/планы → P2
-  данные → P3 приложение). Состояние на 10.09.2026: P0 и P1 закрыты, кроме #243 (ждёт даты
+  данные → P3 приложение). Состояние на 11.09.2026: P0 и P1 закрыты, кроме #243 (ждёт даты
   старта); следующий кандидат — P2: #247 v2 (обрезание прозы при расхождении с числами), затем #237.
   10.09 — concerns (`coach/concerns.py`, колено не захардкожено) и аудит документации (README,
   DEV_PLAN §4/§9, ARCHITECTURE, METRICS_GUIDE приведены к коду); 08.09 закрыты #253/#302/#259/#289.
-  Мелочи по пути: #328 (датозависимый тест болезни), #329 (4 файла > 400 строк).
+  11.09 — техдолг закрыт: #328/#332 (датонезависимые тесты), #233/#330 (гигиена тестов, CI 3.13), #329 (разнос
+  `planning` → `planning_rows`/`planning_availability`, `orchestrator` → `chat_flow`, `workout_insights` →
+  `workout_insights_context`, `analysis/utils` → `pace_series`; старые имена реэкспортируются).
 - **Что менялось последним — верх `CHANGELOG.md`** (записи за день идут сверху, новые выше старых).
 - Стартер сессии — `~/go.sh` (вне репозитория): статусный блок в его шапке обновляется вместе с
   крупными изменениями; запускает `claude` из корня проекта.

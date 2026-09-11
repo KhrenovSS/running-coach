@@ -102,6 +102,7 @@ running-coach/
 │   │   ├── hr_max.py           # Адаптивный max_hr (авто-повышение по пикам, предложение снижения)
 │   │   ├── user_service.py     # get_user_settings(db, ...) — сессию владеет вызывающий код
 │   │   ├── workout_insights.py # Разбор тренировки: computed_json (insights v7) из session_metrics/effort/gap/…
+│   │   ├── workout_insights_context.py # #329: план дня (_plan_for_session), история/RPE, apply_type_resolution
 │   │   ├── insights_baseline.py# Базовая линия HR↔GAP-темп и ожидаемый темп на пульсе (окно 120 дн)
 │   │   ├── repositories_insights.py # InsightRepository: очередь разборов (claim/finish), флаги для safety
 │   │   ├── prediction_log.py   # Продюсер residuals прогноз↔факт (идемпотентно по session_id; #246)
@@ -147,10 +148,11 @@ running-coach/
 │   │   ├── gps_quality.py      #   квалиметрия GPS + оценка дистанции по шагам
 │   │   ├── data_checks.py      #   кросс-чеки с часами (device_mismatch, lap_check)
 │   │   ├── intervals.py        #   HRR-разбор интервалов
+│   │   ├── pace_series.py      #   compute_rolling_pace, interpolate_paces, smooth_paces, build_hr_pace_series (#329)
 │   │   ├── week_structure.py   #   структура недели / детренированность
 │   │   ├── type_resolution.py  #   ярлык по плану дня: «план — назначение, факт — интенсивность» (04.09)
 │   │   ├── segment_laps.py     #   сегменты по структурным лапам часов (программа/ручные отсечки, #302)
-│   │   └── utils.py            #   format_pace, calc_elevation, find_timezone, rolling pace,
+│   │   └── utils.py            #   format_pace, calc_elevation, find_timezone, пики HR, паузы,
 │   │                           #   early_peak_suspect (#238), pauses_to_offsets/pause_overlap_sec (#286)
 │   └── utils/
 │       ├── logger.py           # Структурированное логирование с ротацией

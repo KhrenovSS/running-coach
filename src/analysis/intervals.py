@@ -16,7 +16,7 @@ from datetime import datetime
 
 from src.analysis.hr_zones import get_zone
 from src.analysis.oscillation import detect_pace_oscillations
-from src.analysis.utils import compute_rolling_pace, interpolate_paces, smooth_paces
+from src.analysis.pace_series import compute_rolling_pace, interpolate_paces, smooth_paces
 from src.config.constants import (
     HRR60_LOW_BPM,
     HRR_FLAG_MIN_PEAK_ZONE,

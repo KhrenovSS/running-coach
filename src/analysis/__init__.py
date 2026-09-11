@@ -13,10 +13,12 @@ from src.analysis.segment import build_time_in_zones, segment_by_pace
 from src.analysis.segment_km import compute_km_variability, km_segment_fallback
 from src.analysis.classify import classify_training
 from src.analysis.oscillation import detect_pace_oscillations, compute_hr_lag_correlation
+from src.analysis.pace_series import (
+    build_hr_pace_series, compute_rolling_pace, interpolate_paces, smooth_paces,
+)
 from src.analysis.utils import (
     format_duration, calc_elevation, find_timezone,
-    compute_rolling_pace, interpolate_paces, smooth_paces,
-    is_km_segmentation, serialize_trackpoints, build_hr_pace_series,
+    is_km_segmentation, serialize_trackpoints,
     smoothed_hr_peak, early_peak_suspect, pauses_to_offsets, TrackpointDict, AnalysisResult,
 )
 from src.analysis.gps_quality import (

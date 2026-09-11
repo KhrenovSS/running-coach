@@ -205,15 +205,20 @@ coach/
 ├── concerns.py        # 10.09: актуальные проблемы (травма/боль/перерыв) — params_json["concerns"],
 │                      #   протухание CONCERN_EXPIRE_DAYS=14 без боли и упоминаний; вечерний вопрос и подпись
 │                      #   кнопок боли — только при активной проблеме
-├── orchestrator.py    # morning_verdict (подтверждает план дня), handle_chat, on_workout_completed
-│                      #   (+ _merged_flags: слияние флагов LLM с computed), weekly_report; ChatReply
+├── orchestrator.py    # on_workout_completed (+ _merged_flags: слияние флагов LLM с computed), weekly_report;
+│                      #   реэкспорт chat_flow (#329, 11.09: файл разнесён — вызовы orchestrator.* валидны)
+├── chat_flow.py       # _llm_chat_turn (один LLM-ход + детерминированные пост-обработки), handle_chat
+│                      #   (чат/утро с fallback), morning_verdict, ChatReply, get/set_initiative
 ├── review_flow.py     # ensure_insights_for_batch, run_pending_review, due_review_sessions
 │                      #   (очередь отложенного разбора: claim → orchestrator.on_workout_completed)
 ├── turn_context.py    # build_extras / unchanged_today / history (вынос из orchestrator, #266)
-├── planning.py        # детерминированные числа недели (мезоцикл 3:1, прогрессия, потолки,
-│                      #   long_run_hold/detraining_return, availability #294), week_plan_review,
-│                      #   confirm_or_adjust_morning (последняя строка дня), cancel_days/reopen_days
-│                      #   (отмены подопечного с маркером), blocked_by_unavailable, plan_change_line
+├── planning.py        # детерминированные числа недели (week_targets: мезоцикл 3:1, прогрессия, потолки,
+│                      #   long_run_hold/detraining_return), run_days_cap/enforce_run_days, advance_mesocycle;
+│                      #   реэкспорт двух модулей ниже (#329, 11.09) — `planning.cancel_days(...)` и т.п. валидны
+├── planning_rows.py   # строки плана в recommendations: PLAN_STATUSES, supersede_*/latest_rows_for_dates,
+│                      #   week_plan_review (план vs факт), confirm_or_adjust_morning (последняя строка дня)
+├── planning_availability.py # availability/set_availability (#294), unavailable_dates, cancel_days/reopen_days
+│                      #   (отмены подопечного с маркером UNAVAILABLE_RATIONALE), blocked_by_unavailable
 ├── weekly_plan.py     # generate_weekly_plan (вс 19:00, строки recommendations status=planned)
 ├── numeric_check.py   # #247: сверка чисел прозы LLM с карточкой (детект+лог)
 ├── vision.py          # #257: SleepShot + extract_sleep (скриншот → мост /vision)
@@ -236,7 +241,8 @@ coach/
 #   repositories_insights}.py, telegram/{handlers/sleep_photo, jobs/{sleep_reminder,coach_weekly}}.py,
 #   bin/coach_llm_bridge.py (/complete + /vision). Миграции сна: r1s2t3u4v5w6, s2t3u4v5w6x7.
 #   Ярлык тренировки (04.09): analysis/type_resolution.py (план — назначение, факт — интенсивность),
-#   применяется в services/workout_insights.apply_type_resolution; провенанс training_type_auto/_source
+#   применяется в services/workout_insights_context.apply_type_resolution (реэкспорт из workout_insights;
+#   там же _plan_for_session/история/RPE — #329, 11.09); провенанс training_type_auto/_source
 #   (миграция v5w6x7y8z9a0); переразметка — services/type_resolution_backfill.py.
 ```
 
