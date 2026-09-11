@@ -9,6 +9,9 @@
 # Владение сессией: принимает db + user_id (не объект User — анти-detached, уроки #236),
 # коммитит сам; notify строго ПОСЛЕ commit — telegram_notify читает свою SessionLocal.
 # (Session ownership: takes db + user_id, commits itself; notify strictly after commit.)
+# #237 (11.09.2026, решение владельца): после принудительного обновления вызывающий код
+# пересчитывает тренировки ТЕКУЩЕГО батча (`reanalyze_batch_after_raise`) — до разбора коучем,
+# чтобы зоны/insights не считались по старому максимуму. (Batch re-analysis after a forced raise.)
 
 from datetime import datetime, timedelta, timezone
 
@@ -44,6 +47,11 @@ MAX_HR_WARNING_TEXT = (
     "⚠️ *Пульс выше максимума в профиле*\n\n"
     "На тренировке зафиксирован устойчивый пульс {peak} (в профиле {profile}). "
     "Пока не меняю — если за месяц это повторится {count}+ раз, обновлю автоматически."
+)
+
+MAX_HR_REANALYZED_TEXT = (
+    "↻ Пересчитал {n} тренировк{suffix} этой синхронизации по новому максимуму {new}: "
+    "зоны и разбор теперь честные."
 )
 
 MAX_HR_LOWER_TEXT = (
@@ -223,3 +231,42 @@ def _evaluate_max_hr_lowering(db: Session, user_id: int) -> int | None:
     logger.info("hr_max: user=%s предложено снизить max_hr %d → %d (%d интенсивных за %dд)",
                 user_id, profile, observed, len(peaks), MAX_HR_LOWER_WINDOW_DAYS)
     return observed
+
+
+def _plural_trainings(n: int) -> str:
+    """Окончание «тренировк-у/-и/-ок» (Russian plural suffix for the notification)."""
+    if n % 10 == 1 and n % 100 != 11:
+        return "у"
+    if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14):
+        return "и"
+    return ""
+
+
+def reanalyze_batch_after_raise(db: Session, user_id: int, session_ids: list[int], *,
+                                old: int, new: int) -> int:
+    """Пересчитать тренировки батча после автоподнятия max_hr (#237); возврат — сколько удалось.
+
+    Каждая тренировка — в своём try/except: сбой одной не роняет остальные и никогда не
+    роняет синк/загрузку (контракт evaluate_max_hr_raise). Повторная оценка пика выключена
+    (check_max_hr=False) — иначе пересчёт снова оценивал бы тот же батч. Уведомление —
+    одно, после пересчёта, только если что-то пересчитано.
+    (Re-analyze the batch with the new max HR; isolated failures; one notification.)
+    """
+    from src.services.reanalyze import reanalyze_training
+
+    done = 0
+    for sid in session_ids:
+        try:
+            if reanalyze_training(db, sid, user_id, check_max_hr=False) is not None:
+                done += 1
+        except Exception:
+            logger.warning("hr_max: пересчёт тренировки %s после max_hr %d→%d упал — изолировано "
+                           "(reanalyze after raise failed)", sid, old, new, exc_info=True)
+            db.rollback()
+    logger.info("hr_max: user=%s max_hr %d→%d — пересчитано %d/%d тренировок батча",
+                user_id, old, new, done, len(session_ids))
+    if done:
+        telegram_notify(user_id=user_id,
+                        text=MAX_HR_REANALYZED_TEXT.format(n=done, suffix=_plural_trainings(done), new=new))
+    return done
+

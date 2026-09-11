@@ -18,7 +18,7 @@ from src.api.deps import get_current_user
 from src.services.audit import AuditService
 from src.services.raw_files import save_raw_file
 from src.services.telegram_notify import telegram_notify
-from src.services.hr_max import evaluate_max_hr_raise
+from src.services.hr_max import evaluate_max_hr_raise, reanalyze_batch_after_raise
 from src.web.state import _pending, _pending_lock, _cleanup_stale_pending
 from src.utils.rate_limit import rate_limit
 
@@ -106,6 +106,7 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
     user_lthr = latest_lthr(current_user.id, db=db)  # зоны от порога (F4/M3.1)
     saved = 0
     hr_peak = 0  # пик батча для адаптивного max_hr (batch peak for adaptive max HR)
+    saved_ids: list[int] = []  # id сессий батча — для пересчёта после автоподнятия max_hr (#237)
     deleted_hit = None
     temp_id = None
     audit = AuditService(db)
@@ -206,6 +207,7 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
             session = _save_session_from_data(data, db, current_user,
                                               file_sha256=file_sha, raw_file_path=raw_path)
             saved += 1
+            saved_ids.append(session.id)
             hr_peak = max(hr_peak, session.hr_peak_smoothed or session.max_heart_rate or 0)
             _notify_new_session(session, current_user, filename=file.filename or "unknown")
             audit.log_training_uploaded(
@@ -220,7 +222,10 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
 
     # Адаптивный max_hr: один вызов на мультифайловый батч; строго ПОСЛЕ коммитов —
     # сервис коммитит сессию (one call per batch, strictly after commits — service commits)
-    evaluate_max_hr_raise(db, current_user.id, hr_peak, source="upload")
+    raised = evaluate_max_hr_raise(db, current_user.id, hr_peak, source="upload")
+    if raised:
+        # #237: тренировки батча пересчитываются по новому максимуму (синхронно, батч мал)
+        reanalyze_batch_after_raise(db, current_user.id, saved_ids, old=raised[0], new=raised[1])
 
     if parse_errors:
         audit.log_event(

@@ -99,7 +99,8 @@ running-coach/
 │   │   ├── repositories.py     # TrainingRepository/HealthRepository/FeedbackRepository (db — обязательный kwarg)
 │   │   ├── analytics_helpers.py# compute_slope, compute_ewma, compute_moving_average
 │   │   ├── repositories_coach.py # CoachRepository: выборки для скиллов/state, честный ACWR, coach_messages
-│   │   ├── hr_max.py           # Адаптивный max_hr (авто-повышение по пикам, предложение снижения)
+│   │   ├── hr_max.py           # Адаптивный max_hr (авто-повышение по пикам, предложение снижения,
+│   │   │                       #   #237: пересчёт батча после автоподнятия — reanalyze_batch_after_raise)
 │   │   ├── user_service.py     # get_user_settings(db, ...) — сессию владеет вызывающий код
 │   │   ├── workout_insights.py # Разбор тренировки: computed_json (insights v7) из session_metrics/effort/gap/…
 │   │   ├── workout_insights_context.py # #329: план дня (_plan_for_session), история/RPE, apply_type_resolution

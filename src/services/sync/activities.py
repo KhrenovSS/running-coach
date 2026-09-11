@@ -12,7 +12,7 @@ from src.services.sync.utils import _make_client
 from src.services.sync.dedup import load_dedup_state, is_duplicate, find_deleted_match
 from src.services.raw_files import save_raw_file, sha256_hex
 from src.services.telegram_notify import telegram_notify
-from src.services.hr_max import evaluate_max_hr_raise
+from src.services.hr_max import evaluate_max_hr_raise, reanalyze_batch_after_raise
 from src.utils.timeutils import local_dt
 from src.exceptions import CoachError
 
@@ -276,9 +276,16 @@ async def sync_activities_for_user(cred, brand: str, db,
                 )
             # Адаптивный max_hr: один вызов на батч по максимальному пику
             # (Adaptive max HR: one call per batch with the batch peak)
-            evaluate_max_hr_raise(db, cred.user_id,
-                                  max(nt['hr_peak'] for nt in new_trainings),
-                                  source=f"{brand}_sync")
+            raised = evaluate_max_hr_raise(db, cred.user_id,
+                                           max(nt['hr_peak'] for nt in new_trainings),
+                                           source=f"{brand}_sync")
+            if raised:
+                # #237: батч проанализирован по старому максимуму — пересчитать ДО разбора коучем
+                # и синхронно (тред разбора пишет те же строки insights — без гонки сессий)
+                # (Re-analyze the batch with the new max HR before the coach review thread.)
+                reanalyze_batch_after_raise(db, cred.user_id,
+                                            [nt['session_id'] for nt in new_trainings],
+                                            old=raised[0], new=raised[1])
             # Разбор тренировки коучем — в daemon-треде: LLM-мост отвечает до
             # 150 с и не должен держать sync/progress (DEV_PLAN §9 C8).
             # (Coach review in a daemon thread; must never block or break the sync.)

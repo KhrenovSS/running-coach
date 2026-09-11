@@ -330,3 +330,65 @@ def test_no_suspect_when_peak_is_late():
     peak_late, suspect = early_peak_suspect(times, hrs, dists, window_sec=300,
                                             pace_slack_min_km=0.5, delta_bpm=8)
     assert suspect is False and peak_late == 175
+
+
+# --- #237 (11.09.2026): пересчёт батча после автоподнятия max_hr ---
+
+def _session_with_trackpoints(db, user):
+    from src.analysis.utils import serialize_trackpoints
+    from tests.helpers import build_trackpoints, build_training_session
+    from tests.helpers_intervals import T0
+    tps = build_trackpoints('long', duration_min=20, base_pace=6.0, hr=140, start_time=T0)
+    return build_training_session(
+        db, user.id, training_type='easy', total_distance_km=3.0, duration_minutes=20.0,
+        begin_ts=T0, trackpoints_json=serialize_trackpoints(tps), segments_json=[])
+
+
+def test_reanalyze_check_max_hr_flag(db_session, monkeypatch):
+    """check_max_hr=False — пересчёт не оценивает пик повторно (иначе батч после поднятия
+    снова попадал бы в evaluate_max_hr_raise); по умолчанию оценка остаётся."""
+    from src.services.reanalyze import reanalyze_training
+    from tests.helpers import make_user
+    calls = []
+    monkeypatch.setattr(hr_max, "evaluate_max_hr_raise", lambda *a, **kw: calls.append(a))
+    user = make_user(db_session, chat_id=93801, email="hr-93801@example.com")
+    s = _session_with_trackpoints(db_session, user)
+    assert reanalyze_training(db_session, s.id, user.id, check_max_hr=False) is not None
+    assert calls == []
+    assert reanalyze_training(db_session, s.id, user.id) is not None
+    assert len(calls) == 1
+
+
+def test_reanalyze_batch_after_raise_isolates_failures(db_session, sent, monkeypatch):
+    """Одна тренировка падает — остальные пересчитаны, исключение не всплывает,
+    одно уведомление с новым максимумом; пик повторно не оценивается."""
+    from tests.helpers import make_user
+    monkeypatch.setattr(hr_max, "evaluate_max_hr_raise",
+                        lambda *a, **kw: pytest.fail("max_hr не должен оцениваться повторно"))
+    user = make_user(db_session, chat_id=93802, email="hr-93802@example.com")
+    s = _session_with_trackpoints(db_session, user)
+    import src.services.reanalyze as reanalyze_mod
+    real = reanalyze_mod.reanalyze_training
+
+    def flaky(db, sid, uid, *a, **kw):
+        if sid == 999_999:
+            raise RuntimeError("boom")
+        return real(db, sid, uid, *a, **kw)
+    monkeypatch.setattr(reanalyze_mod, "reanalyze_training", flaky)
+
+    n = hr_max.reanalyze_batch_after_raise(db_session, user.id, [s.id, 999_999], old=177, new=181)
+    assert n == 1
+    assert len(sent) == 1 and "181" in sent[0]["text"] and "1 тренировку" in sent[0]["text"]
+
+
+def test_reanalyze_batch_after_raise_silent_when_nothing_done(db_session, sent):
+    """Несуществующие id → 0 пересчитано, уведомления нет."""
+    from tests.helpers import make_user
+    user = make_user(db_session, chat_id=93803, email="hr-93803@example.com")
+    assert hr_max.reanalyze_batch_after_raise(db_session, user.id, [777_777], old=177, new=181) == 0
+    assert sent == []
+
+
+def test_plural_trainings():
+    assert [hr_max._plural_trainings(n) for n in (1, 2, 5, 11, 21, 22)] == ["у", "и", "", "", "у", "и"]
+

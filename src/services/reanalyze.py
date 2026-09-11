@@ -40,7 +40,8 @@ def _activity_from_raw(session: TrainingSession) -> dict | None:
 
 
 def reanalyze_training(db: Session, session_id: int, user_id: int,
-                        training_type_override: str | None = None) -> dict | None:
+                        training_type_override: str | None = None, *,
+                        check_max_hr: bool = True) -> dict | None:
     """
     Пересчитать тренировку из сохранённых трекпоинтов.
     Reanalyze training from stored trackpoints.
@@ -50,6 +51,8 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
         session_id: ID тренировки
         user_id: ID пользователя (для проверки прав)
         training_type_override: ручная установка типа (None = авто)
+        check_max_hr: после пересчёта оценить пик для адаптивного max_hr (False — вызов из
+            самого автоподнятия, #237: иначе пересчёт батча снова оценивал бы тот же пик)
 
     Returns:
         dict с результатами или None при ошибке
@@ -180,11 +183,12 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
     logger.info("Reanalyze: тренировка %d пересчитана → %s, %d сегментов (Training %d reanalyzed → %s, %d segments)",
                 session_id, result['training_type'], result['segments_count'],
                 session_id, result['training_type'], result['segments_count'])
-    # Адаптивный max_hr: пересчёт мог поднять пик выше профильного (adaptive max HR check)
-    from src.services.hr_max import evaluate_max_hr_raise
-    evaluate_max_hr_raise(db, user_id,
-                          result.get('hr_peak_smoothed') or result.get('max_heart_rate'),
-                          source="reanalyze")
+    if check_max_hr:
+        # Адаптивный max_hr: пересчёт мог поднять пик выше профильного (adaptive max HR check)
+        from src.services.hr_max import evaluate_max_hr_raise
+        evaluate_max_hr_raise(db, user_id,
+                              result.get('hr_peak_smoothed') or result.get('max_heart_rate'),
+                              source="reanalyze")
     # Физио-метрики (D2): трекпоинты изменились — пересчитать computed_json
     # (physio metrics: trackpoints changed — recompute the stored insight)
     try:
