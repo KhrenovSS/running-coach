@@ -1,6 +1,6 @@
 # /logs (#303/#119, 07.09.2026): только для вошедшего; имена ротации как у логгера; день валидируется.
 import os
-os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest")
+os.environ["SECRET_KEY"] = "test-secret-key-for-pytest"   # явно, не setdefault (#233)
 
 from datetime import date
 from pathlib import Path

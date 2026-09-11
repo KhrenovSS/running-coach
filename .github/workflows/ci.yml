@@ -30,7 +30,7 @@ jobs:
       
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13'   # прод-интерпретатор (Dockerfile python:3.13-slim, #330)
       
       - name: Cache pip
         uses: actions/cache@v4

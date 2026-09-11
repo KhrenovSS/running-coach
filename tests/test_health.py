@@ -4,7 +4,7 @@
 # Do NOT add os.environ.setdefault here — it won't override.
 
 import os
-os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest")
+os.environ["SECRET_KEY"] = "test-secret-key-for-pytest"   # явно, не setdefault (#233)
 
 from fastapi.testclient import TestClient
 from src.startup import create_app

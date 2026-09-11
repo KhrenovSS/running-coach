@@ -2,6 +2,14 @@
 
 All notable changes to this project are tracked here.
 
+## [11.09.2026] — Техдолг: гигиена тестов и CI (#233, #330)
+
+### Changed
+- `tests/test_health.py`, `tests/test_logs_route.py`: `os.environ.setdefault("SECRET_KEY", …)` → явное присваивание —
+  паттерн `setdefault` в тестах больше не смущает гвард DB-safety (#233).
+- `.github/workflows/ci.yml`: Python 3.12 → **3.13** — тесты идут на интерпретаторе прода (`Dockerfile` python:3.13-slim);
+  `requires-python >= 3.12` в `pyproject.toml` не меняется (#330). `BACKLOG.md`: #233/#330 — в архив (252 закрытых).
+
 ## [11.09.2026] — Техдолг: зелёные тесты на любом дне недели (#328, #332)
 
 ### Fixed
