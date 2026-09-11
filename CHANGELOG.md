@@ -2,6 +2,15 @@
 
 All notable changes to this project are tracked here.
 
+## [11.09.2026] — `/delete_me` не отвязывал аккаунт от Telegram (#236)
+
+### Fixed
+- **`/delete_me` удалял данные, но аккаунт оставался привязан к чату**: `cmd_delete_me_confirm` писал
+  `telegram_chat_id = None` в detached-объект из `get_user()` (сессия закрыта — мутация молча терялась). Теперь отвязка
+  идёт в session-bound пользователя внутри сессии хендлера (тот же паттерн, что у кнопки max_hr). Тесты —
+  новый `tests/test_telegram_account.py` (на старом коде тест падал: `telegram_chat_id` оставался).
+  `BACKLOG.md`: #236 — в архив (257 закрытых).
+
 ## [11.09.2026] — Авто-reanalyze батча после автоподнятия max_hr (#237)
 
 ### Added

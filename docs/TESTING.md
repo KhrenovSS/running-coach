@@ -57,6 +57,7 @@ tests/
 ├── test_session_ownership.py# ГВАРД: SessionLocal() только в композиционных корнях (allowlist)
 ├── test_stage0_fixes.py     # регрессы Этапа 0 (stats бота, reanalyze, performance Float)
 ├── test_hr_max.py           # адаптивный max_hr (повышение/снижение)
+├── test_telegram_account.py # /delete_me: удаление данных + отвязка chat_id (#236)
 └── test_backfill.py         # backfill-скрипты
 ```
 

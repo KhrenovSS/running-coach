@@ -57,7 +57,12 @@ async def cmd_delete_me_confirm(update: Update, context: ContextTypes.DEFAULT_TY
         db.query(WeightMeasurement).filter(WeightMeasurement.user_id == user.id).delete()
         db.query(DeletedTraining).filter(DeletedTraining.user_id == user.id).delete()
         db.query(WatchCredential).filter(WatchCredential.user_id == user.id).delete()
-        user.telegram_chat_id = None
+        # #236: отвязку пишем в session-bound пользователя — `user` из get_user() detached,
+        # его мутация молча терялась и аккаунт оставался привязан к чату (уроки hr_max-кнопки).
+        # (Unlink via the session-bound row; the detached object never persisted.)
+        db_user = db.query(User).filter(User.id == user.id).first()
+        if db_user is not None:
+            db_user.telegram_chat_id = None
         db.commit()
         clear_awaiting_weight(chat_id)
         audit.log_settings_changed(
