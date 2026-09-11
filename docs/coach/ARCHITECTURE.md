@@ -86,8 +86,10 @@ expired/error) с атомарным claim (`UPDATE ... WHERE status='pending'`,
 блок «⚠️ Ограничение по безопасности». Проза LLM инструктирована не называть чисел тренировки,
 но это правило промпта, не гарантия. Numeric-consistency checker — **v1 реализован 29.08.2026**
 (`src/coach/numeric_check.py`, #247): детект чисел прозы (км/мин/темп/зоны/пульс) против
-карточки → `logger.warning` + `meta.numeric_mismatch`; текст пользователю пока не режется
-(обрезание — после наблюдений).
+карточки → `logger.warning` + `meta.numeric_mismatch`. **v2 — 11.09.2026 (решение владельца)**: предложение
+прозы с чужим числом вырезается (`trim_mismatched_prose`, хвост «Числа — в карточке ниже», `meta.numeric_trimmed`,
+`meta.prose` — урезанная проза), выключатель `COACH_NUMERIC_TRIM_PROSE` (`llm/config.py`). Основание: за
+29.08–11.09 на проде 0 расхождений из 83 ответов — ложных срабатываний тоже нет, страховка бесплатна.
 
 ## Решение 5: недельный персистентный план (29.08.2026)
 
@@ -142,7 +144,7 @@ M4 — interval/race либо tempo с avg_hr ≥95%·lthr. Нормативны
 прогресса, одно слабое место, направление) и детерминированной карточки «Итоги недели»
 (`week_report.py` → `render_week_report.py`). Сигналы прогресса/тревоги (`highlights`/`concerns`)
 предвыбирает код по порогам `config.py` — LLM выбирает из них, не выдумывает; числа в прозе
-запрещены и ловятся `numeric_check.prose_numbers` (лог + meta, #247). Числа недели считаются
+запрещены и ловятся `numeric_check.prose_numbers` (лог + meta; с 11.09 предложение с числом вырезается, #247 v2). Числа недели считаются
 один раз в джобе и передаются и отчёту, и плану следующей недели (`generate_weekly_plan(week_report=)`),
 чтобы план объяснял, что меняется относительно прошедшей недели. Решение владельца: карточка —
 только про тренировки; самочувствие остаётся в утреннем вердикте.
@@ -220,7 +222,7 @@ coach/
 ├── planning_availability.py # availability/set_availability (#294), unavailable_dates, cancel_days/reopen_days
 │                      #   (отмены подопечного с маркером UNAVAILABLE_RATIONALE), blocked_by_unavailable
 ├── weekly_plan.py     # generate_weekly_plan (вс 19:00, строки recommendations status=planned)
-├── numeric_check.py   # #247: сверка чисел прозы LLM с карточкой (детект+лог)
+├── numeric_check.py   # #247: сверка чисел прозы LLM с карточкой (детект+лог) + v2 trim предложения с чужим числом
 ├── vision.py          # #257: SleepShot + extract_sleep (скриншот → мост /vision)
 ├── rules/p1_safety.py # evaluate_safety(state) — правила 0–21 (0 — нет данных → консервативный потолок;
 │                      #   шкала Recovery Coros, флаги разбора 17–19, монотонность 20, перекос недели 16,

@@ -31,3 +31,9 @@ PRICE_INPUT_PER_M = 5.0
 PRICE_OUTPUT_PER_M = 25.0
 PRICE_CACHE_READ_PER_M = 0.5     # ~0.1× входа
 PRICE_CACHE_WRITE_PER_M = 6.25   # ~1.25× входа
+
+# --- Numeric checker v2 (#247, 11.09.2026): проза с чужим числом режется предложением ---
+COACH_NUMERIC_TRIM_PROSE = True  # выключатель страховки без правки кода (False → только детект, как v1)
+NUMERIC_TRIM_NOTE = "Числа — в карточке ниже."
+NUMERIC_TRIM_FALLBACK_TEXT = "Держимся плана — детали в карточке."
+

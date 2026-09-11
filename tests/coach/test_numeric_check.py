@@ -1,6 +1,7 @@
-# Тесты numeric-checker'а (#247): проза не противоречит карточке (v1 — детект)
+# Тесты numeric-checker'а (#247): проза не противоречит карточке (v1 — детект, v2 — обрезание)
 from src.coach.contracts import SafetyVerdict, Prescription
-from src.coach.numeric_check import check_prose
+from src.coach.llm.config import NUMERIC_TRIM_FALLBACK_TEXT, NUMERIC_TRIM_NOTE
+from src.coach.numeric_check import check_prose, mismatch_pairs, trim_mismatched_prose
 
 
 def _prescription(**kw) -> Prescription:
@@ -67,8 +68,61 @@ def test_e2e_mismatch_recorded_in_meta(athlete_with_history, db_session):
         CoachMessage.id.desc()).first()
     mismatches = msg.meta_json.get("numeric_mismatch")
     assert mismatches and any("25" in m for m in mismatches)
-    # текст пользователю НЕ изменён (v1 — только детект)
-    assert "25 км" in msg.text
+    # v2 (11.09.2026): предложение с чужим числом вырезано, заметка о карточке добавлена,
+    # карточка (детерминированные числа) на месте, история хранит урезанную прозу
+    assert "25 км" not in msg.text and "Z5" not in msg.text
+    assert NUMERIC_TRIM_NOTE in msg.text
+    assert "Лёгкий бег" in msg.text
+    assert msg.meta_json["numeric_trimmed"] == ["Сегодня будет 25 км в Z5 — держись!"]
+    assert "25" not in msg.meta_json["prose"]
+
+
+def test_e2e_matching_numbers_untouched(athlete_with_history, db_session):
+    """Числа прозы сходятся с карточкой → текст и meta.prose без изменений, метки нет."""
+    from src.coach import orchestrator
+    from src.coach.llm.client import LLMResponse
+    from src.models import CoachMessage
+    from tests.coach.fakes import ScriptedLLM
+
+    turn = {"message": "Сегодня лёгкие 40 мин, около 6 км. Спокойно!",
+            "proposal": {"workout_type": "easy", "target_zone": 2,
+                         "duration_min": 40, "distance_km": 6.0,
+                         "structure": None, "rationale": []},
+            "followup_question": None, "log_suggestion": None}
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
+    reply = orchestrator.handle_chat(athlete_with_history.id, "что сегодня?",
+                                     db=db_session, llm=llm)
+    msg = db_session.query(CoachMessage).filter_by(
+        user_id=athlete_with_history.id, role="assistant").order_by(
+        CoachMessage.id.desc()).first()
+    assert reply.text.startswith(turn["message"])
+    assert "numeric_mismatch" not in msg.meta_json and "numeric_trimmed" not in msg.meta_json
+    assert msg.meta_json["prose"] == turn["message"]
+    assert NUMERIC_TRIM_NOTE not in reply.text
+
+
+def test_mismatch_pairs_return_raw_tokens():
+    p = _prescription()
+    pairs = mismatch_pairs("Пробеги 12 км в Z4, пульс 175 уд/мин.", p, max_hr=177)
+    assert [t for t, _ in pairs] == ["12 км", "175 уд/мин", "Z4"]
+
+
+def test_trim_removes_only_offending_sentence():
+    msg = ("Доброе утро! Сегодня 25 км в Z5 — держись.\n\n"
+           "Пульс держим спокойно. Разминка обязательна.")
+    text, removed = trim_mismatched_prose(msg, ["25 км", "Z5"])
+    assert removed == ["Сегодня 25 км в Z5 — держись."]
+    assert text == ("Доброе утро!\n\nПульс держим спокойно. Разминка обязательна.\n\n"
+                    + NUMERIC_TRIM_NOTE)
+    assert text.count(NUMERIC_TRIM_NOTE) == 1
+
+
+def test_trim_empty_result_falls_back_and_noop_without_tokens():
+    text, removed = trim_mismatched_prose("Сегодня 25 км.", ["25 км"])
+    assert removed == ["Сегодня 25 км."]
+    assert text == f"{NUMERIC_TRIM_FALLBACK_TEXT}\n\n{NUMERIC_TRIM_NOTE}"
+    assert trim_mismatched_prose("Всё по плану.", []) == ("Всё по плану.", [])
+    assert trim_mismatched_prose("Всё по плану.", ["99 км"]) == ("Всё по плану.", [])
 
 
 def test_check_plan_prose_counts_and_types():

@@ -15,10 +15,14 @@ from sqlalchemy.orm import Session
 
 from src.coach import concerns, illness, planning
 from src.coach.contracts import Prescription, WorkoutProposal
-from src.coach.numeric_check import check_prose, prose_numbers
+from src.coach.numeric_check import mismatch_pairs, prose_numbers, trim_mismatched_prose
 from src.coach.llm.agent import run_turn
 from src.coach.llm.client import CoachLLM, get_llm
-from src.coach.llm.config import COACH_EFFORT_CHAT, COACH_MAX_TURNS_PER_DAY
+from src.coach.llm.config import (
+    COACH_EFFORT_CHAT,
+    COACH_MAX_TURNS_PER_DAY,
+    COACH_NUMERIC_TRIM_PROSE,
+)
 from src.coach.llm.prompts import build_messages, build_system_blocks, build_today_block
 from src.coach.llm.schemas import LogSuggestion, ReviewAssessment
 from src.coach.prescriber import finalize, save_prescription, user_max_hr
@@ -247,19 +251,31 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
             "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0),
             "cache_creation_input_tokens": usage.get("cache_creation_input_tokens", 0),
             "prose": turn.message}   # #258: история берёт прозу без карточки
+    # #247: числа прозы против карточки. v1 — детект (лог + meta.numeric_mismatch); v2 (11.09.2026) —
+    # предложение с чужим числом вырезается, в meta.prose — урезанная проза (#258: история без карточки).
+    # (Numeric check: detect, then trim the offending sentence — numbers come from the card.)
+    tokens: list[str] = []
     if card is not None:
-        # #247 v1: детект расхождений проза↔карточка — лог+метка, текст не режем
-        mismatches = check_prose(turn.message, card, max_hr, lthr=lthr)
-        if mismatches:
+        pairs = mismatch_pairs(turn.message, card, max_hr, lthr=lthr)
+        if pairs:
             logger.warning("Numeric mismatch for kind=%s user=%s: %s",
-                           kind, user_id, "; ".join(mismatches))
-            meta["numeric_mismatch"] = mismatches
+                           kind, user_id, "; ".join(d for _, d in pairs))
+            meta["numeric_mismatch"] = [d for _, d in pairs]
+            tokens = [t for t, _ in pairs]
     elif kind == "weekly":
-        # Числа недели даёт карточка — проза их называть не должна (C8.1; #247: лог+метка)
-        found = prose_numbers(turn.message)
-        if found:
-            logger.warning("Weekly prose carries numbers user=%s: %s", user_id, found)
-            meta["numeric_mismatch"] = found
+        # Числа недели даёт карточка — проза их называть не должна (C8.1)
+        tokens = prose_numbers(turn.message)
+        if tokens:
+            logger.warning("Weekly prose carries numbers user=%s: %s", user_id, tokens)
+            meta["numeric_mismatch"] = tokens
+    if tokens and COACH_NUMERIC_TRIM_PROSE and text.startswith(turn.message):
+        trimmed, removed = trim_mismatched_prose(turn.message, tokens)
+        if removed:
+            text = trimmed + text[len(turn.message):]     # проза — префикс text, хвосты нетронуты
+            meta["prose"] = trimmed
+            meta["numeric_trimmed"] = removed
+            logger.info("Numeric trim for kind=%s user=%s: %d sentence(s) removed",
+                        kind, user_id, len(removed))
     CoachRepository.save_message(user_id, "user", message, db=db, kind=kind)
     assistant_msg = CoachRepository.save_message(
         user_id, "assistant", text, db=db, kind=kind, meta=meta,

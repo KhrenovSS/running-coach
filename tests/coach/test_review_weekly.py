@@ -218,15 +218,20 @@ def test_weekly_job_gate_below_normal(athlete_with_history, db_session):
 
 
 def test_weekly_prose_numbers_flagged_in_meta(athlete_with_history, db_session):
-    """Проза отчёта с числами (км/%) → лог + meta.numeric_mismatch, текст не режется (#247)."""
-    turn = dict(WEEKLY_TURN, message="Набежал 25 км, лёгкого 84% — отлично.")
+    """Проза отчёта с числами (км/%) → лог + meta.numeric_mismatch; v2 (11.09.2026): предложение
+    с числами вырезано, карточка «Итоги недели» и прочая проза на месте (#247)."""
+    from src.coach.llm.config import NUMERIC_TRIM_NOTE
+    turn = dict(WEEKLY_TURN, message="Набежал 25 км, лёгкого 84% — отлично. Так держать!")
     llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
     reply = orchestrator.weekly_report(athlete_with_history.id, db=db_session, llm=llm)
-    assert "25 км" in reply.text
+    assert "25 км" not in reply.text.split("Итоги недели")[0]   # проза без чисел, карточка — с числами
+    assert reply.text.startswith("Так держать!") and NUMERIC_TRIM_NOTE in reply.text
+    assert "Итоги недели" in reply.text
     msg = db_session.query(CoachMessage).filter_by(
         user_id=athlete_with_history.id, kind="weekly", role="assistant").order_by(
         CoachMessage.id.desc()).first()
     assert set(msg.meta_json["numeric_mismatch"]) == {"25 км", "84%"}
+    assert msg.meta_json["numeric_trimmed"] == ["Набежал 25 км, лёгкого 84% — отлично."]
 
 
 def test_weekly_job_passes_numbers_to_plan(athlete_with_history, db_session, monkeypatch):

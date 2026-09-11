@@ -1,10 +1,11 @@
 # Numeric-consistency checker (#247): проза LLM не должна противоречить карточке.
 #
-# v1 — только обнаружение (решение 29.08.2026): расхождения логируются и
-# помечаются в meta_json assistant-строки; текст пользователю НЕ меняется
-# (обрезание прозы — отдельное решение после наблюдений). Закрывает остаточный
-# риск из ARCHITECTURE.md «проза может исказить число».
-# (Detect-only v1: prose numbers are checked against the clamped card.)
+# v1 (29.08.2026) — обнаружение: расхождения логируются и помечаются в meta_json
+# assistant-строки. v2 (11.09.2026, решение владельца): страховка — предложение прозы с чужим
+# числом вырезается (`trim_mismatched_prose`), в конец добавляется «Числа — в карточке ниже».
+# Основание: за 29.08–11.09 на проде 0 расхождений из 83 ответов — ложных срабатываний тоже 0.
+# Закрывает остаточный риск из ARCHITECTURE.md «проза может исказить число» кодом, не промптом.
+# (v1 detect-only; v2 trims the offending sentence — numbers are rendered by code.)
 
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ import re
 
 from src.analysis.hr_zones import zone_ceiling_hr
 from src.coach.contracts import Prescription
+from src.coach.llm.config import NUMERIC_TRIM_FALLBACK_TEXT, NUMERIC_TRIM_NOTE
 
 # Число + единица: км, минуты, темп M:SS/км, зона Z1-5, пульс
 _KM_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*км\b", re.IGNORECASE)
@@ -52,14 +54,15 @@ def _expected_values(p: Prescription, max_hr: int | None,
             "zone": [float(zone)] if zone is not None else []}
 
 
-def _mismatches(found: list[float], expected: list[float], tol: float,
-                unit: str) -> list[str]:
+def _mismatches(found: list[tuple[str, float]], expected: list[float], tol: float,
+                unit: str) -> list[tuple[str, str]]:
+    """(токен прозы, описание) для чисел вне допуска. found — (сырой токен, значение)."""
     if not expected:
         # Эталона нет (например rest) — любое число этого рода подозрительно,
         # но без эталона честного сравнения нет: пропускаем (не спамим ложным)
         return []
-    return [f"{v:g} {unit} ≠ карточке ({'/'.join(f'{e:g}' for e in expected)})"
-            for v in found
+    return [(tok, f"{v:g} {unit} ≠ карточке ({'/'.join(f'{e:g}' for e in expected)})")
+            for tok, v in found
             if not any(abs(v - e) <= tol for e in expected)]
 
 
@@ -76,30 +79,73 @@ def prose_numbers(message: str) -> list[str]:
     return found
 
 
-def check_prose(message: str, p: Prescription | None,
-                max_hr: int | None = None, lthr: int | None = None) -> list[str]:
-    """Числа тренировки в прозе, противоречащие карточке (пусто = всё сходится).
+def mismatch_pairs(message: str, p: Prescription | None,
+                   max_hr: int | None = None, lthr: int | None = None) -> list[tuple[str, str]]:
+    """(токен прозы, описание расхождения) для чисел, противоречащих карточке.
 
     Structure-строки типа «10×400/400» не парсим — они попадают в карточку
     дословно из p.target['structure'] и в прозе легальны.
+    (Raw prose token + human description per mismatching number.)
     """
     if p is None or not message:
         return []
     exp = _expected_values(p, max_hr, lthr)
-    out: list[str] = []
-    out += _mismatches([float(m.replace(",", "."))
-                        for m in _KM_RE.findall(message)],
+    out: list[tuple[str, str]] = []
+    out += _mismatches([(m.group(0), float(m.group(1).replace(",", ".")))
+                        for m in _KM_RE.finditer(message)],
                        exp["km"], _KM_TOL, "км")
-    out += _mismatches([float(m) for m in _MIN_RE.findall(message)],
+    out += _mismatches([(m.group(0), float(m.group(1))) for m in _MIN_RE.finditer(message)],
                        exp["min"], _MIN_TOL, "мин")
-    out += _mismatches([int(a) + int(b) / 60.0
-                        for a, b in _PACE_RE.findall(message)],
+    out += _mismatches([(m.group(0), int(m.group(1)) + int(m.group(2)) / 60.0)
+                        for m in _PACE_RE.finditer(message)],
                        exp["pace"], _PACE_TOL, "мин/км")
-    out += _mismatches([float(m) for m in _HR_RE.findall(message)],
+    out += _mismatches([(m.group(0), float(m.group(1))) for m in _HR_RE.finditer(message)],
                        exp["hr"], _HR_TOL, "уд/мин")
-    out += _mismatches([float(m) for m in _ZONE_RE.findall(message)],
+    out += _mismatches([(m.group(0), float(m.group(1))) for m in _ZONE_RE.finditer(message)],
                        exp["zone"], 0.0, "зона")
     return out
+
+
+def check_prose(message: str, p: Prescription | None,
+                max_hr: int | None = None, lthr: int | None = None) -> list[str]:
+    """Числа тренировки в прозе, противоречащие карточке (пусто = всё сходится)."""
+    return [desc for _, desc in mismatch_pairs(message, p, max_hr, lthr)]
+
+
+# --- v2 (11.09.2026): обрезание предложения с чужим числом ---
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?…])\s+")
+
+
+def trim_mismatched_prose(message: str, tokens: list[str]) -> tuple[str, list[str]]:
+    """Убрать из прозы предложения, содержащие токены расхождений; вернуть (текст, удалённые).
+
+    Абзацы сохраняются; предложения делятся по .!?… + пробел. Пустой результат → нейтральная
+    фраза NUMERIC_TRIM_FALLBACK_TEXT. Если что-то вырезано — в конец один раз NUMERIC_TRIM_NOTE
+    («числа — в карточке»). Без токенов текст возвращается как есть.
+    (Drop sentences carrying mismatching tokens; keep paragraphs; add the card note once.)
+    """
+    if not message or not tokens:
+        return message, []
+    removed: list[str] = []
+    paragraphs_out: list[str] = []
+    for para in message.split("\n"):
+        if not para.strip():
+            paragraphs_out.append(para)
+            continue
+        kept = []
+        for sent in _SENTENCE_SPLIT_RE.split(para):
+            if any(tok in sent for tok in tokens):
+                removed.append(sent.strip())
+            else:
+                kept.append(sent)
+        paragraphs_out.append(" ".join(kept).strip())
+    if not removed:
+        return message, []
+    text = "\n".join(paragraphs_out).strip()
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    if not text:
+        text = NUMERIC_TRIM_FALLBACK_TEXT
+    return f"{text}\n\n{NUMERIC_TRIM_NOTE}", removed
 
 
 # --- #316 (07.09.2026): проза плана недели vs карта — типы и число беговых дней ---

@@ -131,7 +131,8 @@
   композирует `session_metrics` (M1) + `effort`/`gap` + `hr_baseline` + `data_checks`
   (кросс-чеки с часами) + `intervals` (HRR) + `week_structure`/downhill/session_rpe (M4);
   baseline — `services/insights_baseline.py`; флаги — только из `computed.flags`,
-  `numeric_check.py` сверяет числа прозы с карточкой. Контекст/дедуп/история —
+  `numeric_check.py` сверяет числа прозы с карточкой и с 11.09 (v2) вырезает предложение с чужим числом
+  (`COACH_NUMERIC_TRIM_PROSE`, хвост «Числа — в карточке ниже»). Контекст/дедуп/история —
   в `turn_context.py`.
 - **Сон — из скриншота** (Coros API длительность/фазы не отдаёт): пользователь шлёт фото экрана
   сна в Telegram → мост `/vision` (Read-tool) → `coach/vision.py`/`services/sleep_ingest.py` → колонки `sleep_*`
