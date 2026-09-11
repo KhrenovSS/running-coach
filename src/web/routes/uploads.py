@@ -13,6 +13,7 @@ from src.models import get_db, User, TrainingSession, DeletedTraining, get_setti
 from src.parsers.tcx_parser import parse_tcx
 from src.parsers.fit_parser import parse_fit
 from src.analysis.utils import format_pace, format_duration
+from src.analysis.user_params import analysis_kwargs
 from src.utils.logger import get_logger
 from src.api.deps import get_current_user
 from src.services.audit import AuditService
@@ -143,17 +144,11 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
             tmp_path = tmp.name
         try:
             if ext == ".fit":
-                data = parse_fit(tmp_path, max_hr=settings.max_hr,
-                                 max_credible_pace=settings.max_credible_pace,
-                                 max_gps_jump_m=settings.max_gps_jump_m,
-                                 min_hr_for_fast_pace=settings.min_hr_for_fast_pace,
-                                 lthr=user_lthr)
+                data = parse_fit(tmp_path, max_hr=settings.max_hr, lthr=user_lthr,
+                                 **analysis_kwargs(settings))   # GPS + interval_* профиля (#327)
             else:
-                data = parse_tcx(tmp_path, max_hr=settings.max_hr,
-                                 max_credible_pace=settings.max_credible_pace,
-                                 max_gps_jump_m=settings.max_gps_jump_m,
-                                 min_hr_for_fast_pace=settings.min_hr_for_fast_pace,
-                                 lthr=user_lthr)
+                data = parse_tcx(tmp_path, max_hr=settings.max_hr, lthr=user_lthr,
+                                 **analysis_kwargs(settings))
         except Exception as e:
             logger.warning("Upload: parse error for %s — %s", file.filename, e, exc_info=True)
             parse_errors.append(file.filename or "unknown")

@@ -1,4 +1,5 @@
 from math import radians, cos, sin, sqrt, asin
+from src.config.constants import MAX_CREDIBLE_PACE, MAX_GPS_JUMP_M, MIN_HR_FOR_FAST_PACE
 from src.utils.logger import get_logger
 
 logger = get_logger("parsers.gps")
@@ -11,7 +12,8 @@ def haversine_m(lat1, lon1, lat2, lon2):
     return 6371000 * 2 * asin(sqrt(max(0, min(a, 1))))
 
 
-def clean_trackpoints(trackpoints, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130):
+def clean_trackpoints(trackpoints, max_credible_pace=MAX_CREDIBLE_PACE, max_gps_jump_m=MAX_GPS_JUMP_M,
+                      min_hr_for_fast_pace=MIN_HR_FOR_FAST_PACE):
     original_count = len(trackpoints)
     if original_count < 3:
         return trackpoints, []

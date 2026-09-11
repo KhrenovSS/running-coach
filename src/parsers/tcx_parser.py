@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from src.analysis import process_trackpoints
 from .weather import weather_icon
 from src.config import settings
+from src.config.constants import MAX_CREDIBLE_PACE, MAX_GPS_JUMP_M, MIN_HR_FOR_FAST_PACE
 
 # Пространство имён Garmin TCX (Garmin TCX XML namespace)
 NS = {
@@ -49,7 +50,9 @@ def extract_tcx_trackpoints(file_path):
 
 
 # Основная функция парсинга TCX-файла (Main TCX file parsing function)
-def parse_tcx(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130, lthr=None):
+def parse_tcx(file_path, max_hr=None, max_credible_pace=MAX_CREDIBLE_PACE, max_gps_jump_m=MAX_GPS_JUMP_M,
+              min_hr_for_fast_pace=MIN_HR_FOR_FAST_PACE, lthr=None, **analysis_kwargs):
+    """TCX → AnalysisResult. **analysis_kwargs — прочие kw process_trackpoints (interval_*, #327)."""
     if max_hr is None:
         max_hr = settings.default_max_hr
     trackpoints, start_time_utc = extract_tcx_trackpoints(file_path)
@@ -58,4 +61,5 @@ def parse_tcx(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.
     return process_trackpoints(trackpoints, start_time_utc, max_hr,
                                 max_credible_pace, lthr=lthr,
                                 max_gps_jump_m=max_gps_jump_m,
-                                min_hr_for_fast_pace=min_hr_for_fast_pace)
+                                min_hr_for_fast_pace=min_hr_for_fast_pace,
+                                **analysis_kwargs)

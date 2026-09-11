@@ -153,6 +153,7 @@ running-coach/
 │   │   ├── week_structure.py   #   структура недели / детренированность
 │   │   ├── type_resolution.py  #   ярлык по плану дня: «план — назначение, факт — интенсивность» (04.09)
 │   │   ├── segment_laps.py     #   сегменты по структурным лапам часов (программа/ручные отсечки, #302)
+│   │   ├── user_params.py      #   gps_kwargs/interval_kwargs/analysis_kwargs(user) — дефолты из constants (#274/#327)
 │   │   └── utils.py            #   format_pace, calc_elevation, find_timezone, пики HR, паузы,
 │   │                           #   early_peak_suspect (#238), pauses_to_offsets/pause_overlap_sec (#286)
 │   └── utils/

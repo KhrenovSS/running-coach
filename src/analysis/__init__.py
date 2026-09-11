@@ -25,21 +25,34 @@ from src.analysis.gps_quality import (
     raw_gps_stats, build_gps_quality, clean_windows, estimate_distance_by_cadence,
 )
 from src.config import settings
-from src.config.constants import STRIDE_DEFAULT_M, WEATHER_AVG_MIN_DURATION_MIN
+from src.config.constants import (
+    DEFAULT_HR_LAG_SEC,
+    DEFAULT_MIN_OSCILLATIONS,
+    DEFAULT_MIN_PHASE_DISTANCE_M,
+    DEFAULT_MIN_PHASE_DURATION_SEC,
+    DEFAULT_PACE_THRESHOLD,
+    MAX_CREDIBLE_PACE,
+    MAX_GPS_JUMP_M,
+    MIN_HR_FOR_FAST_PACE,
+    STRIDE_DEFAULT_M,
+    WEATHER_AVG_MIN_DURATION_MIN,
+)
 
 logger = get_logger("analysis")
 
 
 def process_trackpoints(trackpoints: list[TrackpointDict], start_time_utc: datetime,
-                          max_hr: int = settings.default_max_hr, max_credible_pace: float = 3.0,
+                          max_hr: int = settings.default_max_hr,
+                         max_credible_pace: float = MAX_CREDIBLE_PACE,
                          lthr: int | None = None,
-                         max_gps_jump_m: float = 100.0, min_hr_for_fast_pace: int = 130,
-                         pace_gap: float = 1.0,
+                         max_gps_jump_m: float = MAX_GPS_JUMP_M,
+                         min_hr_for_fast_pace: int = MIN_HR_FOR_FAST_PACE,
+                         pace_gap: float = DEFAULT_PACE_THRESHOLD,
                          pauses: list[dict] | None = None,
-                         interval_min_phase_duration: int = 60,
-                         interval_min_phase_distance_m: int = 200,
-                         interval_hr_lag_sec: int = 5,
-                         interval_min_oscillations: int = 3,
+                         interval_min_phase_duration: int = DEFAULT_MIN_PHASE_DURATION_SEC,
+                         interval_min_phase_distance_m: int = DEFAULT_MIN_PHASE_DISTANCE_M,
+                         interval_hr_lag_sec: int = DEFAULT_HR_LAG_SEC,
+                         interval_min_oscillations: int = DEFAULT_MIN_OSCILLATIONS,
                          watch_stride_m: float | None = None,
                          laps: list[dict] | None = None) -> AnalysisResult | None:
     """

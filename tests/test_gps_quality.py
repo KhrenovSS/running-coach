@@ -19,7 +19,7 @@ from src.config.constants import (
 )
 from tests.helpers import build_gps_glitch_trackpoints
 
-MAX_CREDIBLE_PACE = 3.0  # как в process_trackpoints по умолчанию (pipeline default)
+from src.config.constants import MAX_CREDIBLE_PACE  # единый источник дефолта (#274)
 
 # Геометрия кейса-42: 15 мин сбоя (5.7 м/с, 25% точек без координат) + 30 мин чисто
 GLITCH_MIN = 15.0

@@ -13,7 +13,8 @@ from src.services.audit import AuditService
 from src.services.watch_credentials import upsert_watch_credential
 from src.crypto import safe_decrypt
 from src.config.constants import (DEFAULT_PACE_THRESHOLD, DEFAULT_MIN_PHASE_DURATION_SEC,
-                                   DEFAULT_HR_LAG_SEC, DEFAULT_MIN_OSCILLATIONS)
+                                   DEFAULT_HR_LAG_SEC, DEFAULT_MIN_OSCILLATIONS,
+                                   MAX_CREDIBLE_PACE, MAX_GPS_JUMP_M, MIN_HR_FOR_FAST_PACE)
 from src.utils.logger import get_logger
 from src.utils.rate_limit import rate_limit
 
@@ -74,9 +75,9 @@ async def settings_page(request: Request, current_user: User = Depends(get_curre
 
 @router.post('/settings')
 async def settings_save(max_hr: int | None = Form(None), weight: float | None = Form(None),
-                        max_credible_pace: float = Form(3.0),
-                        max_gps_jump_m: float = Form(100.0),
-                        min_hr_for_fast_pace: int = Form(130),
+                        max_credible_pace: float = Form(MAX_CREDIBLE_PACE),
+                        max_gps_jump_m: float = Form(MAX_GPS_JUMP_M),
+                        min_hr_for_fast_pace: int = Form(MIN_HR_FOR_FAST_PACE),
                         interval_pace_threshold: float = Form(DEFAULT_PACE_THRESHOLD),
                         interval_min_phase_duration: int = Form(DEFAULT_MIN_PHASE_DURATION_SEC),
                         interval_hr_lag_sec: int = Form(DEFAULT_HR_LAG_SEC),

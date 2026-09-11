@@ -13,7 +13,7 @@ from src.analysis.segment_km import (
 )
 from src.utils.logger import get_logger
 from src.config import settings
-from src.config.constants import RECORDING_GAP_MAX_SEC
+from src.config.constants import MAX_CREDIBLE_PACE, RECORDING_GAP_MAX_SEC
 
 logger = get_logger("analysis.segment")
 
@@ -269,7 +269,7 @@ def segment_by_pace(trackpoints: list[dict], max_hr: int, total_dist_km: float,
                     lthr: int | None = None,
                      min_oscillations: int = 3, pace_gap: float = 1.0,
                      min_phase_duration_sec: int = 15,
-                     max_credible_pace: float = 3.0) -> tuple[list[dict], int]:
+                     max_credible_pace: float = MAX_CREDIBLE_PACE) -> tuple[list[dict], int]:
     """
     Сегментация трека по смене темпа через change-point detection + осцилляции.
     Track segmentation via pace change-point detection + oscillations.

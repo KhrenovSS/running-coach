@@ -3,6 +3,7 @@ from datetime import datetime
 from src.analysis import process_trackpoints
 from src.analysis.gps_quality import watch_stride_m
 from src.config import settings
+from src.config.constants import MAX_CREDIBLE_PACE, MAX_GPS_JUMP_M, MIN_HR_FOR_FAST_PACE
 
 # Константа для конвертации полуокружностей в градусы (Semicircles to degrees)
 SEMICIRCLE_TO_DEG = 180.0 / 2**31
@@ -186,7 +187,11 @@ def extract_fit_trackpoints(file_path, coros_cadence_workaround=False):
 
 
 # Парсинг FIT-файла (FIT file parsing)
-def parse_fit(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130, coros_cadence_workaround=False, lthr=None):
+def parse_fit(file_path, max_hr=None, max_credible_pace=MAX_CREDIBLE_PACE, max_gps_jump_m=MAX_GPS_JUMP_M,
+              min_hr_for_fast_pace=MIN_HR_FOR_FAST_PACE, coros_cadence_workaround=False, lthr=None,
+              **analysis_kwargs):
+    """FIT → AnalysisResult. **analysis_kwargs — прочие kw process_trackpoints (interval_* из профиля,
+    #327: без них live-синк классифицировал по дефолтам, а reanalyze — по настройкам пользователя)."""
     if max_hr is None:
         max_hr = settings.default_max_hr
     activity = extract_fit_activity(file_path, coros_cadence_workaround=coros_cadence_workaround)
@@ -200,7 +205,8 @@ def parse_fit(file_path, max_hr=None, max_credible_pace=3.0, max_gps_jump_m=100.
                                   min_hr_for_fast_pace=min_hr_for_fast_pace,
                                   pauses=(activity['device_summary'] or {}).get('pauses'),
                                   watch_stride_m=watch_stride_m(activity['device_summary']),
-                                  laps=activity['laps'])   # #302: структурные лапы → сегменты
+                                  laps=activity['laps'],   # #302: структурные лапы → сегменты
+                                  **analysis_kwargs)
     if result is None:
         return None
     if activity['calories'] is not None:

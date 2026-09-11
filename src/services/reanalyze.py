@@ -3,6 +3,7 @@
 from sqlalchemy.orm import Session
 from src.models import TrainingSession, User
 from src.analysis import process_trackpoints
+from src.analysis.user_params import analysis_kwargs
 from src.analysis.gps_quality import watch_stride_m
 from src.config import settings as app_settings
 from src.services.raw_files import resolve_raw_file
@@ -85,11 +86,6 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
         return None
 
     # Получить пороги из настроек пользователя (Get thresholds from user settings)
-    pace_gap = user.interval_pace_threshold or 1.0
-    phase = user.interval_min_phase_duration or 60
-    phase_dist_m = user.interval_min_phase_distance_m or 200
-    lag = user.interval_hr_lag_sec or 5
-    min_osc = user.interval_min_oscillations or 3
 
     try:
         from src.services.repositories import latest_lthr
@@ -105,19 +101,12 @@ def reanalyze_training(db: Session, session_id: int, user_id: int,
             laps=laps,
             max_hr=user.max_hr or app_settings.default_max_hr,
             lthr=latest_lthr(user_id, db=db),
-            max_credible_pace=user.max_credible_pace or 3.0,
-            max_gps_jump_m=user.max_gps_jump_m or 100.0,
-            min_hr_for_fast_pace=user.min_hr_for_fast_pace or 130,
-            pace_gap=pace_gap,
+            **analysis_kwargs(user),   # GPS-пороги + interval_* из профиля (#274/#327)
             pauses=pauses,
             # #275: шаг с часов — из сырья (FIT) или сохранённого device_summary
             watch_stride_m=watch_stride_m(
                 (activity.get('device_summary') if from_raw else None)
                 or (session.device_summary if isinstance(session.device_summary, dict) else None)),
-            interval_min_phase_duration=phase,
-            interval_min_phase_distance_m=phase_dist_m,
-            interval_hr_lag_sec=lag,
-            interval_min_oscillations=min_osc,
         )
     except Exception as e:
         logger.error("Reanalyze: ошибка анализа %d: %s (Analysis error for %d: %s)", session_id, e, session_id, e)

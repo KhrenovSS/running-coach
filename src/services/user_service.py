@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from src.domain.models import User
 from src.config import settings as app_settings
+from src.config.constants import MAX_CREDIBLE_PACE, MAX_GPS_JUMP_M, MIN_HR_FOR_FAST_PACE
 
 
 def get_user_settings(db: Session, user_id: int) -> User:
@@ -19,7 +20,8 @@ def get_user_settings(db: Session, user_id: int) -> User:
     if not user:
         user = User(
             id=user_id, max_hr=app_settings.default_max_hr, weight_kg=85.0,
-            max_credible_pace=3.0, max_gps_jump_m=100.0, min_hr_for_fast_pace=130,
+            max_credible_pace=MAX_CREDIBLE_PACE, max_gps_jump_m=MAX_GPS_JUMP_M,
+            min_hr_for_fast_pace=MIN_HR_FOR_FAST_PACE,
         )
         db.add(user)
         db.commit()

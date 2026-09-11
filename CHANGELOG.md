@@ -2,6 +2,25 @@
 
 All notable changes to this project are tracked here.
 
+## [11.09.2026] — Параметры анализа из профиля в live-пути, константы GPS-очистки (#327, #274, #252)
+
+### Fixed
+- **Синк и web-загрузка не передавали `interval_*`-настройки пользователя** (`parse_fit`/`parse_tcx` их не принимали) —
+  тренировка при синке классифицировалась по дефолтам, а после кнопки «пересчитать» — по настройкам профиля, ярлык
+  мог отличаться. Новый резолвер `analysis/user_params.py` (`gps_kwargs`/`interval_kwargs`/`analysis_kwargs(user)`,
+  дефолты — из `config/constants`), парсеры принимают `**analysis_kwargs` и прокидывают в `process_trackpoints`;
+  `sync/activities.py`, `web/routes/uploads.py` и `services/reanalyze.py` читают один резолвер (#327).
+
+### Changed
+- **Мёртвые константы GPS-очистки → единый источник (#274)**: `MAX_CREDIBLE_PACE`/`MAX_GPS_JUMP_M` и новая
+  `MIN_HR_FOR_FAST_PACE` заменили литералы 3.0/100/130 в сигнатурах `process_trackpoints`, `clean_trackpoints`,
+  `segment_by_pace`, `km_segment_fallback`, парсеров, Column default `User` (python-side, схема БД не меняется),
+  `user_service`, форме `/settings` и `tests/test_gps_quality.py`; `MIN_DISTANCE_FOR_VALID_SEGMENT_M` удалена
+  (нигде не использовалась).
+- **#252 закрыт как невоспроизводимый**: `temperature`/`weather_code` проставляются сегментам после сегментации
+  (слияние внутри `segment_by_pace` происходит раньше) — регрессионный тест фиксирует порядок.
+  Тесты: `tests/test_user_params.py` (+5). `BACKLOG.md`: #327/#274/#252 — в архив (260 закрытых).
+
 ## [11.09.2026] — `/delete_me` не отвязывал аккаунт от Telegram (#236)
 
 ### Fixed

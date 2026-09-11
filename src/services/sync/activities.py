@@ -13,6 +13,7 @@ from src.services.sync.dedup import load_dedup_state, is_duplicate, find_deleted
 from src.services.raw_files import save_raw_file, sha256_hex
 from src.services.telegram_notify import telegram_notify
 from src.services.hr_max import evaluate_max_hr_raise, reanalyze_batch_after_raise
+from src.analysis.user_params import analysis_kwargs
 from src.utils.timeutils import local_dt
 from src.exceptions import CoachError
 
@@ -82,11 +83,9 @@ async def sync_activities_for_user(cred, brand: str, db,
             tmp_path = tmp.name
         try:
             data = parse_fit(tmp_path, max_hr=us.max_hr,
-                             max_credible_pace=us.max_credible_pace,
-                             max_gps_jump_m=us.max_gps_jump_m,
-                             min_hr_for_fast_pace=us.min_hr_for_fast_pace,
                              coros_cadence_workaround=True,
-                             lthr=user_lthr)
+                             lthr=user_lthr,
+                             **analysis_kwargs(us))   # GPS-пороги + interval_* профиля (#327)
             return data, fit_data
         except Exception:
             logger.warning("Parse error for %s", act.get('name'), exc_info=True)

@@ -2,11 +2,12 @@
 # Km segmentation and variability: fallback and classification
 
 from src.analysis.hr_zones import get_zone, get_band
+from src.config.constants import MAX_CREDIBLE_PACE
 from src.analysis.utils import format_duration, format_pace, calc_elevation
 
 
 def _compute_per_point_pace(trackpoints: list[dict], window_m: int = 50,
-                             max_credible_pace: float = 3.0) -> list[dict]:
+                             max_credible_pace: float = MAX_CREDIBLE_PACE) -> list[dict]:
     """
     Вычислить темп для каждой точки через скользящее окно.
     Calculate per-point pace using a rolling window.

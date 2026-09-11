@@ -10,9 +10,10 @@ PACE_SMOOTHING_WINDOW_SEC: Final[int] = 10
 MIN_SMOOTHING_DISTANCE_M: Final[int] = 15
 BIN_SIZE_M: Final[int] = 200
 
-# Настройки очистки GPS (GPS cleaning settings)
+# Настройки очистки GPS (GPS cleaning settings) — единый источник дефолтов (#274): сигнатуры
+# process_trackpoints/clean_trackpoints/парсеров, Column default User и форма /settings читают отсюда
 MAX_GPS_JUMP_M: Final[float] = 100.0
-MIN_DISTANCE_FOR_VALID_SEGMENT_M: Final[float] = 50.0
+MIN_HR_FOR_FAST_PACE: Final[int] = 130   # уд/мин — ниже быстрый темп считается GPS-артефактом
 # #302: санити темпа лапа часов — вне диапазона дистанция лапа мусорная (GPS-сбой: 12.5 км за 25 мин, 01.09)
 LAP_PACE_SANITY_MIN_MIN_KM: Final[float] = 3.0
 LAP_PACE_SANITY_MAX_MIN_KM: Final[float] = 15.0
