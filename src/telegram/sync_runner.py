@@ -90,11 +90,13 @@ def run_sync_in_thread(chat_id: int) -> tuple[bool, str]:
                 audit.log_sync_failed(brand=brand, user_id=user.id,
                                       error="; ".join(brand_failed), source="telegram")
             else:
+                # #114: итог ПО БРЕНДУ, не накопленный по всем (искажал per-brand статистику)
                 audit.log_sync_completed(
                     brand=brand,
                     user_id=user.id,
-                    found=total_new_activities,
-                    processed=total_new_activities,
+                    found=new_activities,
+                    processed=new_activities,
+                    health=new_health,
                     source="telegram",
                 )
 

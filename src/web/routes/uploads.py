@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from src.models import get_db, User, TrainingSession, DeletedTraining, get_settings
 from src.parsers.tcx_parser import parse_tcx
 from src.parsers.fit_parser import parse_fit
+from src.parsers.detect import sniff_kind
 from src.analysis.utils import format_pace, format_duration
 from src.analysis.user_params import analysis_kwargs
 from src.utils.logger import get_logger
@@ -122,6 +123,15 @@ async def upload_files(files: list[UploadFile] = File(...), db: Session = Depend
         contents = await file.read()
         if len(contents) > 50 * 1024 * 1024:
             logger.warning("Upload: file too large — %s (%d bytes)", file.filename, len(contents))
+            parse_errors.append(file.filename or "unknown")
+            continue
+
+        # #78: содержимое должно соответствовать расширению — иначе мусор не парсим и в raw/ не кладём
+        # (content must match the extension; reject before raw save / parse)
+        expected_kind = "fit" if ext == ".fit" else "tcx"
+        if sniff_kind(contents) != expected_kind:
+            logger.warning("Upload: содержимое %s не похоже на %s — отклонено (content mismatch)",
+                           file.filename, expected_kind.upper())
             parse_errors.append(file.filename or "unknown")
             continue
 

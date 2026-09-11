@@ -131,6 +131,7 @@ running-coach/
 │   │   └── factory.py          #   register, get_watch_client, list_brands
 │   ├── parsers/                # Парсеры файлов
 │   │   ├── __init__.py
+│   │   ├── detect.py           # sniff_kind(contents) — FIT/TCX по содержимому до парсинга (#78)
 │   │   ├── gps.py              # clean_trackpoints, haversine_m
 │   │   ├── weather.py          # fetch_weather (Open-Meteo, httpx)
 │   │   ├── tcx_parser.py       # Парсинг TCX (XML)

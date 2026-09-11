@@ -341,3 +341,31 @@ def test_bot_sync_runner_uses_shared_bookkeeping(db_session, monkeypatch):
     assert ok and "Синхронизация завершена" in text
     reloaded = _reload_cred(cred.id)
     assert reloaded.activity_sync_failures == 0 and reloaded.last_activity_sync_at is not None
+
+
+def test_bot_sync_runner_audits_per_brand_counts(db_session, monkeypatch):
+    """#114: `sync.<brand>.completed` каждого бренда несёт СВОЁ число новых тренировок, не накопленное."""
+    import json
+    from src.domain.models.audit import AuditEvent
+    from src.telegram import sync_runner
+
+    user = make_user(db_session, chat_id=96013, email="bot2@example.com")
+    _make_cred(db_session, user.id, brand="coros")
+    _make_cred(db_session, user.id, brand="garmin")
+    results = iter([0, 2, 0, 3])          # health/activity для coros, затем для garmin
+
+    def fake_run(coro):
+        coro.close()
+        return next(results)
+    monkeypatch.setattr(sync_runner, "run_async_in_thread", fake_run)
+    monkeypatch.setattr(orchestrator, "telegram_notify", lambda **kw: None)
+    ok, _ = sync_runner.run_sync_in_thread(96013)
+    assert ok
+    db_session.expire_all()
+    found = {}
+    for ev in db_session.query(AuditEvent).filter(AuditEvent.user_id == user.id).all():
+        if ev.event_type.endswith(".completed"):
+            meta = json.loads(ev.metadata_json)
+            found[meta["brand"]] = (meta["found"], meta.get("health"))
+    assert found == {"coros": (2, 0), "garmin": (3, 0)}
+

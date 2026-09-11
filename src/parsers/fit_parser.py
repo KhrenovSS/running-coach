@@ -99,7 +99,7 @@ def extract_fit_activity(file_path, coros_cadence_workaround=False):
                     continue
                 hr = data.get('heart_rate')
                 dist = data.get('distance')
-                alt = data.get('enhanced_altitude') or data.get('altitude')
+                alt = _pick_altitude(data)
                 cad = data.get('cadence')
                 if cad is not None and cad < 100 and coros_cadence_workaround:
                     cad = cad * 2
@@ -187,6 +187,13 @@ def extract_fit_trackpoints(file_path, coros_cadence_workaround=False):
 
 
 # Парсинг FIT-файла (FIT file parsing)
+def _pick_altitude(data: dict) -> float | None:
+    """enhanced_altitude, иначе altitude; 0 м — валидная высота, не пропуск (#106).
+    (Prefer enhanced_altitude; zero is a valid altitude, not a missing value.)"""
+    alt = data.get('enhanced_altitude')
+    return alt if alt is not None else data.get('altitude')
+
+
 def parse_fit(file_path, max_hr=None, max_credible_pace=MAX_CREDIBLE_PACE, max_gps_jump_m=MAX_GPS_JUMP_M,
               min_hr_for_fast_pace=MIN_HR_FOR_FAST_PACE, coros_cadence_workaround=False, lthr=None,
               **analysis_kwargs):

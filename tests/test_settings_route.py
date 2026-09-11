@@ -58,3 +58,24 @@ def test_settings_accepts_valid_max_hr(db_session):
         assert db_session.query(User).filter(User.id == user.id).first().max_hr == 180
     finally:
         _reset()
+
+
+def test_settings_without_watch_brand_has_no_watch_email_diff(db_session):
+    """#127: сохранение без бренда часов не пишет ложное изменение watch_email в аудит."""
+    from src.domain.models.audit import AuditEvent
+    user = make_user(db_session, chat_id=93953, email="set-93953@example.com", max_hr=177)
+    _as(user, db_session)
+    try:
+        resp = client.post("/settings", data={"max_hr": "179"}, headers=_HEADERS, follow_redirects=False)
+        assert resp.status_code == 303
+        db_session.expire_all()
+        events = db_session.query(AuditEvent).filter(
+            AuditEvent.user_id == user.id, AuditEvent.event_type == "settings.changed").all()
+        assert events, "смена max_hr должна попасть в аудит"
+        import json
+        for ev in events:
+            meta = json.loads(ev.metadata_json)
+            assert "watch_email" not in json.dumps(meta), meta
+    finally:
+        _reset()
+

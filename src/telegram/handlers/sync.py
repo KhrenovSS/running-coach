@@ -1,6 +1,4 @@
 import asyncio
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -8,7 +6,7 @@ from telegram.ext import ContextTypes
 from src.telegram.utils import get_user
 from src.telegram.sync_runner import run_sync_in_thread
 from src.utils.logger import get_logger
-from src.config import settings
+from src.utils.timeutils import user_now
 
 logger = get_logger("telegram.handlers.sync")
 
@@ -35,7 +33,8 @@ async def cmd_sync(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db = SessionLocal()
             user_db = db.query(User).filter(User.telegram_chat_id == chat_id).first()
             if user_db:
-                today_start = datetime.now(ZoneInfo(settings.timezone)).replace(hour=0, minute=0, second=0, microsecond=0)
+                # #124: «сегодня» — по поясу пользователя, не серверному (user's local midnight)
+                today_start = user_now(user_db).replace(hour=0, minute=0, second=0, microsecond=0)
                 today_count = db.query(TrainingSession).filter(
                     TrainingSession.user_id == user_db.id,
                     TrainingSession.begin_ts >= today_start,

@@ -119,7 +119,7 @@ async def settings_save(max_hr: int | None = Form(None), weight: float | None = 
     user.name = name or None
 
     # Читаем старый email для audit-diff (Read old email for audit diff — brand-agnostic)
-    old_watch_email = ''
+    old_watch_email: str | None = None
     if watch_brand:
         old_cred = db.query(WatchCredential).filter(
             WatchCredential.user_id == current_user.id,
@@ -157,8 +157,9 @@ async def settings_save(max_hr: int | None = Form(None), weight: float | None = 
         changes['max_hr'] = {'old': old_max_hr, 'new': max_hr}
     if weight is not None and old_weight != weight:
         changes['weight_kg'] = {'old': old_weight, 'new': weight}
-    if old_watch_email != (watch_email or None):
-        changes['watch_email'] = {'old': old_watch_email, 'new': watch_email or None}
+    # #127: сравнивать только при выбранном бренде и нормализованно ('' ≡ None) — иначе ложный diff
+    if watch_brand and (old_watch_email or None) != (watch_email or None):
+        changes['watch_email'] = {'old': old_watch_email or None, 'new': watch_email or None}
     if changes:
         audit.log_settings_changed(
             user_id=current_user.id,

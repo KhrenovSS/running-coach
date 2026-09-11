@@ -15,6 +15,9 @@ from src.config import settings
 from src.models import User
 from src.utils.logger import LOGS_DIR
 
+# Поле уровня в текстовом формате логгера (level field of the text log format) — #120
+_LEVEL_RE = re.compile(r"^\S+ \S+ \| (DEBUG|INFO|WARNING|ERROR|CRITICAL)\b")
+
 router = APIRouter()
 
 LOG_LINES_MAX = 5000
@@ -62,8 +65,12 @@ async def view_logs(lines: int = 100, day: str | None = None,
            f"<a href='/logs?lines=200'>200</a> <a href='/logs?lines={LOG_LINES_MAX}'>все</a>)</p>",
            f"<p>Дни: {nav}</p>" if nav else "", "<pre>"]
     for line in tail:
-        level = ("INFO" if "INFO" in line else "WARNING" if "WARNING" in line
-                 else "ERROR" if "ERROR" in line else "DEBUG")
+        # #120: уровень — из поля формата логгера «дата время | LEVEL | logger | …», не подстрокой
+        # по всей строке (слово WARNING в тексте сообщения красило строку). (Level from the log field.)
+        m = _LEVEL_RE.match(line)
+        level = m.group(1) if m else "INFO"
+        if level == "CRITICAL":
+            level = "ERROR"
         out.append(f"<span class='{level}'>{_html.escape(line.rstrip())}</span>\n")
     out.append("</pre></body></html>")
     return HTMLResponse("".join(out))

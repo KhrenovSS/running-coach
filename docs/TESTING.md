@@ -53,6 +53,7 @@ tests/
 ├── test_prediction_log.py   # продюсер residuals прогноз↔факт (#246)
 ├── test_logs_route.py       # GET /logs (lines, day)
 ├── test_settings_route.py   # POST /settings: валидация max_hr (#239), get_db на соединении фикстуры
+├── test_detect.py           # sniff_kind FIT/TCX/мусор (#78), _pick_altitude (#106)
 ├── test_docs_links.py       # ГВАРД: ссылки на файлы в docs/*.md и CLAUDE.md существуют
 ├── test_weight_service.py   # save_weight/current_weight
 ├── test_session_ownership.py# ГВАРД: SessionLocal() только в композиционных корнях (allowlist)
