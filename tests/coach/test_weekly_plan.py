@@ -442,15 +442,19 @@ def test_weekly_plan_keeps_strides_segments(athlete_with_history, db_session, mo
             {"role": "cooldown", "amount_kind": "min", "amount_value": 8, "target_zone": 2},
         ],
     }
+    # Длительная 70 мин — выше LONG_RUN_MIN_MINUTES: с #317 короткая «длительная» становится
+    # easy, и строк easy было две (#332). Строку ускорений берём по дате, не по ярлыку.
     turn = dict(PLAN_TURN, weekly_plan=[strides_day,
                                         {"workout_type": "long", "target_zone": 2,
-                                         "duration_min": 50, "for_days_ahead": 7}])
+                                         "duration_min": 70, "for_days_ahead": 7}])
     llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
     uid = athlete_with_history.id
-    text = generate_weekly_plan(uid, db=db_session, llm=llm, now=_sunday(athlete_with_history))
+    sunday = _sunday(athlete_with_history)
+    text = generate_weekly_plan(uid, db=db_session, llm=llm, now=sunday)
     assert text is not None
-    row = db_session.query(Recommendation).filter_by(user_id=uid, status="planned",
-                                                     workout_type="easy").one()
+    row = db_session.query(Recommendation).filter_by(
+        user_id=uid, status="planned", for_date=sunday.date() + timedelta(days=2)).one()
+    assert row.workout_type == "easy"
     segs = (row.target_json or {}).get("segments") or []
     assert segs, "сегменты ускорений потеряны при сборке плана"
     assert any(s.get("role") == "work" and s.get("repeat") == 4 for s in segs)

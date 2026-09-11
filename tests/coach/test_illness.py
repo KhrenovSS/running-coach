@@ -67,8 +67,13 @@ def test_recovery_long_ago_has_no_block(athlete_with_history, db_session):
 
 
 def test_week_targets_exclude_paused_days(athlete_with_history, db_session):
+    """Пауза после выздоровления закрывает даты плана. Якорь — будущий понедельник 09:00:
+    среди недели `/plan` = остаток недели (#293), и в пт/сб остаток короче паузы — тест
+    падал по реальной дате (#328). (Monday anchor keeps the window ≥ pause days.)"""
     uid = athlete_with_history.id
-    now = user_now(athlete_with_history)
+    real_now = user_now(athlete_with_history)
+    days = (0 - real_now.weekday()) % 7 or 7
+    now = (real_now + timedelta(days=days)).replace(hour=9, minute=0, second=0, microsecond=0)
     illness.record_illness(IllnessReport(status="recovered", kind="other", days_ago=0),
                            uid, db=db_session, now=now)
     t = planning.week_targets(uid, db=db_session, today=now.date())
