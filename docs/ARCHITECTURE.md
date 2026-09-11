@@ -4,7 +4,7 @@
 
 ## Текущий стек (Current stack)
 
-- **Backend:** Python 3.12+ (прод — `python:3.13-slim`), FastAPI
+- **Backend:** Python 3.13 (CI и прод — `python:3.13-slim`; `requires-python >= 3.12`), FastAPI
 - **База данных:** PostgreSQL 16 + SQLAlchemy ORM
 - **Миграции:** Alembic (автоматически при старте контейнера `app`)
 - **Тесты:** pytest (SQLite in-memory по умолчанию; opt-in PG через TEST_PG_URL)
@@ -71,7 +71,7 @@ running-coach/
 │   │   ├── templates/          # 6 Jinja2-шаблонов
 │   │   └── routes/
 │   │       ├── __init__.py     # web_router = pages + uploads + sync + logs
-│   │       ├── pages/          # Пакет: auth (48), index (242), session (216), settings (149)
+│   │       ├── pages/          # Пакет: auth (48), index (242), session (216), settings (167)
 │   │       ├── uploads.py      # POST /upload, /upload/confirm, /upload/confirm_deleted
 │   │       ├── sync.py         # POST /sync/{brand}/run, /sync/{brand}/health, GET /sync/status/{task_id};
 │   │       │                   #   legacy-алиасы POST /coros/sync, /coros/sync/health, GET /coros/sync/status/{task_id}
@@ -90,7 +90,8 @@ running-coach/
 │   │   ├── sync_service.py     # Shim: DeprecationWarning (обратная совместимость)
 │   │   ├── watch_credentials.py# upsert_watch_credential (шифрование + upsert)
 │   │   ├── training_service.py # delete_training (переносит external_activity_id), upsert_feedback
-│   │   ├── reanalyze.py        # Пересчёт: сначала сырой FIT/TCX (raw_file_path), fallback trackpoints_json
+│   │   ├── reanalyze.py        # Пересчёт: сначала сырой FIT/TCX (raw_file_path), fallback trackpoints_json;
+│   │   │                       #   check_max_hr=False при вызове из hr_max.reanalyze_batch_after_raise (#237)
 │   │   ├── raw_files.py        # Хранилище исходных FIT/TCX: uploads/raw/<user_id>/<sha256>.<ext>
 │   │   ├── weight_service.py   # save_weight (одна транзакция), current_weight (последнее измерение)
 │   │   ├── stats.py            # calc_stats, fmt_duration, zone_ranges, get_zone_bars_data
@@ -102,7 +103,7 @@ running-coach/
 │   │   ├── hr_max.py           # Адаптивный max_hr (авто-повышение по пикам, предложение снижения,
 │   │   │                       #   #237: пересчёт батча после автоподнятия — reanalyze_batch_after_raise)
 │   │   ├── user_service.py     # get_user_settings(db, ...) — сессию владеет вызывающий код
-│   │   ├── workout_insights.py # Разбор тренировки: computed_json (insights v7) из session_metrics/effort/gap/…
+│   │   ├── workout_insights.py # Разбор тренировки: computed_json (insights v10) из session_metrics/effort/gap/…
 │   │   ├── workout_insights_context.py # #329: план дня (_plan_for_session), история/RPE, apply_type_resolution
 │   │   ├── insights_baseline.py# Базовая линия HR↔GAP-темп и ожидаемый темп на пульсе (окно 120 дн)
 │   │   ├── repositories_insights.py # InsightRepository: очередь разборов (claim/finish), флаги для safety
@@ -136,7 +137,7 @@ running-coach/
 │   │   ├── weather.py          # fetch_weather (Open-Meteo, httpx)
 │   │   ├── tcx_parser.py       # Парсинг TCX (XML)
 │   │   └── fit_parser.py       # Парсинг FIT (бинарный, check_crc)
-│   ├── analysis/               # Пакет анализа тренировок (17 модулей)
+│   ├── analysis/               # Пакет анализа тренировок (19 модулей)
 │   │   ├── __init__.py         #   process_trackpoints() — оркестратор
 │   │   ├── oscillation.py      #   detect_pace_oscillations, compute_hr_lag_correlation
 │   │   ├── classify.py         #   classify_training (interval/tempo/long/recovery/easy)
@@ -273,7 +274,7 @@ Pydantic-моделей в роутах нет, `response_model`/`@router.delete
 ```
 POST /upload (TCX/FIT файл)
   ↓
-src/web/routes/uploads.py (валидация размера, парсинг)
+src/web/routes/uploads.py (валидация размера, detect.sniff_kind — содержимое vs расширение до записи в raw/ (#78), парсинг с analysis_kwargs(user) (#327))
   ↓
 tcx_parser.py / fit_parser.py → trackpoints
   (lthr пользователя (latest_lthr) прокидывается в process_trackpoints — зоны/классификация от ПАНО)
@@ -291,7 +292,7 @@ src/analysis/__init__.py :: process_trackpoints()
   ↓
 ORM → PostgreSQL (training_sessions: training_type_auto/_source — провенанс ярлыка)
   ↓
-разбор: workout_insights.apply_type_resolution — итоговый training_type по плану дня
+разбор: workout_insights_context.apply_type_resolution (реэкспорт из workout_insights) — итоговый training_type по плану дня
   (analysis/type_resolution.py; override главнее, source auto|plan|manual)
   ↓
 Уведомление в Telegram (telegram_notify.py)
@@ -300,7 +301,7 @@ ORM → PostgreSQL (training_sessions: training_type_auto/_source — прове
 FIT: `parse_fit` дополнительно сохраняет `laps_json` (лапы часов) и `device_summary`
 (эталоны session-сообщения + паузы записи).
 
-### Поток: разбор тренировки (insights v7)
+### Поток: разбор тренировки (insights v10)
 
 ```
 sync/upload → review_flow (pending)
@@ -343,7 +344,7 @@ src/telegram/main.py :: run_bot()
   ├── jobs/ → daily_weight_job, daily_recovery_check_job, weekly_max_hr_check_job
   ├── jobs/ → morning_verdict_job (09:30, вердикт коуча), evening_wellness_job (21:00, вопрос о колене)
   ├── jobs/ → coach_weekly (вс 19:00), pending_reviews (разборы), sleep_reminder (10:00)
-  └── коуч: /verdict, /coach_settings; любой свободный текст → orchestrator.handle_chat
+  └── коуч: /verdict, /coach_settings; любой свободный текст → chat_flow.handle_chat (реэкспорт orchestrator.handle_chat валиден)
       (LLM через get_llm: ключ → мост подписки → детерминированный fallback)
 ```
 
@@ -357,4 +358,4 @@ src/telegram/main.py :: run_bot()
 
 ---
 
-**Последнее обновление:** 01.09.2026 (F-серия: квалиметрия GPS, FIT v2, insights v7, зоны от LTHR)
+**Последнее обновление:** 11.09.2026 (#329 разнос модулей: pace_series/user_params/chat_flow/planning_rows/planning_availability/workout_insights_context; detect.py; insights v10)

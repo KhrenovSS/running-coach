@@ -172,7 +172,7 @@ override главнее. Обратимо: `training_type = training_type_auto`.
 волатильны и в кэшируемый профиль system-блока **не кладутся** (`turn_context`: today-блоки
 `illness (params)` / `concerns (params)`).
 
-## Карта модулей `src/coach/` (фактическая, на 10.09.2026)
+## Карта модулей `src/coach/` (фактическая, на 11.09.2026)
 
 ```
 coach/
@@ -188,7 +188,8 @@ coach/
 ├── fallback.py        # табличное предложение без LLM (readiness → easy/recovery/rest)
 ├── render.py          # детерминированный рендер карточек + render_week_plan (недельный план)
 ├── render_segments.py # рендер посегментной раскладки + segments_total_min + compact_segments (структура одной строкой)
-├── render_week.py     # карточка недели (render_week_plan: план/факт по дням, ~темп, ≈км из прогноза)
+├── render_week.py     # карточка недели (render_week_plan: план/факт по дням, ~темп, ≈км из прогноза;
+│                      #   rest — только ярлык без пульса, прошедший rest — нейтральная строка без ✓/✗, #331)
 ├── week_view.py       # read-only показ сохранённого плана недели (/week, show_week_plan)
 ├── week_report.py     # C8.1 (03.09): числа недели по локальной дате (объём, лёгкое время по зонам, баллы,
 │                      #   экономичность, монотонность), highlights/concerns, build_week_report (вс/report)
@@ -207,7 +208,8 @@ coach/
 ├── concerns.py        # 10.09: актуальные проблемы (травма/боль/перерыв) — params_json["concerns"],
 │                      #   протухание CONCERN_EXPIRE_DAYS=14 без боли и упоминаний; вечерний вопрос и подпись
 │                      #   кнопок боли — только при активной проблеме
-├── orchestrator.py    # on_workout_completed (+ _merged_flags: слияние флагов LLM с computed), weekly_report;
+├── orchestrator.py    # on_workout_completed (+ _merged_flags: слияние флагов LLM с computed, _deterministic_review,
+│                      #   _gps_warning_suffix), weekly_report;
 │                      #   реэкспорт chat_flow (#329, 11.09: файл разнесён — вызовы orchestrator.* валидны)
 ├── chat_flow.py       # _llm_chat_turn (один LLM-ход + детерминированные пост-обработки), handle_chat
 │                      #   (чат/утро с fallback), morning_verdict, ChatReply, get/set_initiative
@@ -258,4 +260,4 @@ hr_baseline}.py` — Minetti-GAP, decoupling Pa:HR, базовая линия HR
 гейт initiative, LLM только для самой свежей тренировки батча),
 `src/domain/models/coach.py` (6 таблиц, включая `WorkoutInsight`) + `WellnessReport` в
 `health.py`, миграции `p9q0r1s2t3u4`/`q0r1s2t3u4v5`, `tests/coach/` (45 модулей `test_*.py` + fakes,
-на 10.09.2026).
+на 11.09.2026).

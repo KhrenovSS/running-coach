@@ -64,7 +64,7 @@ tests/
 └── test_backfill.py         # backfill-скрипты
 ```
 
-Всего собирается ≈ 1009 тестов (`pytest --co -q`, на 10.09.2026).
+Всего собирается ≈ 1037 тестов (`pytest --co -q`, на 11.09.2026).
 
 ## Инвариант: тесты не ходят в сеть
 
@@ -102,7 +102,8 @@ In-memory БД (и PG-схема) живёт **весь прогон** — да�
 файлами. Поэтому `make_user` в каждом тесте должен получать уникальные
 `chat_id`/`email` (иначе `UNIQUE constraint failed`). Занятые диапазоны chat_id:
 `123456789/999/111/222` (test_models, auto_sync), `77xxx` (backfill), `88xxx` (test_lthr_pipeline),
-`89xxx` (test_week_structure), `90001-90002` (skills), `93xxx` (test_workout_insights),
+`89xxx` (test_week_structure), `90001-90002` (skills), `93xxx` (test_workout_insights; `9380x` hr_max #237,
+`9390x` test_telegram_account, `9395x` test_settings_route),
 `94xxx` (hr_max), `95xxx` (stage0), `96xxx` (auto_sync), `97xxx` (dedup),
 `98xxx` (raw_files), `99xxx` (weight), `92xxx` (coach — счётчик `tests/coach/conftest._seq`).
 Для нового файла бери свободный диапазон и хелпер вида:
@@ -128,6 +129,12 @@ python_files = test_*.py
 - `DATABASE_URL` форсится ДО импорта `src.*`; **НИКОГДА** `setdefault` (no-op в контейнере →
   тесты пишут в прод) и **НИКОГДА** `drop_all` в autouse-фикстурах.
 - Фикстура `db_session` — сессия через `SessionLocal` приложения.
+- **Route-тесты с БД** (`tests/test_settings_route.py`): in-memory SQLite не делит таблицы между
+  соединениями, а `TestClient` исполняет роут в другом потоке (пул — per-thread), поэтому сессия роута
+  привязывается к соединению фикстуры — `Session(bind=db_session.connection())` +
+  `app.dependency_overrides[get_db]`; `get_current_user` — override на пользователя из фикстуры.
+- `SECRET_KEY` в route-тестах — явное `os.environ["SECRET_KEY"] = ...` до импорта `src.*`, никогда
+  `setdefault` (#233; CI-гвард по `src/`).
 - PG-режим: `DROP SCHEMA public` + `alembic upgrade head` один раз на сессию — выполняется
   ТОЛЬКО на явно указанном `TEST_PG_URL` с guard'ом «строго localhost».
 
@@ -226,8 +233,8 @@ def test_km_fallback_short():
 - [ ] Имя теста описывает поведение
 - [ ] Тест проверяет одну вещь
 - [ ] Нет зависимости от внешних сервисов
-- [ ] Интеграционные тесты используют `TestClient` и `SessionLocal`
+- [ ] Интеграционные тесты используют `TestClient` + `SessionLocal`; `get_db` переопределён на соединение фикстуры
 
 ---
 
-**Последнее обновление:** 01.09.2026 (F-серия: тесты gps_quality/intervals/week_structure/lthr, новые диапазоны chat_id)
+**Последнее обновление:** 11.09.2026 (test_detect/test_user_params/test_settings_route/test_telegram_account, паттерн route-тестов с БД, 1037 тестов)

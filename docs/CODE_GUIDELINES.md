@@ -43,6 +43,8 @@ resp = httpx.get(url, timeout=settings.http_timeout)
 | `177` | `settings.default_max_hr` |
 | `15` (timeout) | `settings.http_timeout` |
 | `3.0` (мин/км) | `MAX_CREDIBLE_PACE` (constants.py) |
+| `100.0` (м, GPS-скачок) | `MAX_GPS_JUMP_M` (constants.py) |
+| `130` (уд/мин) | `MIN_HR_FOR_FAST_PACE` (constants.py) |
 | `0.2` (км) | `MIN_SEGMENT_DISTANCE_KM` (constants.py) |
 | `1.0` (вариативность) | `VARIABILITY_THRESHOLD` (constants.py) |
 | `21600` (health sync) | `SYNC_HEALTH_INTERVAL` (constants.py) |
@@ -94,7 +96,8 @@ def delete_training(db: Session, user_id: int, session_id: int) -> bool:
 проверками диапазонов в сервисе/роуте с понятным ответом пользователю
 (`src/web/routes/pages/settings.py::settings_save` — 15 полей формы). Pydantic-моделей запроса в
 проекте нет; вводить их ради одного роута не нужно. Границы значений — из `constants.py`
-(например, `MAX_HR_CAP`, `MAX_HR_CONFIRM_COUNT`, `MAX_HR_CONFIRM_WINDOW_DAYS`), не литералами.
+(например, `MAX_HR_MIN`/`MAX_HR_CAP` — диапазон max_hr для формы и кнопки бота, `MAX_HR_CONFIRM_COUNT`,
+`MAX_HR_CONFIRM_WINDOW_DAYS`), не литералами.
 
 Данные с часов/из файлов **не доверяем**: парсеры и `src/analysis/gps_quality.py` помечают
 недостоверное (`suspect_flags`, `gps_quality.unreliable`), а не отбрасывают молча.
@@ -173,7 +176,8 @@ from src.domain.models.training import TrainingSession
 from src.utils.logger import get_logger
 ```
 
-`from src.database import ...` запрещён (модуль удалён, CI-гвард). Константы и настройки — только
+`from src.database import ...` запрещён (модуль удалён, CI-гвард). `os.environ.setdefault(...)` в `src/`
+запрещён (CI-гвард; в тестах env задаётся явным присваиванием, #233). Константы и настройки — только
 через `src.config` (§1).
 
 ---

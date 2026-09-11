@@ -2,6 +2,25 @@
 
 All notable changes to this project are tracked here.
 
+## [11.09.2026] — Сверка документации с кодом после 11 коммитов дня
+
+### Changed
+- Три параллельные проверки (общие доки, доки коуча, CLAUDE.md/BACKLOG/go.sh) — ~45 расхождений исправлены:
+  `README.md` (Python 3.13, 19 модулей анализа + `pace_series.py`/`user_params.py`, `parsers/detect.py`, дефолты
+  полей из констант, `interval_*` во всех путях, `/delete_me` с отвязкой чата, пересчёт после автоподнятия max_hr,
+  диапазон max_hr 100–220, подсветка `/logs`, «что нового» за 11.09); `docs/ARCHITECTURE.md` (Python 3.13, insights v10,
+  19 модулей, `settings (167)`, `check_max_hr`, sniff в uploads, реализация `apply_type_resolution`/`handle_chat`
+  по новым путям); `docs/TESTING.md` (1037 тестов, диапазоны chat_id новых файлов, паттерн route-тестов с БД —
+  сессия роута на соединении фикстуры, явный `SECRET_KEY`); `docs/CODE_GUIDELINES.md` (`MAX_GPS_JUMP_M`/
+  `MIN_HR_FOR_FAST_PACE`/`MAX_HR_MIN`, CI-гвард `setdefault`); `docs/LOGGING.md` (пространства логгеров новых модулей,
+  источники `settings.changed`, `settings.max_hr_suggest`, подсветка `/logs`); `docs/coach/ARCHITECTURE.md` (дата
+  карты, `render_week` #331, полный перечень orchestrator); `docs/coach/DEV_PLAN.md` (новый блок §9 «11.09.2026»,
+  §12 отдых в `/week`, #247 v2, пути `chat_flow`/`workout_insights_context`); `docs/coach/METRICS_GUIDE.md`
+  (`workout_insights_context._plan_for_session`); `CLAUDE.md` (правило явного env в тестах, #237, место применения
+  numeric v2, «Где продолжать» на вечер 11.09); `BACKLOG.md` (статусы 11.09, приоритеты без закрытых номеров,
+  строка спринта с починенной разметкой, #250 закрыт — дубль 139 уже помечен `139b`; 275 закрытых);
+  `~/go.sh` (статус: всё запушено и задеплоено, актуальные примеры мелочей).
+
 ## [11.09.2026] — Шесть мелких багов аудита 07.2026 (#78, #114, #120, #106, #127, #124)
 
 ### Fixed

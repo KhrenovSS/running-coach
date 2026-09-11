@@ -26,7 +26,7 @@
 на анализ:
 
 > **Ни одна метрика тренировки не оценивается LLM «на глаз», если её можно
-> вычислить.** Детерминированный слой (`src/services/workout_insights.py` +
+> вычислить.** Детерминированный слой (`src/services/workout_insights.py` + `workout_insights_context.py` +
 > `src/analysis/`) считает числа и ставит флаги; LLM получает готовый
 > `computed_json` и отвечает только за интерпретацию, объяснение и тон.
 
@@ -187,7 +187,7 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
 - блок `computed["plan_vs_actual"]`: тип совпал; потолок зоны соблюдён
   (`minutes_above_planned_zone`); длительность/дистанция ±15%; темп vs целевой;
 - ~~снять фильтр `for_date >= today`~~ — решено иначе: план дня сессии резолвит
-  `workout_insights._plan_for_session` (+ `linked_session_id`), фильтр контекста не менялся;
+  `workout_insights_context._plan_for_session` (+ `linked_session_id`; реэкспорт из `workout_insights`), фильтр контекста не менялся;
 - **Флаги**: `plan_intensity_exceeded`, `plan_volume_exceeded` — оба относятся
   к травмобезопасности напрямую;
 - REVIEW_PROMPT: переопределить `effort_match` от plan_vs_actual (сейчас —

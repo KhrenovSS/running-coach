@@ -43,10 +43,12 @@ logger.info("Sync completed", extra={"count": 5})
 ### Конвенция имён логгеров
 
 Имя — иерархическое, по модулю: `get_logger("coach.orchestrator")`, `get_logger("telegram.handlers.coach")`.
-Используемые пространства: `app` (общий), `coach.*` (agent, llm, orchestrator, prescriber, tools,
-week_report, weekly_plan), `telegram.handlers.*`, `telegram.jobs.*`, `telegram.main`,
+Используемые пространства: `app` (общий), `coach.*` (agent, llm, orchestrator — его же намеренно
+использует `chat_flow.py`, planning — включая `planning_rows`/`planning_availability`, prescriber, review_flow,
+vision, tools, week_report, weekly_plan), `telegram.handlers.*`, `telegram.jobs.*`, `telegram.main`,
 `telegram.utils`, `telegram.sync_runner`, `analysis` / `analysis.*` (segment, gps_quality,
-data_checks), `parsers.*` (gps, weather), `services.*` (workout_insights, insights_baseline,
+data_checks), `analysis.reanalyze` (`services/reanalyze.py`), `parsers.*` (gps, weather), `services.*`
+(workout_insights — его же намеренно использует `workout_insights_context.py`, insights_baseline,
 prediction_log, sleep_ingest, type_resolution_backfill), `api.deps`, `auth`, `crypto`,
 `rate_limit`, `raw_files`, `training_service`, `watch.coros`, `watch_credentials`.
 Новый модуль получает логгер по своему пути — не переиспользуй `"app"`.
@@ -69,7 +71,8 @@ prediction_log, sleep_ingest, type_resolution_backfill), `api.deps`, `auth`, `cr
 | `training.confirm_deleted` | Подтверждение повторной загрузки удалённой тренировки | `/upload/confirm_deleted` |
 | `feedback.created` | Оценка тренировки создана | `/session/{id}/feedback`, Telegram feedback |
 | `feedback.updated` | Оценка тренировки обновлена | `/session/{id}/feedback`, Telegram feedback |
-| `settings.changed` | Изменены настройки пользователя | `/settings`, Telegram `/start`, Telegram `/delete_me` |
+| `settings.changed` | Изменены настройки пользователя | `/settings`, Telegram `/start`, `/delete_me`, `/reset_password`, кнопка max_hr в Telegram, авто-повышение max_hr (`services/hr_max.py`) |
+| `settings.max_hr_suggest` | Предложение снизить max_hr (по нему — кулдаун 30 дней) | `services/hr_max.py` (джоб понедельника) |
 | `sync.{brand}.started` | Начата синхронизация часов | Telegram `/sync`, `/sync/{brand}/run` |
 | `sync.{brand}.completed` | Синхронизация часов завершена | Telegram `/sync`, `/sync/{brand}/run` |
 | `sync.{brand}.failed` | Ошибка синхронизации часов | Telegram `/sync`, `/sync/{brand}/run` |
@@ -100,7 +103,8 @@ GET /logs?lines=100
 GET /logs?lines=100&day=YYYY-MM-DD
 ```
 
-Показывает последние N строк из текущего лог-файла приложения; `day` — ротированный файл за указанный день (`<log_file>.YYYY-MM-DD`, формат проверяется, иначе 400).
+Показывает последние N строк из текущего лог-файла приложения (уровень строки — по полю формата `| LEVEL |`,
+не по подстроке в тексте; CRITICAL подсвечивается как ERROR, #120); `day` — ротированный файл за указанный день (`<log_file>.YYYY-MM-DD`, формат проверяется, иначе 400).
 
 ## Рекомендации (Best practices)
 

@@ -47,10 +47,10 @@
 ## 🏗️ Архитектура
 
 ### Стек
-- **Backend**: Python + FastAPI + SQLAlchemy + PostgreSQL 16 (через Docker Compose)
+- **Backend**: Python 3.13 (CI и прод; `requires-python >= 3.12`) + FastAPI + SQLAlchemy + PostgreSQL 16 (через Docker Compose)
 - **Frontend**: HTML/CSS/JS (Vanilla) + Chart.js
-- **Анализ**: `src/analysis/` — пакет анализа (17 модулей): `__init__.py` (оркестратор process_trackpoints), `oscillation.py` (детекция интервалов: base_pace + pace_gap + HR-lag), `classify.py` (interval/tempo/long/recovery/easy), `segment.py` (change-point detection + осцилляции), `segment_km.py` (km-fallback, вариативность), `hr_zones.py` (зоны от LTHR c fallback %max_hr: get_zone/get_band/zone_bounds/zone_ceiling_hr), `gap.py` (GAP/Minetti + downhill_block), `effort.py` (кардиодрейф/HR-стабильность), `hr_baseline.py` (базовая линия HR↔темп), `session_metrics.py` (метрики M1 разбора), `gps_quality.py` (квалиметрия GPS + оценка по шагам), `data_checks.py` (кросс-чеки с часами), `intervals.py` (HRR интервалов), `week_structure.py` (структура недели/детренированность), `type_resolution.py` (ярлык: сырой тип + план дня), `segment_laps.py` (сегменты по структурным лапам часов, #302), `utils.py`
-- **Парсеры**: `src/parsers/` — `tcx_parser.py` (XML), `fit_parser.py` (бинарный), `gps.py` (очистка GPS), `weather.py` (Open-Meteo API, httpx)
+- **Анализ**: `src/analysis/` — пакет анализа (19 модулей): `__init__.py` (оркестратор process_trackpoints), `oscillation.py` (детекция интервалов: base_pace + pace_gap + HR-lag), `classify.py` (interval/tempo/long/recovery/easy), `segment.py` (change-point detection + осцилляции), `segment_km.py` (km-fallback, вариативность), `hr_zones.py` (зоны от LTHR c fallback %max_hr: get_zone/get_band/zone_bounds/zone_ceiling_hr), `gap.py` (GAP/Minetti + downhill_block), `effort.py` (кардиодрейф/HR-стабильность), `hr_baseline.py` (базовая линия HR↔темп), `session_metrics.py` (метрики M1 разбора), `gps_quality.py` (квалиметрия GPS + оценка по шагам), `data_checks.py` (кросс-чеки с часами), `intervals.py` (HRR интервалов), `week_structure.py` (структура недели/детренированность), `type_resolution.py` (ярлык: сырой тип + план дня), `segment_laps.py` (сегменты по структурным лапам часов, #302), `pace_series.py` (compute_rolling_pace/interpolate_paces/smooth_paces/build_hr_pace_series, #329), `user_params.py` (gps_kwargs/interval_kwargs/analysis_kwargs — параметры анализа из профиля, дефолты из `config/constants`, #274/#327), `utils.py`
+- **Парсеры**: `src/parsers/` — `tcx_parser.py` (XML), `fit_parser.py` (бинарный), `gps.py` (очистка GPS), `detect.py` (sniff_kind — FIT/TCX по содержимому до парсинга, #78), `weather.py` (Open-Meteo API, httpx)
 - **Интеграции**: Coros Training Hub (неофициальное API), Open‑Meteo (погода), Telegram Bot API. Мульти-бренд: `BaseWatchClient` ABC + `factory.py` реестр.
 - **Аутентификация**: email+пароль (bcrypt), одноразовые токены регистрации (`secrets`), session-cookie (`SessionMiddleware`)
 - **Логирование**: структурированное, ежедневная ротация (`TimedRotatingFileHandler`), JSON/text
@@ -109,11 +109,11 @@ goal_target VARCHAR(255)                -- Конкретная цель («sub 
 max_hr INTEGER DEFAULT 177              -- Максимальный пульс (уд/мин)
 max_credible_pace FLOAT DEFAULT 3.0     -- Максимально правдоподобный темп (мин/км)
 max_gps_jump_m FLOAT DEFAULT 100.0      -- Макс. скачок GPS между точками (м)
-min_hr_for_fast_pace INTEGER DEFAULT 130-- Мин. пульс для быстрого темпа (уд/мин)
+min_hr_for_fast_pace INTEGER DEFAULT 130-- Мин. пульс для быстрого темпа (уд/мин); дефолты трёх полей — python-side из config/constants (#274)
 timezone VARCHAR(50)                     -- IANA-таймзона пользователя (e.g. "Europe/Moscow")
 interval_pace_threshold FLOAT             -- Порог темпа: разница с базовым (мин/км, default 1.0)
 interval_min_phase_duration INTEGER       -- Мин. длительность фазы (сек, default 60)
-interval_min_phase_distance_m INTEGER     -- Мин. дистанция фазы (м) — используется reanalyze
+interval_min_phase_distance_m INTEGER     -- Мин. дистанция фазы (м); interval_* идут во все пути анализа через analysis_kwargs(user) (#327)
 interval_hr_lag_sec INTEGER               -- Лаг пульса (сек, default 5)
 interval_min_oscillations INTEGER         -- Мин. число осцилляций для interval (default 3)
 is_active BOOLEAN DEFAULT TRUE          -- Активен ли пользователь
@@ -362,7 +362,7 @@ training_sessions.id                     │
 - `/report` – итоги недели (пн–сегодня): проза тренера + карточка чисел «Итоги недели» (в вс 19:00 приходит сам, затем план следующей недели)
 - `/sleep` – попросить прислать скриншот экрана сна (данные сна вводятся картинкой; фото распознаёт vision-мост, скриншот удаляется из чата)
 - `/coach_settings` – уровень инициативы коуча (🔕 выкл / 🔈 минимум / 🔔 обычная / 📣 максимум)
-- `/delete_me` – удалить все данные пользователя; `/delete_me_confirm` – подтверждение (5 минут)
+- `/delete_me` – удалить все данные пользователя и отвязать чат от аккаунта (#236); `/delete_me_confirm` – подтверждение (5 минут)
 - `/cancel` – отмена текущего диалога (ConversationHandler)
 
 **Свободный текст** (не команда) — чат с ИИ-коучем: вопросы о состоянии, самочувствии,
@@ -392,6 +392,7 @@ training_sessions.id                     │
   → wellness_reports; пропускается, если боль уже записана из тренировки
 - **Разбор тренировки** – после каждой синхронизации новой тренировки (гейт: инициатива ≠ выкл)
 - **Еженедельная проверка max_hr** – понедельник 10:05 (предложение снизить, кулдаун 30 дней)
+- **Пересчёт после автоподнятия max_hr** – тренировки текущей синхронизации/загрузки пересчитываются по новому максимуму до разбора коучем, уведомление «↻ Пересчитал N тренировок» (#237)
 - **Безопасность пароля** – сообщение с паролем Coros автоматически удаляется через 2 секунды
 
 ---
@@ -429,7 +430,7 @@ training_sessions.id                     │
 
 Доступны через веб‑интерфейс (`/settings`) и Telegram‑бота:
 
-- **max_hr** – максимальный пульс (по умолчанию 177уд/мин)
+- **max_hr** – максимальный пульс (по умолчанию 177 уд/мин; допустимо 100–220 — `MAX_HR_MIN..MAX_HR_CAP`, вне диапазона форма показывает ошибку и не сохраняет, #239)
 - **max_credible_pace** – максимально правдоподобный темп (для очистки GPS‑ошибок)
 - **max_gps_jump_m** – максимальный скачок GPS между точками
 - **min_hr_for_fast_pace** – минимальный пульс для быстрого темпа (проверка правдоподобия)
@@ -563,7 +564,7 @@ python run_telegram_bot.py
 
 Всё перечисленное в «Возможностях» выше — в проде, включая гибридный ИИ-коуч (с 23.08.2026:
 утренний вердикт, разбор тренировки, недельный план и отчёт, сон из скриншота, метрики разбора
-insights v7). Нормативная дорожная карта коуча и статусы — [`docs/coach/DEV_PLAN.md`](docs/coach/DEV_PLAN.md);
+insights v10). Нормативная дорожная карта коуча и статусы — [`docs/coach/DEV_PLAN.md`](docs/coach/DEV_PLAN.md);
 открытые задачи и идеи (фильтры на главной, multi-brand onboarding, панель администратора, PWA) —
 [`BACKLOG.md`](BACKLOG.md). Дорожная карта в README не дублируется.
 
@@ -591,7 +592,7 @@ insights v7). Нормативная дорожная карта коуча и �
 tail -n 100 logs/app.log.$(date +%F)
 ```
 
-Через веб‑интерфейс: `/logs?lines=100`
+Через веб‑интерфейс: `/logs?lines=100` (уровень строки подсвечивается по полю формата логгера, не по подстроке в тексте, #120)
 
 Формат (text/json) и уровень логирования настраиваются через `.env`:
 ```
@@ -618,9 +619,10 @@ LOGS_DIR=logs
 
 ---
 
-*Последнее обновление: 10.09.2026 — сверка с кодом.*
+*Последнее обновление: 11.09.2026 — сверка с кодом.*
 
 Что нового с 01.09.2026:
+- 11.09: разнос файлов > 400 строк (`pace_series.py`, `user_params.py`, `coach/chat_flow.py`, `coach/planning_rows.py`, `coach/planning_availability.py`, `services/workout_insights_context.py`; старые имена реэкспортируются, #329); sniff содержимого загрузки (#78); interval_* профиля в live-синке и загрузке (#327); константы GPS-очистки единым источником (#274); пересчёт батча после автоподнятия max_hr (#237); валидация max_hr в `/settings` (#239) и гвард «181 → 181» (#333); numeric checker v2 режет предложение прозы с чужим числом (#247); `/delete_me` отвязывает чат (#236); per-brand аудит `/sync` (#114), уровень строк `/logs` (#120), высота 0 м в FIT (#106), «сегодня» по поясу пользователя (#124); CI на Python 3.13 (#330)
 - сегментация по структурным лапам часов — `src/analysis/segment_laps.py` (#302)
 - набор/спуск высоты с гистерезисом 2 м, как у часов — `ELEV_HYSTERESIS_M` (#253)
 - адаптивная поправка датчика температуры часов — `src/services/watch_temp_bias.py`
