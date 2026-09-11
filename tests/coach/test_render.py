@@ -570,3 +570,53 @@ def test_render_week_plan_notes_before_footer():
     lines = text.split("\n")
     assert lines.index("⚠️ Объём недели урезан до ~25 км: цель недели.") < len(lines) - 1
     assert lines[-1].startswith("Остальные дни — отдых")
+
+
+def test_render_week_plan_rest_day_has_no_hr_ceiling():
+    """Инцидент 11.09.2026: карточка недели показала «Сб 12.09 — 🛌 Отдых · пульс до 126» —
+    у rest в target лежит max_zone=1 (заглушка), и потолок досчитывался как верх Z1.
+    Отдых — только ярлык; отмена подопечным (UNAVAILABLE_RATIONALE) — «по твоей просьбе»."""
+    from datetime import date
+
+    from src.coach.config import UNAVAILABLE_RATIONALE
+    from src.coach.render_week import render_week_plan
+
+    state = _state()
+    verdict = evaluate_safety(state)
+    easy, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2, duration_min=30),
+                    verdict, state)
+    cancelled, _ = clamp(WorkoutProposal(workout_type="rest", target_zone=1,
+                                         rationale=[UNAVAILABLE_RATIONALE]), verdict, state)
+    coach_rest, _ = clamp(WorkoutProposal(workout_type="rest", target_zone=1,
+                                          rationale=["день паузы"]), verdict, state)
+    easy.when, cancelled.when, coach_rest.when = (
+        date(2026, 9, 11), date(2026, 9, 12), date(2026, 9, 13))
+    targets = {"week_start": "2026-09-07"}
+
+    text = render_week_plan([easy, cancelled, coach_rest], targets, max_hr=177,
+                            today=date(2026, 9, 11))
+    sat = next(l for l in text.splitlines() if l.startswith("Сб 12.09"))
+    sun = next(l for l in text.splitlines() if l.startswith("Вс 13.09"))
+    assert sat == "Сб 12.09 — 🛌 Отдых · по твоей просьбе"
+    assert sun == "Вс 13.09 — 🛌 Отдых"
+    for line in (sat, sun):
+        assert "пульс" not in line and "Z1" not in line and "мин" not in line
+    assert "пульс до" in text                         # беговой день потолок сохраняет
+
+
+def test_rehydrate_keeps_unavailable_marker_for_week_card():
+    """Сохранённая строка отмены дня → после rehydrate маркер в proposal.rationale жив,
+    и read-only карточка недели (/week) видит «по твоей просьбе»."""
+    from datetime import date
+    from types import SimpleNamespace
+
+    from src.coach.config import UNAVAILABLE_RATIONALE
+    from src.coach.render_week import _is_athlete_unavailable
+    from src.coach.safety import rehydrate
+
+    row = SimpleNamespace(
+        workout_type="rest", for_date=date(2026, 9, 12), target_json={"max_zone": 1},
+        volume_json={}, predicted_json=None, clamped=False, source="llm",
+        proposal_json={"workout_type": "rest", "target_zone": 1,
+                       "rationale": [UNAVAILABLE_RATIONALE]})
+    assert _is_athlete_unavailable(rehydrate(row))

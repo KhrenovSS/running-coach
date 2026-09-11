@@ -2,6 +2,18 @@
 
 All notable changes to this project are tracked here.
 
+## [11.09.2026] — Карточка недели: отдых без потолка пульса
+
+### Fixed
+- **Карточка недели показывала «Сб 12.09 — 🛌 Отдых · пульс до 126»** (инцидент 11.09.2026, /week после отмены
+  субботы подопечным). У строки rest в `target_json` лежит `max_zone: 1` (заглушка от `cancel_days`/`fallback`),
+  `finalize` потолок для rest намеренно не фиксирует, а `render_week.render_week_plan` досчитывал его как верх Z1 —
+  в отличие от дневных карточек (`render_prescription_short` rest уже пропускал). Теперь отдых в карточке недели —
+  только ярлык, без пульса/темпа/объёма; отдых по отмене подопечным (маркер `UNAVAILABLE_RATIONALE` в
+  `proposal.rationale`) подписан «по твоей просьбе» (`_is_athlete_unavailable`). `safety.rehydrate` сохраняет
+  `rationale` предложения из `proposal_json`, чтобы read-only карточка `/week` видела маркер.
+  Тесты: `test_render_week_plan_rest_day_has_no_hr_ceiling`, `test_rehydrate_keeps_unavailable_marker_for_week_card`.
+
 ## [10.09.2026] — Аудит документации: доки приведены к коду, go.sh обновлён
 
 ### Changed

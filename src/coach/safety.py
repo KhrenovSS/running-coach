@@ -306,9 +306,12 @@ def rehydrate(row) -> Prescription:
     pj = getattr(row, "proposal_json", None) or {}
     # Что предлагали ДО урезания — для строки «⚠️ Чт: Темповая → Лёгкий бег» в карточке
     # (the pre-clamp proposal, so the saved card can name the substitution)
+    # rationale — тоже: в ней маркер отмены дня подопечным (UNAVAILABLE_RATIONALE), по нему
+    # карточка недели помечает отдых «по твоей просьбе» (11.09.2026). (Keep rationale: marker.)
     proposal = (WorkoutProposal(workout_type=pj["workout_type"],
                                 target_zone=int(pj.get("target_zone") or 2),
-                                duration_min=pj.get("duration_min"))
+                                duration_min=pj.get("duration_min"),
+                                rationale=list(pj.get("rationale") or []))
                 if pj.get("workout_type") else None)
     return Prescription(
         safety=SafetyVerdict(),

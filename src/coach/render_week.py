@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from src.analysis.utils import format_pace
+from src.coach.config import UNAVAILABLE_RATIONALE
 from src.coach.contracts import Prescription
 from src.coach.render import _TYPE_LABEL, _hr_ceiling, _predicted_estimate
 from src.coach.render_segments import compact_segments, visible_segments
@@ -103,6 +104,13 @@ def _pace_hint(p: Prescription) -> float | None:
 
 
 
+def _is_athlete_unavailable(p: Prescription) -> bool:
+    """Отдых поставлен из-за недоступности подопечного (маркер в rationale proposal),
+    зеркало `turn_context.is_athlete_unavailable` для назначения (athlete-cancelled rest)."""
+    proposal = p.proposal
+    return proposal is not None and UNAVAILABLE_RATIONALE in (proposal.rationale or [])
+
+
 def _fact_line(day: str, p: Prescription, fact: dict | None,
                max_hr: int | None = None, lthr: int | None = None) -> str:
     """Прошедший день: факт связанной тренировки (✓) или пропуск (✗) — без потолка
@@ -182,6 +190,14 @@ def render_week_plan(prescriptions: list[Prescription], targets: dict,
         mark = "▶ " if today is not None and p.when == today else ""
         day = f"{mark}{_day_label(p.when)}"
         parts = [_TYPE_LABEL.get(p.workout_type, p.workout_type)]
+        if p.workout_type == "rest":
+            # Отдых — без пульса/темпа/объёма: max_zone=1 у rest — не задание, а заглушка
+            # (инцидент 11.09.2026: «🛌 Отдых · пульс до 126»). Отмена подопечным — пометка.
+            # (Rest day: label only; athlete-cancelled day gets a marker.)
+            if _is_athlete_unavailable(p):
+                parts.append("по твоей просьбе")
+            lines.append(f"{day} — " + " · ".join(parts))
+            continue
         if p.target.get("pace_min_km") is not None:
             parts.append(f"темп {format_pace(p.target['pace_min_km'])}/км")
         else:
