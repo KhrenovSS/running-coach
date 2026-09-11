@@ -2,7 +2,7 @@
 
 Открытые пункты: идеи, фиксы, вопросы. **Правило:** заметил мелочь → строка сюда, обратно к задаче;
 не чини «заодно». Закрытые пункты переносятся в `docs/archive/BACKLOG_closed.md` при чистке
-(последняя — 11.09.2026: 262 закрытых строк; нумерация сквозная, следующий свободный номер — #334).
+(последняя — 11.09.2026: 268 закрытых строк; нумерация сквозная, следующий свободный номер — #334).
 Статусы: ⬜ открыто · 🟡 частично · 🔶 частично закрыто · ⏸ не планируется.
 
 ## Приоритеты (ревизия владельца 04.09.2026, статусы — 10.09.2026)
@@ -32,8 +32,8 @@
 ### P3 — приложение, инфраструктура, документация
 | # | Что и почему | Оценка |
 |---|---|---|
-| 116, 78, 81 | Web/Telegram: пароль в чате, проверка загрузок, rate-limit — важно при появлении второго пользователя (`/logs` — 119/303 закрыты 07.09). | S–M |
-| 236, 123, 126, 124, 125, 117, 121 | Баги Telegram/web: detached `/delete_me`, TOCTOU фидбека, TZ в `/sync`, лимит 4096, catch-all веса, `/health`. | S каждая |
+| 116, 78 | Web/Telegram: пароль в чате, проверка загрузок (rate-limit #81 — есть) — важно при появлении второго пользователя (`/logs` — 119/303 закрыты 07.09). | S–M |
+| 126, 124, 125, 121 | Баги Telegram/web: TOCTOU фидбека, TZ в `/sync`, лимит 4096, `/health` (#236/#117/#123 закрыты 11.09). | S каждая |
 | 248 | `training_type_override` в web/`/stats` (коуч уже на `effective_training_type`). | S |
 | 291 | Пол/имя подопечного в профиле (род зафиксирован в персоне 03.09 — 🔶). | S |
 | 1, 16, 5, 15, 87, 223, 224, 89, 90, 134 | Sync/scheduler/async архитектура, сессии БД в хендлерах. | M–L |
@@ -67,7 +67,6 @@
 | # | Тег | Описание | Файл / Источник | Статус |
 |---|-----|----------|-----------------|--------|
 | 78 | [Validation] | **Только расширение файла проверяется** — `.exe` переименованный в `.tcx` пройдёт. | `src/web/routes/uploads.py:40` | ⬜ P2 |
-| 81 | [Validation] | **Нет rate-limiting на upload/settings/logs** — уязвимость к abuse. | `src/web/routes/uploads.py`, `settings.py`, `logs.py` | ⬜ P2 |
 
 ### Architectural
 
@@ -91,19 +90,14 @@
 
 | # | Тег | Описание | Файл / Источник | Статус |
 |---|-----|----------|-----------------|--------|
-| 103 | [Bug] | **`save_dashboard_data` вызывается дважды** при пустом `metrics_list` — или баг, или лишний вызов. | `src/services/sync/health.py:81-83,181` | ⬜ P2 |
-| 104 | [Bug] | **Start_time в TCX: `'' or None` → `AttributeError`** при replace, если оба отсутствуют. | `src/parsers/tcx_parser.py:23-24` | ⬜ P2 |
 | 106 | [Bug] | **FIT: `enhanced_altitude=0 or data.get('altitude')` — 0 (valid) трактуется как falsy**. | `src/parsers/fit_parser.py:26` | ⬜ P2 |
 | 109 | [Bug] | **Oscillation HR-lag: mismatch time scales** — `pace_change` за 1 шаг, `hr_change` за `lag_sec`. | `src/analysis/oscillation.py:182-190` | ⬜ P2 |
 | 111 | [Bug] | **Сегментация O(n^2)** — while loop по trackpoints для rolling window при равных dist. | `src/analysis/segment.py:103-104` | ⬜ P2 |
-| 112 | [Bug] | **Сегментация: `max_credible_upper=15.0` хардкодом** — не из конфига. | `src/analysis/segment.py:111` | ⬜ P2 |
 | 113 | [Bug] | **Сегментация: `count_off_osc = len(osc) < num_kms * 0.5` — предел 50-150% слишком широк**. | `src/analysis/segment.py:370-371` | ⬜ P2 |
 | 114 | [Bug] | **Sync audit: `log_sync_completed` вызывается внутри per-cred цикла, передаёт cumulative totals** — искажение per-brand статистики. | `src/telegram/sync_runner.py:84-90` | ⬜ P2 |
 | 116 | [Bug] | **Пароль показывается в plaintext в Telegram** — self-deleting, но может засветиться в нотификациях. | `src/telegram/handlers/account.py:121-127` | ⬜ P2 |
-| 117 | [Bug] | **`handle_weight_message` — catch-all для всех не-командных сообщений** — любой текст в неудачный момент попытается стать weight. | `src/telegram/main.py:68` | ⬜ P2 |
 | 120 | [Bug] | **`/logs` уровень детекции по подстроке** — слово `"WARNING"` в сообщении даёт неверный CSS. | `src/web/routes/logs.py:40-41` | ⬜ P2 |
 | 121 | [Bug] | **`/health` всегда 200, даже при `degraded`** — маскирует проблемы от load balancer. | `src/api/routes/health.py` | ⬜ P2 |
-| 123 | [Bug] | **`get_or_create_user_by_telegram` — если email уже занят другим, генерит рандомный пароль без уведомления юзера**. | `src/telegram/handlers/start.py:75-76` | ⬜ P2 |
 | 124 | [Bug] | **`today_start` в `sync.py:43` считает по Moscow TZ, хотя `begin_ts` в UTC** — смещение до 12ч. | `src/telegram/handlers/sync.py:43` | ⬜ P2 |
 | 125 | [Bug] | **Training list может превысить 4096 символов Telegram** — падение при 100+ сессиях. | `src/telegram/handlers/trainings.py:81` | ⬜ P2 |
 | 126 | [Bug] | **Feedback TOCTOU race** — check-then-insert без атомарности, возможны дубли. | `src/telegram/handlers/feedback.py:41-56` | ⬜ P2 |
