@@ -7,14 +7,13 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from src.config.constants import MAX_HR_CAP
+from src.config.constants import MAX_HR_CAP, MAX_HR_MIN
 from src.models import SessionLocal, User
 from src.services.audit import AuditService
 from src.utils.logger import get_logger
 
 logger = get_logger("telegram.handlers.hr_max")
 
-MAX_HR_MIN = 100  # нижняя граница валидации (validation floor, matches src/exceptions.py range)
 
 
 async def hr_max_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):

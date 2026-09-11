@@ -168,6 +168,7 @@ DEDUP_TIME_WINDOW_SEC: Final[int] = 120  # окно матчинга по вре
 
 # Адаптивный максимальный пульс (Adaptive max HR — auto-raise / suggest lowering)
 HR_SMOOTH_MEDIAN_WINDOW: Final[int] = 5      # окно скользящей медианы пика — фильтр одиночных выбросов (rolling-median window, spike filter)
+MAX_HR_MIN: Final[int] = 100                 # нижняя граница валидации max_hr (кнопка бота, форма /settings) — #239
 MAX_HR_CAP: Final[int] = 220                 # выше — артефакт датчика; диапазон согласован с src/exceptions.py (above → sensor artifact)
 MAX_HR_CONFIRM_COUNT: Final[int] = 3         # превышений за окно для принудительного обновления (exceedances to force-update)
 MAX_HR_CONFIRM_WINDOW_DAYS: Final[int] = 30  # окно подтверждения превышений (confirmation window)

@@ -14,12 +14,15 @@
     <div style="text-align:right;margin-bottom:10px;">{{ user_header|safe }}</div>
     {% endif %}
     <h2>⚙️ Настройки</h2>
+    {% if error_text %}
+    <div class='card' style='border-left:4px solid #c0392b;color:#c0392b;'>⚠️ {{ error_text }}</div>
+    {% endif %}
     <div class='card'>
         <form action='/settings' method='post'>
             <label><b>Имя:</b></label>
             <input type='text' name='name' value='{{ user_name or "" }}' style='width:250px;padding:6px;font-size:14px'>
             <label><b>Максимальный пульс (ЧССмакс):</b></label>
-            <input type='number' name='max_hr' value='{{ max_hr or "" }}' min='100' max='250'>
+            <input type='number' name='max_hr' value='{{ max_hr or "" }}' min='{{ max_hr_min }}' max='{{ max_hr_cap }}'>
             <label><b>Вес (кг):</b></label>
             <input type='number' name='weight' value='{{ weight or "" }}' min='30' max='250' step='0.1'>
             <hr>

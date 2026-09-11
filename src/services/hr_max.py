@@ -133,24 +133,17 @@ def _evaluate_max_hr_raise(db: Session, user_id: int, batch_peak: int | None,
         # N-й по величине дневной пик; устойчиво к одному оставшемуся выбросу.
         # (Value actually reached on ≥N distinct days — the N-th largest daily peak.)
         new_value = sorted(day_peaks.values(), reverse=True)[MAX_HR_CONFIRM_COUNT - 1]
-        old_value = profile
-        user.max_hr = new_value
-        db.commit()
-        AuditService(db).log_settings_changed(
-            user_id=user_id,
-            changes={"max_hr": {"old": old_value, "new": new_value}},
-            source="auto_max_hr", trigger=source, exceed_days=len(day_peaks),
-        )
-        telegram_notify(
-            user_id=user_id,
-            text=MAX_HR_UPDATED_TEXT.format(old=old_value, new=new_value, n=len(day_peaks)),
-        )
-        logger.info("hr_max: user=%s max_hr %d → %d (дней с превышением за %dд: %d, source=%s)",
-                    user_id, old_value, new_value, MAX_HR_CONFIRM_WINDOW_DAYS,
-                    len(day_peaks), source)
-        return (old_value, new_value)
+        if new_value <= profile:
+            # #333: N-й дневной пик не выше профиля (пики 185/183/181 при 181) — обновлять нечего,
+            # иначе уходил аудит и уведомление «181 → 181». Остаёмся на стадии предупреждения.
+            # (Nth daily peak not above profile — nothing to update; fall through to the warning.)
+            logger.info("hr_max: user=%s %d-й дневной пик %d ≤ профиль %d — без обновления",
+                        user_id, MAX_HR_CONFIRM_COUNT, new_value, profile)
+        else:
+            return _force_update(db, user, user_id, profile, new_value, len(day_peaks), source)
 
-    # Первое/второе превышение — только предупредить (First/second exceedance — warn only)
+    # Первое/второе превышение (или N-й пик не выше профиля) — только предупредить
+    # (First/second exceedance — warn only)
     telegram_notify(
         user_id=user_id,
         text=MAX_HR_WARNING_TEXT.format(peak=batch_peak, profile=profile,
@@ -160,6 +153,25 @@ def _evaluate_max_hr_raise(db: Session, user_id: int, batch_peak: int | None,
     logger.info("hr_max: user=%s предупреждение — пик %d > профиль %d (дней с превышением за %dд: %d)",
                 user_id, batch_peak, profile, MAX_HR_CONFIRM_WINDOW_DAYS, len(day_peaks))
     return None
+
+
+def _force_update(db: Session, user: User, user_id: int, old_value: int, new_value: int,
+                  exceed_days: int, source: str) -> tuple[int, int]:
+    """Принудительное обновление max_hr: commit → аудит → уведомление (forced update path)."""
+    user.max_hr = new_value
+    db.commit()
+    AuditService(db).log_settings_changed(
+        user_id=user_id,
+        changes={"max_hr": {"old": old_value, "new": new_value}},
+        source="auto_max_hr", trigger=source, exceed_days=exceed_days,
+    )
+    telegram_notify(
+        user_id=user_id,
+        text=MAX_HR_UPDATED_TEXT.format(old=old_value, new=new_value, n=exceed_days),
+    )
+    logger.info("hr_max: user=%s max_hr %d → %d (дней с превышением за %dд: %d, source=%s)",
+                user_id, old_value, new_value, MAX_HR_CONFIRM_WINDOW_DAYS, exceed_days, source)
+    return (old_value, new_value)
 
 
 def evaluate_max_hr_lowering(db: Session, user_id: int) -> int | None:

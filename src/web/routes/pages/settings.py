@@ -14,18 +14,26 @@ from src.services.watch_credentials import upsert_watch_credential
 from src.crypto import safe_decrypt
 from src.config.constants import (DEFAULT_PACE_THRESHOLD, DEFAULT_MIN_PHASE_DURATION_SEC,
                                    DEFAULT_HR_LAG_SEC, DEFAULT_MIN_OSCILLATIONS,
-                                   MAX_CREDIBLE_PACE, MAX_GPS_JUMP_M, MIN_HR_FOR_FAST_PACE)
+                                   MAX_CREDIBLE_PACE, MAX_GPS_JUMP_M, MIN_HR_FOR_FAST_PACE,
+                                   MAX_HR_CAP, MAX_HR_MIN)
 from src.utils.logger import get_logger
 from src.utils.rate_limit import rate_limit
 
 logger = get_logger("app")
 router = APIRouter()
 
+# Тексты ошибок формы по ключу ?error= (#239) — bilingual: form error texts keyed by field
+SETTINGS_ERRORS = {
+    "max_hr": f"Максимальный пульс должен быть в диапазоне {MAX_HR_MIN}–{MAX_HR_CAP} уд/мин — значение не сохранено.",
+}
+
 
 @router.get('/settings', response_class=HTMLResponse)
 async def settings_page(request: Request, current_user: User = Depends(get_current_user),
-                        db: Session = Depends(get_db)):
+                        db: Session = Depends(get_db), error: str | None = None):
     from src.config import settings as app_settings
+    # #239: ошибка валидации формы приходит редиректом ?error=<field> (POST не рендерит страницу)
+    error_text = SETTINGS_ERRORS.get(error) if error else None
     m = current_user.max_hr or app_settings.default_max_hr
     z1 = f"{round(m * 0.5)}-{round(m * 0.6)}"
     z2 = f"{round(m * 0.6)}-{round(m * 0.7)}"
@@ -60,6 +68,8 @@ async def settings_page(request: Request, current_user: User = Depends(get_curre
         weight_display = last_wm[0] if last_wm else None
     return templates.TemplateResponse(request, "settings.html", {
         "user_header": user_header,
+        "error_text": error_text,
+        "max_hr_min": MAX_HR_MIN, "max_hr_cap": MAX_HR_CAP,
         "user_name": current_user.name or "",
         "max_hr": m, "weight": weight_display, "z1": z1, "z2": z2, "z3": z3, "z4": z4, "z5": z5,
         "max_credible_pace": current_user.max_credible_pace,
@@ -96,6 +106,12 @@ async def settings_save(max_hr: int | None = Form(None), weight: float | None = 
     if not user:
         user = User(id=current_user.id)
         db.add(user)
+    if max_hr is not None and not (MAX_HR_MIN <= max_hr <= MAX_HR_CAP):
+        # #239: границы те же, что у кнопки бота (MAX_HR_MIN..MAX_HR_CAP); ничего не сохраняем,
+        # возвращаем на форму с текстом ошибки (validation floor/cap shared with the bot button)
+        logger.info("Settings: max_hr=%s вне диапазона %d–%d для user=%s — отклонено",
+                    max_hr, MAX_HR_MIN, MAX_HR_CAP, current_user.id)
+        return RedirectResponse(url='/settings?error=max_hr', status_code=303)
     old_weight = user.weight_kg
     old_max_hr = user.max_hr
     old_name = user.name

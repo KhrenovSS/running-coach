@@ -52,12 +52,14 @@ tests/
 ├── test_raw_files.py        # хранилище сырых FIT/TCX + reanalyze от сырья
 ├── test_prediction_log.py   # продюсер residuals прогноз↔факт (#246)
 ├── test_logs_route.py       # GET /logs (lines, day)
+├── test_settings_route.py   # POST /settings: валидация max_hr (#239), get_db на соединении фикстуры
 ├── test_docs_links.py       # ГВАРД: ссылки на файлы в docs/*.md и CLAUDE.md существуют
 ├── test_weight_service.py   # save_weight/current_weight
 ├── test_session_ownership.py# ГВАРД: SessionLocal() только в композиционных корнях (allowlist)
 ├── test_stage0_fixes.py     # регрессы Этапа 0 (stats бота, reanalyze, performance Float)
 ├── test_hr_max.py           # адаптивный max_hr (повышение/снижение)
 ├── test_telegram_account.py # /delete_me: удаление данных + отвязка chat_id (#236)
+├── test_user_params.py      # analysis_kwargs(user), interval_* в parse_fit/parse_tcx (#327), погода сегментов после слияния (#252)
 └── test_backfill.py         # backfill-скрипты
 ```
 

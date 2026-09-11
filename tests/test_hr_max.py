@@ -100,6 +100,21 @@ def test_three_exceedances_force_update(db_session, sent):
     assert meta["changes"]["max_hr"] == {"old": 177, "new": 181}
 
 
+def test_nth_peak_not_above_profile_warns_only(db_session, sent):
+    """#333: пики 185/183/181 при профиле 181 — 3-й пик равен профилю → «181 → 181» не шлём,
+    остаёмся на предупреждении, аудита нет, max_hr не тронут."""
+    user = _user(db_session, max_hr=181)
+    for days_ago, peak in ((10, 185), (5, 183), (1, 181)):
+        _session(db_session, user.id, peak=peak, days_ago=days_ago)
+    assert hr_max.evaluate_max_hr_raise(db_session, user.id, 185, source="test") is None
+    db_session.refresh(user)
+    assert user.max_hr == 181
+    assert len(sent) == 1 and "выше максимума" in sent[0]["text"] and "181 → 181" not in sent[0]["text"]
+    assert sent[0]["reply_markup"] is not None                       # кнопка «Обновить до 185»
+    assert db_session.query(AuditEvent).filter(
+        AuditEvent.user_id == user.id, AuditEvent.event_type == "settings.changed").first() is None
+
+
 def test_old_exceedances_outside_window_ignored(db_session, sent):
     """Превышения старше 30 дней не считаются: 2 свежих + 1 старое → только предупреждение."""
     user = _user(db_session)
