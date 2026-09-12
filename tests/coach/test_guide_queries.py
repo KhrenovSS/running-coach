@@ -31,10 +31,21 @@ def test_knee_guide_still_wins_pain_query():
 
 
 def test_key_rules_digest_within_budget():
-    lines = key_rules_digest().splitlines()
-    assert len(lines) <= DIGEST_LINES_MAX
-    assert any(line.startswith("47_") and "walk_run_stage_weeks" in line for line in lines)
-    assert any(line.startswith("50_") and "illness_pause" in line for line in lines)
+    """12.09.2026: дайджест по фазе — возвратные правила (47/61/46 key_rules_returning) только при
+    returning; при stable их нет (стабильно бегающему «вход через ходьбу» не показываем)."""
+    stable = key_rules_digest("stable").splitlines()
+    returning = key_rules_digest("returning").splitlines()
+    assert len(returning) <= DIGEST_LINES_MAX and len(stable) < len(returning)
+    assert any(line.startswith("47_") and "walk_run_stage_weeks" in line for line in returning)
+    assert not any(line.startswith("47_") for line in stable)
+    assert not any("entry_session_minutes_max" in line or "return_plan_first_block" in line
+                   or "first_third_return_volume" in line for line in stable)
+    # правила без привязки к возврату — в обеих фазах
+    for lines in (stable, returning):
+        assert any(line.startswith("50_") and "illness_pause" in line for line in lines)
+        assert any(line.startswith("61_") and "beginner_marathon_plan_weeks" in line for line in lines)
+        assert any(line.startswith("46_") and "cadence_target_steps_per_min" in line for line in lines)
+    assert key_rules_digest() == key_rules_digest("stable")
 
 
 def test_review_queries_add_heat_last():

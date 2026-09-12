@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from src.analysis.utils import format_pace
 from src.coach.config import UNAVAILABLE_RATIONALE
 from src.coach.contracts import Prescription
-from src.coach.render import _TYPE_LABEL, _hr_ceiling, _predicted_estimate
+from src.coach.render import _TYPE_LABEL, _hr_ceiling, _predicted_estimate, type_label
 from src.coach.render_segments import compact_segments, visible_segments
 from src.utils.timeutils import WEEKDAYS_RU_SHORT
 
@@ -115,7 +115,7 @@ def _fact_line(day: str, p: Prescription, fact: dict | None,
                max_hr: int | None = None, lthr: int | None = None) -> str:
     """Прошедший день: факт связанной тренировки (✓) или пропуск (✗) — без потолка
     пульса и ≈км плана, которые дрейфуют со сменой якоря зон (past day as fact)."""
-    label = _TYPE_LABEL.get(p.workout_type, p.workout_type)
+    label = type_label(p)
     if p.workout_type == "rest":
         # #331 (11.09.2026): прошедший отдых — не «пропущен» и не «факт», просто отдых;
         # отмена подопечным подписана как у будущих дней. (Past rest day: neutral line.)
@@ -194,7 +194,7 @@ def render_week_plan(prescriptions: list[Prescription], targets: dict,
             continue
         mark = "▶ " if today is not None and p.when == today else ""
         day = f"{mark}{_day_label(p.when)}"
-        parts = [_TYPE_LABEL.get(p.workout_type, p.workout_type)]
+        parts = [type_label(p)]
         if p.workout_type == "rest":
             # Отдых — без пульса/темпа/объёма: max_zone=1 у rest — не задание, а заглушка
             # (инцидент 11.09.2026: «🛌 Отдых · пульс до 126»). Отмена подопечным — пометка.

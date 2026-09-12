@@ -123,8 +123,9 @@ Coros синкает `lthr`/`ltsp` — они стали якорем всей �
 классификация) и коучу (insights, потолки карточек `zone_ceiling_hr`, history_tools,
 zone_distribution). Классификация: recovery ≤81%·lthr, easy ≤89%·lthr; «качественный день»
 M4 — interval/race либо tempo с avg_hr ≥95%·lthr. Нормативный темп сегментов при пустой
-истории — `ltsp + LTSP_ZONE_OFFSET_S[зона]` (`pace_source="threshold"`). LTHR часов не
-валидирован полевым тестом — M3.2 за владельцем.
+истории — `ltsp + LTSP_ZONE_OFFSET_S[зона]` (`pace_source="threshold"`). **M3.2 (12.09.2026)**: якорь —
+полевой ПАНО (`UserModel.params_json["lthr_field"]`, свежесть 180 дн, `repositories.field_lthr`) → Coros → %max_hr;
+тест назначает коуч (`coach/lthr_field.py`), число считает `analysis/lthr_test.py`, подтверждение кнопкой.
 
 ## Решение 8: граница безопасности потребляет метрики разбора (F3/F5/F6, 01.09.2026)
 
@@ -200,14 +201,23 @@ coach/
 ├── planning_safety.py # apply_safety_to_targets: интенсив закрыт вердиктом → hard_days_max=0,
 │                      #   quality_*_km_max=0, quality_blocked_by_safety (06.09.2026, до промпта LLM);
 │                      #   прогноз правила 17 по дням (quality_reopens_at, project_state, 07.09.2026)
-│                      #   + cap_long_run: потолок длительной (30 % недели / 150 мин) кодом при финализации
+│                      #   + cap_long_run: потолок длительной (30 % недели, 40 % при < 40 км или ≤ 4 пробежек / 150 мин) кодом при финализации
 │                      #   + cap_week_volume: сумма плана ≤ target_km (лёгкие ужимаются); объём плоский при закрытом интенсиве
+│                      #   только по усталости/здоровью (volume_hold, INTENSITY_ONLY_SAFETY_RULES, 12.09.2026)
 ├── segments.py        # enrich_and_clamp_segments: числа сегментам из зон/истории, per-segment clamp (M2.1)
 ├── illness.py         # #322 (07.09): гейт болезни — params_json["illness"], пауза ILLNESS_PAUSE_DAYS[kind],
 │                      #   правило 21 safety / закрытые даты плана / blocked_reason; LLM сообщает факт, сроки — код
 ├── concerns.py        # 10.09: актуальные проблемы (травма/боль/перерыв) — params_json["concerns"],
 │                      #   протухание CONCERN_EXPIRE_DAYS=14 без боли и упоминаний; вечерний вопрос и подпись
 │                      #   кнопок боли — только при активной проблеме
+├── training_status.py # 12.09: фаза returning/stabilizing/stable из полных недель с пробежками и пауз
+│                      #   (STATUS_STABLE_WEEKS=4); блок athlete_status в today-контексте — замена статичной
+│                      #   строки персоны «после долгого перерыва»; фаза гейтит дайджест key_rules_returning
+├── quality_ladder.py  # 12.09: hard_days_max 1→3 по переносимости качественных за 4 нед (RPE, боль,
+│                      #   hr_vs_baseline.z, флаги разбора, recovery/HRV наутро); safety главнее
+├── lthr_field.py      # 12.09 (M3.2): полевой ПАНО — params_json["lthr_field"], is_due/place_test/test_proposal
+│                      #   (race 15+30+10), маркер target.lthr_test, reanalyze_recent; число — analysis/lthr_test.py,
+│                      #   кнопки/команда /lthr — telegram/handlers/lthr.py, карточка — orchestrator.lthr_test_followup
 ├── orchestrator.py    # on_workout_completed (+ _merged_flags: слияние флагов LLM с computed, _deterministic_review,
 │                      #   _gps_warning_suffix), weekly_report;
 │                      #   реэкспорт chat_flow (#329, 11.09: файл разнесён — вызовы orchestrator.* валидны)
@@ -217,7 +227,8 @@ coach/
 │                      #   (очередь отложенного разбора: claim → orchestrator.on_workout_completed)
 ├── turn_context.py    # build_extras / unchanged_today / history (вынос из orchestrator, #266)
 ├── planning.py        # детерминированные числа недели (week_targets: мезоцикл 3:1, прогрессия, потолки,
-│                      #   long_run_hold/detraining_return), run_days_cap/enforce_run_days, advance_mesocycle;
+│                      #   long_run_hold/detraining_return, hard_days_max из quality_ladder + athlete_status),
+│                      #   run_days_cap/enforce_run_days, advance_mesocycle;
 │                      #   реэкспорт двух модулей ниже (#329, 11.09) — `planning.cancel_days(...)` и т.п. валидны
 ├── planning_rows.py   # строки плана в recommendations: PLAN_STATUSES, supersede_*/latest_rows_for_dates,
 │                      #   week_plan_review (план vs факт), confirm_or_adjust_morning (последняя строка дня)
@@ -234,7 +245,7 @@ coach/
 │                      #   distribution, progress, pain (state) + workout (per-session)
 ├── tools/             # registry (7 read-only tools), context, serialize, state_tools,
 │                      #   history_tools (daily_metrics_morning += сон), knowledge_tools
-├── knowledge/         # loader (front-matter, key_rules_digest, keyword-поиск)
+├── knowledge/         # loader (front-matter: key_rules + key_rules_returning, key_rules_digest(phase), keyword-поиск)
 │   └── guides/        #   методика: Лидьярд/80-20/прогрессия/колено + Дэниелс/Фицджеральд
 └── llm/               # client (get_llm: ключ→мост→Null), config, schemas (CoachTurn: proposal, weekly_plan,
                        #   unavailable/available_again_days_ahead, available_weekdays, show_week_plan),

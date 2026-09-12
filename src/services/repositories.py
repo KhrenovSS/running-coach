@@ -13,12 +13,34 @@ from sqlalchemy.orm import Session
 
 from src.analysis.hr_zones import get_zone
 from src.config import settings
-from src.models import TrainingSession, DailyMetrics, User, TrainingFeedback
+from src.config.constants import LTHR_FIELD_MAX_AGE_DAYS
+from src.models import TrainingSession, DailyMetrics, User, TrainingFeedback, UserModel
+
+
+def field_lthr(user_id: int, *, db: Session,
+               max_age_days: int = LTHR_FIELD_MAX_AGE_DAYS) -> int | None:
+    """Подтверждённый полевой ПАНО из UserModel.params_json["lthr_field"] (M3.2, 12.09.2026):
+    None — нет записи или старше max_age_days. (Confirmed field-tested LTHR, if fresh.)"""
+    um = db.query(UserModel).filter(UserModel.user_id == user_id).first()
+    rec = (um.params_json or {}).get("lthr_field") if um else None
+    if not rec or not rec.get("value") or not rec.get("measured_at"):
+        return None
+    try:
+        measured = datetime.fromisoformat(str(rec["measured_at"])).date()
+    except ValueError:
+        return None
+    if (datetime.now(timezone.utc).date() - measured).days > max_age_days:
+        return None
+    return int(rec["value"])
 
 
 def latest_lthr(user_id: int, *, db: Session, max_age_days: int = 45) -> int | None:
-    """Свежий LTHR из DailyMetrics (F4/M3.1): None — нет данных или устарел.
-    (Freshest lactate-threshold HR from daily metrics; None when absent/stale.)"""
+    """Якорь зон: свежий полевой ПАНО (`field_lthr`, M3.2) → иначе LTHR из DailyMetrics (F4/M3.1):
+    None — нет данных или устарел. Единственная точка выбора порога для всех потребителей.
+    (Field-tested LTHR first, then the watch value; None when absent/stale.)"""
+    field = field_lthr(user_id, db=db)
+    if field is not None:
+        return field
     cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).date()
     row = db.query(DailyMetrics.lthr).filter(
         DailyMetrics.user_id == user_id,

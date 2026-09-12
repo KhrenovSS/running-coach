@@ -24,7 +24,6 @@ from src.coach.config import (
     INTERVAL_MAX_PCT_WEEK,
     LOAD_PROGRESSION,
     LONG_RUN_MAX_MIN,
-    PLAN_QUALITY_DAYS_MAX,
     PLAN_RUN_DAYS_CAP,
     PLAN_RUN_DAYS_FLOOR,
     PLAN_RUN_DAYS_STEP,
@@ -58,6 +57,9 @@ from src.coach.planning_rows import (  # noqa: F401 — реэкспорт
 )
 from src.coach.planning_safety import long_run_min_hint
 from src.coach.planning_window import local_week_volumes, plan_window, week_done
+from src.coach.quality_ladder import quality_ladder
+from src.coach import lthr_field
+from src.coach.training_status import compute_status
 from src.services.repositories_insights import InsightRepository
 from src.models import TrainingSession, User, UserModel
 from src.utils.logger import get_logger
@@ -175,7 +177,13 @@ def week_targets(user_id: int, *, db: Session, today: date | None = None,
     # пика (гайд 61), без качественных; паузы 6–13 дней закрывает правило 14 safety
     # (detraining return → volume ceiling, no quality)
     detraining_return = False
-    hard_days_max = PLAN_QUALITY_DAYS_MAX
+    # 12.09.2026: статус подопечного и лестница качественных дней — из данных, не константой
+    # (athlete status + tolerance ladder replace the fixed quality-days constant)
+    status = compute_status(user_id, db=db, today=today)
+    ladder = quality_ladder(user_id, db=db, today=today, phase=status["phase"],
+                            active_injury=status["active_injury"], run_days_max=run_days_max,
+                            week_start=week_start)
+    hard_days_max = ladder["level"]
     days_off = _days_off(user_id, db=db, today=today)
     if days_off is not None and days_off >= DETRAINING_RETURN_MIN_DAYS_OFF:
         peak = max([w["total_km"] for w in local_week_volumes(
@@ -205,6 +213,11 @@ def week_targets(user_id: int, *, db: Session, today: date | None = None,
         # #318: ориентир минут длительной под потолок км — LLM планирует минутами
         "long_run_min_hint": long_run_min_hint(user_id, user, long_run_km_max, db=db),
         "hard_days_max": hard_days_max,
+        # 12.09.2026: фаза returning/stabilizing/stable и почему качественных дней столько
+        "athlete_status": status["phase"],
+        "quality_ladder": ladder,
+        # M3.2 (12.09.2026): нужен полевой тест ПАНО — stable и нет свежего полевого значения
+        "lthr_test_due": lthr_field.is_due(user_id, db=db, phase=status["phase"]),
         "detraining_return": detraining_return,     # #289: возврат после паузы — объём ≤ 65% пика
         "illness": context_block(ill, today),       # #322: болезнь/пауза — что знает система
         "days_off": days_off,

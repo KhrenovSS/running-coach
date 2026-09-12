@@ -257,9 +257,10 @@ base64 → temp-файл на хосте → `claude -p --allowedTools Read --ad
 Ошибки SDK ловить цепочкой от частного к общему; `except Exception`/`except: pass` запрещены.
 
 Кэш (порядок `tools` → `system` → `messages`): `system[0]` — персона + контракт безопасности +
-формат + дайджест `key_rules` (**брейкпойнт 1**); `system[1]` — профиль пользователя
-(**брейкпойнт 2**); волатильное (дата, `AthleteState`, `SafetyVerdict`, реплика) — только в
-последнем user-блоке. В `system[0]/[1]` ни дат, ни timestamp, ни UUID; схемы с `sort_keys=True`;
+формат + дайджест `key_rules` (**брейкпойнт 1**; с 12.09.2026 дайджест зависит от фазы статуса
+подопечного — `key_rules_returning` гайдов 46/47/61 входят только при `returning`, две версии кэша);
+`system[1]` — профиль пользователя (**брейкпойнт 2**); волатильное (дата, `AthleteState`,
+`SafetyVerdict`, реплика, блок `athlete_status`) — только в последнем user-блоке. В `system[0]/[1]` ни дат, ни timestamp, ни UUID; схемы с `sort_keys=True`;
 набор tools между запросами не меняется. Тест — `test_prompt_stability.py`.
 История: окно 8 сообщений из `coach_messages`; guides в промпт целиком не инлайнятся
 (проза — через `search_guides`, ≤3 чанка × ≤400 слов).
@@ -470,8 +471,8 @@ PDF-текст). Книги → конспекты-гайды своими сл�
   map/reduce `distill_books.py` (REDUCE знает только 4 seed-темы → дублировал бы 40–46).
   Подключение: `_TYPE_GUIDE_TERMS["race"]` → гайд 48; флаг жары в разборе → третий запрос
   (гайд 49); план недели при `detraining_return` → `plan_guides_queries` (гайды 47 + 61;
-  `build_extras.guides_query` принимает список). Дайджест — 60 строк (ориентир поднят до ≤ 60,
-  гвард `tests/coach/test_guide_queries.py`). Детерминированный гейт болезни — ✅ 07.09.2026 (#322:
+  `build_extras.guides_query` принимает список). Дайджест — ≤ 64 строк (гвард
+  `tests/coach/test_guide_queries.py`; с 12.09.2026 — по фазе статуса: 54 при stable, 62 при returning). Детерминированный гейт болезни — ✅ 07.09.2026 (#322:
   `coach/illness.py`, `ILLNESS_PAUSE_DAYS`, правило 21 safety, `CoachTurn.illness`).
 - ✅ **E3 — чанки методики инлайном (#242, 25.08.2026)**: `_build_extras` +=
   `method_guides` — для разбора запросы из фактов (`knowledge/loader.review_guides_queries`:
@@ -554,10 +555,10 @@ lap-сообщения (готовая разметка интервалов) и
   (repositories, окно 45 дней); `lthr`/`ltsp` в METRIC_FIELDS. Нормативный темп сегментов
   от `ltsp` (#273): нет истории на потолке зоны → pace_hint = ltsp + LTSP_ZONE_OFFSET_S[зона]
   («правило шести секунд»), `pace_source="threshold"` — «мало данных» для ускорений закрыт.
-  M3.2 (полевой тест ПАНО — валидация lthr Coros) — за владельцем.
+  M3.2 (полевой тест ПАНО — валидация lthr Coros) — ✅ 12.09.2026 (`coach/lthr_field.py`, `analysis/lthr_test.py`,
+  автоназначение в плане, кнопки подтверждения, `latest_lthr` предпочитает полевое значение).
 
-Зависимости: F0 → F1 → (F2 ∥ F3 ∥ F7) → F4 → (F5 ∥ F6). Осталось: M3.2 (полевой тест ПАНО —
-за владельцем), F7-часть «GAP vs Coros Effort Pace»; хвосты §7 METRICS_GUIDE закрыты 04.09.2026
+Зависимости: F0 → F1 → (F2 ∥ F3 ∥ F7) → F4 → (F5 ∥ F6). Осталось: F7-часть «GAP vs Coros Effort Pace»; хвосты §7 METRICS_GUIDE закрыты 04.09.2026
 правилами 17–20 (#289 — остаток только поправка `hr_vs_baseline` при detraining).
 
 Literal-перечень флагов assessment — `schemas.FlagValue` (append-only, 21 значение, зеркало в
@@ -591,7 +592,9 @@ Literal-перечень флагов assessment — `schemas.FlagValue` (append
   `cap_week_volume` (лёгкие/восстановительные дни пропорционально до `target_km`, допуск
   `WEEK_VOLUME_TOLERANCE_PCT` 5 %, дни с сегментами фиксированы, `meta.week_volume_capped`); при закрытом
   интенсиве `apply_safety_to_targets` ставит `target_km = prev_week_km` (`volume_held_by_safety`, шапка «объём
-  без роста») — решение владельца 06.09; цикл финализации — два прохода; `recent_athlete_requests` (7 дн) в
+  без роста») — решение владельца 06.09; **с 12.09.2026 — только при правилах усталости/здоровья**
+  (`volume_hold`, `INTENSITY_ONLY_SAFETY_RULES`: блок правилами 16/17 объём не держит, `volume_growth_kept`);
+  цикл финализации — два прохода; `recent_athlete_requests` (7 дн) в
   контексте плана.
 - ✅ **06.09 — ускорения по усилию и честный даунгрейд**: `is_stride`-сегменты (15–20 с) не клэмпятся по
   зоне/пульсу, усилие `STRIDE_DEFAULT_EFFORT` «свободно», компактная строка включает отдых («5×20 сек
@@ -603,8 +606,8 @@ Literal-перечень флагов assessment — `schemas.FlagValue` (append
   `easy_too_hard_counts_by_day` → `quality_reopens_at` → `quality_allowed_from_days_ahead`, каждый день плана
   финализируется по `project_state`; шапка «интенсив не раньше Чт (safety)»; `HARD_SHARE_LOOKBACK_DAYS = 7`.
   Смежно (методика): `EASY_RUN_Z3_TOLERANCE_PCT` 10 → 20 % + критерий среднего пульса выше Z2,
-  `long_run_max_pct` 40 % при < 30 км/нед или ≤ 4 пробежек, `PLAN_EASY_MIN_MINUTES` 25 → 30, при плоском
-  объёме `run_days_max` не больше прошлой недели.
+  `long_run_max_pct` 40 % при < 30 км/нед (с 12.09.2026 — < 40 км) или ≤ 4 пробежек, `PLAN_EASY_MIN_MINUTES` 25 → 30, при плоском
+  объёме `run_days_max` не больше прошлой недели (с 12.09.2026 — только при hold по усталости/здоровью).
 - ✅ **07.09 — гейт болезни (#322)**: `CoachTurn.illness` (`IllnessReport`: sick/recovered, kind, days_ago),
   `coach/illness.py` (`params_json["illness"]`, без миграции; `record_illness`, `blocked_reason`),
   `ILLNESS_PAUSE_DAYS[kind]` (ОРЗ/грипп 14, ангина 21, пневмония 30, другое 7 дн.), правило 21 safety,
@@ -637,6 +640,26 @@ Literal-перечень флагов assessment — `schemas.FlagValue` (append
   (`ConcernReport`), `context_block` → `extras["concerns (params)"]`; колено убрано из профиля
   (`turn_context.profile`), промпта, `skills/pain.py`, вечернего вопроса (только при активной проблеме) и
   `handlers/pain.py` (`pain_location` — из активной травмы или `unspecified`); новый #328.
+
+### 12.09.2026 — статус подопечного из данных, лестница качественных дней, длительная, объём, тест ПАНО (решения владельца)
+
+- ✅ **WP1 длительная**: `LONG_RUN_LOW_VOLUME_KM` 30 → 40 (40 % недели до 40 км), причина `cap_long_run` и карточка
+  отчёта от одной формулы `long_run_max_pct`; #335/#336 закрыты.
+- ✅ **WP2 объём**: `planning_safety.volume_hold` — плоский объём только при правилах усталости/здоровья;
+  блок правилами `INTENSITY_ONLY_SAFETY_RULES` (16/17…) объём не держит (`volume_growth_kept`).
+- ✅ **WP3 M3.2 полевой тест ПАНО**: `coach/lthr_field.py` + `analysis/lthr_test.py` + `handlers/lthr.py`;
+  автоназначение при `stable` (`lthr_test_due`), число по треку, кнопки подтверждения, `latest_lthr` с полевым
+  приоритетом, пересчёт 28 дней, гайд 31. Рабочий чек-лист — `TASK_2026-09-12_status_and_lthr.md`.
+
+- ✅ **Персона без «возвращающегося после долгого перерыва»**: фазу `returning`/`stabilizing`/`stable`
+  считает `coach/training_status.py` (полные недели с ≥ 2 пробежками, `STATUS_STABLE_WEEKS` = 4, паузы),
+  блок `athlete_status (computed)` — в today-контексте каждого хода; `build_system_blocks(profile, phase)`.
+- ✅ **Дайджест по фазе**: front-matter блок `key_rules_returning:` (гайды 46/47/61) — в system[0] только при
+  `returning`; `test_guide_queries.py` проверяет обе фазы.
+- ✅ **Лестница качественных дней** `coach/quality_ladder.py` вместо `PLAN_QUALITY_DAYS_MAX = 1`: уровень 1→3
+  по переносимости темповых/интервальных за 4 недели (RPE, боль, `hr_vs_baseline.z`, флаги, утреннее
+  восстановление/HRV); `week_targets["hard_days_max"]`, `["quality_ladder"]`, `["athlete_status"]`.
+  Safety (`apply_safety_to_targets`) главнее. Прод 12.09 (read-only): user 2 — `stabilizing`, уровень 1.
 
 ### 11.09.2026 — техдолг, страховки, мелочи аудита (детали — CHANGELOG, 12 записей за день)
 
@@ -682,7 +705,7 @@ Literal-перечень флагов assessment — `schemas.FlagValue` (append
    `DailyMetrics.sleep_*` (см. D8 ниже и CHANGELOG 30.08)**; правило «недосып→осторожнее»
    #254 (данные сна теперь есть); #232 (repair performance), #249 (recovery-шкала 20/70/90),
    #255 (осадки в разбор). **M2.1 разбора (HRR) и M3.1 (зоны/темпы от LTHR/LTSP) —
-   ✅ 01.09.2026 (F3/F4); осталось M3.2 — полевой тест ПАНО (за владельцем); не путать
+   ✅ 01.09.2026 (F3/F4); M3.2 — полевой тест ПАНО ✅ 12.09.2026; не путать
    M2.1 разбора с НАЗНАЧЕНИЕМ по сегментам (`segments.py`, в коде «M2.1»).**
 
 ## 10. Тесты (`tests/coach/`)
@@ -746,7 +769,8 @@ CoachError → сообщение погибло. Исправлено: `send_md
 ## 12. Принятые допущения (менять по слову владельца)
 - **Зоны — от ПАНО (01.09.2026)**: лестница 81/89/100/105% LTHR (Coros, окно свежести
   45 дней), fallback %max_hr при отсутствии/невалидном lthr; история пересчитана
-  (решение владельца). LTHR часов не валидирован полевым тестом — M3.2.
+  (решение владельца). С 12.09.2026 якорь — полевой ПАНО (`params_json["lthr_field"]`, 180 дн), затем Coros,
+  затем %max_hr (M3.2).
 
 - Боль — 3 кнопки: `PAIN_LEVELS = (0 «не беспокоило», 2 «немного», 5 «мешало»)`;
   третья = `PAIN_STOP_LEVEL` → немедленный вердикт «Отдых». Колонка Integer держит шкалу 0–10.

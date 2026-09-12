@@ -597,6 +597,47 @@ def test_apply_safety_holds_volume_flat():
     assert out2["target_km"] == 27.9 and "volume_held_by_safety" not in out2
 
 
+def test_apply_safety_volume_hold_only_for_fatigue_rules():
+    """Решение владельца 12.09.2026: интенсив закрыт только правилами распределения нагрузки
+    (16/17…) → объём растёт (+10 %), частота не урезается; усталость/здоровье или пустой список
+    сработавших правил → объём плоский (как 06.09)."""
+    from src.coach.contracts import ReasoningStep, SafetyVerdict
+    from src.coach.planning_safety import apply_safety_to_targets, volume_hold
+    base = {"hard_days_max": 1, "quality_z3_km_max": 5.6, "quality_z4_km_max": 2.8,
+            "target_km": 27.9, "prev_week_km": 25.4, "long_run_km_max": 11.2,
+            "run_days_max": 5, "rest_days_min": 2, "prev_week_runs_max": 4}
+    reasons = [ReasoningStep(rule="p1_safety", decision="", reason="лёгкие слишком быстро")]
+    allowed = ("rest", "recovery", "easy", "long")
+
+    only17 = SafetyVerdict(max_zone=2, allowed_types=allowed, reasons=reasons,
+                           triggered=["easy_runs_too_hard"])
+    assert volume_hold(only17) is False
+    out = apply_safety_to_targets(base, only17)
+    assert out["hard_days_max"] == 0 and out["quality_z3_km_max"] == 0.0        # интенсив закрыт
+    assert out["target_km"] == 27.9 and "volume_held_by_safety" not in out      # объём растёт
+    assert out["volume_growth_kept"] == "intensity_only"
+    assert out["run_days_max"] == 5 and out["long_run_km_max"] == 11.2           # не урезаны
+
+    both16_17 = SafetyVerdict(max_zone=2, allowed_types=allowed, reasons=reasons,
+                              triggered=["week_intensity_overload", "easy_runs_too_hard"])
+    assert volume_hold(both16_17) is False
+
+    fatigue = SafetyVerdict(max_zone=2, allowed_types=allowed, reasons=reasons,
+                            triggered=["recovery_fatigued"])
+    assert volume_hold(fatigue) is True
+    held = apply_safety_to_targets(base, fatigue)
+    assert held["target_km"] == 25.4 and held["volume_held_by_safety"] is True
+    assert held["run_days_max"] == 4
+
+    mixed = SafetyVerdict(max_zone=2, allowed_types=allowed, reasons=reasons,
+                          triggered=["easy_runs_too_hard", "hrv_low"])
+    assert volume_hold(mixed) is True
+    assert apply_safety_to_targets(base, mixed)["target_km"] == 25.4
+
+    empty = SafetyVerdict(max_zone=2, allowed_types=allowed, reasons=reasons)   # triggered=[]
+    assert volume_hold(empty) is True                                           # консервативно
+
+
 def test_cap_week_volume_keeps_structured_days_and_leaves_trail():
     """06.09.2026: день с сегментами не масштабируется (иначе 39 мин при сегментах на 42);
     урезанные копии несут след «урезано кодом» в rationale."""

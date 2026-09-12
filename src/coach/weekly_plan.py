@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from src.coach import concerns, illness, planning
+from src.coach import concerns, illness, lthr_field, planning
 from src.coach.contracts import Prescription, WorkoutProposal
 from src.coach.knowledge.loader import plan_guides_queries
 from src.coach.numeric_check import check_plan_prose
@@ -50,6 +50,7 @@ from src.coach.rules.p1_safety import evaluate_safety
 from src.coach.state import assess_state
 from src.coach.tools.serialize import jsonable
 from src.coach.turn_context import build_extras, recent_athlete_requests
+from src.coach.turn_context import status_phase as _status_phase
 from src.exceptions import CoachError, LLMUnavailableError
 from src.coach.llm.schemas import CoachTurn
 from src.models import Recommendation, User
@@ -215,7 +216,7 @@ def generate_weekly_plan(user_id: int, *, db: Session,
             local_dt(verdict.earliest_next_hard, user))
     today_block = build_today_block(state_json, verdict_json,
                                     fmt_local(user_now(user)), extras=extras)
-    system = build_system_blocks(_profile(user))
+    system = build_system_blocks(_profile(user), phase=_status_phase(extras))
     messages = build_messages(_history(user_id, db=db), today_block, PLAN_PROMPT)
     if athlete_text:
         # Реплика не должна пропасть из истории и athlete_requests (после сборки history —
@@ -254,6 +255,14 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     # Потолок беговых дней на ОСТАТОК недели — детерминированно (решение владельца 02.09.2026)
     run_days_cap = targets["remaining_run_days_max"]
     items, dropped_days = planning.enforce_run_days(items, run_days_cap)
+    # M3.2 (решение владельца 12.09.2026): коуч сам ставит полевой тест ПАНО первым качественным днём,
+    # когда статус stable, интенсив открыт и свежего полевого ПАНО нет (протокол — кодом)
+    test_day = None
+    if targets.get("lthr_test_due") and (targets.get("hard_days_max") or 0) >= 1:
+        items, test_day = lthr_field.place_test(
+            items, quality_from_day=targets.get("quality_allowed_from_days_ahead"))
+        if test_day is not None:
+            logger.info("LTHR field test placed on day +%s for user=%s", test_day, user_id)
 
     first_offset = targets["days_ahead_allowed"][0]
     # День 0 при уже данном назначении на сегодня — осознанная замена (adjusted),
@@ -311,7 +320,11 @@ def generate_weekly_plan(user_id: int, *, db: Session,
                           "частота растёт не быстрее +1 в неделю.")
     for proposal, p in zip(items, prescriptions):
         status = "adjusted" if (proposal.for_days_ahead == 0 and had_today_row) else "planned"
+        lthr_field.mark_test(p, proposal)          # маркер дня-теста в target (M3.2)
         save_prescription(p, state, db=db, status=status)
+    if test_day is not None:
+        plan_notes.append(f"🧪 День +{test_day}: полевой тест ПАНО — 30 мин ровно на максимуме, "
+                          "ПАНО посчитаю по треку и предложу принять.")
     # Отменённые подопечным дни — rest с маркером, ПОСЛЕ гашения прежнего плана
     cancel_tail = _cancel_tail(cancelled, user_id, state, db=db, now_local=now_local)
 

@@ -32,6 +32,13 @@ _TYPE_LABEL = {
 _STATUS_ICON = {"ok": "🟢", "warning": "🟡", "danger": "🔴", "unknown": "⚪"}
 
 
+def type_label(p: Prescription) -> str:
+    """Подпись типа назначения; день полевого теста ПАНО (target.lthr_test, M3.2) — «🧪 Тест ПАНО»."""
+    if (p.target or {}).get("lthr_test"):
+        return "🧪 Тест ПАНО"
+    return _TYPE_LABEL.get(p.workout_type, p.workout_type)
+
+
 def _day_label(when: date | None, today: date | None = None) -> str | None:
     """«воскресенье 31.08» для будущего дня; None — сегодня/нет даты (day label)."""
     today = today or date.today()
@@ -141,7 +148,7 @@ def render_prescription(p: Prescription, max_hr: int | None = None,
     Будущий день (p.when > today) — день в заголовке + пометка «предварительно».
     """
     day = _day_label(p.when, today)
-    title = _TYPE_LABEL.get(p.workout_type, p.workout_type)
+    title = type_label(p)
     segments = visible_segments(p.target)     # ровная пробежка — без разбивки (02.09.2026)
     work = [s for s in segments if s.get("role") == "work"]
     if (work and all(is_stride(s) for s in work)
@@ -191,7 +198,7 @@ def render_prescription_short(p: Prescription, max_hr: int | None = None,
     day = _day_label(p.when, today)
     prefix = (f"План на {day.split()[0]} ({p.when:%d.%m}) без изменений:\n" if day
               else "План на сегодня без изменений:\n")
-    parts = [_TYPE_LABEL.get(p.workout_type, p.workout_type)]
+    parts = [type_label(p)]
     if p.workout_type != "rest":
         if p.target.get("pace_min_km") is not None:
             parts.append(f"темп {format_pace(p.target['pace_min_km'])}/км")

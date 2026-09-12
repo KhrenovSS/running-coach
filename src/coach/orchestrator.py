@@ -60,7 +60,47 @@ def _deterministic_review(user_id: int, session_id: int, *, db: Session) -> str:
                                        kind="review", meta={"fallback": True})
     InsightRepository.finish(session_id, db=db, source="fallback",
                              coach_message_id=msg.id)
+    lthr_test_followup(user_id, session_id, db=db)
     return text
+
+
+def _fmt_pace(sec_per_km: int | None) -> str | None:
+    if not sec_per_km:
+        return None
+    return f"{sec_per_km // 60}:{sec_per_km % 60:02d}/км"
+
+
+def lthr_test_followup(user_id: int, session_id: int, *, db: Session) -> str | None:
+    """M3.2 (12.09.2026): день плана был полевым тестом ПАНО и разбор посчитал число → отдельное
+    сообщение с кнопками «принять как якорь зон / оставить Coros». Число — только код; проза LLM его
+    не ставит. Никогда не роняет разбор. Возврат — текст карточки (тесты) или None."""
+    try:
+        from src.coach.lthr_field import TEST_TITLE
+        from src.services.repositories import latest_lthr
+        from src.services.telegram_notify import telegram_notify
+        from src.services.workout_insights import get_or_compute
+        block = ((get_or_compute(user_id, session_id, db=db) or {}).get("lthr_test") or {})
+        if not block.get("available"):
+            return None
+        value = int(block["lthr"])
+        current = latest_lthr(user_id, db=db)
+        quality = ("ровно" if block.get("quality") == "ok"
+                   else f"пульс полз (+{block.get('drift_bpm')} уд/мин) — оценка грубая")
+        pace = _fmt_pace(block.get("pace_s_km"))
+        text = (f"{TEST_TITLE}: по треку ПАНО ≈ *{value} уд/мин*"
+                + (f" (сейчас якорь {current})" if current else "")
+                + (f", темп отрезка {pace}" if pace else "") + f", {quality}. "
+                "Принять как якорь зон? Пересчитаю последние 4 недели.")
+        buttons = {"inline_keyboard": [
+            [{"text": f"Принять {value}", "callback_data": f"lthr:set:{value}"}],
+            [{"text": "Оставить как есть", "callback_data": "lthr:ignore"}],
+        ]}
+        telegram_notify(user_id=user_id, text=text, reply_markup=buttons)
+        return text
+    except Exception:
+        logger.warning("lthr_test followup failed for user=%s session=%s", user_id, session_id,
+                       exc_info=True)
+        return None
 
 
 def _merged_flags(llm_flags: list[str], computed: dict | None) -> list[str]:
@@ -121,6 +161,7 @@ def on_workout_completed(user_id: int, session_id: int, *, db: Session,
             effort_match=a.effort_match if a else None,
             carry_forward=a.carry_forward if a else None,
             coach_message_id=reply.assistant_message_id)
+        lthr_test_followup(user_id, session_id, db=db)
         return reply.text
     except (LLMUnavailableError, CoachError) as e:
         logger.info("LLM review fallback for user=%s: %s", user_id, e)

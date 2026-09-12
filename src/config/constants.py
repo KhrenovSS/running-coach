@@ -91,6 +91,10 @@ LTHR_ZONE_2_MAX_PCT: Final[float] = 0.89
 LTHR_ZONE_3_MAX_PCT: Final[float] = 1.00
 LTHR_ZONE_4_MAX_PCT: Final[float] = 1.05
 LTHR_SANITY_MIN: Final[int] = 100        # lthr вне (LTHR_SANITY_MIN, max_hr) → fallback %max_hr
+# Полевой ПАНО (M3.2, 12.09.2026): подтверждённое значение из UserModel.params_json["lthr_field"]
+# главнее Coros столько дней; старше — снова Coros (ре-тест при смене формы, гайд 40).
+# (Field-tested LTHR overrides the watch value while fresh.)
+LTHR_FIELD_MAX_AGE_DAYS: Final[int] = 180
 # Классификация при известном LTHR: recovery целиком в Z1, easy — не выше Z2
 RECOVERY_MAX_LTHR_PCT: Final[float] = 0.81
 EASY_MAX_LTHR_PCT: Final[float] = 0.89

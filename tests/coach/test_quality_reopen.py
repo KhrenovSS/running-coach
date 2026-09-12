@@ -59,7 +59,9 @@ def test_apply_safety_partial_keeps_quality_day():
     assert partial["quality_z3_km_max"] == 2.5
     assert partial["quality_allowed_from_days_ahead"] == 3
     assert partial["quality_blocked_by_safety"] == "2 лёгких слишком быстро"
-    assert partial["target_km"] == 25.4 and partial["volume_held_by_safety"] is True
+    # 12.09.2026 (решение владельца): блок только правилом 17 — объём растёт, лечим темп лёгких
+    assert partial["target_km"] == 27.9 and "volume_held_by_safety" not in partial
+    assert partial["volume_growth_kept"] == "intensity_only"
     full = apply_safety_to_targets(base, verdict)
     assert full["hard_days_max"] == 0 and "quality_allowed_from_days_ahead" not in full
 
@@ -110,7 +112,7 @@ def test_weekly_plan_places_tempo_after_rule17_clears(db_session):
     assert rows[3].workout_type == "tempo" and not rows[3].clamped     # после — остаётся
     reopen = wed.date() + timedelta(days=2)
     assert f"интенсив не раньше" in text and f"{reopen:%d.%m}" in text
-    assert "разгрузка по safety" in text
+    assert "мезоцикла (рост)" in text and "разгрузка по safety" not in text   # 12.09: объём растёт
     assert '"quality_allowed_from_days_ahead": 2' in str(llm.calls[0])
 
 

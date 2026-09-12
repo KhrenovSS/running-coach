@@ -101,7 +101,7 @@ docker stop pg-test
 In-memory БД (и PG-схема) живёт **весь прогон** — данные тестов не чистятся между
 файлами. Поэтому `make_user` в каждом тесте должен получать уникальные
 `chat_id`/`email` (иначе `UNIQUE constraint failed`). Занятые диапазоны chat_id:
-`123456789/999/111/222` (test_models, auto_sync), `77xxx` (backfill), `88xxx` (test_lthr_pipeline),
+`123456789/999/111/222` (test_models, auto_sync), `77xxx` (backfill), `85xxx` (test_lthr_field), `86xxx` (test_recovery_quality_gate), `87xxx` (test_prediction_log), `88xxx` (test_lthr_pipeline),
 `89xxx` (test_week_structure), `90001-90002` (skills), `93xxx` (test_workout_insights; `9380x` hr_max #237,
 `9390x` test_telegram_account, `9395x` test_settings_route),
 `94xxx` (hr_max), `95xxx` (stage0), `96xxx` (auto_sync), `97xxx` (dedup),

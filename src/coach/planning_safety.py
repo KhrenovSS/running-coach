@@ -18,7 +18,9 @@ from src.coach.config import (
     EASY_TOO_HARD_LOOKBACK_DAYS,
     HARD_SHARE_MIN_MINUTES_7D,
     HARD_TYPES,
+    INTENSITY_ONLY_SAFETY_RULES,
     LONG_RUN_CAP_TOLERANCE_KM,
+    LONG_RUN_MAX_PCT_WEEK,
     LONG_RUN_MAX_MIN,
     PLAN_EASY_MIN_MINUTES,
     PLAN_RUN_DAYS_FLOOR,
@@ -113,6 +115,16 @@ def quality_reopens_at(state: AthleteState, counts: dict[int, int], *, now: date
     return None
 
 
+def volume_hold(verdict: SafetyVerdict) -> bool:
+    """Держать ли объём недели плоским при закрытом интенсиве (решение владельца 12.09.2026):
+    да — если сработало хоть одно правило усталости/здоровья или список пустой (консервативно);
+    нет — если интенсив закрыт только правилами распределения нагрузки (INTENSITY_ONLY_SAFETY_RULES).
+    (Hold weekly volume flat unless the block is intensity-distribution only.)"""
+    if not verdict.triggered:
+        return True
+    return any(t not in INTENSITY_ONLY_SAFETY_RULES for t in verdict.triggered)
+
+
 def apply_safety_to_targets(targets: dict[str, Any], verdict: SafetyVerdict, *,
                             quality_from_days_ahead: int | None = None) -> dict[str, Any]:
     """Согласовать потолки недели с вердиктом safety; без блокировки — без изменений.
@@ -120,9 +132,11 @@ def apply_safety_to_targets(targets: dict[str, Any], verdict: SafetyVerdict, *,
     Интенсив закрыт на всё окно → потолки качества = 0. `quality_from_days_ahead` = N
     (прогноз `quality_reopens_at`, 07.09.2026) → качественный день остаётся, но только с
     for_days_ahead ≥ N (`quality_allowed_from_days_ahead`; раньше — clamp по прогнозному
-    состоянию режет сам). В обоих случаях объём плоский и частота прошлой недели (решение
-    владельца 06.09.2026 + 07.09.2026). Чистая функция; `quality_blocked_by_safety` — первая
-    причина вердикта для шапки/промпта. (Pure: reconcile weekly caps with the verdict.)
+    состоянию режет сам). Объём и частота: плоские (цель = прошлая неделя) только при усталости/
+    здоровье (`volume_hold`); при блоке лишь по распределению нагрузки рост +10 % сохраняется
+    (`volume_growth_kept`, решение владельца 12.09.2026 — отменяет «всегда плоский» от 06.09).
+    Чистая функция; `quality_blocked_by_safety` — первая причина вердикта для шапки/промпта.
+    (Pure: reconcile weekly caps with the verdict.)
     """
     if not quality_blocked(verdict):
         return targets
@@ -137,11 +151,14 @@ def apply_safety_to_targets(targets: dict[str, Any], verdict: SafetyVerdict, *,
             out["remaining_hard_days_max"] = 0
         out["quality_z3_km_max"] = 0.0
         out["quality_z4_km_max"] = 0.0
-    # Решение владельца 06.09.2026: в safety-разгрузку объём недели плоский — цель = прошлая
-    # неделя, потолок длительной пересчитан; рост +10 % вернётся, когда интенсив снова открыт
-    # (owner decision: hold weekly volume flat while quality is blocked by safety)
+    # 06.09.2026: в safety-разгрузку объём недели плоский — цель = прошлая неделя, потолок длительной
+    # пересчитан. 12.09.2026: только при усталости/здоровье; блок по распределению нагрузки
+    # (правила 16/17 и родня) объём не держит — быстрые лёгкие лечатся темпом, не километрами.
+    # (Hold volume flat only for fatigue/health blocks; intensity-only blocks keep the +10 % growth.)
     prev_km = out.get("prev_week_km") or 0.0
-    if prev_km > 0 and (out.get("target_km") or 0.0) > prev_km:
+    if prev_km > 0 and (out.get("target_km") or 0.0) > prev_km and not volume_hold(verdict):
+        out["volume_growth_kept"] = "intensity_only"
+    elif prev_km > 0 and (out.get("target_km") or 0.0) > prev_km:
         out["target_km"] = round(prev_km, 1)
         if "remaining_km" in out and "done_km" in out:
             out["remaining_km"] = round(max(0.0, out["target_km"] - (out["done_km"] or 0.0)), 1)
@@ -170,7 +187,7 @@ def cap_long_run(proposal: WorkoutProposal, prescription: Prescription,
     потолке 8,4 км, а отчёт обещал «без роста длительной»).
 
     Километры — тот же ориентир, что печатает карточка (`prescription.predicted` из
-    predict_volume); потолок км — `long_run_km_max` (30 % недели, при long_run_hold — прошлая
+    predict_volume); потолок км — `long_run_km_max` (30/40 % недели, при long_run_hold — прошлая
     длительная); минут — `long_run_min_max` (150). Нет оценки темпа → только потолок минут
     (нет данных → не выдумываем). Возврат: (урезанная копия proposal | None, заметка | None).
     (Deterministic long-run cap; pure — returns a trimmed copy or (None, None).)
@@ -193,12 +210,15 @@ def cap_long_run(proposal: WorkoutProposal, prescription: Prescription,
     new_min = duration
     new_km = proposal.distance_km
     reason = None
+    # Доля — из targets (30 % / 40 %, 12.09.2026), не захардкоженное «30 %»
+    pct_reason = (f"потолок {(targets.get('long_run_max_pct') or LONG_RUN_MAX_PCT_WEEK) * 100:.0f} % "
+                  "недельного объёма")
     if cap_km and km_est and km_est > cap_km + LONG_RUN_CAP_TOLERANCE_KM:
         new_min = math.floor(duration * cap_km / km_est)
-        reason = "потолок 30 % недельного объёма"
+        reason = pct_reason
     if cap_km and proposal.distance_km and proposal.distance_km > cap_km + LONG_RUN_CAP_TOLERANCE_KM:
         new_km = cap_km
-        reason = reason or "потолок 30 % недельного объёма"
+        reason = reason or pct_reason
     if cap_min and new_min > cap_min:
         new_min = float(cap_min)
         reason = f"не дольше {cap_min:.0f} мин"

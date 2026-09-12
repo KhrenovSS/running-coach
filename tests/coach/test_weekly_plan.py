@@ -372,7 +372,8 @@ def test_weekly_plan_caps_long_run_by_code(athlete_with_history, db_session, mon
     est_km = long_row.volume_json["duration_min"] / 4.0
     assert est_km <= cap_km + 0.3 + 0.15, (est_km, cap_km)   # допуск + округление минут
     assert long_row.volume_json["duration_min"] < 70
-    assert "⚠️ Длительная урезана до" in text and "потолок 30 % недельного объёма" in text
+    pct = targets["long_run_max_pct"]
+    assert "⚠️ Длительная урезана до" in text and f"потолок {pct * 100:.0f} % недельного объёма" in text
     msg = db_session.query(CoachMessage).filter_by(user_id=uid, kind="plan", role="assistant") \
         .order_by(CoachMessage.id.desc()).first()
     assert msg.meta_json["long_run_capped"] is True
@@ -487,12 +488,17 @@ def test_weekly_plan_volume_cap_skips_structured_day_and_leaves_trail(athlete_wi
     llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
     uid = athlete_with_history.id
     _seed_prev_runs(db_session, uid)
-    text = generate_weekly_plan(uid, db=db_session, llm=llm, now=_sunday(athlete_with_history))
+    sunday = _sunday(athlete_with_history)
+    text = generate_weekly_plan(uid, db=db_session, llm=llm, now=sunday)
     assert text is not None and "Объём недели урезан" in text
     rows = db_session.query(Recommendation).filter_by(user_id=uid, status="planned").all()
     structured = [r for r in rows if (r.target_json or {}).get("segments")]
     assert len(structured) == 1 and structured[0].volume_json["duration_min"] == 42   # из сегментов
-    trimmed = [r for r in rows if r.workout_type == "easy" and not (r.target_json or {}).get("segments")]
+    # Только два 90-минутных лёгких дня (+1, +5): длительная 40 мин с 12.09 (потолок 40 %) не режется
+    # и переименовывается в easy без следа — её здесь не считаем
+    trimmed = [r for r in rows if r.for_date in {sunday.date() + timedelta(days=1),
+                                                  sunday.date() + timedelta(days=5)}]
+    assert len(trimmed) == 2
     assert trimmed and all(r.volume_json["duration_min"] < 90 for r in trimmed)
     assert all(any(x.startswith("урезано кодом") for x in r.proposal_json["rationale"]) for r in trimmed)
     structured_line = next(l for l in text.splitlines() if "5×20 сек свободно" in l)

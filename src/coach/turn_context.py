@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from src.coach.contracts import Prescription
 from src.coach import concerns
 from src.coach.illness import context_block, illness_state
+from src.coach import training_status
 from src.coach.knowledge.loader import review_guides_queries
 from src.coach.knowledge.loader import search as guide_search
 from src.coach.llm.config import (
@@ -38,6 +39,13 @@ def profile(user: User) -> dict:
         # Травмы/проблемы — НЕ здесь: они протухают (coach/concerns.py) и живут в today-блоке
         # (concerns expire by design → volatile block, never the cached profile)
     }
+
+
+def status_phase(extras: dict | None) -> str:
+    """Фаза подопечного из уже собранного today-блока — для build_system_blocks (без второго
+    запроса к БД). Нет блока → "stable" (дайджест без возвратных правил). (Phase from extras.)"""
+    block = (extras or {}).get("athlete_status (computed)") or {}
+    return block.get("phase") or training_status.PHASE_STABLE
 
 
 def _as_queries(guides_query: str | list[str] | None) -> list[str]:
@@ -116,6 +124,10 @@ def build_extras(user_id: int, *, db: Session,
     if active:
         # 10.09.2026: актуальные проблемы (травма/боль/перерыв) — только пока активны
         extras["concerns (params)"] = concerns.context_block(active, today_local)
+    # 12.09.2026: статус подопечного (returning/stabilizing/stable) — всегда: это замена статичной
+    # строки персоны «после долгого перерыва»; в волатильном блоке, не в кэшируемом профиле
+    status = training_status.compute_status(user_id, db=db, today=today_local)
+    extras["athlete_status (computed)"] = training_status.context_block(status)
     if session_id is not None:
         detail = run_tool(
             "get_workout_detail", {"session_id": session_id}, user_id=user_id, db=db)

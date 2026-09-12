@@ -7,9 +7,10 @@ tags: техника бега, каденс, дыхание, реабилита�
 key_rules:
   cadence_target_steps_per_min: 180
   downhill_incline_max_pct: 3
+  strides_reps_per_session: 8
+key_rules_returning:
   no_form_loss_break_days: 5
   first_third_return_volume_pct_of_prior_peak: 33
-  strides_reps_per_session: 8
 ---
 
 ## Техника: каденс и постановка стопы

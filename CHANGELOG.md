@@ -2,6 +2,79 @@
 
 All notable changes to this project are tracked here.
 
+## [12.09.2026] — Полевой тест ПАНО (M3.2): коуч сам назначает, число считает код, якорь зон по кнопке (WP3)
+
+### Added
+- `src/coach/lthr_field.py`: полевой ПАНО в `UserModel.params_json["lthr_field"]` (без миграции): `set_field_lthr`
+  (+ аудит `settings.changed`), `is_due` (статус `stable` и нет полевого значения моложе `LTHR_FIELD_MAX_AGE_DAYS` = 180),
+  протокол `test_proposal` (race: разминка 15 мин Z2 → 30 мин Z4 «ровно, максимум, который удержишь все 30 мин»
+  → заминка 10 мин Z1), `place_test` (первый качественный день плана → тест; без качественных — первый лёгкий не
+  раньше `quality_allowed_from_days_ahead`, не длительная), маркер `target_json["lthr_test"]`, `reanalyze_recent`
+  (пересчёт тренировок за `LTHR_REANALYZE_DAYS` = 28 после смены якоря).
+- `services/repositories.latest_lthr`: свежий полевой ПАНО (`field_lthr`) главнее Coros — единственная точка якоря
+  для всех потребителей зон; `athlete_status.zone_anchor` = lthr_field | coros | max_hr.
+- `src/analysis/lthr_test.py` (чистая): 30-мин окно с максимальным средним пульсом по времени (учёт пауз/дропаутов),
+  ПАНО = средний пульс последних `LTHR_TEST_WINDOW_MIN` = 20 мин, дрейф 10-я → 30-я мин (> 8 уд/мин → `quality=rough`),
+  темп окна, покрытие пульсом ≥ 90 %, санити `LTHR_SANITY_MIN < ПАНО < max_hr`; блок `computed["lthr_test"]` в
+  insights только для дня с маркером плана (`_plan_for_session` отдаёт `lthr_test`), `INSIGHTS_SCHEMA_VERSION` 10 → 11.
+- Разбор (`orchestrator.lthr_test_followup`, оба пути): карточка «🧪 Тест ПАНО: по треку N уд/мин (сейчас якорь M),
+  темп …» с кнопками `lthr:set:N` / `lthr:ignore`; Telegram `handlers/lthr.py`: кнопки и команда `/lthr <уд/мин>`
+  (ручной ввод), запись + пересчёт 28 дней + потолки Z1–Z4 в ответе.
+- План: `week_targets["lthr_test_due"]`, размещение теста кодом в `weekly_plan` после `enforce_run_days`, заметка
+  «🧪 День +N: полевой тест ПАНО…», подпись «🧪 Тест ПАНО» в карточках (`render.type_label`), строка PLAN_PROMPT,
+  запрос гайда 31 в `plan_guides_queries`. Новый гайд `31_lthr_field_test.md` (протокол, чтение результата, устаревшее).
+- Тесты: `tests/test_lthr_field.py` (85xxx), `tests/coach/test_lthr_plan.py`; всего 1063.
+
+## [12.09.2026] — Объём недели растёт при интенсиве, закрытом только правилами 16/17 (решение владельца, WP2)
+
+### Changed
+- `planning_safety.volume_hold(verdict)`: объём плоский (`target_km = prev_week_km`, частота не выше прошлой недели,
+  потолок длительной от прошлой недели) — только если сработало правило усталости/здоровья (HRV, recovery, боль,
+  сон, болезнь, detraining, монотонность, ACWR/ATI, серия тяжёлых, нет данных) или список `triggered` пуст
+  (консервативно). Блок лишь правилами распределения нагрузки (`INTENSITY_ONLY_SAFETY_RULES` в `coach/config.py`:
+  `week_intensity_overload`, `easy_runs_too_hard`, `quality_volume_exceeded`, `downhill_load`, `hard_days_too_close`,
+  `poor_interval_recovery`, `recovery_hours`) объём не держит — `targets["volume_growth_kept"] = "intensity_only"`,
+  шапка «рост · без интенсива (safety)», строка PLAN_PROMPT «лечим темп лёгких, не километры». Отменяет часть решения
+  06.09.2026 («всегда плоский»). Анти-дрейф — `tests/test_coach_config.py` (список ⊆ ключей p1_safety).
+
+## [12.09.2026] — Доля длительной 40 % до 40 км/нед (решение владельца, WP1)
+
+### Changed
+- `LONG_RUN_LOW_VOLUME_KM` 30 → 40: длительная до 40 % недели при объёме < 40 км или ≤ 4 пробежках, 30 % выше
+  (`long_run_max_pct`). Причина урезания в `cap_long_run` берёт процент из `targets["long_run_max_pct"]`, карточка
+  «Итоги недели» (`render_week_report`) сравнивает с той же формулой, а не с константой 30 % (расходилась с отчётом
+  при малом объёме). Гайд 45: `long_run_max_pct_of_week = 25` снято из `key_rules` в прозу (#336 — LLM видел цифру
+  строже кода). `LOAD_PROGRESSION["max_monthly_increase_pct"]` удалена (#335 — не использовалась).
+- Рабочий чек-лист решений 12.09 — `docs/coach/TASK_2026-09-12_status_and_lthr.md` (точка возобновления).
+
+## [12.09.2026] — Статус подопечного из данных и лестница качественных дней (решение владельца)
+
+### Changed
+- **Персона без «возвращающегося после долгого перерыва»** (`src/coach/llm/prompts.py`): стаж, регулярность,
+  паузы и ограничения LLM получает блоком `athlete_status (computed)` в today-контексте (всегда, в
+  волатильном блоке — не в кэшируемом профиле). Фазу считает новый `src/coach/training_status.py`:
+  `returning` (сейчас пауза ≥ 6 дн или пауза ≥ 14 дн ещё «не отработана» — прошло меньше дней, чем она
+  длилась, гайд 61), `stabilizing` (серия полных недель с ≥ `STATUS_MIN_RUNS_PER_WEEK` = 2 пробежками
+  короче `STATUS_STABLE_WEEKS` = 4; пауза ≥ 6 дн через границу недель рвёт серию), `stable`. Ограничения
+  (болезнь/травма/detraining) — списком из уже существующих источников (`illness`, `concerns`).
+- **Дайджест key_rules по фазе** (`knowledge/loader.key_rules_digest(phase)`): «возвратные» правила гайдов
+  47 (ходьба→бег, `entry_session_minutes_max`), 61 (`return_plan_*`), 46 (`no_form_loss_break_days`,
+  `first_third_return_volume_pct_of_prior_peak`) вынесены во front-matter блок `key_rules_returning:` и
+  попадают в system[0] только при `returning` (54 строки при stable, 62 при returning; гвард ≤ 64).
+  `build_system_blocks(profile, phase)` — фаза из уже собранного today-блока (`turn_context.status_phase`).
+- **Качественных дней в плане — лестница по переносимости** (`src/coach/quality_ladder.py` вместо константы
+  `PLAN_QUALITY_DAYS_MAX = 1` «возврат после травмы колена»): по темповым/интервальным за
+  `QUALITY_LADDER_WEEKS` = 4 недели читаются тап тяжести (≥ `QUALITY_RPE_HARD` = 8 — плохо), боль > 0,
+  `hr_vs_baseline.z` ≥ 2, флаги `hr_above_baseline`/`poor_interval_recovery`/`hard_days_too_close`,
+  recovery < 70 % и HRV very_low на следующее утро. Уровень 1 — статус не stable / активная травма /
+  < 3 качественных / доля хороших < 75 %; 2 — хорошая переносимость и качественные две недели подряд;
+  3 — две недели по два без сбоев (`PLAN_QUALITY_DAYS_CAP`, гайд 41); последняя плохая — ступень ниже;
+  не больше `run_days_max − 2`. `week_targets` несёт `athlete_status` и `quality_ladder` (LLM видит причину);
+  safety (`apply_safety_to_targets`) по-прежнему главнее и может обнулить.
+- Тесты: `tests/coach/test_training_status.py`, `tests/coach/test_quality_ladder.py`; дайджест по фазам в
+  `test_guide_queries.py`, персона — в `test_concerns.py`. Прод (read-only, 12.09): user 2 → `stabilizing`
+  (3 недели подряд, последняя пауза 6 дн закончилась 23.08), лестница 1 (качественных за 4 нед — 0).
+
 ## [11.09.2026] — Сверка документации с кодом после 11 коммитов дня
 
 ### Changed

@@ -74,6 +74,8 @@ def test_profile_and_persona_have_no_hardcoded_knee(db_session):
     assert "injuries" not in profile(user)
     # «правила боли в колене» (гайд 30) — методика, остаётся; травма подопечного — нет
     assert "травмы колена" not in SYSTEM_PERSONA and "беречь колено" not in SYSTEM_PERSONA
+    # 12.09.2026: «возвращающийся после долгого перерыва» — тоже не константа, а athlete_status
+    assert "после долгого перерыва" not in SYSTEM_PERSONA and "athlete_status" in SYSTEM_PERSONA
 
 
 def test_missing_pain_only_with_active_concern(db_session):

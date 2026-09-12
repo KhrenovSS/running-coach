@@ -521,6 +521,8 @@ training load по темповым зонам.
 
 > Реализация проекта (F4/M3.1): 5-зонная лестница от LTHR — Z5/Z6 Coros свёрнуты в нашу Z5;
 > границы — `LTHR_ZONE_*_MAX_PCT` в `src/config/constants.py`, fallback %max_hr без валидного lthr.
+> M3.2 (12.09.2026): подтверждённый полевой ПАНО (30-мин тест, средний пульс последних 20 мин) главнее
+> значения Coros `LTHR_FIELD_MAX_AGE_DAYS` = 180 дней (`src/coach/lthr_field.py`, `docs/coach/METRICS_GUIDE.md` M3.2).
 
 Это зоны, которые COROS рассчитывает персонально на основе LTHR.
 

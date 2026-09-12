@@ -32,28 +32,33 @@ class Guide:
     meta: dict = field(default_factory=dict)
     key_rules: dict = field(default_factory=dict)
     chunks: tuple[GuideChunk, ...] = ()
+    # правила только для фазы returning (возврат после паузы) — в дайджест при стабильном
+    # стаже не попадают (12.09.2026; см. training_status.py)
+    key_rules_returning: dict = field(default_factory=dict)
 
 
-def _parse_front_matter(lines: list[str]) -> tuple[dict, dict]:
-    """Плоский front-matter + блок key_rules (flat front-matter + key_rules block)."""
+def _parse_front_matter(lines: list[str]) -> tuple[dict, dict, dict]:
+    """Плоский front-matter + блоки key_rules / key_rules_returning
+    (flat front-matter + rule blocks; the returning block is phase-gated in the digest)."""
     meta: dict = {}
-    key_rules: dict = {}
-    in_rules = False
+    blocks: dict[str, dict] = {"key_rules": {}, "key_rules_returning": {}}
+    current: str | None = None
     for line in lines:
         if not line.strip():
             continue
-        if line.startswith("key_rules:"):
-            in_rules = True
+        head = line.rstrip()[:-1] if line.rstrip().endswith(":") else None
+        if head in blocks and not line.startswith(" "):
+            current = head
             continue
-        if in_rules and line.startswith("  "):
+        if current and line.startswith("  "):
             k, _, v = line.strip().partition(":")
-            key_rules[k.strip()] = v.strip()
+            blocks[current][k.strip()] = v.strip()
             continue
-        in_rules = False
+        current = None
         k, _, v = line.partition(":")
         v = v.strip()
         meta[k.strip()] = tuple(t.strip() for t in v.split(",")) if k.strip() == "tags" else v
-    return meta, key_rules
+    return meta, blocks["key_rules"], blocks["key_rules_returning"]
 
 
 def _split_chunks(name: str, body: str, tags: tuple[str, ...]) -> tuple[GuideChunk, ...]:
@@ -85,24 +90,35 @@ def load_guides() -> tuple[Guide, ...]:
         text = path.read_text(encoding="utf-8")
         meta: dict = {}
         key_rules: dict = {}
+        returning: dict = {}
         body = text
         if text.startswith("---"):
             parts = text.split("---", 2)
             if len(parts) >= 3:
-                meta, key_rules = _parse_front_matter(parts[1].splitlines())
+                meta, key_rules, returning = _parse_front_matter(parts[1].splitlines())
                 body = parts[2]
         tags = meta.get("tags", ())
         guides.append(Guide(name=path.name, meta=meta, key_rules=key_rules,
-                            chunks=_split_chunks(path.name, body, tags)))
+                            chunks=_split_chunks(path.name, body, tags),
+                            key_rules_returning=returning))
     return tuple(guides)
 
 
-def key_rules_digest() -> str:
-    """Компактный дайджест key_rules всех guides — для кэшируемого блока промпта."""
+def key_rules_digest(phase: str = "stable") -> str:
+    """Компактный дайджест key_rules всех guides — для кэшируемого блока промпта.
+
+    phase — статус подопечного (training_status.py): «возвратные» правила (key_rules_returning:
+    ходьба→бег, % от пика после паузы) попадают в дайджест только при phase == "returning" —
+    стабильно бегающему их видеть незачем (решение владельца 12.09.2026). Байты стабильны
+    внутри одной фазы (кэш system[0] — две версии). (Phase-gated rule digest.)
+    """
     lines = []
     for g in load_guides():
         for k, v in g.key_rules.items():
             lines.append(f"{g.name}: {k} = {v}")
+        if phase == "returning":
+            for k, v in g.key_rules_returning.items():
+                lines.append(f"{g.name}: {k} = {v}")
     return "\n".join(lines)
 
 
@@ -154,6 +170,9 @@ def plan_guides_queries(targets: dict | None) -> list[str]:
     """
     if (targets or {}).get("detraining_return"):
         return list(_PLAN_RETURN_GUIDE_TERMS)
+    if (targets or {}).get("lthr_test_due"):
+        # M3.2: неделя с полевым тестом ПАНО — протокол теста рядом с общей прогрессией
+        return list(_PLAN_GUIDE_TERMS) + ["полевой тест ПАНО порог 30 минут"]
     return list(_PLAN_GUIDE_TERMS)
 
 

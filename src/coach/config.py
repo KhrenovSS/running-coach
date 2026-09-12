@@ -97,6 +97,15 @@ HRR_POOR_RECOVERY_LOOKBACK_DAYS = 4   # окно поиска флага в не
 # (Intensity ladder — order equals danger order; clamp() only moves DOWN.)
 TYPE_INTENSITY_ORDER = ("rest", "recovery", "easy", "long", "tempo", "interval", "race")
 HARD_TYPES = ("tempo", "interval", "race")
+# Правила safety, закрывающие интенсив ТОЛЬКО из-за распределения нагрузки (перекос Z3+, лёгкие
+# слишком быстро, объём качества, спуски, интервалы между качественными). Решение владельца 12.09.2026:
+# при таком блоке объём недели продолжает расти (+10 %) — лечим темп лёгких, не километры; плоский
+# объём остаётся для усталости/здоровья (HRV, recovery, боль, сон, болезнь, detraining, монотонность…)
+# и для пустого списка сработавших правил (консервативно). Ключи — `triggered` в rules/p1_safety.py.
+# (Safety rules that block quality for intensity-distribution reasons only; volume keeps growing.)
+INTENSITY_ONLY_SAFETY_RULES = ("week_intensity_overload", "easy_runs_too_hard",
+                               "quality_volume_exceeded", "downhill_load",
+                               "hard_days_too_close", "poor_interval_recovery", "recovery_hours")
 # Ускорения (strides, гайды 45/46: 15–20 с с полным восстановлением) — рабочий отрезок не длиннее
 # этого; всё длиннее в Z3+ — качественная работа: safety классифицирует предложение по сегментам,
 # а не по ярлыку (инцидент 04.09.2026: «лёгкий бег» с 4×3 мин в Z3 обошёл гейт интенсива).
@@ -137,7 +146,8 @@ CYCLE_3_1 = {
 
 LOAD_PROGRESSION = {
     "max_weekly_increase_pct": 10,
-    "max_monthly_increase_pct": 30,
+    # месячный ключ (30 %) удалён 12.09.2026 (#335): не использовался, месячный потолок
+    # обеспечивает мезоцикл 3+1 (три недели по +10 %, разгрузка 75 %)
 }
 
 # Маркер строки отдыха, поставленной потому, что подопечный НЕ СМОЖЕТ бегать (не решение
@@ -159,6 +169,16 @@ DETRAINING_RETURN_VOLUME_PCT = 0.65  # гайд 61: первые недели в
 DETRAINING_RETURN_MIN_DAYS_OFF = 14  # потолок объёма — после паузы от 2 недель (гайд 46: до 5 дней
                                      # форма не теряется; 6–13 дней — только правило 14 safety)
 DETRAINING_PEAK_WEEKS = 8          # окно поиска пика недельного объёма до паузы
+
+# --- Статус подопечного (coach/training_status.py, решение владельца 12.09.2026): фаза
+# returning / stabilizing / stable считается из истории тренировок, а не из персоны промпта.
+# Неделя «непрерывности» — полная локальная неделя с ≥ STATUS_MIN_RUNS_PER_WEEK пробежками;
+# STATUS_STABLE_WEEKS таких подряд → stable (возвратные правила гайдов уходят из промпта, лестница
+# качественных дней открывается). Пауза ≥ DETRAINING_MIN_DAYS_OFF рвёт серию.
+# (Athlete continuity status computed from data; replaces the static "returning" persona line.)
+STATUS_STABLE_WEEKS = 4
+STATUS_MIN_RUNS_PER_WEEK = 2
+STATUS_LOOKBACK_WEEKS = 16
 
 # --- Болезнь (#322, 07.09.2026) — гайд 50 (Швец): с температурой не бегать; после выздоровления
 # перерыв по таблице «Оздоровительный бег» (Киев, 1982), берём НИЖНЮЮ границу: ОРЗ/бронхит 2 нед,
@@ -210,10 +230,12 @@ INTERVAL_SEGMENT_MAX_MIN = 5.0     # непрерывный отрезок в Z4
 
 # M1.6: длительная (Дэниелс, гайд 45: ≤25–30% недели или 150 мин)
 LONG_RUN_MAX_PCT_WEEK = 0.30
-# 07.09.2026: правило 30 % — для больших объёмов; при ≤ 4 пробежках или < 30 км/нед длительная
-# 33–40 % — норма (иначе 60-минутная длительная урезалась ради пятого 28-минутного дня)
+# 07.09.2026: правило 30 % — для больших объёмов; при ≤ 4 пробежках или малом недельном объёме
+# длительная 33–40 % — норма (иначе 60-минутная длительная урезалась ради пятого 28-минутного дня).
+# 12.09.2026 (решение владельца): порог малого объёма 30 → 40 км — иначе длительная 90 мин
+# появлялась не раньше 43 км/нед, 120 мин — при 57 км.
 LONG_RUN_MAX_PCT_LOW_VOLUME = 0.40
-LONG_RUN_LOW_VOLUME_KM = 30.0
+LONG_RUN_LOW_VOLUME_KM = 40.0
 LONG_RUN_LOW_VOLUME_RUN_DAYS = 4
 LONG_RUN_MAX_MIN = 150.0
 LONG_RUN_CAP_TOLERANCE_KM = 0.3   # допуск оценки км по темпу истории при урезании длительной (06.09.2026)
@@ -226,6 +248,20 @@ STRIDE_HOWTO = ("Ускорения: плавный разгон, быстро �
 # Длительная как качественный день для правила 12 (04.09.2026): по ярлыку long ИЛИ по
 # длительности; единый источник порога — src/config/constants.py (резолвер ярлыка)
 from src.config.constants import LONG_RUN_MIN_MINUTES  # noqa: E402,F401
+from src.config.constants import DETRAINING_MIN_DAYS_OFF  # noqa: E402,F401
+from src.config.constants import LTHR_FIELD_MAX_AGE_DAYS, LTHR_SANITY_MIN  # noqa: E402,F401
+
+# --- Полевой тест ПАНО (M3.2, решение владельца 12.09.2026): коуч сам ставит 30-минутный тест первым
+# качественным днём при статусе stable и без свежего полевого ПАНО; результат — средний пульс
+# последних LTHR_TEST_WINDOW_MIN минут рабочего отрезка (Friel); подтверждение кнопкой → якорь зон
+# (coach/lthr_field.py, analysis/lthr_test.py). (Field LTHR test protocol constants.)
+LTHR_TEST_WARMUP_MIN = 15          # разминка Z2 перед тестом
+LTHR_TEST_WORK_MIN = 30            # рабочий отрезок: ровно, максимум, который держится 30 мин
+LTHR_TEST_WINDOW_MIN = 20          # ПАНО = средний пульс последних 20 из 30 мин
+LTHR_TEST_COOLDOWN_MIN = 10        # заминка Z1
+LTHR_TEST_DRIFT_MAX_BPM = 8        # рост пульса между 10-й и 30-й минутой выше → quality=rough
+LTHR_TEST_HR_COVERAGE_MIN = 0.9    # доля точек с пульсом в окне ниже → результата нет
+LTHR_REANALYZE_DAYS = 28           # после смены якоря пересчитываем тренировки за это окно
 
 # M1.7: каденс (Дэниелс, гайд 46 — профилактика колена; цель ~180 spm)
 CADENCE_TARGET_SPM = 180
@@ -249,9 +285,19 @@ PLAN_VOLUME_TOLERANCE_PCT = 0.15   # объём выше плана более �
 PLAN_INTENSITY_TOLERANCE_PCT = 0.10  # доля времени выше плановой зоны → флаг
 
 # --- Недельный план (Weekly plan) — решения владельца 29.08.2026 ---
-# Качественных дней в плане недели: возврат после травмы колена — один
-# (guide 41 допускает 3; потолок поднимает владелец осознанно)
-PLAN_QUALITY_DAYS_MAX = 1
+# Качественных дней в плане недели — лестница по переносимости (coach/quality_ladder.py, решение
+# владельца 12.09.2026): 1 — только начинаю / статус не stable / активная травма; 2 — качественные
+# переносятся хорошо; 3 — потолок гайда 41 (hard_days_per_week). Константа «один, возврат после
+# травмы колена» удалена — число считает код по факту тренировок.
+# (Quality days per week: a tolerance ladder 1→3 instead of a fixed constant.)
+PLAN_QUALITY_DAYS_MIN = 1
+PLAN_QUALITY_DAYS_CAP = 3          # гайд 41: hard_days_per_week = 3
+QUALITY_LADDER_WEEKS = 4           # окно оценки переносимости качественных
+QUALITY_LADDER_MIN_SESSIONS = 3    # меньше качественных в окне → уровень 1 (только начинаю)
+QUALITY_LADDER_TOLERATED_SHARE = 0.75  # доля хорошо перенесённых ≥ → можно подниматься
+QUALITY_RPE_HARD = 8               # тап тяжести 0–10 ≥ → качественная перенесена тяжело
+QUALITY_HR_Z_HIGH = 2.0            # hr_vs_baseline.z ≥ → пульс выше ожидаемого сверх σ-шума
+QUALITY_LADDER_RUN_DAYS_GAP = 2    # качественных ≤ беговых дней − 2 (лёгкие между ними, гайд 45)
 # Беговых дней в неделю (решение владельца 02.09.2026): частота растёт не быстрее
 # +STEP к максимуму пробежек за прошлые недели (Дэниелс/Лидьярд: сначала частота,
 # потом объём; возврат после травмы), пол FLOOR, потолок CAP. Остальные дни — отдых.
@@ -270,8 +316,8 @@ EARLIEST_HARD_HIDE_MIN = 60
 
 
 def long_run_max_pct(week_km: float | None, run_days: int | None = None) -> float:
-    """Потолок доли длительной в неделе (гайд 45): 30 % при большом объёме, 40 % при малом
-    (< LONG_RUN_LOW_VOLUME_KM или ≤ LONG_RUN_LOW_VOLUME_RUN_DAYS пробежек). Единственная формула
+    """Потолок доли длительной в неделе (гайд 45, решение владельца 12.09.2026): 30 % при большом
+    объёме, 40 % при малом (< LONG_RUN_LOW_VOLUME_KM = 40 км или ≤ LONG_RUN_LOW_VOLUME_RUN_DAYS пробежек). Единственная формула
     для планирования, недельного отчёта и разбора. (Long-run share cap by weekly volume/frequency.)
     """
     if week_km is not None and 0 < week_km < LONG_RUN_LOW_VOLUME_KM:

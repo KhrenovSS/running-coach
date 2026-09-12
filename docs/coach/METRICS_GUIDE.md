@@ -11,7 +11,7 @@
 `orchestrator._merged_flags`). **M2.2 (план vs факт) реализован 29.08.2026**
 (`schema_version` 3: `plan_vs_actual` + линковка `linked_session_id`).
 **M2.1 РАЗБОРА (HRR, `analysis/intervals.py`) ✅ 01.09.2026 (F3, schema v6); M3.1 (зоны/темпы
-от LTHR/LTSP) ✅ 01.09.2026 (F4); M3.2 (полевой тест ПАНО) — за владельцем.**
+от LTHR/LTSP) ✅ 01.09.2026 (F4); M3.2 (полевой тест ПАНО) ✅ 12.09.2026 (см. ниже).**
 ⚠️ Не путать M2.1 разбора с уже сделанным (01.09.2026)
 НАЗНАЧЕНИЕМ тренировки по сегментам (`segments.py`/`render_segments.py`, помечено в коде «M2.1») —
 это разные вещи: здесь речь о пост-анализе выполненного, там — о структуре предписания.
@@ -130,9 +130,10 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
 ### M1.6 Доля длительной в неделе (Дэниелс, гайд 45)
 - **Формула**: `long_run_share = km_сессии / km_недели` для type=long.
 - **Флаг**: `long_run_share_high` при > `long_run_max_pct(week_km, runs)` (30%; **40%** при
-  < `LONG_RUN_LOW_VOLUME_KM` 30 км/нед или ≤ `LONG_RUN_LOW_VOLUME_RUN_DAYS` 4 пробежек —
-  07.09.2026: правило 30% для малых объёмов урезало 60-минутную длительную) или
-  длительности > `LONG_RUN_MAX_MIN` (150 мин). Та же формула — в `week_targets` и `week_report`.
+  < `LONG_RUN_LOW_VOLUME_KM` **40 км/нед** (12.09.2026, решение владельца; было 30) или
+  ≤ `LONG_RUN_LOW_VOLUME_RUN_DAYS` 4 пробежек — 07.09.2026: правило 30% для малых объёмов урезало
+  60-минутную длительную) или длительности > `LONG_RUN_MAX_MIN` (150 мин). Та же формула — в
+  `week_targets`, `week_report`, карточке `render_week_report` и причине `cap_long_run`.
 
 ### M1.7 Каденс (Дэниелс, гайд 46 — профилактика колена)
 - **Формула**: медианный `avg_cadence` беговых сегментов vs цель
@@ -249,6 +250,8 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
 | `post_race_recovery_violated` (M4.1) | ✅ правило 13 p1_safety: `max_zone=2` + запрет hard на период 1 день/3 км |
 | `downhill_load_high` (M4.2) | ✅ правило 19 p1_safety `downhill_load`: `max_zone=3`, интенсив не раньше +24 ч (колено) — 04.09.2026 |
 | `detraining_expected` (M4.3) | ✅ правило 14 (max_zone=2 + запрет hard) + потолок объёма плана ≤ 65% пика после паузы ≥ 14 дн (`detraining_return`, 04.09.2026); поправка ожиданий `hr_vs_baseline` — `detraining_shift_bpm` (#289, 08.09.2026, см. M4.3) |
+| статус подопечного (12.09.2026) | ✅ `coach/training_status.py`: фаза `returning` (сейчас пауза ≥ `DETRAINING_MIN_DAYS_OFF` = 6 дн, или пауза ≥ 14 дн «не отработана» — прошло меньше дней, чем длилась), `stabilizing` (< `STATUS_STABLE_WEEKS` = 4 полных недель подряд с ≥ `STATUS_MIN_RUNS_PER_WEEK` = 2 пробежками; пауза ≥ 6 дн через границу недель рвёт серию), `stable`; блок `athlete_status` в today-контексте, дайджест `key_rules_returning` — только при `returning` |
+| лестница качественных дней (12.09.2026) | ✅ `coach/quality_ladder.py` → `week_targets.hard_days_max`: качественные за `QUALITY_LADDER_WEEKS` = 4 нед, «плохо» — RPE ≥ `QUALITY_RPE_HARD` = 8, боль > 0, `hr_vs_baseline.z` ≥ `QUALITY_HR_Z_HIGH` = 2, флаги `hr_above_baseline`/`poor_interval_recovery`/`hard_days_too_close`, наутро recovery < 70 % или HRV very_low; уровень 1 (не stable / травма / < 3 качественных / хороших < 75 %) → 2 (две недели подряд с качественными) → 3 (две недели по два без сбоев; `PLAN_QUALITY_DAYS_CAP`, гайд 41); последняя плохая — ступень ниже; ≤ `run_days_max − 2` |
 
 Правило: **ограничения проходят через `evaluate_safety`/`clamp` — LLM может
 только сказать мягче, но не мягче границ.** Это уже инвариант проекта; новые
@@ -277,9 +280,22 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
   на его истории (сколько тренировок сменит тип/долю зон); отдельное решение — пересчитывать
   ли историю разборов (reanalyze умеет).
 
-### M3.2 — валидация порога (⬜ за владельцем)
-30-минутный тест ПАНО или свежий контрольный старт 5–10 км — сверка `lthr`/`ltsp` Coros
-с полевым тестом; ре-тест при изменении формы, не по расписанию (guide 40).
+### M3.2 — полевой тест ПАНО (✅ 12.09.2026, решение владельца)
+- **Назначение**: коуч сам ставит тест первым качественным днём плана, когда статус `stable`
+  (`training_status`), интенсив открыт и нет полевого ПАНО моложе `LTHR_FIELD_MAX_AGE_DAYS` (180 дн):
+  `lthr_field.is_due` → `week_targets["lthr_test_due"]` → `lthr_field.place_test` (тип `race`, разминка
+  `LTHR_TEST_WARMUP_MIN` 15 мин Z2 → `LTHR_TEST_WORK_MIN` 30 мин Z4 «ровно, максимум, который удержишь все 30 мин»
+  → заминка `LTHR_TEST_COOLDOWN_MIN` 10 мин Z1), маркер `Recommendation.target_json["lthr_test"]`.
+- **Формула** (`analysis/lthr_test.lthr_from_test`, чистая): рабочий отрезок — 30-мин окно с максимальным средним
+  пульсом по времени (интервалы записи без пауз и разрывов > `RECORDING_GAP_MAX_SEC`); ПАНО = средний пульс
+  последних `LTHR_TEST_WINDOW_MIN` (20) мин окна (Friel); дрейф = средний пульс 26–30-й мин − 8–12-й мин, выше
+  `LTHR_TEST_DRIFT_MAX_BPM` (8) → `quality="rough"`; покрытие пульсом ≥ `LTHR_TEST_HR_COVERAGE_MIN` (0.9);
+  санити `LTHR_SANITY_MIN < ПАНО < max_hr`; темп окна `pace_s_km`. Блок `computed["lthr_test"]` только при
+  `plan.lthr_test` (schema v11).
+- **Подтверждение**: разбор шлёт карточку с кнопками `lthr:set:N` / `lthr:ignore` (`orchestrator.lthr_test_followup`);
+  `/lthr N` — ручной ввод. Запись `params_json["lthr_field"]` + аудит; `latest_lthr` предпочитает полевое значение
+  Coros; тренировки за `LTHR_REANALYZE_DAYS` (28) пересчитываются (`lthr_field.reanalyze_recent`).
+- Ре-тест — при смене формы (гайд 31), не по календарю; после 180 дн якорь снова Coros.
 
 ## 9. Порядок внедрения и проверка
 
@@ -289,7 +305,7 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
    (`schema_version` bump), старые записи лечит lazy-пересчёт `get_or_compute`.
 2. **§6 (флаги)** — вместе с M1, до M2: иначе новые флаги умножат рассинхрон.
 3. **M2.1 интервалы** → **M2.2 план vs факт** (зависит от `linked_session_id`).
-4. **M3** — M3.1 ✅ 01.09.2026 (стоп-поинт пройден); M3.2 — валидация (за владельцем).
+4. **M3** — M3.1 ✅ 01.09.2026 (стоп-поинт пройден); M3.2 ✅ 12.09.2026 (полевой тест ПАНО).
 5. Каждый этап: полный `pytest -q`, деплой `bot` (метрики живут в боте),
    smoke — разбор реальной тренировки: в тексте разбора числа совпадают
    с `computed_json`, флаги — только из `computed.flags`.
@@ -389,7 +405,7 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
 Сигналы (пороги — `src/coach/config.py`): `efficiency_gain` (≤ `EFFICIENCY_GAIN_BPM` при n≥2) /
 `efficiency_loss` (≥ `EFFICIENCY_LOSS_BPM`); `easy_share_ok` / `easy_share_low` / `intensity_overload`
 (Z3+ > `HARD_SHARE_OVERLOAD`); `volume_step_ok` / `volume_jump` (`LOAD_PROGRESSION`);
-`long_run_share_high` (`LONG_RUN_MAX_PCT_WEEK`/`LONG_RUN_MAX_MIN`); `pain_days` / `pain_free_week`;
+`long_run_share_high` (`long_run_max_pct` 30/40 %, `LONG_RUN_MAX_MIN`); `pain_days` / `pain_free_week`;
 `frequency_up`; `acwr_high` (> `WEEK_REPORT_ACWR_HIGH`); `easy_runs_too_hard`
 (≥ `EASY_TOO_HARD_WEEK_FLAGS`); `plan_complete` / `plan_missed`; `no_runs`; `monotony_high`
 (`monotony` > `MONOTONY_HIGH` при `trained_days` ≥ `MONOTONY_MIN_TRAIN_DAYS`).

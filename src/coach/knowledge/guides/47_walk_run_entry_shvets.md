@@ -4,7 +4,7 @@ title: Вход в бег и возврат после долгой паузы: 
 source: конспект книги «Швец Г. Я бегу марафон (1983)»
 status: distilled
 tags: новичок, ходьба, чередование бег ходьба, возврат после перерыва, регулярность, дозирование, привычка
-key_rules:
+key_rules_returning:
   walk_run_stage_weeks: 12
   entry_session_minutes_max: 20
   habit_formation_months: 12

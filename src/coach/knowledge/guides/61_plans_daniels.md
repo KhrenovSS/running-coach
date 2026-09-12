@@ -5,11 +5,12 @@ source: конспект книги «daniels_800m_marathon»
 status: distilled
 tags: планы тренировок, начинающий бегун, возврат после перерыва, марафон, процент от объёма, периодизация
 key_rules:
+  beginner_marathon_plan_weeks: 18
+  peak_week_working_range_pct: 90
+key_rules_returning:
   return_plan_first_block_weeks: 3
   return_plan_first_block_pct_of_peak: 65
   return_plan_second_block_pct_of_peak: 90
-  beginner_marathon_plan_weeks: 18
-  peak_week_working_range_pct: 90
 ---
 
 ## Общий принцип: план строится в процентах от пикового объёма

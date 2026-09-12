@@ -16,7 +16,7 @@ from src.coach.config import (
     EFFICIENCY_LOSS_BPM,
     HARD_SHARE_OVERLOAD,
     LOAD_RATIO_LOW,
-    LONG_RUN_MAX_PCT_WEEK,
+    long_run_max_pct,
     MONOTONY_HIGH,
     MONOTONY_MIN_TRAIN_DAYS,
     WEEK_REPORT_ACWR_HIGH,
@@ -98,8 +98,11 @@ def _quality_line(this: dict, targets: dict) -> str | None:
     parts = [q]
     if this.get("long_run_share") is not None:
         lr = (f"длительная {this['long_run_km']:.1f} км = {this['long_run_share']:.0%} недели")
-        if this["long_run_share"] > LONG_RUN_MAX_PCT_WEEK:
-            lr += f" ⚠ (потолок {LONG_RUN_MAX_PCT_WEEK:.0%})"
+        # Та же формула, что у week_report.concerns/планирования (30/40 %, 12.09.2026) —
+        # иначе карточка спорит с отчётом при малом объёме
+        pct = long_run_max_pct(this.get("km"), this.get("runs"))
+        if this["long_run_share"] > pct:
+            lr += f" ⚠ (потолок {pct:.0%})"
         parts.append(lr)
     return " · ".join(parts)
 

@@ -18,6 +18,7 @@ from src.analysis.data_checks import device_check, lap_check
 from src.analysis.hr_zones import lthr_valid, zone_ceiling_hr
 from src.analysis.week_structure import detraining, week_structure
 from src.analysis.intervals import interval_recovery
+from src.analysis.lthr_test import lthr_from_test
 from src.analysis.gap import compute_gap, downhill_block, local_grade_factors, smooth_altitudes
 from src.analysis.hr_baseline import baseline_deviation, detraining_hr_shift
 from src.coach.config import (
@@ -29,6 +30,10 @@ from src.coach.config import (
     INTERVAL_MAX_PCT_WEEK,
     INTERVAL_SEGMENT_MAX_MIN,
     LONG_RUN_MAX_MIN,
+    LTHR_TEST_DRIFT_MAX_BPM,
+    LTHR_TEST_HR_COVERAGE_MIN,
+    LTHR_TEST_WINDOW_MIN,
+    LTHR_TEST_WORK_MIN,
     long_run_max_pct,
     PLAN_INTENSITY_TOLERANCE_PCT,
     PLAN_VOLUME_TOLERANCE_PCT,
@@ -69,12 +74,13 @@ from src.utils.logger import get_logger
 
 logger = get_logger("services.workout_insights")
 
-INSIGHTS_SCHEMA_VERSION = 10  # версия computed_json (v5 — F0; v6 — F3 HRR; v7 — F5/F6: week_structure/downhill/detraining/session_rpe;
+INSIGHTS_SCHEMA_VERSION = 11  # версия computed_json (v5 — F0; v6 — F3 HRR; v7 — F5/F6: week_structure/downhill/detraining/session_rpe;
                              # v8 — 07.09.2026: пол GAP-фактора на спусках #298, heat.temp_source #299;
                              # v9 — 08.09.2026: baseline v2 (#259) + detraining_shift_bpm в hr_vs_baseline,
                              # контекст паузы в detraining (#289);
                              # v10 — 08.09.2026 (зима): heat.cold_flag, адаптивная поправка датчика часов,
-                             # watch_temp_c/watch_minus_weather_c — история пересчитывается лениво)
+                             # watch_temp_c/watch_minus_weather_c — история пересчитывается лениво;
+                             # v11 — 12.09.2026: блок lthr_test (полевой ПАНО по треку, только для дня-теста плана)
 
 _EMPTY_DRIFT = {"applicable": False, "reason": "no_trackpoints", "drift_pct": None,
                 "first_half_ef": None, "second_half_ef": None, "gap_adjusted": None,
@@ -187,6 +193,7 @@ def compute_workout_metrics(session: TrainingSession, *,
             {"available": False}, volume_tol=PLAN_VOLUME_TOLERANCE_PCT,
             intensity_tol=PLAN_INTENSITY_TOLERANCE_PCT)
         computed["interval_recovery"] = {"available": False, "reason": "no_trackpoints"}
+        computed["lthr_test"] = {"available": False, "reason": "no_trackpoints"}
         computed["week_structure"] = week_structure(
             history_briefs or [], _session_day(session), ttype)
         computed["detraining"] = detraining(
@@ -289,6 +296,14 @@ def compute_workout_metrics(session: TrainingSession, *,
         dists=None if gps_unreliable else dists,
         laps=session.laps_json if isinstance(session.laps_json, list) else None,
         t0=tp_t0, ttype=ttype)
+    # M3.2 (12.09.2026): полевой тест ПАНО — только когда план дня был тестом (маркер lthr_test);
+    # число считает код, подтверждение — кнопкой (coach/lthr_field). (Field LTHR only on a test day.)
+    computed["lthr_test"] = (
+        lthr_from_test(times_sec, hrs, dists=None if gps_unreliable else dists,
+                       pauses_sec=pauses_sec, max_hr=max_hr,
+                       work_min=LTHR_TEST_WORK_MIN, window_min=LTHR_TEST_WINDOW_MIN,
+                       drift_max_bpm=LTHR_TEST_DRIFT_MAX_BPM, coverage_min=LTHR_TEST_HR_COVERAGE_MIN)
+        if (plan or {}).get("lthr_test") else {"available": False, "reason": "not_a_test_day"})
     # M4 (F5/F6): структура недели, детренированность, downhill, session-RPE
     computed["week_structure"] = week_structure(
         history_briefs or [], _session_day(session), ttype,

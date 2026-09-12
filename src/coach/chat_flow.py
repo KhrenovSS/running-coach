@@ -37,6 +37,7 @@ from src.coach.tools.serialize import jsonable
 from src.coach.turn_context import build_extras as _build_extras
 from src.coach.turn_context import history as _history
 from src.coach.turn_context import profile as _profile
+from src.coach.turn_context import status_phase as _status_phase
 from src.coach.turn_context import unchanged_today as _unchanged_today
 from src.coach.render_week import plan_change_line
 from src.coach.week_view import render_stored_week_plan
@@ -125,7 +126,8 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
             local_dt(verdict.earliest_next_hard, user))
     today_block = build_today_block(state_json, verdict_json,
                                     fmt_local(user_now(user)), extras=extras)
-    system = build_system_blocks(_profile(user))
+    system = build_system_blocks(_profile(user),
+                                 phase=_status_phase(extras))
     messages = build_messages(_history(user_id, db=db), today_block, message)
 
     turn, usage = run_turn(llm, user_id=user_id, db=db,

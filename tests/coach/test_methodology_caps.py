@@ -35,7 +35,9 @@ def test_easy_discipline_flags_large_share_or_avg_above_ceiling():
 
 
 def test_long_run_max_pct_by_volume_and_frequency():
-    assert long_run_max_pct(25.4, 5) == LONG_RUN_MAX_PCT_LOW_VOLUME     # < 30 км
+    assert long_run_max_pct(25.4, 5) == LONG_RUN_MAX_PCT_LOW_VOLUME     # < 40 км
+    assert long_run_max_pct(35.0, 5) == LONG_RUN_MAX_PCT_LOW_VOLUME     # 12.09.2026: порог 30 → 40 км
+    assert long_run_max_pct(40.0, 5) == LONG_RUN_MAX_PCT_WEEK           # ровно 40 — уже 30 %
     assert long_run_max_pct(45.0, 4) == LONG_RUN_MAX_PCT_LOW_VOLUME     # ≤ 4 пробежек
     assert long_run_max_pct(45.0, 5) == LONG_RUN_MAX_PCT_WEEK
     assert long_run_max_pct(LONG_RUN_LOW_VOLUME_KM, None) == LONG_RUN_MAX_PCT_WEEK

@@ -20,6 +20,7 @@ from src.telegram.handlers.sleep_photo import cmd_sleep, handle_sleep_photo
 from src.telegram.handlers.feedback import feedback_callback
 from src.telegram.handlers.pain import pain_callback, pain_phase_callback, wellness_callback
 from src.telegram.handlers.hr_max import hr_max_callback
+from src.telegram.handlers.lthr import cmd_lthr, lthr_callback
 from src.telegram.jobs.weight import daily_weight_job
 from src.telegram.jobs.recovery import daily_recovery_check_job
 from src.telegram.jobs.sleep_reminder import sleep_screenshot_reminder_job
@@ -76,6 +77,7 @@ def run_bot():
     application.add_handler(CommandHandler("report", cmd_report))
     application.add_handler(CommandHandler("sleep", cmd_sleep))
     application.add_handler(CommandHandler("coach_settings", cmd_coach_settings))
+    application.add_handler(CommandHandler("lthr", cmd_lthr))   # M3.2: полевой ПАНО вручную
 
     reset_pw_handler = ConversationHandler(
         entry_points=[CommandHandler("reset_password", cmd_reset_password)],
@@ -92,6 +94,7 @@ def run_bot():
     application.add_handler(CallbackQueryHandler(wellness_callback, pattern="^wellness:"))
     application.add_handler(CallbackQueryHandler(initiative_callback, pattern="^initiative:"))
     application.add_handler(CallbackQueryHandler(hr_max_callback, pattern="^maxhr:"))
+    application.add_handler(CallbackQueryHandler(lthr_callback, pattern="^lthr:"))
     application.add_handler(CallbackQueryHandler(stats_callback, pattern="^stats:"))
     application.add_handler(CallbackQueryHandler(trainings_callback, pattern="^trainings:"))
     # Скриншот сна (#257): фото или картинка-документ → vision → DailyMetrics.

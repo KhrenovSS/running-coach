@@ -143,6 +143,8 @@ def _plan_for_session(user_id: int, session: TrainingSession, *,
         "distance_km": volume.get("distance_km"),
         "for_date": rec.for_date.isoformat(),
         "source": rec.source, "clamped": rec.clamped,
+        # M3.2 (12.09.2026): день плана был полевым тестом ПАНО → insights считают lthr_test
+        "lthr_test": bool(target.get("lthr_test")),
     }
 
 
