@@ -191,6 +191,13 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
   `workout_insights_context._plan_for_session` (+ `linked_session_id`; реэкспорт из `workout_insights`), фильтр контекста не менялся;
 - **Флаги**: `plan_intensity_exceeded`, `plan_volume_exceeded` — оба относятся
   к травмобезопасности напрямую;
+- **База сравнения (#341, 16.09.2026, решение владельца)**: `plan` — последняя действующая строка дня
+  (согласованное), `plan.baseline` — исходная строка дня (первая со статусом planned/confirmed/adjusted,
+  `workout_insights_context.plan_baseline_row`), если чат/утро её переторговали. `volume_ratio` — к
+  согласованному, `baseline.volume_ratio` — к исходному, `changed_in_chat: true`; флаг
+  `plan_volume_exceeded` — по **максимуму** двух отношений (инцидент 13.09.2026: 71 мин к 72 → 0.98, к плану
+  50 → 1.42 → флаг). `week_plan_review` — `changed_in_chat`/`planned_min_original` по дням и счётчик.
+  `INSIGHTS_SCHEMA_VERSION` = 12;
 - REVIEW_PROMPT: переопределить `effort_match` от plan_vs_actual (сейчас —
   «сошлись ли ощущения с типом», план не упоминается).
 

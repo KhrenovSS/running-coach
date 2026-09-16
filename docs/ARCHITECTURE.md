@@ -358,4 +358,4 @@ src/telegram/main.py :: run_bot()
 
 ---
 
-**Последнее обновление:** 11.09.2026 (#329 разнос модулей: pace_series/user_params/chat_flow/planning_rows/planning_availability/workout_insights_context; detect.py; insights v10)
+**Последнее обновление:** 16.09.2026 (coach/day_caps.py + segment_trim.py — потолки объёма в чате/утре, #338–#343; insights v12). 11.09.2026 — #329 разнос модулей: pace_series/user_params/chat_flow/planning_rows/planning_availability/workout_insights_context; detect.py; insights v10

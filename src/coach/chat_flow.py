@@ -13,7 +13,7 @@ from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
-from src.coach import concerns, illness, planning
+from src.coach import concerns, day_caps, illness, planning
 from src.coach.contracts import Prescription, WorkoutProposal
 from src.coach.numeric_check import mismatch_pairs, prose_numbers, trim_mismatched_prose
 from src.coach.llm.agent import run_turn
@@ -100,6 +100,11 @@ def morning_verdict(user_id: int, *, db: Session) -> str:
                                   lthr=latest_lthr(user_id, db=db)))
 
 
+def _notes_block(notes: list[str] | None) -> str:
+    """Заметки потолков объёма над карточкой дня («⚠️ Длительная урезана до …»), детерминированно."""
+    return "".join("\n\n" + n for n in (notes or []))
+
+
 def _llm_chat_turn(user_id: int, message: str, *, db: Session,
                    llm: CoachLLM, kind: str, extras: dict | None = None,
                    allow_proposal: bool = True,
@@ -118,6 +123,12 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
     state_json.pop("signals", None)
     if extras is None:
         extras = _build_extras(user_id, db=db)
+    targets: dict | None = None
+    if kind in ("chat", "morning"):
+        # #338/#339 (16.09.2026): потолки недели — и в контекст модели, и кодом на выход (день
+        # можно увеличить только в пределах остатка недели и потолка одной пробежки)
+        targets = day_caps.day_targets(user_id, verdict, db=db, now=user_now(user))
+        extras["week_targets (planning)"] = day_caps.context_block(targets)
     # Только JSON-копия: clamp() сравнивает earliest_next_hard в UTC
     # (JSON copy only — clamp() keeps comparing in UTC)
     verdict_json = jsonable(verdict)
@@ -193,29 +204,37 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
             logger.info("Proposal blocked: athlete unavailable on %s user=%s", when, user_id)
             text += "\n\n" + blocked
             proposal = None
+    # Дни, которые подопечный отменяет этой же репликой, объём не занимают (#338)
+    cancelled_dates = tuple(user_now(user).date() + timedelta(days=d)
+                            for d in (turn.unavailable_days_ahead or []))
     morning_result = (planning.confirm_or_adjust_morning(
-        proposal, user_id, state, db=db, now=user_now(user))
+        proposal, user_id, state, db=db, now=user_now(user), targets=targets)
         if kind == "morning" else None)
     if morning_result is not None:
         # План дня есть: подтверждение (UPDATE status) или осознанная замена
         # (решение владельца 29.08.2026). (Confirm or consciously adjust the plan.)
-        card, mode, plan_row = morning_result
+        card, mode, plan_row, cap_notes = morning_result
         logger.info("Morning plan %s for user=%s", mode, user_id)
         if mode == "adjusted":
             # Строка «Изменил план на … (было: …)» над карточкой (решение владельца 03.09.2026)
             text += "\n\n" + plan_change_line(card.when, card, plan_row)
+        text += _notes_block(cap_notes)
         text += "\n\n" + render_prescription(card, max_hr=max_hr, user=user, lthr=lthr)
     elif proposal is not None and not allow_proposal:
         # Разбор/отчёт — про прошлое: назначение даёт утренний вердикт/чат (C8).
         # (Reviews look backward: proposals are dropped, not clamped/persisted.)
         logger.info("Proposal dropped for kind=%s user=%s", kind, user_id)
     elif proposal is not None:
-        card = finalize(proposal, state, db=db, persist=False, source="llm",
-                        now=user_now(user))
+        # #338 (16.09.2026): потолки объёма недели — кодом, симметрично /plan: просьба «хочу 10 км»
+        # оценивается по остатку недели и потолку одной пробежки, а не принимается слепо
+        card, cap_notes = day_caps.finalize_with_caps(
+            proposal, state, db=db, now=user_now(user), source="llm", targets=targets,
+            exclude_dates=cancelled_dates)
         if kind == "chat" and _unchanged_today(card, user_id, db=db):
             # Дедуп (решение владельца 26.08.2026): назначение не изменилось —
             # одна строка-напоминание, без новой строки в recommendations.
             # (Unchanged plan → one reminder line, no duplicate recommendation row.)
+            text += _notes_block(cap_notes)
             text += "\n\n" + render_prescription_short(card, max_hr=max_hr, lthr=lthr)
         else:
             # Уже данное назначение на этот день → строка «Изменил план на …» над карточкой
@@ -223,6 +242,7 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
             save_prescription(card, state, db=db)
             if old is not None:
                 text += "\n\n" + plan_change_line(card.when, card, old)
+            text += _notes_block(cap_notes)
             text += "\n\n" + render_prescription(card, max_hr=max_hr, user=user, lthr=lthr)
     if turn.unavailable_days_ahead and kind in ("chat", "morning"):
         # Подопечный не сможет бегать в эти дни → детерминированно гасим назначения и ставим

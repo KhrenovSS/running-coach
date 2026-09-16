@@ -181,60 +181,82 @@ def apply_safety_to_targets(targets: dict[str, Any], verdict: SafetyVerdict, *,
     return out
 
 
+# Отдых нечего резать; гонка/полевой тест ПАНО (race) — протокол или старт, объёмом не режется
+# (safety гейтит интенсив как раньше). (Rest has no volume; a race/test protocol is not trimmed.)
+_UNCAPPED_TYPES = ("rest", "race")
+
+
+def _run_label(workout_type: str) -> str:
+    return "Длительная" if workout_type == "long" else "Пробежка"
+
+
 def cap_long_run(proposal: WorkoutProposal, prescription: Prescription,
                  targets: dict[str, Any]) -> tuple[WorkoutProposal | None, str | None]:
-    """Потолок длительной — кодом, не промптом (06.09.2026: LLM дал 70 мин ≈ 10 км при
+    """Потолок одной пробежки — кодом, не промптом (06.09.2026: LLM дал 70 мин ≈ 10 км при
     потолке 8,4 км, а отчёт обещал «без роста длительной»).
 
-    Километры — тот же ориентир, что печатает карточка (`prescription.predicted` из
-    predict_volume); потолок км — `long_run_km_max` (30/40 % недели, при long_run_hold — прошлая
-    длительная); минут — `long_run_min_max` (150). Нет оценки темпа → только потолок минут
-    (нет данных → не выдумываем). Возврат: (урезанная копия proposal | None, заметка | None).
-    (Deterministic long-run cap; pure — returns a trimmed copy or (None, None).)
+    16.09.2026 (#340): потолок — ПО СОДЕРЖИМОМУ, не по ярлыку: любая не-rest пробежка с оценкой км
+    выше `long_run_km_max` режется («лёгкая» на 12 км — длительная, как бы её ни назвали); предложение
+    только с `distance_km` (без минут) режется по километрам; структурная — через
+    `segment_trim.shrink_proposal` (ровная часть/повторы), не «только заметка».
+    Километры — тот же ориентир, что печатает карточка (`prescription.predicted`); потолок км —
+    `long_run_km_max` (30/40 % недели, при long_run_hold — прошлая длительная); минут —
+    `long_run_min_max` (150). Нет оценки темпа и нет distance_km → только потолок минут.
+    Возврат: (урезанная копия proposal | None, заметка | None). (Deterministic single-run cap; pure.)
     """
-    if proposal.workout_type != "long" or not proposal.duration_min:
+    from src.coach.segment_trim import shrink_proposal
+
+    if proposal.workout_type in _UNCAPPED_TYPES or (not proposal.duration_min and not proposal.distance_km):
         return None, None
-    if proposal.segments:
-        # Структурная длительная (прогрессия/блоки): молча резать нельзя — сегменты разойдутся
-        # с длительностью; выше потолка — только заметка (structured long run: warn, don't trim)
-        km_est = (prescription.predicted or {}).get("distance_km")
-        cap_km = targets.get("long_run_km_max")
-        if cap_km and km_est and km_est > cap_km + LONG_RUN_CAP_TOLERANCE_KM:
-            return None, (f"⚠️ Длительная ≈{km_est:.1f} км выше потолка {cap_km:.1f} км, "
-                          "структура задана — проверь вручную.")
-        return None, None
-    duration = float(proposal.duration_min)
     cap_km = targets.get("long_run_km_max")
     cap_min = targets.get("long_run_min_max")
-    km_est = (prescription.predicted or {}).get("distance_km")
-    new_min = duration
-    new_km = proposal.distance_km
-    reason = None
-    # Доля — из targets (30 % / 40 %, 12.09.2026), не захардкоженное «30 %»
+    predicted = prescription.predicted or {}
+    km_est = predicted.get("distance_km")
+    pace = predicted.get("pace_min_km")
     pct_reason = (f"потолок {(targets.get('long_run_max_pct') or LONG_RUN_MAX_PCT_WEEK) * 100:.0f} % "
                   "недельного объёма")
+    label = _run_label(proposal.workout_type)
+    if not proposal.duration_min:
+        # Только километры (#340, второй обход): режем distance_km, минуты — из темпа истории
+        if not (cap_km and proposal.distance_km and proposal.distance_km > cap_km + LONG_RUN_CAP_TOLERANCE_KM):
+            return None, None
+        new_km = float(cap_km)
+        minutes = int(math.floor(new_km * pace)) if pace else None
+        trail = f"урезано кодом: {proposal.distance_km:.1f} → {new_km:.1f} км ({pct_reason})"
+        note = f"⚠️ {label} урезана до {new_km:.1f} км"
+        if minutes:
+            note += f" (≈{minutes} мин)"
+        return replace(proposal, distance_km=new_km, duration_min=minutes,
+                       rationale=[*proposal.rationale, trail], code_trimmed=True), note + f": {pct_reason}."
+    duration = float(proposal.duration_min)
+    new_min = duration
+    reason = None
     if cap_km and km_est and km_est > cap_km + LONG_RUN_CAP_TOLERANCE_KM:
         new_min = math.floor(duration * cap_km / km_est)
         reason = pct_reason
     if cap_km and proposal.distance_km and proposal.distance_km > cap_km + LONG_RUN_CAP_TOLERANCE_KM:
-        new_km = cap_km
+        # Дистанция LLM выше потолка при недооценке км по истории — минуты вниз пропорционально
+        new_min = min(new_min, math.floor(duration * cap_km / proposal.distance_km))
         reason = reason or pct_reason
     if cap_min and new_min > cap_min:
         new_min = float(cap_min)
         reason = f"не дольше {cap_min:.0f} мин"
-    if new_min >= duration and new_km == proposal.distance_km:
+    if new_min >= duration:
         return None, None
     if targets.get("long_run_hold"):
         reason += ", длительная не растёт после прошлой недели"
-    est_km = round(new_min * km_est / duration, 1) if km_est else None
-    note = f"⚠️ Длительная урезана до {new_min:.0f} мин"
-    if est_km is not None:
-        note += f" (≈{est_km:.1f} км)"
-    note += f": {reason}."
     # След урезания в proposal_json.rationale — что предлагал LLM (audit trail in rationale)
     trail = f"урезано кодом: {duration:.0f} → {new_min:.0f} мин ({reason})"
-    return replace(proposal, duration_min=int(new_min), distance_km=new_km,
-                   rationale=[*proposal.rationale, trail], code_trimmed=True), note
+    capped, seg_note = shrink_proposal(proposal, new_min, trail=trail, pace_min_km=pace)
+    final_min = float(capped.duration_min or new_min)
+    est_km = round(final_min * km_est / duration, 1) if km_est else None
+    note = f"⚠️ {label} урезана до {final_min:.0f} мин"
+    if est_km is not None:
+        note += f" (≈{est_km:.1f} км)"
+    note += f": {reason}"
+    if seg_note:
+        note += f"; {seg_note}"
+    return capped, note + "."
 
 
 _SCALABLE_TYPES = ("easy", "recovery")
@@ -247,10 +269,14 @@ def cap_week_volume(items: list[WorkoutProposal], prescriptions: list[Prescripti
     Сумма — по `predicted.distance_km` каждого дня (тот же ориентир, что в карточке; день без оценки
     считается 0 и не трогается). Выше `target_km × (1 + WEEK_VOLUME_TOLERANCE_PCT)` → лёгкие/
     восстановительные дни ужимаются пропорционально (floor, не ниже PLAN_EASY_MIN_MINUTES);
-    длительная и качественные под своими потолками — не трогаем. Возврат: (новый список items с
-    заменёнными днями | None, заметка | None). Для остатка недели цель — `remaining_km`.
+    длительная и качественные под своими потолками — не трогаем. 16.09.2026 (#340): структурные
+    лёгкие дни (ускорения) тоже ужимаются — через `segment_trim.shrink_proposal` (ровная часть
+    режется, ускорения сохраняются). Возврат: (новый список items с заменёнными днями | None,
+    заметка | None). Для остатка недели цель — `remaining_km`.
     (Deterministic weekly-volume cap: scale easy days down to the target; pure.)
     """
+    from src.coach.segment_trim import shrink_proposal
+
     target = targets.get("remaining_km") if targets.get("plan_scope") == "rest_of_week" \
         else targets.get("target_km")
     if not target or target <= 0 or len(items) != len(prescriptions):
@@ -259,32 +285,42 @@ def cap_week_volume(items: list[WorkoutProposal], prescriptions: list[Prescripti
     total = sum(est)
     if total <= target * (1 + WEEK_VOLUME_TOLERANCE_PCT):
         return None, None
-    # Структурные дни (сегменты) фиксированы: масштаб длительности разошёлся бы с сегментами
-    # (06.09.2026: 39 мин при сегментах на 42) — ужимаются только ровные лёгкие дни
-    scalable = [i for i, it in enumerate(items)
-                if it.workout_type in _SCALABLE_TYPES and est[i] > 0 and it.duration_min
-                and not it.segments]
-    if not scalable:
+    candidates = [i for i, it in enumerate(items)
+                  if it.workout_type in _SCALABLE_TYPES and est[i] > 0 and it.duration_min]
+    if not candidates:
         return None, None
-    fixed = sum(est[i] for i in range(len(items)) if i not in scalable)
-    scalable_sum = sum(est[i] for i in scalable)
-    k = max(0.0, (target - fixed) / scalable_sum) if scalable_sum > 0 else 1.0
-    if k >= 1.0:
-        return None, None
-    new_items = list(items)
-    new_total = fixed
+    # Сначала — ровные лёгкие дни (наполнитель); структурные (ускорения) — только если ровных не
+    # хватило (гайд 45: ключевой стимул режут последним). (Plain easy days first, structured last.)
+    plain = [i for i in candidates if not items[i].segments]
+    tiers = [plain, candidates] if plain and len(plain) < len(candidates) else [candidates]
+    new_items: list[WorkoutProposal] = list(items)
+    new_total = total
     changed = False
-    for i in scalable:
-        it = items[i]
-        new_min = max(PLAN_EASY_MIN_MINUTES, math.floor(it.duration_min * k))
-        if new_min < it.duration_min:
-            trail = f"урезано кодом: {it.duration_min:.0f} → {new_min:.0f} мин (объём недели)"
-            new_items[i] = replace(it, duration_min=int(new_min),
-                                   distance_km=(round(it.distance_km * new_min / it.duration_min, 1)
-                                                if it.distance_km else None),
-                                   rationale=[*it.rationale, trail])
-            changed = True
-        new_total += est[i] * new_min / it.duration_min
+    seg_notes: list[str] = []
+    for scalable in tiers:
+        if not scalable:
+            continue
+        fixed = sum(est[i] for i in range(len(items)) if i not in scalable)
+        scalable_sum = sum(est[i] for i in scalable)
+        k = max(0.0, (target - fixed) / scalable_sum) if scalable_sum > 0 else 1.0
+        if k >= 1.0:
+            continue
+        new_items, new_total, changed, seg_notes = list(items), fixed, False, []
+        for i in scalable:
+            it = items[i]
+            new_min = max(PLAN_EASY_MIN_MINUTES, math.floor(it.duration_min * k))
+            if new_min < it.duration_min:
+                trail = f"урезано кодом: {it.duration_min:.0f} → {new_min:.0f} мин (объём недели)"
+                new_items[i], seg_note = shrink_proposal(
+                    it, new_min, trail=trail,
+                    pace_min_km=(prescriptions[i].predicted or {}).get("pace_min_km"))
+                if seg_note:
+                    seg_notes.append(f"день +{it.for_days_ahead}: {seg_note}")
+                new_min = new_items[i].duration_min or new_min
+                changed = True
+            new_total += est[i] * new_min / it.duration_min
+        if new_total <= target * (1 + WEEK_VOLUME_TOLERANCE_PCT):
+            break                                    # ровных дней хватило — структурные целы
     if not changed:
         return None, None
     prev_km = targets.get("prev_week_km")
@@ -292,8 +328,10 @@ def cap_week_volume(items: list[WorkoutProposal], prescriptions: list[Prescripti
             if targets.get("volume_held_by_safety") and prev_km
             else (f": рост не больше +10 % к прошлой неделе ({prev_km:.1f} км)" if prev_km
                   else ": цель недели"))
-    note = f"⚠️ Объём недели урезан до ~{new_total:.0f} км{tail}."
-    return new_items, note
+    note = f"⚠️ Объём недели урезан до ~{new_total:.0f} км{tail}"
+    if seg_notes:
+        note += " (" + "; ".join(seg_notes) + ")"
+    return new_items, note + "."
 
 
 def long_run_min_hint(user_id: int, user: Any, km_max: float | None, *, db: Session) -> int | None:

@@ -33,6 +33,17 @@
 Конкретика структурного дня (06.09.2026): `compact_segments` печатает отдых между отрезками, `finalize`
 выставляет длительность дня из `segments_total_min`, карточка дня с ускорениями добавляет `STRIDE_HOWTO`.
 
+Потолки объёма в чате и утре (16.09.2026, #338–#343, инцидент 13.09): `coach/day_caps.py` применяет те же
+кэпы к одному назначению — `day_targets` (`week_targets` + `apply_safety_to_targets` + `planned_km_remaining`),
+`finalize_with_caps` (finalize → `cap_long_run` → `cap_day_volume` → повторный finalize урезанного), срез
+недели `context_block` → `extras["week_targets (planning)"]` и абзац об объёме в `SAFETY_CONTRACT`; утро
+(`confirm_or_adjust_morning(targets=)`) сверяет и plan-строку. `cap_long_run` — по содержимому (ярлык не
+обходит, `race` не режется, дистанция без минут режется); структурная выше потолка — `coach/segment_trim.py`
+по гайдам 44/45/46/61 (ускорения сохраняются, ровная часть вниз; качество — повторы вниз; не помещается —
+структура снимается); `cap_week_volume` ужимает структурные дни последними. `prescriber.finalize` не даёт
+сумме сегментов откатить `max_duration_min` (#343). База сравнения план vs факт — исходная строка дня
+(`_plan_for_session.baseline`, флаг `plan_volume_exceeded` по максимуму отношений, #341).
+
 ## Решение 2: ручной tool-loop, не SDK tool_runner
 
 `client.beta.messages.tool_runner` генерирует схему из сигнатуры и вызывает функцию сам —
@@ -202,8 +213,12 @@ coach/
 │                      #   quality_*_km_max=0, quality_blocked_by_safety (06.09.2026, до промпта LLM);
 │                      #   прогноз правила 17 по дням (quality_reopens_at, project_state, 07.09.2026)
 │                      #   + cap_long_run: потолок длительной (30 % недели, 40 % при < 40 км или ≤ 4 пробежек / 150 мин) кодом при финализации
-│                      #   + cap_week_volume: сумма плана ≤ target_km (лёгкие ужимаются); объём плоский при закрытом интенсиве
+│                      #   + cap_week_volume: сумма плана ≤ target_km (лёгкие ужимаются, структурные — последними); объём плоский при закрытом интенсиве
 │                      #   только по усталости/здоровью (volume_hold, INTENSITY_ONLY_SAFETY_RULES, 12.09.2026)
+│                      #   cap_long_run — по содержимому (16.09.2026, #340): любой бег выше long_run_km_max, race не режется
+├── day_caps.py        # потолки объёма в чате/утре (16.09.2026, #338): day_targets, cap_day_volume (остаток недели −
+│                      #   назначенное на другие дни), finalize_with_caps (двухпроходный finalize), context_block для LLM
+├── segment_trim.py    # урезание структурной тренировки по гайдам 44/45/46/61 (16.09.2026): trim_segments, shrink_proposal
 ├── segments.py        # enrich_and_clamp_segments: числа сегментам из зон/истории, per-segment clamp (M2.1)
 ├── illness.py         # #322 (07.09): гейт болезни — params_json["illness"], пауза ILLNESS_PAUSE_DAYS[kind],
 │                      #   правило 21 safety / закрытые даты плана / blocked_reason; LLM сообщает факт, сроки — код
@@ -221,7 +236,7 @@ coach/
 ├── orchestrator.py    # on_workout_completed (+ _merged_flags: слияние флагов LLM с computed, _deterministic_review,
 │                      #   _gps_warning_suffix), weekly_report;
 │                      #   реэкспорт chat_flow (#329, 11.09: файл разнесён — вызовы orchestrator.* валидны)
-├── chat_flow.py       # _llm_chat_turn (один LLM-ход + детерминированные пост-обработки), handle_chat
+├── chat_flow.py       # _llm_chat_turn (один LLM-ход + детерминированные пост-обработки + day_caps), handle_chat
 │                      #   (чат/утро с fallback), morning_verdict, ChatReply, get/set_initiative
 ├── review_flow.py     # ensure_insights_for_batch, run_pending_review, due_review_sessions
 │                      #   (очередь отложенного разбора: claim → orchestrator.on_workout_completed)

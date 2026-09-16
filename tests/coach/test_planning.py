@@ -417,7 +417,7 @@ def test_morning_confirms_latest_row_including_proposed(db_session):
     db_session.add_all([old, new])
     db_session.commit()
     state = assess_state(user.id, db=db_session)
-    p, mode, row = planning.confirm_or_adjust_morning(None, user.id, state, db=db_session, now=now)
+    p, mode, row, _notes = planning.confirm_or_adjust_morning(None, user.id, state, db=db_session, now=now)
     assert row.id == new.id and mode == "confirmed" and p.workout_type == "easy"
     db_session.refresh(old); db_session.refresh(new)
     assert new.status == "confirmed" and old.status == "planned"
@@ -489,9 +489,19 @@ def test_cap_long_run_within_tolerance_untouched():
     proposal = WorkoutProposal(workout_type="long", target_zone=2, duration_min=60)
     targets = {"long_run_km_max": 8.4, "long_run_min_max": 150.0}
     assert cap_long_run(proposal, _long_prescription(8.6), targets) == (None, None)
-    # Не длительная — вообще не рассматриваем
+    # #340 (16.09.2026): потолок — по содержимому, ярлык «easy» его не обходит
     easy = WorkoutProposal(workout_type="easy", target_zone=2, duration_min=200)
-    assert cap_long_run(easy, _long_prescription(20.0), targets) == (None, None)
+    capped, note = cap_long_run(easy, _long_prescription(20.0), targets)
+    assert capped is not None and capped.duration_min == 84 and capped.workout_type == "easy"
+    assert note.startswith("⚠️ Пробежка урезана до 84 мин")
+    # Второй обход #340: только километры, без минут — режем distance_km, минуты из темпа истории
+    km_only = WorkoutProposal(workout_type="long", target_zone=2, distance_km=30.0)
+    capped, note = cap_long_run(km_only, _long_prescription(10.0), targets)
+    assert capped.distance_km == 8.4 and capped.duration_min == 58          # floor(8.4 × 7.0)
+    assert "урезана до 8.4 км" in note
+    # Отдых и пустое предложение — не рассматриваем
+    assert cap_long_run(WorkoutProposal(workout_type="rest", target_zone=1),
+                        _long_prescription(None), targets) == (None, None)
 
 
 def test_cap_long_run_minutes_only_without_pace_history():
@@ -513,7 +523,7 @@ def test_cap_long_run_mentions_hold():
     proposal = WorkoutProposal(workout_type="long", target_zone=2, duration_min=70, distance_km=10.0)
     targets = {"long_run_km_max": 8.4, "long_run_min_max": 150.0, "long_run_hold": True}
     capped, note = cap_long_run(proposal, _long_prescription(10.0), targets)
-    assert capped.distance_km == 8.4 and capped.duration_min == 58
+    assert capped.distance_km <= 8.4 and capped.duration_min == 58        # дистанция ∝ минутам
     assert "длительная не растёт после прошлой недели" in note
 
 
@@ -638,31 +648,52 @@ def test_apply_safety_volume_hold_only_for_fatigue_rules():
     assert volume_hold(empty) is True                                           # консервативно
 
 
-def test_cap_week_volume_keeps_structured_days_and_leaves_trail():
-    """06.09.2026: день с сегментами не масштабируется (иначе 39 мин при сегментах на 42);
-    урезанные копии несут след «урезано кодом» в rationale."""
-    from src.coach.contracts import WorkoutSegment
+def test_cap_week_volume_structured_days_scaled_last_and_leaves_trail():
+    """16.09.2026 (#340): структурный лёгкий день режется ПОСЛЕДНИМ — сначала ровные дни
+    (наполнитель); если их хватило — ускорения целы. Урезанные копии несут след «урезано кодом»."""
+    from src.coach.contracts import RecoverySpec, WorkoutSegment
     from src.coach.planning_safety import cap_week_volume
+    strides = [WorkoutSegment(role="warmup", amount_value=20, target_zone=2),
+               WorkoutSegment(role="work", amount_kind="sec", amount_value=20, repeat=5,
+                              target_zone=3, recovery=RecoverySpec(duration_min=2.0)),
+               WorkoutSegment(role="cooldown", amount_value=10, target_zone=2)]
     items, pres = _plan_items_and_prescriptions(
         [("easy", 40, 5.7), ("easy", 42, 6.0), ("easy", 40, 5.7), ("long", 58, 8.3)])
-    items[1].segments.append(WorkoutSegment(role="work", amount_kind="sec", amount_value=20,
-                                            repeat=5, target_zone=3))
+    items[1].segments.extend(strides)
     new, note = cap_week_volume(items, pres, {"target_km": 22.0, "prev_week_km": 22.0})
     assert new is not None
-    assert new[1] is items[1] and new[3] is items[3]             # структурный и длительная — нетронуты
+    assert new[1] is items[1] and new[3] is items[3]             # ровных хватило: структурный цел
     assert new[0].duration_min < 40 and new[2].duration_min < 40
     assert any(r.startswith("урезано кодом: 40 →") for r in new[0].rationale)
     assert items[0].rationale == []                              # вход не мутирует
+    # Ровных дней не хватает (пол 30 мин) → структурный ужимается через ровную часть
+    items, pres = _plan_items_and_prescriptions([("easy", 40, 5.7), ("easy", 60, 8.6)])
+    items[1].segments.extend(strides + [WorkoutSegment(role="steady", amount_value=18, target_zone=2)])
+    new, note = cap_week_volume(items, pres, {"target_km": 12.0, "prev_week_km": 12.0})
+    assert new[0].duration_min < 40 and new[1].duration_min < 60
+    assert any(s.role == "work" and s.repeat == 5 for s in new[1].segments)   # ускорения сохранены
+    assert "ускорений сохранены" in note
 
 
-def test_cap_long_run_structured_only_warns_and_trail_on_plain():
-    from src.coach.contracts import WorkoutProposal, WorkoutSegment
+def test_cap_long_run_structured_trimmed_by_literature_and_trail_on_plain():
+    """16.09.2026 (#340, решение владельца): структурная длительная выше потолка режется по
+    гайдам — ровная часть вниз, ускорения сохраняются; итог = сумма сегментов."""
+    from src.coach.contracts import RecoverySpec, WorkoutProposal, WorkoutSegment
     from src.coach.planning_safety import cap_long_run
+    from src.coach.segment_trim import total_minutes
     targets = {"long_run_km_max": 8.4, "long_run_min_max": 150.0}
-    structured = WorkoutProposal(workout_type="long", target_zone=2, duration_min=70,
-                                 segments=[WorkoutSegment(role="steady", amount_value=70, target_zone=2)])
+    structured = WorkoutProposal(workout_type="long", target_zone=2, duration_min=70, segments=[
+        WorkoutSegment(role="warmup", amount_value=10, target_zone=1),
+        WorkoutSegment(role="steady", amount_value=45, target_zone=2),
+        WorkoutSegment(role="work", amount_kind="sec", amount_value=20, repeat=5, target_zone=4,
+                       recovery=RecoverySpec(duration_min=2.0)),
+        WorkoutSegment(role="cooldown", amount_value=5, target_zone=1)])
     capped, note = cap_long_run(structured, _long_prescription(10.0), targets)
-    assert capped is None and "структура задана" in note
+    assert capped is not None and capped.duration_min <= 58
+    assert capped.duration_min == int(total_minutes(capped.segments))     # длительность = сегменты
+    assert any(s.role == "work" and s.repeat == 5 for s in capped.segments)
+    assert "5 ускорений сохранены" in note and "ровная часть" in note
+    assert capped.rationale[-1].startswith("ровная часть")
     plain = WorkoutProposal(workout_type="long", target_zone=2, duration_min=70,
                             rationale=["единственная длительная"])
     capped, _ = cap_long_run(plain, _long_prescription(10.0), targets)

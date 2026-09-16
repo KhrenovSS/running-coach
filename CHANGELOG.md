@@ -2,6 +2,52 @@
 
 All notable changes to this project are tracked here.
 
+## [16.09.2026] — Просьбы подопечного «пробежать больше» оцениваются кодом: потолки объёма в чате и утре (#338–#343, P0)
+
+Инцидент 13.09.2026: подопечный тремя репликами поднял длительную 50 → 72 мин / 10 км, коуч согласился —
+объём в ad-hoc пути ограничивали только боль/сон < 5 ч, потолки прогрессии звались лишь из `/plan`. Разбор и
+решения владельца — `docs/coach/TASK_2026-09-13_athlete_requests.md` (§7).
+
+### Added
+- `src/coach/day_caps.py`: потолки объёма для одного назначения (чат/утро) симметрично `/plan` — `day_targets`
+  (`week_targets` + `apply_safety_to_targets` + `planned_km_remaining`), `cap_day_volume` (допуск дня =
+  остаток недели × (1 + `WEEK_VOLUME_TOLERANCE_PCT`) − км других назначенных дней; отменяемые той же репликой
+  дни объём освобождают), `finalize_with_caps` (finalize → `cap_long_run` → `cap_day_volume` → повторный
+  finalize; `Prescription` рождается только в `clamp`), `context_block` — компактный срез недели для LLM
+  (`remaining_km`, `long_run_km_max`, `planned_km_remaining`, `unallocated_km`, #339).
+- `src/coach/segment_trim.py` (решение владельца 16.09.2026, по гайдам 44/45/46/61): структурная тренировка
+  выше потолка режется осмысленно — ускорения: ровная часть вниз (полы `SEGMENT_WARMUP_MIN_MIN` 10 /
+  `SEGMENT_COOLDOWN_MIN_MIN` 5), число ускорений сохраняется (≤ `STRIDES_MAX_PER_SESSION` 8), ровной части
+  < 30 мин → ускорения снимаются; качественная работа: повторы вниз (не ниже `SEGMENT_WORK_REPEAT_MIN` 2),
+  разминка/заминка целы, не помещается → структура снимается; `shrink_proposal` — общий срез ровного и
+  структурного предложения (длительность = сумма урезанных сегментов, след «урезано кодом» в `rationale`).
+- `SAFETY_CONTRACT`: абзац об объёме — числа недели в `week_targets (planning)`, просьбу бежать больше
+  оценивать по ним, соглашаться только в пределах, иначе объяснить и предложить компромисс.
+- Тесты: `tests/coach/test_day_caps.py` (17: чистые кэпы/урезание, e2e инцидент 13.09, утро, #342, #343, #341),
+  `test_session_metrics::test_plan_vs_actual_baseline_keeps_overshoot_signal`,
+  `test_coach_config::test_segment_trim_constants_match_guides`; всего 1080 (+18).
+
+### Changed
+- `planning_safety.cap_long_run` (#340): потолок км — **по содержимому**, не по ярлыку (`easy` на 12 км режется
+  как длительная), предложение только с `distance_km` режется по километрам (минуты — из темпа истории),
+  структурная — через `segment_trim`, не «только заметка»; `race` (гонка / полевой тест ПАНО) объёмом не режется.
+  `cap_week_volume`: структурные лёгкие дни ужимаются, но **последними** — сначала ровные (гайд 45: наполнитель
+  режут раньше ключевого стимула).
+- `chat_flow._llm_chat_turn`: для чата/утра считает `day_targets`, кладёт срез в контекст, назначение идёт через
+  `finalize_with_caps`; заметки «⚠️ Длительная/Пробежка/Объём урезан(а) до N мин (≈X км): причина» — над карточкой.
+  `planning_rows.confirm_or_adjust_morning(..., targets=)` применяет потолки и к предложению LLM, и к самой
+  plan-строке (решение владельца), возвращает четвёртым элементом заметки.
+- `prescriber.finalize` (#343): сумма сегментов выше `verdict.max_duration_min` (боль / сон < 5 ч) → структура
+  снимается, длительность остаётся заклэмпленной (раньше 72 → 40 → снова 72 — правила 9/15 для структурных
+  тренировок не работали). Порог «длительная короче N мин = лёгкая» в чате/утре — общий с `/plan`
+  (`min(60, long_run_min_hint)`) — закрывает #342: «напомни план» больше не переписывает `long 50` в `easy 50`.
+- #341: `workout_insights_context._plan_for_session` отдаёт `baseline` — исходную строку дня (план недели), если
+  чат/утро её переторговали; `session_metrics.plan_vs_actual` считает `baseline.volume_ratio` и ставит
+  `plan_volume_exceeded` по максимуму отношений (13.09: 71 к 50 → 1.42 → флаг); `week_plan_review` — поля
+  `changed_in_chat`/`planned_min_original` и счётчик `changed_in_chat`. `INSIGHTS_SCHEMA_VERSION` 11 → 12.
+- Тесты кэпов переписаны под новое поведение (`test_planning.py`, `test_weekly_plan.py`); `tests/coach/test_planning.py::
+  test_week_targets_long_run_hold_after_share_flag` падает на `main` независимо от правок (датозависимый) — BACKLOG #344.
+
 ## [12.09.2026] — Полевой тест ПАНО (M3.2): коуч сам назначает, число считает код, якорь зон по кнопке (WP3)
 
 ### Added

@@ -319,8 +319,23 @@ def plan_vs_actual(plan: dict | None, ttype: str | None,
         ratio = session_km / planned_km
     if ratio is not None:
         out["volume_ratio"] = round(ratio, 2)
-        if ratio > 1.0 + volume_tol:
-            flags.append(FLAG_PLAN_VOLUME)
+    # #341 (16.09.2026, решение владельца): база сравнения — ИСХОДНЫЙ план дня; согласие в чате
+    # («можно 10 км?» → строка 72 мин) сигнал перевыполнения не гасит: флаг — по максимуму отношений
+    # к согласованному и к исходному. (Overshoot flag vs the original plan as well as the agreed one.)
+    base = plan.get("baseline")
+    base_ratio = None
+    if base:
+        b_min, b_km = base.get("duration_min"), base.get("distance_km")
+        if b_min and duration_min:
+            base_ratio = duration_min / b_min
+        elif b_km and session_km:
+            base_ratio = session_km / b_km
+        out["baseline"] = {"planned": {k: base.get(k) for k in ("type", "duration_min", "distance_km")},
+                           "volume_ratio": round(base_ratio, 2) if base_ratio is not None else None,
+                           "changed_in_chat": True}
+    worst = max(r for r in (ratio, base_ratio) if r is not None) if (ratio or base_ratio) else None
+    if worst is not None and worst > 1.0 + volume_tol:
+        flags.append(FLAG_PLAN_VOLUME)
 
     out["flags"] = flags
     return out

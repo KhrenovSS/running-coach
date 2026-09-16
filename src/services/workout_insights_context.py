@@ -124,18 +124,19 @@ def _plan_for_session(user_id: int, session: TrainingSession, *,
     from src.config.constants import RECOMMENDATION_STATUS_SUPERSEDED
 
     # Погашенные перепланированием строки не линкуем к факту (02.09.2026)
-    rec = db.query(Recommendation).filter(
+    rows = db.query(Recommendation).filter(
         Recommendation.user_id == user_id,
         Recommendation.for_date == day,
         Recommendation.status != RECOMMENDATION_STATUS_SUPERSEDED,
-    ).order_by(Recommendation.id.desc()).first()
-    if rec is None:
+    ).order_by(Recommendation.id.asc()).all()
+    if not rows:
         return None
+    rec = rows[-1]
     if rec.linked_session_id is None:
         rec.linked_session_id = session.id
         db.commit()
     target, volume = rec.target_json or {}, rec.volume_json or {}
-    return {
+    out = {
         "type": rec.workout_type,
         "max_zone": target.get("max_zone"),
         "pace_min_km": target.get("pace_min_km"),
@@ -146,6 +147,27 @@ def _plan_for_session(user_id: int, session: TrainingSession, *,
         # M3.2 (12.09.2026): день плана был полевым тестом ПАНО → insights считают lthr_test
         "lthr_test": bool(target.get("lthr_test")),
     }
+    baseline = plan_baseline_row(rows)
+    if baseline is not None and baseline.id != rec.id:
+        # #341 (16.09.2026): исходное назначение дня (план недели) — база сравнения, которую
+        # согласие в чате не переписывает (13.09: факт 71 мин сравнили с «72», а план был 50)
+        bvol = baseline.volume_json or {}
+        out["baseline"] = {"type": baseline.workout_type,
+                           "duration_min": bvol.get("duration_min"),
+                           "distance_km": bvol.get("distance_km"),
+                           "status": baseline.status, "recommendation_id": baseline.id}
+    return out
+
+
+def plan_baseline_row(rows: list) -> object | None:
+    """Исходная строка дня среди действующих (по id): первая со статусом плана
+    (planned/confirmed/adjusted), иначе самая ранняя. (Original assignment of the day.)"""
+    if not rows:
+        return None
+    for r in rows:
+        if r.status in ("planned", "confirmed", "adjusted"):
+            return r
+    return rows[0]
 
 
 def _rpe_history(user_id: int, session: TrainingSession, *,

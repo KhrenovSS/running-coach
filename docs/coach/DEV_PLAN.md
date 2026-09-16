@@ -104,6 +104,10 @@ LLM только сообщает факт (`CoachTurn.concern`), код сни�
 
 ## 4. Граница безопасности P1
 
+> 16.09.2026: границы объёма (прогрессия: +10 %/нед, доля длительной, остаток недели) — не правила P1, а
+> потолки `planning_safety`/`day_caps`, применяемые после `clamp` повторным `finalize` во всех путях
+> (план, чат, утро). P1 остаётся про состояние на день; `max_duration_min` — только боль/сон.
+
 `rules/p1_safety.py :: evaluate_safety(state, *, now=None) -> SafetyVerdict` +
 `safety.py :: clamp(proposal, verdict, state, *, now=None, source="fallback")
 -> tuple[Prescription, bool]` (`now` — параметр ради реплеябельности, `source` пишется в
@@ -640,6 +644,23 @@ Literal-перечень флагов assessment — `schemas.FlagValue` (append
   (`ConcernReport`), `context_block` → `extras["concerns (params)"]`; колено убрано из профиля
   (`turn_context.profile`), промпта, `skills/pain.py`, вечернего вопроса (только при активной проблеме) и
   `handlers/pain.py` (`pain_location` — из активной травмы или `unspecified`); новый #328.
+
+### 16.09.2026 — потолки объёма в чате/утре: просьбы подопечного оцениваются кодом (#338–#343, P0; решения владельца)
+
+- ✅ **#338 ядро**: `coach/day_caps.py` — `day_targets` (`week_targets` + `apply_safety_to_targets`), `cap_day_volume`
+  (остаток недели − назначенное на другие дни), `finalize_with_caps` (двухпроходный finalize, как в `weekly_plan`);
+  подключено в `chat_flow._llm_chat_turn` (чат/утро) и `planning_rows.confirm_or_adjust_morning(targets=)` — утро
+  сверяет и plan-строку (решение владельца).
+- ✅ **#339 контекст**: `day_caps.context_block` → `extras["week_targets (planning)"]`; `SAFETY_CONTRACT` — абзац об объёме.
+- ✅ **#340 обходы**: `cap_long_run` по содержимому (ярлык не спасает, `race` не режется, дистанция без минут режется);
+  структурная выше потолка — `coach/segment_trim.py` по гайдам 44/45/46/61 (решение владельца: ускорения сохраняются,
+  ровная часть вниз; качество — повторы вниз; не помещается — структура снимается); `cap_week_volume` ужимает
+  структурные дни последними.
+- ✅ **#343**: `prescriber.finalize` — сумма сегментов выше `max_duration_min` → структура снимается (раньше откатывала clamp).
+- ✅ **#341**: `_plan_for_session.baseline`, `plan_vs_actual.baseline` (флаг по максимуму — решение владельца),
+  `week_plan_review.changed_in_chat`, `INSIGHTS_SCHEMA_VERSION` 12.
+- ✅ **#342**: порог «длительная < N мин = лёгкая» в чате общий с `/plan` (`min(60, long_run_min_hint)`); тест-репродукция.
+- Разбор и решения — `TASK_2026-09-13_athlete_requests.md` §7; тесты `tests/coach/test_day_caps.py` (17).
 
 ### 12.09.2026 — статус подопечного из данных, лестница качественных дней, длительная, объём, тест ПАНО (решения владельца)
 

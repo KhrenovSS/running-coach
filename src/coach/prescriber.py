@@ -160,14 +160,24 @@ def finalize(proposal: WorkoutProposal | None, state: AthleteState, *,
         # Ровная пробежка (разминка/бег/заминка, один ровный блок) — без сущностей:
         # целиком «пульс до N · время» (решение владельца 02.09.2026). Ускорения и блоки
         # с разным пульсом сохраняются. (Monotone structure is not persisted.)
+        from src.coach.render_segments import segments_total_min
+        total = segments_total_min(seg_dicts) if seg_dicts else None
+        cap = verdict.max_duration_min
+        if seg_dicts and total and cap is not None and total > cap:
+            # #343 (16.09.2026): сумма сегментов выше потолка длительности safety (боль / сон < 5 ч)
+            # откатывала бы урезание clamp (72 → 40 → снова 72) — структуру честно снимаем,
+            # длительность остаётся заклэмпленной. (Segments above the safety cap are dropped.)
+            prescription.rationale.append(ReasoningStep(
+                rule="segments", decision="структура снята",
+                reason=f"сумма сегментов {total} мин выше потолка длительности {cap} мин"))
+            seg_dicts = []
         if seg_dicts and not is_monotone(seg_dicts):
             prescription.target["segments"] = seg_dicts
             # Длительность структурного дня — из суммы сегментов (06.09.2026: LLM дал 39 мин при
             # сегментах на 42 → строка недели спорила с карточкой дня); predicted пересчитываем,
-            # чтобы «≈км» совпадал. Интенсивность не меняется — safety не трогаем.
-            # (Structured day: duration follows the segments; not a safety widening.)
-            from src.coach.render_segments import segments_total_min
-            total = segments_total_min(seg_dicts)
+            # чтобы «≈км» совпадал. Интенсивность не меняется — safety не трогаем; потолки объёма
+            # (day_caps / weekly_plan) считаются по итоговой Prescription, то есть уже после этого.
+            # (Structured day: duration follows the segments; volume caps see the final number.)
             current = prescription.volume.get("duration_min")
             if total and (current is None or round(current) != total):
                 prescription.rationale.append(ReasoningStep(

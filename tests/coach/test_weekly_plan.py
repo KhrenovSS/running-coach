@@ -51,13 +51,13 @@ def _wednesday(user):
     days = (2 - now.weekday()) % 7 or 7
     return (now + timedelta(days=days)).replace(hour=9, minute=0, second=0, microsecond=0)
 
-def _seed_prev_runs(db, user_id, n=4):
+def _seed_prev_runs(db, user_id, n=4, km=5.0):
     """n лёгких пробежек на прошлой неделе: при плоском объёме (safety) беговых дней не больше,
     чем раньше (07.09.2026) — тесты с 4 днями плана держат частоту прошлой недели ≥ 4."""
     from tests.helpers import build_training_session
     from src.domain.models.base import utcnow
     for i in range(n):
-        build_training_session(db, user_id, total_distance_km=5.0, duration_minutes=35.0,
+        build_training_session(db, user_id, total_distance_km=km, duration_minutes=35.0,
                                training_type="easy", avg_heart_rate=130,
                                begin_ts=utcnow() - timedelta(days=8 + i))
 
@@ -465,24 +465,36 @@ def test_weekly_plan_keeps_strides_segments(athlete_with_history, db_session, mo
 
 def test_weekly_plan_volume_cap_skips_structured_day_and_leaves_trail(athlete_with_history,
                                                                        db_session, monkeypatch):
-    """06.09.2026: перебор объёма + день с ускорениями → структурный день неизменен, соседние
-    ужаты, proposal_json.rationale урезанных дней содержит «урезано кодом»."""
+    """06.09.2026: перебор объёма + день с ускорениями → соседние ровные дни ужаты, структурный день
+    неизменен (16.09.2026: ровные режутся первыми, структурный — только если их не хватило),
+    proposal_json.rationale урезанных дней содержит «урезано кодом»."""
     from src.coach import prescriber
 
     def fake_predict(p, state, *, db):
         if p.workout_type == "rest":
             return {}
-        return {"pace_min_km": 4.0, "distance_km": round((p.volume.get("duration_min") or 0) / 4.0, 1)}
+        return {"pace_min_km": 6.0, "distance_km": round((p.volume.get("duration_min") or 0) / 6.0, 1)}
     monkeypatch.setattr(prescriber, "predict_volume", fake_predict)
+    from src.coach import planning
+    real_targets = planning.week_targets
+
+    def fixed_targets(*a, **k):
+        # Числа недели фиксируем (цель 30 км, длительная ≤ 12 км), чтобы тест проверял именно
+        # порядок ужатия, а не арифметику прогрессии от фикстур
+        t = real_targets(*a, **k)
+        t.update({"target_km": 30.0, "remaining_km": 30.0, "prev_week_km": 27.3,
+                  "long_run_km_max": 12.0, "long_run_hold": False, "long_run_min_hint": 72})
+        return t
+    monkeypatch.setattr(planning, "week_targets", fixed_targets)
     strides = [{"role": "warmup", "amount_kind": "min", "amount_value": 20, "target_zone": 2},
                {"role": "work", "amount_kind": "sec", "amount_value": 20, "repeat": 5,
                 "target_zone": 3, "recovery": {"duration_min": 2.0}},
                {"role": "cooldown", "amount_kind": "min", "amount_value": 10, "target_zone": 2}]
     turn = dict(PLAN_TURN, weekly_plan=[
-        {"workout_type": "easy", "target_zone": 2, "duration_min": 90, "for_days_ahead": 1},
+        {"workout_type": "easy", "target_zone": 2, "duration_min": 60, "for_days_ahead": 1},
         {"workout_type": "easy", "target_zone": 2, "duration_min": 39, "for_days_ahead": 3,
          "segments": strides},   # 39 при сегментах на 42 — код выставит 42 (06.09.2026)
-        {"workout_type": "easy", "target_zone": 2, "duration_min": 90, "for_days_ahead": 5},
+        {"workout_type": "easy", "target_zone": 2, "duration_min": 60, "for_days_ahead": 5},
         {"workout_type": "long", "target_zone": 2, "duration_min": 40, "for_days_ahead": 7},
     ])
     llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
@@ -494,12 +506,12 @@ def test_weekly_plan_volume_cap_skips_structured_day_and_leaves_trail(athlete_wi
     rows = db_session.query(Recommendation).filter_by(user_id=uid, status="planned").all()
     structured = [r for r in rows if (r.target_json or {}).get("segments")]
     assert len(structured) == 1 and structured[0].volume_json["duration_min"] == 42   # из сегментов
-    # Только два 90-минутных лёгких дня (+1, +5): длительная 40 мин с 12.09 (потолок 40 %) не режется
+    # Только два 60-минутных лёгких дня (+1, +5): длительная 40 мин с 12.09 (потолок 40 %) не режется
     # и переименовывается в easy без следа — её здесь не считаем
     trimmed = [r for r in rows if r.for_date in {sunday.date() + timedelta(days=1),
                                                   sunday.date() + timedelta(days=5)}]
     assert len(trimmed) == 2
-    assert trimmed and all(r.volume_json["duration_min"] < 90 for r in trimmed)
+    assert trimmed and all(r.volume_json["duration_min"] < 60 for r in trimmed)
     assert all(any(x.startswith("урезано кодом") for x in r.proposal_json["rationale"]) for r in trimmed)
     structured_line = next(l for l in text.splitlines() if "5×20 сек свободно" in l)
     assert "(отдых 2 мин трусцой)" in structured_line

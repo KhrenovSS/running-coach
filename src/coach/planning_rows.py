@@ -107,7 +107,10 @@ def week_plan_review(user_id: int, *, db: Session, week_start: date | None = Non
     if not recs:
         return None
     latest = {r.for_date: r for r in recs}
-    days, done, missed = [], 0, 0
+    earliest: dict[date, Recommendation] = {}
+    for r in recs:
+        earliest.setdefault(r.for_date, r)
+    days, done, missed, changed = [], 0, 0, 0
     for d in sorted(latest):
         r = latest[d]
         session = (db.query(TrainingSession).filter(
@@ -117,15 +120,26 @@ def week_plan_review(user_id: int, *, db: Session, week_start: date | None = Non
             done += 1
         elif d < today or (include_today and d == today):
             missed += 1
-        days.append({
+        day = {
             "date": d.isoformat(), "planned_type": r.workout_type,
             "status": r.status,
             "actual_type": effective_training_type(session) if session else None,
             "actual_km": session.total_distance_km if session else None,
-        })
+        }
+        first = earliest[d]
+        if first.id != r.id and (first.volume_json or {}) != (r.volume_json or {}):
+            # #341: план дня переторгован после /plan (чат/утро) — отчёт и следующий план видят дрейф
+            changed += 1
+            fvol = first.volume_json or {}
+            day["changed_in_chat"] = True
+            day["planned_min_original"] = fvol.get("duration_min")
+            day["planned_km_original"] = fvol.get("distance_km")
+            day["planned_min"] = (r.volume_json or {}).get("duration_min")
+        days.append(day)
     return {"week_start": week_start.isoformat(), "days": days,
             "planned": len(days), "done": done, "missed": missed,
-            "adjusted": sum(1 for r in latest.values() if r.status == "adjusted")}
+            "adjusted": sum(1 for r in latest.values() if r.status == "adjusted"),
+            "changed_in_chat": changed}
 
 
 def _proposal_from_row(rec: Recommendation) -> WorkoutProposal:
@@ -146,16 +160,20 @@ def _proposal_from_row(rec: Recommendation) -> WorkoutProposal:
 
 
 def confirm_or_adjust_morning(proposal: WorkoutProposal | None, user_id: int,
-                              state: AthleteState, *, db: Session,
-                              now: datetime) -> tuple[Prescription, str, Recommendation] | None:
+                              state: AthleteState, *, db: Session, now: datetime,
+                              targets: dict | None = None,
+                              ) -> tuple[Prescription, str, Recommendation, list[str]] | None:
     """Утро при наличии плана дня: подтвердить или осознанно заменить.
 
     None — плановой строки на сегодня нет (оркестратор идёт старым путём).
-    Возврат (prescription, "confirmed"|"adjusted", plan_row) — plan_row нужна строке
-    «Изменил план на … (было: …)»:
+    Возврат (prescription, "confirmed"|"adjusted", plan_row, notes) — plan_row нужна строке
+    «Изменил план на … (было: …)», notes — заметки потолков объёма над карточкой:
     - confirmed — re-clamp плана по СЕГОДНЯШНЕМУ состоянию ничего не урезал и
       LLM не меняла → UPDATE status той же строки, без дубля;
-    - adjusted — LLM меняет план или safety урезал → новая строка 'adjusted'.
+    - adjusted — LLM меняет план или safety/потолки урезали → новая строка 'adjusted'.
+    targets (day_caps.day_targets) — потолки недели применяются и к предложению LLM, и к самой
+    plan-строке (решение владельца 16.09.2026: утро сверяет план со свежими числами недели);
+    None → только clamp (как до 16.09). (Morning confirm-or-adjust with day caps.)
     """
     # #292/#305: план дня — ПОСЛЕДНЯЯ действующая строка на дату (включая proposed из чата),
     # иначе утро подтверждало вытесненную plan-строку, а карточку показывало по новой
@@ -167,13 +185,14 @@ def confirm_or_adjust_morning(proposal: WorkoutProposal | None, user_id: int,
     if plan_row is None or plan_row.status not in PLAN_STATUSES + ("proposed",):
         return None
     chosen = proposal if proposal is not None else _proposal_from_row(plan_row)
-    prescription = finalize(chosen, state, db=db, persist=False,
-                            source="llm" if proposal is not None else "plan",
-                            now=now)
+    from src.coach.day_caps import finalize_with_caps
+    prescription, notes = finalize_with_caps(
+        chosen, state, db=db, now=now, targets=targets,
+        source="llm" if proposal is not None else "plan")
     if unchanged_today(prescription, user_id, db=db):
         if plan_row.status != "confirmed":
             plan_row.status = "confirmed"
             db.commit()
-        return prescription, "confirmed", plan_row
+        return prescription, "confirmed", plan_row, notes
     save_prescription(prescription, state, db=db, status="adjusted")
-    return prescription, "adjusted", plan_row
+    return prescription, "adjusted", plan_row, notes

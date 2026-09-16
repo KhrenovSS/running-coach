@@ -126,3 +126,14 @@ def test_m2_plan_thresholds_sane():
     from src.coach import config as c
     assert 0 < c.PLAN_INTENSITY_TOLERANCE_PCT < 0.5
     assert 0 < c.PLAN_VOLUME_TOLERANCE_PCT < 0.5
+
+
+def test_segment_trim_constants_match_guides():
+    """16.09.2026: ускорений за тренировку — как в key_rules гайда 46 (strides_reps_per_session);
+    полы разминки/заминки и минимум повторов — положительные и согласованы с лёгким днём."""
+    from src.coach import config as c
+    from src.coach.knowledge.loader import load_guides
+    g46 = next(g for g in load_guides() if g.name.startswith("46_"))
+    assert int(g46.key_rules["strides_reps_per_session"]) == c.STRIDES_MAX_PER_SESSION
+    assert 0 < c.SEGMENT_COOLDOWN_MIN_MIN <= c.SEGMENT_WARMUP_MIN_MIN < c.PLAN_EASY_MIN_MINUTES
+    assert c.SEGMENT_WORK_REPEAT_MIN >= 1

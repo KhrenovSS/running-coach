@@ -344,6 +344,25 @@ def test_plan_vs_actual_volume_overshoot_flagged_undershoot_not():
     assert under["flags"] == [] and under["volume_ratio"] < 1.0  # недобор — не флаг
 
 
+def test_plan_vs_actual_baseline_keeps_overshoot_signal():
+    """#341 (16.09.2026): план дня 50 мин переторгован в чате до 72; факт 71 мин — к согласованному
+    0.99 (без флага), к исходному 1.42 → флаг plan_volume_exceeded по максимуму отношений."""
+    from src.analysis.session_metrics import FLAG_PLAN_VOLUME, plan_vs_actual
+    times, hrs = _ramp(71, 130)
+    zones = time_in_zones(times, hrs, MAX_HR)
+    plan = {"type": "long", "max_zone": 2, "duration_min": 72,
+            "baseline": {"type": "long", "duration_min": 50, "distance_km": None}}
+    r = plan_vs_actual(plan, "long", 10.1, 71.0, zones, volume_tol=0.15, intensity_tol=0.10)
+    assert r["volume_ratio"] == 0.99
+    assert r["baseline"]["volume_ratio"] == 1.42 and r["baseline"]["changed_in_chat"] is True
+    assert r["baseline"]["planned"]["duration_min"] == 50
+    assert FLAG_PLAN_VOLUME in r["flags"]
+    # Без baseline — прежнее поведение: к согласованному, флага нет
+    plain = plan_vs_actual({"type": "long", "max_zone": 2, "duration_min": 72}, "long", 10.1, 71.0,
+                           zones, volume_tol=0.15, intensity_tol=0.10)
+    assert "baseline" not in plain and plain["flags"] == []
+
+
 def test_plan_vs_actual_type_mismatch_reported():
     from src.analysis.session_metrics import plan_vs_actual
     times, hrs = _ramp(40, 130)
