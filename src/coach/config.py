@@ -106,6 +106,13 @@ HARD_TYPES = ("tempo", "interval", "race")
 INTENSITY_ONLY_SAFETY_RULES = ("week_intensity_overload", "easy_runs_too_hard",
                                "quality_volume_exceeded", "downhill_load",
                                "hard_days_too_close", "poor_interval_recovery", "recovery_hours")
+# Правила, которые НЕ держат объём недели плоским (решение владельца 16.09.2026): распределение нагрузки
+# (список выше) + разовые сигналы дня — короткий сон одной ночи, серия тяжёлых дней. План строится на
+# 7 дней, а эти сигналы описывают состояние в момент планирования (вс вечером после длительной):
+# 13.09 одна ночь 5.8 ч заморозила объём всей недели. Стойкие сигналы (HRV, recovery %, ACWR/ATI, боль,
+# болезнь, detraining, монотонность, нет данных) по-прежнему держат объём — `planning_safety.volume_hold`.
+# (Rules that do not hold weekly volume flat: distribution rules + one-day transient signals.)
+VOLUME_TRANSIENT_SAFETY_RULES = INTENSITY_ONLY_SAFETY_RULES + ("sleep_short", "sleep_very_short", "hard_streak")
 # Ускорения (strides, гайды 45/46: 15–20 с с полным восстановлением) — рабочий отрезок не длиннее
 # этого; всё длиннее в Z3+ — качественная работа: safety классифицирует предложение по сегментам,
 # а не по ярлыку (инцидент 04.09.2026: «лёгкий бег» с 4×3 мин в Z3 обошёл гейт интенсива).

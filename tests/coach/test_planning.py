@@ -50,11 +50,44 @@ def test_targets_deload_on_week_4(db_session):
     _week_of_km(db_session, user.id, 25.0, 2)
     _week_of_km(db_session, user.id, 28.0, 1)
     _set_meta(db_session, user.id, mesocycle_week=3, phase="build",
-              week_start="2000-01-01", last_build_km=28.0)
+              week_start="2000-01-01", last_build_km=28.0, grew=True)
     t = planning.week_targets(user.id, db=db_session)
     assert t["mesocycle_week"] == 4
     assert t["phase"] == "deload"
     assert abs(t["target_km"] - 28.0 * CYCLE_3_1["deload_volume_pct"]) < 0.2
+
+
+def test_flat_week_does_not_advance_mesocycle(db_session):
+    """16.09.2026 (решение владельца): прошлая неделя была плоской (grew отсутствует/False) → счётчик стоит:
+    снова 3/4 build с целью +10 %, а не deload до 75 % (три недели по 26 км → разгрузка до 20 — абсурд)."""
+    user = _unique_user(db_session)
+    _week_of_km(db_session, user.id, 26.3, 2)
+    _week_of_km(db_session, user.id, 26.3, 1)
+    _set_meta(db_session, user.id, mesocycle_week=3, phase="build",
+              week_start="2000-01-01", last_build_km=26.3)          # старая мета без grew
+    t = planning.week_targets(user.id, db=db_session)
+    assert t["mesocycle_week"] == 3 and t["phase"] == "build"
+    assert abs(t["target_km"] - 26.3 * (1 + LOAD_PROGRESSION["max_weekly_increase_pct"] / 100)) < 0.2
+    _set_meta(db_session, user.id, mesocycle_week=3, phase="build",
+              week_start="2000-01-01", last_build_km=26.3, grew=False)
+    assert planning.week_targets(user.id, db=db_session)["mesocycle_week"] == 3
+
+
+def test_advance_mesocycle_writes_grew(db_session):
+    """advance_mesocycle пишет grew: цель выше прошлой недели → True; удержанная safety / без истории → False."""
+    from src.models import UserModel
+    user = _unique_user(db_session)
+    _week_of_km(db_session, user.id, 20.0, 2)
+    _week_of_km(db_session, user.id, 20.0, 1)
+    t = planning.week_targets(user.id, db=db_session)
+    assert t["target_km"] > t["prev_week_km"]
+    planning.advance_mesocycle(user.id, db=db_session, targets=t)
+    meta = db_session.query(UserModel).filter_by(user_id=user.id).first().params_json["week_plan"]
+    assert meta["grew"] is True
+    held = dict(t, target_km=t["prev_week_km"], volume_held_by_safety=True)
+    planning.advance_mesocycle(user.id, db=db_session, targets=held)
+    meta = db_session.query(UserModel).filter_by(user_id=user.id).first().params_json["week_plan"]
+    assert meta["grew"] is False
 
 
 def test_targets_post_deload_resumes_from_build(db_session):
@@ -646,6 +679,16 @@ def test_apply_safety_volume_hold_only_for_fatigue_rules():
 
     empty = SafetyVerdict(max_zone=2, allowed_types=allowed, reasons=reasons)   # triggered=[]
     assert volume_hold(empty) is True                                           # консервативно
+
+    # 16.09.2026: разовые сигналы дня объём не держат — репродукция вс 13.09 (после длительной + одна
+    # короткая ночь → объём недели был заморожен)
+    sunday_13_09 = SafetyVerdict(max_zone=2, allowed_types=allowed, reasons=reasons,
+                                 triggered=["recovery_hours", "hard_days_too_close", "sleep_short"])
+    assert volume_hold(sunday_13_09) is False
+    out = apply_safety_to_targets(base, sunday_13_09)
+    assert out["target_km"] == 27.9 and out["volume_growth_kept"] == "intensity_only"
+    assert volume_hold(SafetyVerdict(triggered=["sleep_very_short", "hard_streak"])) is False
+    assert volume_hold(SafetyVerdict(triggered=["sleep_short", "hrv_low"])) is True     # стойкий сигнал держит
 
 
 def test_cap_week_volume_structured_days_scaled_last_and_leaves_trail():

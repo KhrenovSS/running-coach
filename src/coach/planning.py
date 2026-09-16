@@ -120,11 +120,18 @@ def week_targets(user_id: int, *, db: Session, today: date | None = None,
     prev = [w for w in weeks if w["week_start"] < week_start and w["session_count"] > 0]
     meta = _week_plan_meta(user_id, db=db)
 
-    # Счётчик мезоцикла: replan той же недели НЕ двигает счётчик (идемпотентно)
+    # Счётчик мезоцикла: replan той же недели НЕ двигает счётчик (идемпотентно).
+    # 16.09.2026 (решение владельца): считаем только недели РОСТА — плоская неделя (объём удержан safety,
+    # мало истории, отмены) счётчик не двигает, разгрузка приходит после трёх фактических недель роста,
+    # а не по календарю (три плоские недели → deload до 20 км было бы абсурдом). Флаг `grew` пишет
+    # advance_mesocycle; его отсутствие (старая мета) = не росли. После deload — снова 1.
+    # (Mesocycle counts growth weeks only; a flat week repeats its number.)
     if meta.get("week_start") == week_start.isoformat():
         meso_week = meta.get("mesocycle_week", 1)
-    elif meta.get("mesocycle_week"):
+    elif meta.get("mesocycle_week") and (meta.get("grew") or meta.get("phase") == "deload"):
         meso_week = meta["mesocycle_week"] % _MESO_LEN + 1
+    elif meta.get("mesocycle_week"):
+        meso_week = meta["mesocycle_week"]
     else:
         meso_week = 1
     phase = "deload" if meso_week == _MESO_LEN else "build"
@@ -288,12 +295,16 @@ def advance_mesocycle(user_id: int, *, db: Session, targets: dict) -> None:
     prev_meta = params.get("week_plan") or {}
     last_build = (targets["target_km"] if targets["phase"] == "build"
                   else prev_meta.get("last_build_km") or targets["prev_week_km"])
+    prev_km = targets.get("prev_week_km") or 0.0
     params["week_plan"] = {
         "week_start": targets["week_start"],
         "mesocycle_week": targets["mesocycle_week"],
         "phase": targets["phase"],
         "target_km": targets["target_km"],
         "last_build_km": round(last_build, 1),
+        # 16.09.2026: неделя запланирована как рост (после apply_safety_to_targets) → счётчик мезоцикла
+        # на следующей неделе двинется; плоская (удержана safety / без истории) — нет
+        "grew": bool(targets["phase"] == "build" and prev_km > 0 and targets["target_km"] > prev_km),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
     um.params_json = params

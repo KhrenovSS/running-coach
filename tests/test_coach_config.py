@@ -89,6 +89,13 @@ def test_intensity_only_safety_rules_are_real_rule_keys():
     # правила усталости/здоровья в списке быть не должны
     for k in ("hrv_low", "recovery_fatigued", "pain_caution", "illness", "detraining", "monotony_high"):
         assert k in keys and k not in coach_config.INTENSITY_ONLY_SAFETY_RULES
+    # 16.09.2026: разовые сигналы дня — надмножество intensity-only, тоже ⊆ ключей, стойкие — вне списка
+    transient = set(coach_config.VOLUME_TRANSIENT_SAFETY_RULES)
+    assert set(coach_config.INTENSITY_ONLY_SAFETY_RULES) <= transient <= keys
+    assert {"sleep_short", "sleep_very_short", "hard_streak"} <= transient
+    for k in ("hrv_low", "recovery_fatigued", "pain_caution", "illness", "detraining", "monotony_high",
+              "acwr_high", "rhr_critical", "no_data"):
+        assert k not in transient
 
 
 def test_m1_session_metric_thresholds_sane():

@@ -645,6 +645,13 @@ Literal-перечень флагов assessment — `schemas.FlagValue` (append
   (`turn_context.profile`), промпта, `skills/pain.py`, вечернего вопроса (только при активной проблеме) и
   `handlers/pain.py` (`pain_location` — из активной травмы или `unspecified`); новый #328.
 
+### 16.09.2026 — объём недели: плоский только по стойким сигналам, мезоцикл считает недели роста (решения владельца)
+
+- ✅ `VOLUME_TRANSIENT_SAFETY_RULES` (intensity-only + `sleep_short`/`sleep_very_short`/`hard_streak`) —
+  `planning_safety.volume_hold` держит объём только по стойким сигналам (13.09 одна короткая ночь заморозила неделю).
+- ✅ `week_plan.grew` в мете (`advance_mesocycle`); `week_targets` двигает счётчик мезоцикла только после недели
+  роста или разгрузки — deload после трёх фактических недель роста, не по календарю. BACKLOG #345 (закрыт).
+
 ### 16.09.2026 — потолки объёма в чате/утре: просьбы подопечного оцениваются кодом (#338–#343, P0; решения владельца)
 
 - ✅ **#338 ядро**: `coach/day_caps.py` — `day_targets` (`week_targets` + `apply_safety_to_targets`), `cap_day_volume`

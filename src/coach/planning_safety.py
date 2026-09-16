@@ -18,12 +18,12 @@ from src.coach.config import (
     EASY_TOO_HARD_LOOKBACK_DAYS,
     HARD_SHARE_MIN_MINUTES_7D,
     HARD_TYPES,
-    INTENSITY_ONLY_SAFETY_RULES,
     LONG_RUN_CAP_TOLERANCE_KM,
     LONG_RUN_MAX_PCT_WEEK,
     LONG_RUN_MAX_MIN,
     PLAN_EASY_MIN_MINUTES,
     PLAN_RUN_DAYS_FLOOR,
+    VOLUME_TRANSIENT_SAFETY_RULES,
     WEEK_VOLUME_TOLERANCE_PCT,
     long_run_max_pct,
 )
@@ -117,12 +117,14 @@ def quality_reopens_at(state: AthleteState, counts: dict[int, int], *, now: date
 
 def volume_hold(verdict: SafetyVerdict) -> bool:
     """Держать ли объём недели плоским при закрытом интенсиве (решение владельца 12.09.2026):
-    да — если сработало хоть одно правило усталости/здоровья или список пустой (консервативно);
-    нет — если интенсив закрыт только правилами распределения нагрузки (INTENSITY_ONLY_SAFETY_RULES).
-    (Hold weekly volume flat unless the block is intensity-distribution only.)"""
+    да — если сработало хоть одно СТОЙКОЕ правило усталости/здоровья или список пустой (консервативно);
+    нет — если интенсив закрыт только правилами распределения нагрузки (INTENSITY_ONLY_SAFETY_RULES) и/или
+    разовыми сигналами дня (короткий сон одной ночи, серия тяжёлых дней) — 16.09.2026, решение владельца:
+    13.09 `sleep_short` вечером после длительной заморозил объём всей недели.
+    (Hold weekly volume flat only for persistent fatigue/health signals.)"""
     if not verdict.triggered:
         return True
-    return any(t not in INTENSITY_ONLY_SAFETY_RULES for t in verdict.triggered)
+    return any(t not in VOLUME_TRANSIENT_SAFETY_RULES for t in verdict.triggered)
 
 
 def apply_safety_to_targets(targets: dict[str, Any], verdict: SafetyVerdict, *,
@@ -154,7 +156,8 @@ def apply_safety_to_targets(targets: dict[str, Any], verdict: SafetyVerdict, *,
     # 06.09.2026: в safety-разгрузку объём недели плоский — цель = прошлая неделя, потолок длительной
     # пересчитан. 12.09.2026: только при усталости/здоровье; блок по распределению нагрузки
     # (правила 16/17 и родня) объём не держит — быстрые лёгкие лечатся темпом, не километрами.
-    # (Hold volume flat only for fatigue/health blocks; intensity-only blocks keep the +10 % growth.)
+    # 16.09.2026: разовые сигналы дня (сон одной ночи, серия тяжёлых) объём тоже не держат — только стойкие.
+    # (Hold volume flat only for persistent fatigue/health blocks; transient blocks keep the +10 % growth.)
     prev_km = out.get("prev_week_km") or 0.0
     if prev_km > 0 and (out.get("target_km") or 0.0) > prev_km and not volume_hold(verdict):
         out["volume_growth_kept"] = "intensity_only"
