@@ -45,7 +45,15 @@
 по гайдам 44/45/46/61 (ускорения сохраняются, ровная часть вниз; качество — повторы вниз; не помещается —
 структура снимается); `cap_week_volume` ужимает структурные дни последними. `prescriber.finalize` не даёт
 сумме сегментов откатить `max_duration_min` (#343). База сравнения план vs факт — исходная строка дня
-(`_plan_for_session.baseline`, флаг `plan_volume_exceeded` по максимуму отношений, #341).
+(`_plan_for_session.baseline`, флаг `plan_volume_exceeded` по максимуму отношений, #341). Допуск объёма дня — по состоянию (17.09.2026): `planning_safety.fatigue_signals` (стойкие
+правила усталости/здоровья) → `day_targets["day_volume_tolerance_pct"]` 5 % / 15 % (`DAY_VOLUME_TOLERANCE_RELAXED_PCT`),
+гистерезис `DAY_CAP_MIN_CUT_MIN/KM` — срез короче 10 мин / 1 км не делаем; `/plan` остаётся на 5 %.
+
+Диапазон времени ровного дня (17.09.2026, решение владельца): `coach/volume_range.py` — низ `volume.duration_min_low`
+= max(30, 75 % верха; long 85 % и ≥ порога длительной), считается один раз в `prescriber.finalize` по итоговому верху;
+верх `duration_min` остаётся единственным жёстким числом (суммы, кэпы, экспорт). Карточки «30–40 мин · ≈4.3–5.7 км»
+(`render`, `render_week`), `numeric_check` принимает числа внутри интервала, `plan_vs_actual.within_range` (факт внутри
+= по плану, `volume_ratio` 1.0), `week_plan_review` сравнивает верх/дистанцию.
 
 Частота беговых дней в чате и утре (17.09.2026, #347/#348, решения владельца): плановый отдых строкой не хранится
 (`weekly_plan._clean_days`), поэтому «сегодня по плану отдых» = отсутствие строки. `day_caps.cap_run_days` — первый кэп
@@ -240,6 +248,7 @@ coach/
 │                      #   cap_long_run — по содержимому (16.09.2026, #340): любой бег выше long_run_km_max, race не режется
 ├── races.py           # 17.09 (#243 ч.1): календарь стартов — params_json["races"], record_race из CoachTurn.races, context_block, mark_race
 ├── race_plan.py       # 17.09 (#243 ч.1): потолок по дистанции, goal_for_week (фазы build/taper/race_week/maintenance), place_race, header_suffix
+├── volume_range.py    # 17.09: диапазон времени ровного дня — duration_low/minutes_label/km_range (низ производный, считается в finalize)
 ├── day_caps.py        # потолки объёма и частоты в чате/утре (16–17.09.2026, #338/#347): day_targets, cap_run_days, cap_day_volume (остаток недели −
 │                      #   назначенное на другие дни), finalize_with_caps (двухпроходный finalize), context_block для LLM
 ├── segment_trim.py    # урезание структурной тренировки по гайдам 44/45/46/61 (16.09.2026): trim_segments, shrink_proposal

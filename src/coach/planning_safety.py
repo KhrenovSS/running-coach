@@ -128,7 +128,14 @@ def volume_hold(verdict: SafetyVerdict) -> bool:
     (Hold weekly volume flat only for persistent fatigue/health signals.)"""
     if not verdict.triggered:
         return True
-    return any(t not in VOLUME_TRANSIENT_SAFETY_RULES for t in verdict.triggered)
+    return bool(fatigue_signals(verdict))
+
+
+def fatigue_signals(verdict: SafetyVerdict) -> list[str]:
+    """Стойкие сигналы усталости/здоровья/«нет данных» в вердикте: `triggered` без правил распределения
+    нагрузки и разовых сигналов дня (VOLUME_TRANSIENT_SAFETY_RULES). Пусто — состояние чистое (17.09.2026:
+    допуск объёма дня в чате/утре шире). (Persistent fatigue/health signals; empty = clean state.)"""
+    return [t for t in verdict.triggered if t not in VOLUME_TRANSIENT_SAFETY_RULES]
 
 
 def apply_safety_to_targets(targets: dict[str, Any], verdict: SafetyVerdict, *,

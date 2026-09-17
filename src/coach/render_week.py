@@ -14,6 +14,7 @@ from src.coach.config import UNAVAILABLE_RATIONALE
 from src.coach.contracts import Prescription
 from src.coach.render import _TYPE_LABEL, _hr_ceiling, _predicted_estimate, type_label
 from src.coach.render_segments import compact_segments, visible_segments
+from src.coach.volume_range import km_range, minutes_label
 from src.utils.timeutils import WEEKDAYS_RU_SHORT
 
 
@@ -27,7 +28,7 @@ def _change_label(workout_type: str | None, volume: dict | None) -> str:
     label = _TYPE_LABEL.get(workout_type, workout_type or "—")
     minutes = (volume or {}).get("duration_min")
     if minutes and workout_type != "rest":
-        label += f" · {minutes:.0f} мин"
+        label += f" · {minutes_label(volume)}"           # «30–40 мин» у ровного дня (17.09.2026)
     return label
 
 
@@ -129,7 +130,7 @@ def _fact_line(day: str, p: Prescription, fact: dict | None,
     if fact is None:
         parts = list(head)
         if p.volume.get("duration_min") is not None:
-            parts.append(f"{p.volume['duration_min']:.0f} мин")
+            parts.append(minutes_label(p.volume))
         parts.append("пропущен")
         return f"✗ {day} — " + " · ".join(parts)
     parts = list(head)
@@ -224,9 +225,12 @@ def render_week_plan(prescriptions: list[Prescription], targets: dict,
             if pace_hint is not None:
                 parts.append(f"~{format_pace(pace_hint)}/км")
         if p.volume.get("duration_min") is not None:
-            parts.append(f"{p.volume['duration_min']:.0f} мин")
+            parts.append(minutes_label(p.volume))
         km = _distance_hint_km(p)
-        if km is not None:
+        bounds = km_range(p.volume, p.predicted)          # диапазон км — только по прогнозу темпа
+        if bounds is not None:
+            parts.append(f"≈{bounds[0]:.1f}–{bounds[1]:.1f} км")
+        elif km is not None:
             parts.append(f"≈{km:.1f} км")
         segs = visible_segments(p.target)
         if segs:

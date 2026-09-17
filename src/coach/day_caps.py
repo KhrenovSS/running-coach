@@ -23,14 +23,21 @@ from sqlalchemy.orm import Session
 
 from src.coach import planning
 from src.coach.config import (
-    LONG_RUN_CAP_TOLERANCE_KM,
+    DAY_CAP_MIN_CUT_KM,
+    DAY_CAP_MIN_CUT_MIN,
+    DAY_VOLUME_TOLERANCE_RELAXED_PCT,
     LONG_RUN_MIN_MINUTES,
     PLAN_EASY_MIN_MINUTES,
     WEEK_VOLUME_TOLERANCE_PCT,
 )
 from src.coach.contracts import AthleteState, Prescription, SafetyVerdict, WorkoutProposal
 from src.coach.planning_rows import PLAN_STATUSES
-from src.coach.planning_safety import _UNCAPPED_TYPES, apply_safety_to_targets, cap_long_run
+from src.coach.planning_safety import (
+    _UNCAPPED_TYPES,
+    apply_safety_to_targets,
+    cap_long_run,
+    fatigue_signals,
+)
 from src.coach.prescriber import finalize
 from src.coach.segment_trim import shrink_proposal
 from src.coach.turn_context import is_athlete_unavailable
@@ -49,7 +56,9 @@ _CONTEXT_KEYS = ("plan_scope", "week_start", "prev_week_km", "target_km", "done_
                  # 17.09.2026: частота — беговых дней в неделе не больше run_days_max
                  "run_days_max", "rest_days_min", "done_runs", "run_days_used",
                  # 17.09.2026 (#243 ч.1): фаза подготовки к старту и потолок объёма
-                 "goal", "capped_by_ceiling")
+                 "goal", "capped_by_ceiling",
+                 # 17.09.2026: допуск объёма дня по состоянию (15 % без стойких сигналов усталости, иначе 5 %)
+                 "day_volume_tolerance_pct", "day_volume_tolerance_reason")
 
 
 def _week_bounds(targets: dict[str, Any]) -> tuple[date, date] | None:
@@ -113,6 +122,14 @@ def day_targets(user_id: int, verdict: SafetyVerdict, *, db: Session, now: datet
     сегодня). Один вызов на ход. (Week numbers for a chat/morning turn.)"""
     targets = planning.week_targets(user_id, db=db, now=now)
     targets = apply_safety_to_targets(targets, verdict)
+    # 17.09.2026 (решение владельца): допуск объёма дня — по состоянию. Стойкие сигналы усталости/здоровья
+    # (HRV, recovery %, ACWR/ATI, боль, болезнь, detraining, монотонность, нет данных) → строго 5 %; чистый
+    # вердикт или только правила распределения/разовые сигналы → 15 %. /plan остаётся на 5 %.
+    # (State-dependent day tolerance: fatigue → strict, clean → relaxed.)
+    fatigue = fatigue_signals(verdict)
+    targets["day_volume_tolerance_pct"] = (WEEK_VOLUME_TOLERANCE_PCT if fatigue
+                                           else DAY_VOLUME_TOLERANCE_RELAXED_PCT)
+    targets["day_volume_tolerance_reason"] = fatigue[:3]
     bounds = _week_bounds(targets)
     if bounds is not None:
         rows = _other_day_rows(user_id, db=db, week_start=bounds[0], today=now.date())
@@ -129,12 +146,14 @@ def context_block(targets: dict[str, Any]) -> dict:
     base = targets.get("remaining_km") if targets.get("plan_scope") == "rest_of_week" \
         else targets.get("target_km")
     planned = targets.get("planned_km_remaining")
+    tol = targets.get("day_volume_tolerance_pct", WEEK_VOLUME_TOLERANCE_PCT)
     if base is not None:
         out["planned_km_remaining"] = planned or 0.0
-        out["unallocated_km"] = round(max(0.0, base * (1 + WEEK_VOLUME_TOLERANCE_PCT)
-                                          - (planned or 0.0)), 1)
+        out["unallocated_km"] = round(max(0.0, base * (1 + tol) - (planned or 0.0)), 1)
         out["rule"] = ("одна пробежка не длиннее long_run_km_max; день можно увеличить не больше, "
-                       "чем на unallocated_km сверх его плана — иначе код урежет")
+                       "чем на unallocated_km сверх его плана — иначе код урежет; unallocated_km уже "
+                       "включает допуск по состоянию (day_volume_tolerance_pct: без стойких сигналов "
+                       "усталости шире, при них строгий)")
     if targets.get("run_days_max") is not None:
         out["frequency_rule"] = ("беговых дней в неделе не больше run_days_max (run_days_used уже занято "
                                  "фактом и планом), день полного отдыха обязателен; лишний беговой день "
@@ -187,10 +206,12 @@ def cap_day_volume(proposal: WorkoutProposal, prescription: Prescription,
                    other_planned_km: float = 0.0) -> tuple[WorkoutProposal | None, str | None]:
     """Потолок объёма ДНЯ от остатка недели — чистая функция.
 
-    Допуск дня = (remaining_km | target_km) × (1 + WEEK_VOLUME_TOLERANCE_PCT) − км, уже назначенные
-    на другие дни недели. Оценка км — `prescription.predicted.distance_km` (тот же ориентир, что в
-    карточке), иначе `proposal.distance_km`. Выше допуска (+ LONG_RUN_CAP_TOLERANCE_KM) → минуты
-    вниз пропорционально (не ниже PLAN_EASY_MIN_MINUTES), структура — через shrink_proposal.
+    Допуск дня = (remaining_km | target_km) × (1 + tol) − км, уже назначенные на другие дни недели;
+    tol — `targets["day_volume_tolerance_pct"]` (по состоянию, 17.09.2026), без ключа —
+    WEEK_VOLUME_TOLERANCE_PCT. Оценка км — `prescription.predicted.distance_km` (тот же ориентир, что в
+    карточке), иначе `proposal.distance_km`. Выше допуска на DAY_CAP_MIN_CUT_KM и больше → минуты вниз
+    пропорционально (не ниже PLAN_EASY_MIN_MINUTES), структура — через shrink_proposal; гистерезис —
+    эффективный срез (после пола) меньше DAY_CAP_MIN_CUT_MIN не делаем (шум, не перегруз).
     Дата вне недели targets (вс вечером про пн) → не применяем. Возврат (копия | None, заметка | None).
     (Day-volume cap from the week's remaining km; pure.)"""
     if proposal.workout_type in _UNCAPPED_TYPES or not proposal.duration_min:
@@ -206,16 +227,21 @@ def cap_day_volume(proposal: WorkoutProposal, prescription: Prescription,
     est = predicted.get("distance_km") or proposal.distance_km
     if not est:
         return None, None
-    allowance = base * (1 + WEEK_VOLUME_TOLERANCE_PCT) - (other_planned_km or 0.0)
-    if est <= allowance + LONG_RUN_CAP_TOLERANCE_KM:
+    tol = targets.get("day_volume_tolerance_pct", WEEK_VOLUME_TOLERANCE_PCT)
+    allowance = base * (1 + tol) - (other_planned_km or 0.0)
+    if est <= allowance + DAY_CAP_MIN_CUT_KM:
         return None, None
     duration = float(proposal.duration_min)
     new_min = max(PLAN_EASY_MIN_MINUTES, math.floor(duration * max(allowance, 0.0) / est))
-    if new_min >= duration:
-        return None, None
+    if new_min >= duration or duration - new_min < DAY_CAP_MIN_CUT_MIN:
+        return None, None       # гистерезис: срез короче DAY_CAP_MIN_CUT_MIN — шум, не перегруз
     reason = f"на неделе осталось {base:.1f} км"
     if other_planned_km:
         reason += f", из них {other_planned_km:.1f} уже назначено на другие дни"
+    reason += f"; допуск {tol * 100:.0f} %"
+    fatigue = targets.get("day_volume_tolerance_reason") or []
+    if fatigue:
+        reason += f" — усталость ({', '.join(fatigue)})"
     trail = f"урезано кодом: {duration:.0f} → {new_min:.0f} мин (объём недели: {reason})"
     capped, seg_note = shrink_proposal(proposal, new_min, trail=trail,
                                        pace_min_km=predicted.get("pace_min_km"))

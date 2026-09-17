@@ -141,6 +141,7 @@ def _plan_for_session(user_id: int, session: TrainingSession, *,
         "max_zone": target.get("max_zone"),
         "pace_min_km": target.get("pace_min_km"),
         "duration_min": volume.get("duration_min"),
+        "duration_min_low": volume.get("duration_min_low"),   # 17.09.2026: низ диапазона ровного дня
         "distance_km": volume.get("distance_km"),
         "for_date": rec.for_date.isoformat(),
         "source": rec.source, "clamped": rec.clamped,
@@ -154,6 +155,7 @@ def _plan_for_session(user_id: int, session: TrainingSession, *,
         bvol = baseline.volume_json or {}
         out["baseline"] = {"type": baseline.workout_type,
                            "duration_min": bvol.get("duration_min"),
+                           "duration_min_low": bvol.get("duration_min_low"),
                            "distance_km": bvol.get("distance_km"),
                            "status": baseline.status, "recommendation_id": baseline.id}
     return out

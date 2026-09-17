@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from src.analysis.hr_zones import zone_ceiling_hr
 from src.services.repositories import latest_lthr, latest_ltsp
+from src.coach.volume_range import duration_low
 from src.coach.contracts import (
     AthleteState,
     PaceClampContext,
@@ -198,6 +199,19 @@ def finalize(proposal: WorkoutProposal | None, state: AthleteState, *,
         prescription.workout_type = "easy"
         if db is not None:
             prescription.predicted = predict_volume(prescription, state, db=db)
+    # 17.09.2026 (решение владельца): ровный день — диапазон «минимум ради эффекта — план»: низ производный
+    # (volume_range.duration_low), считается здесь единожды по итоговому верху — все пути (чат, утро, план,
+    # двухпроходные кэпы) идут через finalize повторно, рассинхрона нет. (Derived low bound, one place.)
+    low = duration_low(prescription.workout_type, prescription.volume.get("duration_min"),
+                       has_segments=bool(prescription.target.get("segments")
+                                         or prescription.target.get("structure")
+                                         or proposal.segments),
+                       has_pace=prescription.target.get("pace_min_km") is not None,
+                       long_min_minutes=long_min_minutes)
+    if low is not None:
+        prescription.volume["duration_min_low"] = low
+    else:
+        prescription.volume.pop("duration_min_low", None)
     if persist and db is not None:
         save_prescription(prescription, state, db=db)
     return prescription

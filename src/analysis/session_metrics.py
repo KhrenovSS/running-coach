@@ -292,7 +292,7 @@ def plan_vs_actual(plan: dict | None, ttype: str | None,
     out: dict = {
         "available": True,
         "planned": {k: plan.get(k) for k in
-                    ("type", "max_zone", "duration_min", "distance_km",
+                    ("type", "max_zone", "duration_min", "duration_min_low", "distance_km",
                      "pace_min_km")},
         "type_match": plan.get("type") == ttype,
     }
@@ -315,6 +315,15 @@ def plan_vs_actual(plan: dict | None, ttype: str | None,
     ratio = None
     if planned_min and duration_min:
         ratio = duration_min / planned_min
+        # 17.09.2026: ровный день назначен диапазоном [low, upper] — факт внутри = «по плану»
+        # (volume_ratio 1.0, сырое отношение — volume_ratio_raw). (Fact inside the range is on plan.)
+        low = plan.get("duration_min_low")
+        if low:
+            inside = low <= duration_min <= planned_min
+            out["within_range"] = inside
+            if inside:
+                out["volume_ratio_raw"] = round(ratio, 2)
+                ratio = 1.0
     elif planned_km and session_km:
         ratio = session_km / planned_km
     if ratio is not None:
@@ -328,6 +337,9 @@ def plan_vs_actual(plan: dict | None, ttype: str | None,
         b_min, b_km = base.get("duration_min"), base.get("distance_km")
         if b_min and duration_min:
             base_ratio = duration_min / b_min
+            b_low = base.get("duration_min_low")
+            if b_low and b_low <= duration_min <= b_min:
+                base_ratio = 1.0                       # внутри исходного диапазона — по плану
         elif b_km and session_km:
             base_ratio = session_km / b_km
         out["baseline"] = {"planned": {k: base.get(k) for k in ("type", "duration_min", "distance_km")},

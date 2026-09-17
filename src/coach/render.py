@@ -11,6 +11,7 @@ from typing import Any
 
 from src.analysis.hr_zones import zone_ceiling_hr
 from src.analysis.utils import format_pace
+from src.coach.volume_range import km_label, minutes_label
 from src.coach.config import EARLIEST_HARD_HIDE_MIN, HARD_TYPES, STRIDE_HOWTO
 from src.coach.contracts import AthleteState, Prescription, SafetyVerdict, SkillResult
 from src.coach.safety import is_stride
@@ -104,28 +105,26 @@ def _hr_lead_lines(p: Prescription, max_hr: int | None,
     parts = ([f"пульс до {ceiling} {HR_DISPLAY_UNIT}"] if ceiling is not None
              else [f"Z{p.target['max_zone']} и ниже"])
     if p.volume.get("duration_min") is not None:
-        parts.append(f"{p.volume['duration_min']:.0f} мин")
+        parts.append(minutes_label(p.volume))          # «30–40 мин» у ровного дня (17.09.2026)
     if p.volume.get("distance_km") is not None and estimate is None:
         parts.append(f"~{p.volume['distance_km']:.1f} км")
     if p.target.get("structure") and not p.target.get("segments"):
         parts.append(p.target["structure"])
     lines = [" · ".join(parts)]
     if estimate is not None:
-        pace, km = estimate
+        pace, _km = estimate
+        km_txt = km_label(p.volume, p.predicted)       # «≈4.3–5.7 км» или «≈5.7 км»
         # #264: честная пометка качества оценки; старые predicted без quality = band
         quality = (p.predicted or {}).get("quality", "band")
         if quality == "adjusted":
-            lines.append(f"Прикидка (данных на этом пульсе мало): "
-                         f"~{format_pace(pace)}/км → ≈{km:.1f} км")
+            lines.append(f"Прикидка (данных на этом пульсе мало): ~{format_pace(pace)}/км → {km_txt}")
         elif quality == "typical":
             lines.append(f"По твоим прошлым таким пробежкам: "
-                         f"~{format_pace(pace)}/км → ≈{km:.1f} км (без привязки к пульсу)")
+                         f"~{format_pace(pace)}/км → {km_txt} (без привязки к пульсу)")
         elif quality == "threshold":
-            lines.append(f"Нормативный темп зоны от ПАНО часов: "
-                         f"~{format_pace(pace)}/км → ≈{km:.1f} км")
+            lines.append(f"Нормативный темп зоны от ПАНО часов: ~{format_pace(pace)}/км → {km_txt}")
         else:
-            lines.append(f"Ориентир по твоим пробежкам: "
-                         f"~{format_pace(pace)}/км → ≈{km:.1f} км")
+            lines.append(f"Ориентир по твоим пробежкам: ~{format_pace(pace)}/км → {km_txt}")
     return lines
 
 
@@ -218,11 +217,11 @@ def render_prescription_short(p: Prescription, max_hr: int | None = None,
         elif p.target.get("max_zone") is not None:
             parts.append(f"Z{p.target['max_zone']} и ниже")
         if p.volume.get("duration_min") is not None:
-            parts.append(f"{p.volume['duration_min']:.0f} мин")
+            parts.append(minutes_label(p.volume))
         estimate = _predicted_estimate(p)
         if estimate is not None:
-            pace, km = estimate
-            parts.append(f"~{format_pace(pace)}/км ≈ {km:.1f} км")
+            pace, _km = estimate
+            parts.append(f"~{format_pace(pace)}/км {km_label(p.volume, p.predicted, prefix='≈ ')}")
         segs = visible_segments(p.target)
         if segs:
             # «Детали в дне» должны быть и в короткой карточке (02.09.2026)

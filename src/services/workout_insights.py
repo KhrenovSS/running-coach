@@ -74,7 +74,7 @@ from src.utils.logger import get_logger
 
 logger = get_logger("services.workout_insights")
 
-INSIGHTS_SCHEMA_VERSION = 12  # версия computed_json (v12 — #341 plan_vs_actual.baseline; (v5 — F0; v6 — F3 HRR; v7 — F5/F6: week_structure/downhill/detraining/session_rpe;
+INSIGHTS_SCHEMA_VERSION = 13  # версия computed_json (v13 — 17.09.2026 plan_vs_actual.within_range/duration_min_low; v12 — #341 plan_vs_actual.baseline; (v5 — F0; v6 — F3 HRR; v7 — F5/F6: week_structure/downhill/detraining/session_rpe;
                              # v8 — 07.09.2026: пол GAP-фактора на спусках #298, heat.temp_source #299;
                              # v9 — 08.09.2026: baseline v2 (#259) + detraining_shift_bpm в hr_vs_baseline,
                              # контекст паузы в detraining (#289);

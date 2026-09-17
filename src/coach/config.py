@@ -255,6 +255,19 @@ LONG_RUN_MAX_MIN = 150.0
 LONG_RUN_CAP_TOLERANCE_KM = 0.3   # допуск оценки км по темпу истории при урезании длительной (06.09.2026)
 WEEK_VOLUME_TOLERANCE_PCT = 0.05  # сумма плана выше target_km × (1+допуск) → лёгкие дни ужимаются кодом
 PLAN_EASY_MIN_MINUTES = 30        # ниже этого лёгкий день при ужатии объёма не режем (Дэниелс: лёгкий 30–60 мин)
+# 17.09.2026 (решение владельца, инцидент: утро урезало плановые 40 → 30 мин ради точности ±5 % при чистом вердикте
+# усталости). Допуск объёма недели в чате/утре зависит от состояния: без стойких сигналов усталости/здоровья
+# (все triggered ⊆ VOLUME_TRANSIENT_SAFETY_RULES) — RELAXED, при них — WEEK_VOLUME_TOLERANCE_PCT; /plan остаётся на 5 %.
+# Гистерезис: срез меньше DAY_CAP_MIN_CUT_MIN или DAY_CAP_MIN_CUT_KM не делаем (шум маршрута/GPS ±0.3 км/день).
+# (State-dependent day tolerance for ad-hoc/morning volume caps + hysteresis against noise cuts.)
+DAY_VOLUME_TOLERANCE_RELAXED_PCT = 0.15
+DAY_CAP_MIN_CUT_MIN = 10
+DAY_CAP_MIN_CUT_KM = 1.0
+# Диапазон времени ровного дня (easy/recovery/long без сегментов и темпа; решение владельца 17.09.2026): низ =
+# max(PLAN_EASY_MIN_MINUTES, LOW_PCT × верх) — «минимум ради эффекта — план», карточка «30–40 мин»; у длительной низ
+# мягче (гайд 45: ключевой стимул) и не ниже порога длительной. (Time range for plain days; low is derived.)
+VOLUME_RANGE_LOW_PCT = 0.75
+VOLUME_RANGE_LOW_PCT_LONG = 0.85
 # Урезание СТРУКТУРНОЙ тренировки под потолок объёма (coach/segment_trim.py, решение владельца
 # 16.09.2026, по литературе): ускорения — «символический объём, не в счёт км» (гайд 61), не больше
 # STRIDES_MAX_PER_SESSION за тренировку (гайд 46 strides_reps_per_session) → режем ровную часть, число

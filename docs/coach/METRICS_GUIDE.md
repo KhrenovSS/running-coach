@@ -197,7 +197,7 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
   согласованному, `baseline.volume_ratio` — к исходному, `changed_in_chat: true`; флаг
   `plan_volume_exceeded` — по **максимуму** двух отношений (инцидент 13.09.2026: 71 мин к 72 → 0.98, к плану
   50 → 1.42 → флаг). `week_plan_review` — `changed_in_chat`/`planned_min_original` по дням и счётчик.
-  `INSIGHTS_SCHEMA_VERSION` = 12;
+  `INSIGHTS_SCHEMA_VERSION` = 13 (17.09.2026: ровный день назначен диапазоном — `planned.duration_min_low`, `within_range`; факт внутри [низ, верх] → `volume_ratio` 1.0, сырое отношение — `volume_ratio_raw`; флаг перебора без изменений, недобор внутри диапазона — «по плану»);
 - REVIEW_PROMPT: переопределить `effort_match` от plan_vs_actual (сейчас —
   «сошлись ли ощущения с типом», план не упоминается).
 

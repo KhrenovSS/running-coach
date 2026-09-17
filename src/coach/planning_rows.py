@@ -86,6 +86,11 @@ def supersede_future_rows(user_id: int, *, db: Session, from_date: date) -> int:
     return int(n or 0)
 
 
+def _volume_key(volume: dict | None) -> tuple:
+    v = volume or {}
+    return (v.get("duration_min"), v.get("distance_km"))
+
+
 def week_plan_review(user_id: int, *, db: Session, week_start: date | None = None,
                      include_today: bool = False) -> dict | None:
     """Сверка недели: план (строки planned/confirmed/adjusted) vs факт.
@@ -127,7 +132,9 @@ def week_plan_review(user_id: int, *, db: Session, week_start: date | None = Non
             "actual_km": session.total_distance_km if session else None,
         }
         first = earliest[d]
-        if first.id != r.id and (first.volume_json or {}) != (r.volume_json or {}):
+        # 17.09.2026: сравниваем верх и дистанцию, не dict целиком — производный низ диапазона
+        # (duration_min_low) у строк до/после релиза дрейфом не считается
+        if first.id != r.id and _volume_key(first.volume_json) != _volume_key(r.volume_json):
             # #341: план дня переторгован после /plan (чат/утро) — отчёт и следующий план видят дрейф
             changed += 1
             fvol = first.volume_json or {}

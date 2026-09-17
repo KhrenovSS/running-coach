@@ -29,11 +29,20 @@ _HR_TOL = 5.0        # пульс: ±5 уд/мин
 
 
 def _expected_values(p: Prescription, max_hr: int | None,
-                     lthr: int | None = None) -> dict[str, list[float]]:
-    """Эталонные числа карточки: target/volume/predicted + потолок пульса зоны."""
-    km = [v for v in (p.volume.get("distance_km"),
-                      (p.predicted or {}).get("distance_km")) if v]
-    minutes = [v for v in (p.volume.get("duration_min"),) if v]
+                     lthr: int | None = None) -> dict[str, list]:
+    """Эталонные числа карточки: target/volume/predicted + потолок пульса зоны.
+
+    17.09.2026: ровный день назначен диапазоном — минуты и км эталона могут быть интервалами
+    (low, high); одиночное число = точка. (Card reference values; minutes/km may be ranges.)"""
+    km: list = [v for v in (p.volume.get("distance_km"),
+                            (p.predicted or {}).get("distance_km")) if v]
+    minutes: list = [v for v in (p.volume.get("duration_min"),) if v]
+    low = p.volume.get("duration_min_low")
+    if low and p.volume.get("duration_min") and low < p.volume["duration_min"]:
+        minutes = [(float(low), float(p.volume["duration_min"]))]
+        pace = (p.predicted or {}).get("pace_min_km")
+        if pace and (p.predicted or {}).get("distance_km"):
+            km.append((round(low / pace, 1), float(p.predicted["distance_km"])))
     pace = [v for v in (p.target.get("pace_min_km"),
                         (p.predicted or {}).get("pace_min_km")) if v]
     hr = [v for v in ((p.predicted or {}).get("expected_hr"),) if v]
@@ -54,16 +63,27 @@ def _expected_values(p: Prescription, max_hr: int | None,
             "zone": [float(zone)] if zone is not None else []}
 
 
-def _mismatches(found: list[tuple[str, float]], expected: list[float], tol: float,
+def _bounds(e) -> tuple[float, float]:
+    """Эталон → (низ, верх): интервал как есть, число — точка."""
+    return (float(e[0]), float(e[1])) if isinstance(e, tuple) else (float(e), float(e))
+
+
+def _fmt(e) -> str:
+    lo, hi = _bounds(e)
+    return f"{lo:g}–{hi:g}" if lo != hi else f"{lo:g}"
+
+
+def _mismatches(found: list[tuple[str, float]], expected: list, tol: float,
                 unit: str) -> list[tuple[str, str]]:
-    """(токен прозы, описание) для чисел вне допуска. found — (сырой токен, значение)."""
+    """(токен прозы, описание) для чисел вне допуска. found — (сырой токен, значение);
+    expected — числа или интервалы (low, high): попадание в [low − tol, high + tol] — совпадение."""
     if not expected:
         # Эталона нет (например rest) — любое число этого рода подозрительно,
         # но без эталона честного сравнения нет: пропускаем (не спамим ложным)
         return []
-    return [(tok, f"{v:g} {unit} ≠ карточке ({'/'.join(f'{e:g}' for e in expected)})")
+    return [(tok, f"{v:g} {unit} ≠ карточке ({'/'.join(_fmt(e) for e in expected)})")
             for tok, v in found
-            if not any(abs(v - e) <= tol for e in expected)]
+            if not any(_bounds(e)[0] - tol <= v <= _bounds(e)[1] + tol for e in expected)]
 
 
 _PCT_RE = re.compile(r"(\d+)\s*%")

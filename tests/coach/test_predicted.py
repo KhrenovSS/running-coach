@@ -58,7 +58,8 @@ def test_chat_reply_contains_estimate_line(athlete_with_history, db_session,
     llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
     reply = orchestrator.handle_chat(athlete_with_history.id, "что сегодня?",
                                      db=db_session, llm=llm)
-    assert "Ориентир по твоим пробежкам: ~6:07/км → ≈6.5 км" in reply.text
+    # 17.09.2026: ровный день — диапазон «30–40 мин» → км тоже диапазоном по темпу прогноза
+    assert "Ориентир по твоим пробежкам: ~6:07/км → ≈4.9–6.5 км" in reply.text and "30–40 мин" in reply.text
     assert "~5.5 км" not in reply.text
 
 
