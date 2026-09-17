@@ -128,12 +128,17 @@ def _hr_lead_lines(p: Prescription, max_hr: int | None,
     return lines
 
 
-def _show_earliest(p: Prescription, now: datetime | None = None) -> bool:
-    """Показывать ли «Интенсив — не раньше …» (#306): на карточке нехардового дня — только если
-    до срока ≥ EARLIEST_HARD_HIDE_MIN (иначе строка про уже почти вышедший срок — шум);
-    на качественном дне — всегда. (Hide the near-expired line on easy/long cards.)"""
+def _show_earliest(p: Prescription, now: datetime | None = None, *,
+                   hard_planned: bool = False) -> bool:
+    """Показывать ли «Интенсив — не раньше …»: на качественном дне — всегда; на карточке нехардового
+    дня — только если в действующем плане недели есть качественный день (`hard_planned`, решение
+    владельца 17.09.2026: иначе строка читается как обещание интенсива, которого в плане нет) и до
+    срока ≥ EARLIEST_HARD_HIDE_MIN (#306: почти вышедший срок — шум).
+    (Always on hard cards; on easy/long cards only with a planned hard day and a non-expired deadline.)"""
     if p.workout_type in HARD_TYPES:
         return True
+    if not hard_planned:
+        return False
     now = now or datetime.now(timezone.utc)
     earliest = p.earliest if p.earliest.tzinfo is not None else p.earliest.replace(tzinfo=timezone.utc)
     return (earliest - now).total_seconds() / 60 >= EARLIEST_HARD_HIDE_MIN
@@ -141,12 +146,15 @@ def _show_earliest(p: Prescription, now: datetime | None = None) -> bool:
 
 def render_prescription(p: Prescription, max_hr: int | None = None,
                         lthr: int | None = None,
-                        user: Any = None, today: date | None = None) -> str:
+                        user: Any = None, today: date | None = None,
+                        hard_planned: bool = False) -> str:
     """Карточка назначения — все числа только из заклэмпленного Prescription.
 
     max_hr — для потолка пульса зоны в уд/мин; None → без строки пульса.
     user — для локального пояса времени (user timezone); None → settings.timezone.
     today — точка отсчёта метки дня (для тестов); None → date.today().
+    hard_planned — в плане недели есть качественный день: строка «Интенсив — не раньше …»
+    на нехардовой карточке показывается только тогда (`_show_earliest`).
     Режим по target["pace_min_km"]: задан → ведём по темпу (цель — темп+время,
     пульс справочно); нет → по пульсу (цель — зона+время, темп/км — ориентир).
     Будущий день (p.when > today) — день в заголовке + пометка «предварительно».
@@ -176,7 +184,8 @@ def render_prescription(p: Prescription, max_hr: int | None = None,
             lines += _pace_lead_lines(p)
         else:
             lines += _hr_lead_lines(p, max_hr, lthr)
-    if p.earliest is not None and p.workout_type != "rest" and _show_earliest(p):
+    if (p.earliest is not None and p.workout_type != "rest"
+            and _show_earliest(p, hard_planned=hard_planned)):
         # naive-UTC → пояс пользователя (BACKLOG #260; инциденты 23.08 и 26.08: UTC)
         earliest = local_dt(p.earliest, user)
         lines.append(f"Интенсив — не раньше {earliest:%d.%m %H:%M}")

@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from datetime import timezone
+
 from sqlalchemy.orm import Session
 
 from src.coach.config import (
@@ -152,6 +154,18 @@ def _missing(dm, rpe_coverage: float | None, pain_known: bool,
     if pain_relevant and not pain_known:
         missing.append("pain")
     return missing
+
+
+def _latest_flag_at(user_id: int, flag: str, *, db: Session, days: int) -> str | None:
+    """Начало последней тренировки в окне, разбор которой несёт флаг — ISO (UTC) или None.
+    Якорь срока правил 11/18/19 (#306 ч.2). (Latest flagged session start as ISO; None if none.)"""
+    starts = InsightRepository.recent_flag_sessions(user_id, flag, db=db, days=days)
+    if not starts:
+        return None
+    latest = max(starts)
+    if latest.tzinfo is None:   # SQLite отдаёт naive datetime (naive under SQLite → UTC)
+        latest = latest.replace(tzinfo=timezone.utc)
+    return latest.isoformat()
 
 
 def _week_signals(user_id: int, today, user, *, db: Session) -> dict:
@@ -318,6 +332,16 @@ def assess_state(user_id: int, *, db: Session) -> AthleteState:
         "quality_volume_exceeded_recent": InsightRepository.recent_flag(
             user_id, FLAG_QUALITY_VOLUME, db=db, days=QUALITY_VOLUME_LOOKBACK_DAYS),
         "downhill_load_recent": InsightRepository.recent_flag(
+            user_id, FLAG_DOWNHILL_LOAD, db=db, days=DOWNHILL_LOOKBACK_DAYS),
+        # #306 ч.2 (17.09.2026): начало последней флагнутой тренировки — правила 11/18/19 считают
+        # срок «интенсив не раньше» от неё, а не от «сейчас» (инцидент 16–17.09: дата ехала
+        # пт → сб → вс, коуч каждое утро обещал интенсив «послезавтра»). Булевы сигналы выше —
+        # для совместимости. (Anchor instants for rules 11/18/19; the booleans stay for compat.)
+        "poor_interval_recovery_at": _latest_flag_at(
+            user_id, FLAG_POOR_INTERVAL_RECOVERY, db=db, days=HRR_POOR_RECOVERY_LOOKBACK_DAYS),
+        "quality_volume_exceeded_at": _latest_flag_at(
+            user_id, FLAG_QUALITY_VOLUME, db=db, days=QUALITY_VOLUME_LOOKBACK_DAYS),
+        "downhill_load_at": _latest_flag_at(
             user_id, FLAG_DOWNHILL_LOAD, db=db, days=DOWNHILL_LOOKBACK_DAYS),
         # P0 #308: монотонность Фостера за 7 дней — правило 20
         "monotony_7d": monotony["monotony"],

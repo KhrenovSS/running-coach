@@ -51,6 +51,7 @@ from src.coach.planning_rows import (  # noqa: F401 — реэкспорт
     _monday_of,
     _proposal_from_row,
     confirm_or_adjust_morning,
+    hard_day_planned,
     latest_rows_for_dates,
     supersede_future_rows,
     supersede_rows_for_dates,

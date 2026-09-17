@@ -161,7 +161,8 @@ def test_render_earliest_in_local_timezone(monkeypatch):
     now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     verdict = evaluate_safety(state, now=now)
     p, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2), verdict, state, now=now)
-    text = render_prescription(p)
+    # 17.09.2026: на лёгкой карточке строка — только при качественном дне в плане (hard_planned)
+    text = render_prescription(p, hard_planned=True)
     earliest = now + timedelta(hours=3)
     assert f"{earliest.astimezone(ZoneInfo('Europe/Moscow')):%H:%M}" in text   # UTC → MSK
     assert f"{earliest:%H:%M}" not in text
@@ -184,7 +185,7 @@ def test_render_earliest_prefers_user_timezone(monkeypatch):
     verdict = evaluate_safety(state, now=now)
     p, _ = clamp(WorkoutProposal(workout_type="easy", target_zone=2), verdict, state, now=now)
     user = SimpleNamespace(timezone="Europe/Berlin")
-    text = render_prescription(p, user=user)
+    text = render_prescription(p, user=user, hard_planned=True)
     earliest = now + timedelta(hours=3)
     assert f"{earliest.astimezone(ZoneInfo('Europe/Berlin')):%H:%M}" in text   # пояс пользователя
     assert f"{earliest.astimezone(ZoneInfo('Europe/Moscow')):%H:%M}" not in text  # не settings.timezone

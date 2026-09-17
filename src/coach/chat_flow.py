@@ -97,7 +97,9 @@ def morning_verdict(user_id: int, *, db: Session) -> str:
     prescription = finalize(None, state, db=db, persist=True, now=user_now(user))
     return (render_state_card(state) + "\n\n"
             + render_prescription(prescription, max_hr=user_max_hr(user), user=user,
-                                  lthr=latest_lthr(user_id, db=db)))
+                                  lthr=latest_lthr(user_id, db=db),
+                                  hard_planned=planning.hard_day_planned(
+                                      user_id, db=db, today=user_now(user).date())))
 
 
 def _notes_block(notes: list[str] | None) -> str:
@@ -147,6 +149,9 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
     text = turn.message
     max_hr = user_max_hr(user)
     lthr = latest_lthr(user_id, db=db)  # зоны/потолки от порога (F4/M3.1)
+    # Строка «Интенсив — не раньше …» на лёгкой карточке — только при качественном дне в плане
+    # (решение владельца 17.09.2026; до save_prescription — по плану, каким его видит подопечный)
+    hard_planned = planning.hard_day_planned(user_id, db=db, today=user_now(user).date())
     week_card: str | None = None
     if kind == "chat" and (turn.show_week_plan or turn.weekly_plan is not None):
         # Вопрос «какой план на неделю»: план в чате не персистится (решение
@@ -223,7 +228,8 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
             # Строка «Изменил план на … (было: …)» над карточкой (решение владельца 03.09.2026)
             text += "\n\n" + plan_change_line(card.when, card, plan_row)
         text += _notes_block(cap_notes)
-        text += "\n\n" + render_prescription(card, max_hr=max_hr, user=user, lthr=lthr)
+        text += "\n\n" + render_prescription(card, max_hr=max_hr, user=user, lthr=lthr,
+                                             hard_planned=hard_planned)
     elif proposal is not None and not allow_proposal:
         # Разбор/отчёт — про прошлое: назначение даёт утренний вердикт/чат (C8).
         # (Reviews look backward: proposals are dropped, not clamped/persisted.)
@@ -247,7 +253,8 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
             if old is not None:
                 text += "\n\n" + plan_change_line(card.when, card, old)
             text += _notes_block(cap_notes)
-            text += "\n\n" + render_prescription(card, max_hr=max_hr, user=user, lthr=lthr)
+            text += "\n\n" + render_prescription(card, max_hr=max_hr, user=user, lthr=lthr,
+                                                 hard_planned=hard_planned)
     if turn.unavailable_days_ahead and kind in ("chat", "morning"):
         # Подопечный не сможет бегать в эти дни → детерминированно гасим назначения и ставим
         # отдых, чтобы planned_workouts и /week не «оживляли» отменённый день (инцидент

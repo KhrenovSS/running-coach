@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
+from src.coach.config import HARD_TYPES
 from src.coach.contracts import AthleteState, Prescription, WorkoutProposal
 from src.coach.prescriber import finalize, save_prescription
 from src.coach.turn_context import is_athlete_unavailable, unchanged_today
@@ -27,6 +28,21 @@ PLAN_STATUSES = ("planned", "confirmed", "adjusted")
 
 def _monday_of(d: date) -> date:
     return d - timedelta(days=d.weekday())
+
+
+def hard_day_planned(user_id: int, *, db: Session, today: date) -> bool:
+    """Есть ли в действующем плане текущей недели качественный день (tempo/interval/race) с сегодня
+    по воскресенье (решение владельца 17.09.2026: строка «Интенсив — не раньше …» на лёгкой карточке —
+    только при таком дне; иначе она читается как обещание интенсива, которого в плане нет).
+    Последняя действующая строка на дату решает. (Any hard day left in this week's active plan?)"""
+    rows = db.query(Recommendation).filter(
+        Recommendation.user_id == user_id,
+        Recommendation.for_date >= today,
+        Recommendation.for_date <= _monday_of(today) + timedelta(days=6),
+        Recommendation.status != RECOMMENDATION_STATUS_SUPERSEDED,
+    ).order_by(Recommendation.id.asc()).all()
+    latest = {r.for_date: r for r in rows}
+    return any(r.workout_type in HARD_TYPES for r in latest.values())
 
 
 def supersede_rows_for_dates(user_id: int, *, db: Session, dates: list[date]) -> int:

@@ -51,6 +51,23 @@ def _step(decision: str, reason: str) -> ReasoningStep:
     return ReasoningStep(rule="p1_safety", decision=decision, reason=reason)
 
 
+def _anchored(sig: dict, name: str, extra_h: int, now: datetime, *,
+              flag_key: str | None = None) -> datetime | None:
+    """Срок «интенсив не раньше» для правил 11/18/19 (#306 ч.2, 17.09.2026).
+
+    Есть якорь `<name>_at` (начало флагнутой тренировки) → якорь + extra_h; срок уже прошёл →
+    None (правило молчит). Якоря нет, но булев флаг стоит → прежний `now + extra_h`.
+    Флага нет → None. (Session-anchored deadline; expired → None; legacy fallback without anchor.)
+    """
+    if not sig.get(flag_key or name):
+        return None
+    anchor = _aware(sig.get(f"{name}_at"))
+    if anchor is None:
+        return now + timedelta(hours=extra_h)
+    earliest = anchor + timedelta(hours=extra_h)
+    return earliest if earliest > now else None
+
+
 def evaluate_safety(state: AthleteState, *, now: datetime | None = None) -> SafetyVerdict:
     """Вычислить границы безопасности из снимка состояния (compute safety bounds).
 
@@ -167,9 +184,13 @@ def evaluate_safety(state: AthleteState, *, now: datetime | None = None) -> Safe
     # пульс не падал между повторами — признак недовосстановления, следующий
     # качественный день консервативно отодвигается
     # (poor HRR between reps → push the next hard day further out)
-    if sig.get("poor_interval_recovery"):
+    # #306 ч.2 (17.09.2026): срок — от начала флагнутой тренировки (`*_at`), не от «сейчас»:
+    # иначе он ехал вперёд каждое утро, пока флаг в окне поиска (окно длиннее самого срока), и коуч
+    # обещал интенсив «послезавтра» день за днём. Срок вышел → правило молчит. Без якоря — прежний
+    # путь `now + часы` (совместимость). (Anchored to the flagged session; expired → silent.)
+    hrr_earliest = _anchored(sig, "poor_interval_recovery", HRR_POOR_RECOVERY_EXTRA_H, now_cmp)
+    if hrr_earliest is not None:
         triggered.append("poor_interval_recovery")
-        hrr_earliest = now + timedelta(hours=HRR_POOR_RECOVERY_EXTRA_H)
         if earliest_next_hard is None or hrr_earliest > earliest_next_hard:
             earliest_next_hard = hrr_earliest
         reasons.append(_step("интенсив не раньше чем",
@@ -252,9 +273,10 @@ def evaluate_safety(state: AthleteState, *, now: datetime | None = None) -> Safe
 
     # 18. Превышен потолок качественного объёма в недавнем разборе (#289, гайд 44)
     # → следующий качественный день отодвигается (quality volume exceeded → push next hard)
-    if sig.get("quality_volume_exceeded_recent"):
+    qv_earliest = _anchored(sig, "quality_volume_exceeded", QUALITY_VOLUME_EXTRA_H, now_cmp,
+                            flag_key="quality_volume_exceeded_recent")
+    if qv_earliest is not None:
         triggered.append("quality_volume_exceeded")
-        qv_earliest = now + timedelta(hours=QUALITY_VOLUME_EXTRA_H)
         if earliest_next_hard is None or qv_earliest > earliest_next_hard:
             earliest_next_hard = qv_earliest
         reasons.append(_step("интенсив не раньше чем",
@@ -263,10 +285,11 @@ def evaluate_safety(state: AthleteState, *, now: datetime | None = None) -> Safe
 
     # 19. Ударные спуски в недавней тренировке (#289, гайд 46 — колено): день лёгкий
     # (heavy downhill load → easy day, protect the knee)
-    if sig.get("downhill_load_recent"):
+    dh_earliest = _anchored(sig, "downhill_load", DOWNHILL_EXTRA_H, now_cmp,
+                            flag_key="downhill_load_recent")
+    if dh_earliest is not None:
         triggered.append("downhill_load")
         max_zone = min(max_zone, 3)
-        dh_earliest = now + timedelta(hours=DOWNHILL_EXTRA_H)
         if earliest_next_hard is None or dh_earliest > earliest_next_hard:
             earliest_next_hard = dh_earliest
         reasons.append(_step("max_zone=3, интенсив не раньше чем",
