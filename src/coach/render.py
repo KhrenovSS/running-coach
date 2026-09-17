@@ -36,6 +36,11 @@ def type_label(p: Prescription) -> str:
     """Подпись типа назначения; день полевого теста ПАНО (target.lthr_test, M3.2) — «🧪 Тест ПАНО»."""
     if (p.target or {}).get("lthr_test"):
         return "🧪 Тест ПАНО"
+    race = (p.target or {}).get("race")
+    if race:
+        # 17.09.2026 (#243 ч.1): день старта из календаря; safety понизил тип → честно «в лёгком режиме»
+        label = "🏁 Старт" + (f" · {race['label']}" if race.get("label") else "")
+        return label if p.workout_type == "race" else label + " · в лёгком режиме (safety)"
     return _TYPE_LABEL.get(p.workout_type, p.workout_type)
 
 

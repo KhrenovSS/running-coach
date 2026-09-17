@@ -150,3 +150,18 @@ def test_run_streak_threshold_sane():
     """Правило 22 (17.09.2026): порог серии беговых дней — из гайдов 47/61 («без 3 тренировок подряд»),
     в разумных границах: не бьёт по двум дням подряд и не даёт бегать всю неделю без выходного."""
     assert 2 <= coach_config.SAFETY_RUN_STREAK_MAX_DAYS <= coach_config.PLAN_RUN_DAYS_CAP
+
+
+def test_race_volume_constants_match_literature():
+    """17.09.2026 (#243 ч.1): корзины потолков по дистанции возрастают, крыша не ниже любого потолка,
+    неделя старта — как key_rules гайда 60 (taper_last_week_volume_percent), тейпер — 70–80 % (гайд 60)."""
+    from src.coach import config as c
+    from src.coach.knowledge.loader import load_guides
+    uppers = [u for u, _ in c.RACE_VOLUME_CEILINGS_KM]
+    caps = [cap for _, cap in c.RACE_VOLUME_CEILINGS_KM]
+    assert uppers == sorted(uppers) and caps == sorted(caps)
+    assert c.RACE_VOLUME_HARD_CAP_KM >= max(caps) and c.RACE_VOLUME_DEFAULT_CEILING_KM in caps
+    g60 = next(g for g in load_guides() if g.name.startswith("60_"))
+    assert round(c.RACE_WEEK_VOLUME_PCT * 100) == int(g60.key_rules["taper_last_week_volume_percent"])
+    assert 0.70 <= c.RACE_TAPER_VOLUME_PCT <= 0.80 and c.RACE_TAPER_WEEKS >= int(g60.key_rules["taper_min_weeks"])
+    assert 0 < c.RACE_BUILD_GROWTH_SHARE <= 1 and c.RACE_HORIZON_WEEKS >= 12

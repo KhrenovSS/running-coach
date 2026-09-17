@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from src.analysis.utils import format_pace
+from src.coach import race_plan
 from src.coach.config import UNAVAILABLE_RATIONALE
 from src.coach.contracts import Prescription
 from src.coach.render import _TYPE_LABEL, _hr_ceiling, _predicted_estimate, type_label
@@ -168,8 +169,16 @@ def render_week_plan(prescriptions: list[Prescription], targets: dict,
             phase = "разгрузка по safety"
         else:
             phase = "рост"
+        goal = targets.get("goal") or {}
+        if goal.get("phase") in (race_plan.PHASE_TAPER, race_plan.PHASE_RACE_WEEK,
+                                 race_plan.PHASE_MAINTENANCE):
+            # 17.09.2026 (#243 ч.1): фаза подготовки к старту / плато главнее календарной
+            phase = race_plan.PHASE_RU[goal["phase"]]
         summary = (f"Неделя {targets['mesocycle_week']}/{targets['mesocycle_length']} "
                    f"мезоцикла ({phase}) · цель ~{targets['target_km']:.0f} км")
+        suffix = race_plan.header_suffix(goal)
+        if suffix:
+            summary += " · " + suffix
         if targets.get("quality_blocked_by_safety"):
             # Интенсив закрыт вердиктом safety (06.09.2026); с 07.09 может открыться среди недели
             if targets.get("quality_allowed_from_date"):

@@ -30,7 +30,7 @@ from src.coach.config import (
 )
 from src.coach.contracts import AthleteState, Prescription, SafetyVerdict, WorkoutProposal
 from src.coach.planning_rows import PLAN_STATUSES
-from src.coach.planning_safety import apply_safety_to_targets, cap_long_run
+from src.coach.planning_safety import _UNCAPPED_TYPES, apply_safety_to_targets, cap_long_run
 from src.coach.prescriber import finalize
 from src.coach.segment_trim import shrink_proposal
 from src.coach.turn_context import is_athlete_unavailable
@@ -47,7 +47,9 @@ _CONTEXT_KEYS = ("plan_scope", "week_start", "prev_week_km", "target_km", "done_
                  "long_run_hold", "hard_days_max", "volume_held_by_safety", "volume_growth_kept",
                  "detraining_return",
                  # 17.09.2026: частота — беговых дней в неделе не больше run_days_max
-                 "run_days_max", "rest_days_min", "done_runs", "run_days_used")
+                 "run_days_max", "rest_days_min", "done_runs", "run_days_used",
+                 # 17.09.2026 (#243 ч.1): фаза подготовки к старту и потолок объёма
+                 "goal", "capped_by_ceiling")
 
 
 def _week_bounds(targets: dict[str, Any]) -> tuple[date, date] | None:
@@ -150,8 +152,8 @@ def cap_run_days(proposal: WorkoutProposal, prescription: Prescription, targets:
     без темпа и структуры, не дольше PLAN_EASY_MIN_MINUTES. Уже такое → только заметка.
     Дата вне недели targets → не применяем. Возврат (копия | None, заметка | None).
     (Soft frequency cap: extra run day beyond run_days_max → short easy run, never a hard one.)"""
-    if proposal.workout_type == "rest" or plan_day:
-        return None, None
+    if proposal.workout_type in _UNCAPPED_TYPES or plan_day:
+        return None, None       # старт (race) — не «лишний беговой день», кэп частоты его не трогает
     bounds = _week_bounds(targets)
     if bounds is None or not (bounds[0] <= prescription.when <= bounds[1]):
         return None, None
@@ -191,8 +193,8 @@ def cap_day_volume(proposal: WorkoutProposal, prescription: Prescription,
     вниз пропорционально (не ниже PLAN_EASY_MIN_MINUTES), структура — через shrink_proposal.
     Дата вне недели targets (вс вечером про пн) → не применяем. Возврат (копия | None, заметка | None).
     (Day-volume cap from the week's remaining km; pure.)"""
-    if proposal.workout_type == "rest" or not proposal.duration_min:
-        return None, None
+    if proposal.workout_type in _UNCAPPED_TYPES or not proposal.duration_min:
+        return None, None       # отдых нечего резать; старт объёмом не режется (как в /plan)
     bounds = _week_bounds(targets)
     if bounds is None or not (bounds[0] <= prescription.when <= bounds[1]):
         return None, None

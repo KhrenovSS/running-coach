@@ -339,6 +339,31 @@ PLAN_TODAY_CUTOFF_HOUR = 20
 EARLIEST_HARD_HIDE_MIN = 60
 
 
+# --- Целевые старты и потолок недельного объёма (#243 ч.1, решения владельца 17.09.2026) ---
+# Литература в базе знаний абсолютных км/нед не даёт — потолки взяты серединой диапазонов:
+# Фицджеральд (планы по уровням: 10 км 2ч37м–8ч41м/нед, ПМ 3ч09м–9ч31м; «крыша любителя» 6–7 ч/нед
+# ≈ 60–70 км), Дэниелс (пик любителя ≈ 46–53 км, «синий» продвинутый от 64), Швец (опытный любитель
+# 35–50). Без стартов — потолок полумарафона. Достигли — плато (maintenance), прогресс — в качество.
+# (Weekly-volume ceilings by target race distance; literature midpoints, owner decision.)
+RACE_VOLUME_CEILINGS_KM = ((7.5, 40.0), (15.0, 50.0), (30.0, 55.0), (1000.0, 65.0))  # (дистанция ≤ км, потолок нед. км)
+RACE_VOLUME_HARD_CAP_KM = 70.0        # выше — не любитель (гайд 61: «синий» план не для истории с коленом)
+RACE_VOLUME_DEFAULT_CEILING_KM = 55.0  # без стартов в календаре — потолок полумарафона
+RACE_HORIZON_WEEKS = 18               # старты дальше горизонта потолок не задают (гайд 60: марафон — 18 нед)
+# Тейпер по гайду 60: за 2 недели — 70–80 % пика, неделя старта — 50–60 % (key_rules
+# taper_last_week_volume_percent = 55; сверяется тестом). Пик — max фактический км за RACE_REF_PEAK_WEEKS.
+RACE_TAPER_WEEKS = 2
+RACE_TAPER_VOLUME_PCT = 0.75
+RACE_WEEK_VOLUME_PCT = 0.55
+RACE_TAPER_HARD_DAYS_MAX = 1          # в тейпере — не больше одного короткого качественного дня
+RACE_BUILD_GROWTH_SHARE = 0.75        # доля недель роста в мезоцикле (3 из 4) — для «достижимого пика»
+RACE_REF_PEAK_WEEKS = 4
+RACE_MAX_WEEKS_AHEAD = 52             # старт дальше года — не записываем
+RACE_DISTANCE_MIN_KM = 1.0
+RACE_DISTANCE_MAX_KM = 100.0
+RACES_HISTORY_MAX = 10                # закрытых (done/cancelled) записей в params_json храним не больше
+RACE_RATIONALE = "race_day: целевой старт из календаря"   # маркер proposal.rationale (как TEST_RATIONALE)
+
+
 def long_run_max_pct(week_km: float | None, run_days: int | None = None) -> float:
     """Потолок доли длительной в неделе (гайд 45, решение владельца 12.09.2026): 30 % при большом
     объёме, 40 % при малом (< LONG_RUN_LOW_VOLUME_KM = 40 км или ≤ LONG_RUN_LOW_VOLUME_RUN_DAYS пробежек). Единственная формула

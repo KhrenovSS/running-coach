@@ -31,6 +31,7 @@ from src.coach.config import (
     THRESHOLD_MAX_PCT_WEEK,
     long_run_max_pct,
 )
+from src.coach import race_plan, races
 from src.coach.contracts import WorkoutProposal
 from src.coach.illness import context_block, illness_state, paused_dates
 # #329 (11.09.2026): доступность/отмена дней и строки плана вынесены в соседние модули;
@@ -128,6 +129,9 @@ def week_targets(user_id: int, *, db: Session, today: date | None = None,
     # (Mesocycle counts growth weeks only; a flat week repeats its number.)
     if meta.get("week_start") == week_start.isoformat():
         meso_week = meta.get("mesocycle_week", 1)
+    elif meta.get("goal_phase") == race_plan.PHASE_RACE_WEEK:
+        # 17.09.2026 (#243 ч.1): после недели старта — новый мезоцикл с 1 (лёгкие дни — правило 13)
+        meso_week = 1
     elif meta.get("mesocycle_week") and (meta.get("grew") or meta.get("phase") == "deload"):
         meso_week = meta["mesocycle_week"] % _MESO_LEN + 1
     elif meta.get("mesocycle_week"):
@@ -154,6 +158,24 @@ def week_targets(user_id: int, *, db: Session, today: date | None = None,
     else:
         pct = LOAD_PROGRESSION["max_weekly_increase_pct"] / 100.0
         target_km = round(prev_km * (1 + pct), 1)
+
+    # 17.09.2026 (#243 ч.1, решения владельца): потолок объёма и фаза подготовки к ближайшему старту —
+    # кодом. Без стартов — потолок ПМ (плато: прогресс в качество); build — «достижимый пик» к дате;
+    # taper/race_week — проценты от фактического пика 4 недель (гайд 60). Всё — min: deload, detraining
+    # и safety ниже/снаружи только урезают. (Volume ceiling and race phase; code, not the LLM.)
+    ref_peak = max([w["total_km"] for w in weeks] or [prev_km])
+    goal = race_plan.goal_for_week(races.active_races(user_id, db=db, today=today),
+                                   week_start=week_start, prev_km=prev_km, ref_peak_km=ref_peak)
+    capped_by_ceiling = False
+    cap = goal.get("volume_cap_km")
+    if cap:
+        if goal["phase"] == race_plan.PHASE_RACE_WEEK:
+            target_km = round(cap, 1)          # неделя старта: 55 % пика, но не меньше дистанции
+        elif not low_history and target_km > cap + 0.05:
+            target_km = round(cap, 1)
+            if goal["phase"] in (race_plan.PHASE_BASE, race_plan.PHASE_BUILD):
+                capped_by_ceiling = True
+                goal["phase"] = race_plan.PHASE_MAINTENANCE
 
     # #294: окно доступности — дни недели из params_json + даты, отменённые подопечным
     avail = availability(user_id, db=db)
@@ -191,6 +213,9 @@ def week_targets(user_id: int, *, db: Session, today: date | None = None,
                             active_injury=status["active_injury"], run_days_max=run_days_max,
                             week_start=week_start)
     hard_days_max = ladder["level"]
+    if goal.get("hard_days_cap") is not None:
+        # тейпер — не больше одного короткого качественного, неделя старта — старт и есть качество
+        hard_days_max = min(hard_days_max, goal["hard_days_cap"])
     days_off = _days_off(user_id, db=db, today=today)
     if days_off is not None and days_off >= DETRAINING_RETURN_MIN_DAYS_OFF:
         peak = max([w["total_km"] for w in local_week_volumes(
@@ -224,8 +249,15 @@ def week_targets(user_id: int, *, db: Session, today: date | None = None,
         "athlete_status": status["phase"],
         "quality_ladder": ladder,
         # M3.2 (12.09.2026): нужен полевой тест ПАНО — stable и нет свежего полевого значения
-        "lthr_test_due": lthr_field.is_due(user_id, db=db, phase=status["phase"]),
+        "lthr_test_due": (lthr_field.is_due(user_id, db=db, phase=status["phase"])
+                          and goal["phase"] not in (race_plan.PHASE_TAPER, race_plan.PHASE_RACE_WEEK)),
         "detraining_return": detraining_return,     # #289: возврат после паузы — объём ≤ 65% пика
+        # 17.09.2026 (#243 ч.1): фаза подготовки к старту, потолок и «достижимый пик»; день старта —
+        # сдвиг от сегодня для размещения кодом в /plan (race_day_ahead)
+        "goal": goal,
+        "capped_by_ceiling": capped_by_ceiling,
+        "race_day_ahead": ((date.fromisoformat(goal["next_race"]["date"]) - today).days
+                           if goal["phase"] == race_plan.PHASE_RACE_WEEK else None),
         "illness": context_block(ill, today),       # #322: болезнь/пауза — что знает система
         "days_off": days_off,
         # Беговых дней ≤ и дней полного отдыха ≥ (решение владельца 02.09.2026)
@@ -296,10 +328,14 @@ def advance_mesocycle(user_id: int, *, db: Session, targets: dict) -> None:
         db.add(um)
     params = dict(um.params_json or {})
     prev_meta = params.get("week_plan") or {}
-    last_build = (targets["target_km"] if targets["phase"] == "build"
+    goal = targets.get("goal") or {}
+    # 17.09.2026: тейпер/неделя старта — не база цикла и не «рост» (иначе last_build_km стал бы 75 % пика);
+    # неделя на потолке (capped_by_ceiling) — «рост» для счётчика, иначе разгрузка на плато не придёт
+    in_taper = goal.get("phase") in (race_plan.PHASE_TAPER, race_plan.PHASE_RACE_WEEK)
+    last_build = (targets["target_km"] if targets["phase"] == "build" and not in_taper
                   else prev_meta.get("last_build_km") or targets["prev_week_km"])
     prev_km = targets.get("prev_week_km") or 0.0
-    params["week_plan"] = {
+    meta = {
         "week_start": targets["week_start"],
         "mesocycle_week": targets["mesocycle_week"],
         "phase": targets["phase"],
@@ -307,8 +343,18 @@ def advance_mesocycle(user_id: int, *, db: Session, targets: dict) -> None:
         "last_build_km": round(last_build, 1),
         # 16.09.2026: неделя запланирована как рост (после apply_safety_to_targets) → счётчик мезоцикла
         # на следующей неделе двинется; плоская (удержана safety / без истории) — нет
-        "grew": bool(targets["phase"] == "build" and prev_km > 0 and targets["target_km"] > prev_km),
+        "grew": bool(targets["phase"] == "build" and not in_taper and prev_km > 0
+                     and (targets["target_km"] > prev_km or targets.get("capped_by_ceiling"))),
+        "goal_phase": goal.get("phase"),
+        # компакт цели для /week без пересчёта (week_view.week_targets_stored)
+        "goal": {k: goal.get(k) for k in ("phase", "next_race", "weeks_to_race", "volume_cap_km",
+                                          "reachable_peak_km", "literature_peak_km", "peak_capped_by_date")},
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+    if prev_meta.get("availability"):
+        # Баг до 17.09.2026: окно доступности (set_availability → week_plan.availability) стиралось
+        # каждым /plan — мета собиралась заново без этого ключа. (Keep the availability window.)
+        meta["availability"] = prev_meta["availability"]
+    params["week_plan"] = meta
     um.params_json = params
     db.commit()

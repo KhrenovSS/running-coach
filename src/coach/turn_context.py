@@ -7,7 +7,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from src.coach.contracts import Prescription
-from src.coach import concerns
+from src.coach import concerns, races
 from src.coach.illness import context_block, illness_state
 from src.coach import training_status
 from src.coach.knowledge.loader import review_guides_queries
@@ -124,6 +124,10 @@ def build_extras(user_id: int, *, db: Session,
     if active:
         # 10.09.2026: актуальные проблемы (травма/боль/перерыв) — только пока активны
         extras["concerns (params)"] = concerns.context_block(active, today_local)
+    upcoming = races.active_races(user_id, db=db, today=today_local)
+    if upcoming:
+        # 17.09.2026 (#243 ч.1): целевые старты — только пока актуальны; в кэшируемый профиль не кладём
+        extras["races (params)"] = races.context_block(upcoming, today_local)
     # 12.09.2026: статус подопечного (returning/stabilizing/stable) — всегда: это замена статичной
     # строки персоны «после долгого перерыва»; в волатильном блоке, не в кэшируемом профиле
     status = training_status.compute_status(user_id, db=db, today=today_local)

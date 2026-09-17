@@ -437,3 +437,39 @@ def test_chat_plan_day_exempt_from_run_days_cap(capped_world, db_session, monkey
     llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=_turn(50))])
     reply = orchestrator.handle_chat(user.id, "напомни план", db=db_session, llm=llm)
     assert "Беговые дни" not in reply.text and "без изменений" in reply.text
+
+
+# --- Старты (#243 ч.1, 17.09.2026): race не режется кэпами, чат ведёт календарь ---
+
+def test_caps_do_not_touch_race():
+    p = WorkoutProposal(workout_type="race", target_zone=4, duration_min=100, distance_km=21.1)
+    t = _targets(THU, run_days_max=3, remaining_km=5.0)
+    assert cap_run_days(p, _prescription(100, when=THU, workout_type="race"), t, run_days_used=3, plan_day=False) == (None, None)
+    assert cap_day_volume(p, _prescription(100, when=THU, workout_type="race"), t, other_planned_km=4.0) == (None, None)
+
+
+def test_chat_records_race_and_asks_distance(capped_world, db_session, monkeypatch):
+    """«12 мая полумарафон» → LLM отдаёт races → код пишет календарь и отвечает строкой; без дистанции —
+    вопрос и пустой календарь; блок races (params) появляется в контексте следующего хода."""
+    from src.coach import chat_flow, races
+    user, today = capped_world
+    turn = dict(_turn(45, workout_type="easy"), proposal=None,
+                races=[{"status": "add", "days_ahead": 60, "distance_km": 21.1, "label": "Весенний ПМ"}])
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn)])
+    reply = orchestrator.handle_chat(user.id, "через два месяца бегу полумарафон", db=db_session, llm=llm)
+    assert "Записал старт:" in reply.text and "Весенний ПМ (21.1 км)" in reply.text and "8 нед" in reply.text
+    active = races.active_races(user.id, db=db_session, today=today)
+    assert len(active) == 1 and active[0]["distance_km"] == 21.1
+    seen: dict = {}
+    real_block = chat_flow.build_today_block
+
+    def spy(state_json, verdict_json, now_str, extras=None):
+        seen["races"] = (extras or {}).get("races (params)")
+        return real_block(state_json, verdict_json, now_str, extras=extras)
+    monkeypatch.setattr(chat_flow, "build_today_block", spy)
+    turn2 = dict(_turn(45, workout_type="easy"), proposal=None,
+                 races=[{"status": "add", "days_ahead": 30, "distance_km": None}])
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=turn2)])
+    reply = orchestrator.handle_chat(user.id, "и ещё через месяц старт", db=db_session, llm=llm)
+    assert "На какой дистанции" in reply.text and len(races.active_races(user.id, db=db_session, today=today)) == 1
+    assert seen["races"] and seen["races"][0]["label"] == "Весенний ПМ" and seen["races"][0]["days_ahead"] == 60

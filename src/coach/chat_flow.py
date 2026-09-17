@@ -13,7 +13,7 @@ from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
-from src.coach import concerns, day_caps, illness, planning
+from src.coach import concerns, day_caps, illness, planning, races
 from src.coach.contracts import Prescription, WorkoutProposal
 from src.coach.numeric_check import mismatch_pairs, prose_numbers, trim_mismatched_prose
 from src.coach.llm.agent import run_turn
@@ -193,6 +193,10 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
     if turn.concern is not None and kind in ("chat", "morning"):
         # 10.09.2026: «подвернул ногу» / «уже не беспокоит» — контроль и снятие ведёт код
         text += "\n\n" + concerns.record_concern(turn.concern, user_id, db=db, now=user_now(user))
+    if turn.races and kind in ("chat", "morning"):
+        # 17.09.2026 (#243 ч.1): целевые старты — календарь, потолок объёма и тейпер ведёт код
+        for report in turn.races:
+            text += "\n\n" + races.record_race(report, user_id, db=db, now=user_now(user))
     if proposal is not None and proposal.workout_type != "rest" and kind in ("chat", "morning"):
         # Детерминированный гвард (инцидент 04.09.2026): на день, который подопечный
         # отменил сам, тренировку не назначаем — предложение LLM отбрасывается.

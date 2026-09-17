@@ -765,3 +765,92 @@ def test_week_targets_long_run_min_hint(db_session, monkeypatch):
     monkeypatch.setattr(wi, "expected_pace_at_hr",
                         lambda uid, hr, *, db, **kw: {"pace_min_km": 60.0, "quality": "band"})
     assert planning.week_targets(user.id, db=db_session)["long_run_min_hint"] == LONG_RUN_MAX_MIN
+
+
+# --- Потолок объёма и календарь стартов (#243 ч.1, 17.09.2026) ---
+
+def _add_race(db, user_id, race_date, km=21.1, label="ПМ"):
+    from src.coach import races
+    from src.coach.llm.schemas import RaceReport
+    from datetime import datetime, timezone
+    today = min(race_date, utcnow().date())
+    now = datetime(today.year, today.month, today.day, 10, tzinfo=timezone.utc)
+    return races.record_race(RaceReport(status="add", date=race_date.isoformat(), distance_km=km, label=label),
+                             user_id, db=db, now=now)
+
+
+def _week_start_of(db, user_id):
+    from datetime import date
+    return date.fromisoformat(planning.week_targets(user_id, db=db)["week_start"])
+
+
+def test_targets_plateau_at_default_ceiling_counts_as_growth(db_session):
+    """Без стартов прогрессия упирается в потолок ПМ (55): target = 55, фаза maintenance, capped_by_ceiling;
+    advance_mesocycle считает неделю ростом — разгрузка на плато придёт."""
+    from src.coach.config import RACE_VOLUME_DEFAULT_CEILING_KM
+    user = _unique_user(db_session)
+    _week_of_km(db_session, user.id, 52.0, 2)
+    _week_of_km(db_session, user.id, 53.0, 1)
+    t = planning.week_targets(user.id, db=db_session)
+    assert t["phase"] == "build" and t["target_km"] == RACE_VOLUME_DEFAULT_CEILING_KM
+    assert t["capped_by_ceiling"] is True and t["goal"]["phase"] == "maintenance"
+    assert t["long_run_km_max"] <= RACE_VOLUME_DEFAULT_CEILING_KM * t["long_run_max_pct"] + 0.05
+    planning.advance_mesocycle(user.id, db=db_session, targets=t)
+    meta = db_session.query(UserModel).filter_by(user_id=user.id).first().params_json["week_plan"]
+    assert meta["grew"] is True and meta["goal_phase"] == "maintenance" and meta["goal"]["phase"] == "maintenance"
+    # ниже потолка — обычная прогрессия без флага
+    user2 = _unique_user(db_session)
+    _week_of_km(db_session, user2.id, 20.0, 2)
+    _week_of_km(db_session, user2.id, 22.0, 1)
+    t2 = planning.week_targets(user2.id, db=db_session)
+    assert t2["capped_by_ceiling"] is False and t2["goal"]["phase"] == "base" and t2["target_km"] == 24.2
+
+
+def test_targets_taper_week_before_race(db_session):
+    """Старт через 8–13 дней от понедельника → тейпер: объём 75 % фактического пика, ≤ 1 качественный,
+    тест ПАНО не ставится; мезоцикл неделю ростом не считает, last_build_km не переписывает."""
+    from src.coach.config import RACE_TAPER_VOLUME_PCT
+    user = _unique_user(db_session)
+    _week_of_km(db_session, user.id, 30.0, 2)
+    _week_of_km(db_session, user.id, 28.0, 1)
+    ws = _week_start_of(db_session, user.id)
+    _add_race(db_session, user.id, ws + timedelta(days=9), km=10.0, label="Десятка")
+    _set_meta(db_session, user.id, mesocycle_week=1, phase="build", week_start="2000-01-01", last_build_km=28.0, grew=True)
+    t = planning.week_targets(user.id, db=db_session)
+    assert t["goal"]["phase"] == "taper" and t["goal"]["weeks_to_race"] == 1
+    assert t["target_km"] == round(30.0 * RACE_TAPER_VOLUME_PCT, 1) and t["hard_days_max"] <= 1
+    assert t["lthr_test_due"] is False and t["race_day_ahead"] is None
+    planning.advance_mesocycle(user.id, db=db_session, targets=t)
+    meta = db_session.query(UserModel).filter_by(user_id=user.id).first().params_json["week_plan"]
+    assert meta["grew"] is False and meta["last_build_km"] == 28.0 and meta["goal_phase"] == "taper"
+
+
+def test_targets_race_week_and_next_cycle_restart(db_session):
+    """Старт внутри планируемой недели → race_week: объём 55 % пика, но не меньше дистанции, hard_days_max = 0,
+    race_day_ahead — сдвиг от сегодня; после недели старта мезоцикл начинается с 1."""
+    user = _unique_user(db_session)
+    _week_of_km(db_session, user.id, 30.0, 2)
+    _week_of_km(db_session, user.id, 28.0, 1)
+    ws = _week_start_of(db_session, user.id)
+    race_day = ws + timedelta(days=6)
+    _add_race(db_session, user.id, race_day, km=21.1)
+    t = planning.week_targets(user.id, db=db_session)
+    assert t["goal"]["phase"] == "race_week" and t["hard_days_max"] == 0
+    assert t["target_km"] == 21.1                        # 55 % от 30 = 16.5 < дистанции → дистанция
+    today = utcnow().date()
+    assert t["race_day_ahead"] == (race_day - today).days
+    _set_meta(db_session, user.id, mesocycle_week=3, phase="build", week_start="2000-01-01",
+              last_build_km=30.0, grew=True, goal_phase="race_week")
+    t2 = planning.week_targets(user.id, db=db_session)
+    assert t2["mesocycle_week"] == 1 and t2["phase"] == "build"
+
+
+def test_advance_mesocycle_keeps_availability(db_session):
+    """Баг до 17.09.2026: /plan стирал окно доступности (week_plan.availability) — мета собиралась заново."""
+    user = _unique_user(db_session)
+    _week_of_km(db_session, user.id, 20.0, 2)
+    _week_of_km(db_session, user.id, 22.0, 1)
+    planning.set_availability(user.id, db=db_session, weekdays=[0, 2, 4])
+    t = planning.week_targets(user.id, db=db_session)
+    planning.advance_mesocycle(user.id, db=db_session, targets=t)
+    assert planning.availability(user.id, db=db_session)["weekdays"] == [0, 2, 4]

@@ -170,6 +170,11 @@ def plan_guides_queries(targets: dict | None) -> list[str]:
     """
     if (targets or {}).get("detraining_return"):
         return list(_PLAN_RETURN_GUIDE_TERMS)
+    goal_phase = ((targets or {}).get("goal") or {}).get("phase")
+    if goal_phase in ("taper", "race_week"):
+        # 17.09.2026 (#243 ч.1): подводка к старту — тейпер (гайд 60) и день гонки (гайд 48)
+        return list(_PLAN_GUIDE_TERMS) + ["тейпер снижение объёма перед стартом",
+                                          "день старта раскладка темп питьё"]
     if (targets or {}).get("lthr_test_due"):
         # M3.2: неделя с полевым тестом ПАНО — протокол теста рядом с общей прогрессией
         return list(_PLAN_GUIDE_TERMS) + ["полевой тест ПАНО порог 30 минут"]

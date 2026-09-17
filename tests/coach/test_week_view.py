@@ -120,3 +120,19 @@ def test_past_days_render_as_facts(empty_user, db_session):
     assert tue.startswith("✗") and "пропущен" in tue and "35 мин" in tue
     assert any(l.startswith("▶") and "пульс до" in l for l in lines)   # сегодня — план
     assert "✓ факт · ✗ пропущен" in lines[-1]
+
+
+def test_week_meta_with_race_goal_renders_phase_and_suffix(empty_user, db_session):
+    """17.09.2026 (#243 ч.1): мета с целью (advance_mesocycle.goal) — фаза «тейпер» и хвост про старт в шапке;
+    без goal заголовок как раньше (старые меты)."""
+    today = user_now(empty_user).date()
+    monday = _monday(today)
+    _rec(db_session, empty_user.id, today, "easy", 2, 30.0)
+    db_session.add(UserModel(user_id=empty_user.id, params_json={"week_plan": {
+        "week_start": monday.isoformat(), "mesocycle_week": 2, "phase": "build", "target_km": 22.0,
+        "last_build_km": 28.0, "goal_phase": "taper",
+        "goal": {"phase": "taper", "next_race": {"label": "Десятка", "date": (monday + timedelta(days=9)).isoformat(),
+                                                 "distance_km": 10.0}, "weeks_to_race": 1}}}))
+    db_session.commit()
+    text = render_stored_week_plan(empty_user.id, db=db_session)
+    assert "Неделя 2/4 мезоцикла (тейпер) · цель ~22 км · тейпер · старт Десятка" in text

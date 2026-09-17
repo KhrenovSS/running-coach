@@ -56,6 +56,16 @@
 `state._week_signals`, порог `SAFETY_RUN_STREAK_MAX_DAYS` = 3) — Z2 без интенсива после серии дней без выходного;
 `project_state` обнуляет его для дней плана > 0 — частоту будущих дней держит `enforce_run_days`.
 
+Потолок недельного объёма и календарь целевых стартов (17.09.2026, #243 ч.1, решения владельца): прогрессия
++10 %/нед упирается в потолок по дистанции цели (`RACE_VOLUME_CEILINGS_KM`, без стартов 55 — середина литературы,
+`TASK_2026-09-17_races_and_volume_ceiling.md`). `coach/races.py` — календарь в `params_json["races"]`: LLM сообщает
+факт (`CoachTurn.races`), код подбирает год, валидирует, пишет и отвечает строкой; `coach/race_plan.py` (pure) —
+`goal_for_week` (потолок = max по стартам в горизонте 18 нед; фазы race_week 55 % ≥ дистанции / taper 75 % / build с
+«достижимым пиком» / base / maintenance), `place_race` (старт кодом на день гонки, неделя старта без другого качества),
+`header_suffix`. `week_targets` отдаёт `goal`, `capped_by_ceiling`, `race_day_ahead`; `advance_mesocycle` не считает
+тейпер базой цикла и сохраняет `availability` (баг #351); `races.mark_race` помечает строку старта и при понижении
+safety («в лёгком режиме» — #243 п.4); `day_caps` старт не режет.
+
 ## Решение 2: ручной tool-loop, не SDK tool_runner
 
 `client.beta.messages.tool_runner` генерирует схему из сигнатуры и вызывает функцию сам —
@@ -228,6 +238,8 @@ coach/
 │                      #   + cap_week_volume: сумма плана ≤ target_km (лёгкие ужимаются, структурные — последними); объём плоский при закрытом интенсиве
 │                      #   только по усталости/здоровью (volume_hold, INTENSITY_ONLY_SAFETY_RULES, 12.09.2026)
 │                      #   cap_long_run — по содержимому (16.09.2026, #340): любой бег выше long_run_km_max, race не режется
+├── races.py           # 17.09 (#243 ч.1): календарь стартов — params_json["races"], record_race из CoachTurn.races, context_block, mark_race
+├── race_plan.py       # 17.09 (#243 ч.1): потолок по дистанции, goal_for_week (фазы build/taper/race_week/maintenance), place_race, header_suffix
 ├── day_caps.py        # потолки объёма и частоты в чате/утре (16–17.09.2026, #338/#347): day_targets, cap_run_days, cap_day_volume (остаток недели −
 │                      #   назначенное на другие дни), finalize_with_caps (двухпроходный finalize), context_block для LLM
 ├── segment_trim.py    # урезание структурной тренировки по гайдам 44/45/46/61 (16.09.2026): trim_segments, shrink_proposal
@@ -262,6 +274,7 @@ coach/
 ├── planning_availability.py # availability/set_availability (#294), unavailable_dates, cancel_days/reopen_days
 │                      #   (отмены подопечного с маркером UNAVAILABLE_RATIONALE), blocked_by_unavailable
 ├── weekly_plan.py     # generate_weekly_plan (вс 19:00, строки recommendations status=planned)
+├── weekly_plan_turn.py # 17.09: apply_turn_facts — доступность/болезнь/проблемы/старты из ответа LLM на /plan-пути
 ├── numeric_check.py   # #247: сверка чисел прозы LLM с карточкой (детект+лог) + v2 trim предложения с чужим числом
 ├── vision.py          # #257: SleepShot + extract_sleep (скриншот → мост /vision)
 ├── rules/p1_safety.py # evaluate_safety(state) — правила 0–22 (0 — нет данных → консервативный потолок;

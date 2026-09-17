@@ -10,7 +10,12 @@ from typing import Annotated, Literal, get_args
 
 from pydantic import BaseModel, Field, field_validator
 
-from src.coach.config import PACE_TARGET_MAX_PER_KM, PACE_TARGET_MIN_PER_KM
+from src.coach.config import (
+    PACE_TARGET_MAX_PER_KM,
+    PACE_TARGET_MIN_PER_KM,
+    RACE_DISTANCE_MAX_KM,
+    RACE_DISTANCE_MIN_KM,
+)
 
 
 class RecoverySpecIn(BaseModel):
@@ -161,6 +166,20 @@ class ConcernReport(BaseModel):
     days_ago: Annotated[int, Field(ge=0, le=90)] = 0        # когда началось (0 = сегодня)
 
 
+class RaceReport(BaseModel):
+    """Подопечный назвал целевой старт (дата + дистанция) или отменил его — #243 ч.1, 17.09.2026.
+
+    Дату LLM не вычисляет: «ГГГГ-ММ-ДД» если назван год, «ММ-ДД» без года (год подберёт код —
+    ближайшее будущее), относительные сроки — days_ahead от «Сейчас». Календарь, сроки и фазы
+    подготовки ведёт код (coach/races.py, race_plan.py). (Race fact; code owns dates and phases.)
+    """
+    status: Literal["add", "cancel"]
+    date: str | None = Field(default=None, pattern=r"^(\d{4}-)?\d{2}-\d{2}$")
+    days_ahead: Annotated[int, Field(ge=0, le=366)] | None = None
+    distance_km: float | None = Field(default=None, ge=RACE_DISTANCE_MIN_KM, le=RACE_DISTANCE_MAX_KM)
+    label: str | None = Field(default=None, max_length=60)   # «Московский полумарафон»
+
+
 class CoachTurn(BaseModel):
     """Полный ход коуча: проза + опциональное предложение (full coach turn)."""
     message: str = Field(max_length=1500)
@@ -194,6 +213,9 @@ class CoachTurn(BaseModel):
     # 10.09.2026: актуальная проблема (травма/боль/перерыв) — код ведёт контроль и снятие
     # (Athlete concern → deterministic tracking with auto-expiry.)
     concern: ConcernReport | None = None
+    # 17.09.2026 (#243 ч.1): целевые старты — календарь, потолок объёма и тейпер ведёт код
+    # (Race calendar facts → deterministic ceilings and taper phases.)
+    races: list[RaceReport] | None = Field(default=None, max_length=4)
 
 
 def _strictify(schema: dict) -> dict:

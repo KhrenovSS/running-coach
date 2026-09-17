@@ -107,6 +107,11 @@ LLM только сообщает факт (`CoachTurn.concern`), код сни�
 > 16.09.2026: границы объёма (прогрессия: +10 %/нед, доля длительной, остаток недели) — не правила P1, а
 > потолки `planning_safety`/`day_caps`, применяемые после `clamp` повторным `finalize` во всех путях
 > (план, чат, утро). P1 остаётся про состояние на день; `max_duration_min` — только боль/сон.
+>
+> 17.09.2026 (#243 ч.1): у прогрессии появился потолок — по дистанции целевого старта (`RACE_VOLUME_CEILINGS_KM`,
+> без стартов 55 км) и фазы подготовки к ближайшему старту (`coach/race_plan.py`: build / taper 75 % / race_week
+> 55 % не меньше дистанции / maintenance); календарь стартов — `coach/races.py` (`params_json["races"]`, факты из
+> `CoachTurn.races`). Свод литературы и решения — `TASK_2026-09-17_races_and_volume_ceiling.md`.
 
 `rules/p1_safety.py :: evaluate_safety(state, *, now=None) -> SafetyVerdict` +
 `safety.py :: clamp(proposal, verdict, state, *, now=None, source="fallback")
@@ -646,6 +651,18 @@ Literal-перечень флагов assessment — `schemas.FlagValue` (append
   (`ConcernReport`), `context_block` → `extras["concerns (params)"]`; колено убрано из профиля
   (`turn_context.profile`), промпта, `skills/pain.py`, вечернего вопроса (только при активной проблеме) и
   `handlers/pain.py` (`pain_location` — из активной травмы или `unspecified`); новый #328.
+
+### 17.09.2026 (вечер) — потолок недельного объёма и календарь целевых стартов (#243 ч.1, решения владельца)
+
+- ✅ **Потолок**: `RACE_VOLUME_CEILINGS_KM` 5 км 40 · 10 км 50 · ПМ 55 · марафон 65, крыша 70, без стартов 55 (середина
+  литературы — гайды 41/47/60/61 + черновики); `week_targets.target_km = min(прогрессия, потолок фазы)`, плато —
+  `maintenance` (`capped_by_ceiling` — рост для счётчика мезоцикла).
+- ✅ **Календарь стартов в чате** — `coach/races.py` (`CoachTurn.races`/`RaceReport`, год подбирает код, валидация,
+  дубль/отмена/lazy done, строка-ответ, блок `races (params)`); ✅ **периодизация** — `coach/race_plan.py`
+  (`goal_for_week`: горизонт 18 нед, фазы, «достижимый пик»; `place_race`, `header_suffix`); интеграция в
+  `week_targets`/`advance_mesocycle`/`weekly_plan`/`day_caps`/рендер/промпты. Выносы `weekly_plan_turn.py`, `llm/prompts_plan.py`.
+- ✅ Баг #351: `advance_mesocycle` стирал `week_plan.availability`.
+- Тесты: `test_races.py` (11), `test_race_plan_e2e.py` (2), +8 в существующих; всего 1116. Остаток #243 — TASK §6; #350.
 
 ### 17.09.2026 — частота беговых дней в чате/утре: мягкий кэп + правило 22 (решения владельца, #347/#348)
 

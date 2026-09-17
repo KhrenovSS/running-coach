@@ -12,7 +12,8 @@ from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from src.coach import concerns, illness, lthr_field, planning
+from src.coach import lthr_field, planning, race_plan, races
+from src.coach.weekly_plan_turn import apply_turn_facts
 from src.coach.contracts import Prescription, WorkoutProposal
 from src.coach.knowledge.loader import plan_guides_queries
 from src.coach.numeric_check import check_plan_prose
@@ -52,11 +53,10 @@ from src.coach.tools.serialize import jsonable
 from src.coach.turn_context import build_extras, recent_athlete_requests
 from src.coach.turn_context import status_phase as _status_phase
 from src.exceptions import CoachError, LLMUnavailableError
-from src.coach.llm.schemas import CoachTurn
 from src.models import Recommendation, User
 from src.services.repositories_coach import CoachRepository
 from src.utils.logger import get_logger
-from src.utils.timeutils import WEEKDAYS_RU_SHORT, fmt_local, local_dt, user_now
+from src.utils.timeutils import fmt_local, local_dt, user_now
 
 logger = get_logger("coach.weekly_plan")
 
@@ -85,51 +85,6 @@ def _no_days_text(targets: dict) -> str:
     window = f"дни для бега: {', '.join(names)}" if names else "отменённые дни"
     return (f"На оставшиеся дни недели бегать некуда ({window}) — новый план составлю "
             "в воскресенье вечером. Изменились планы — напиши «могу бегать в любой день».")
-
-
-def _apply_availability_from_turn(turn: CoachTurn, user_id: int, *, db: Session,
-                                  targets: dict, apply_targets, today: date,
-                                  now_local: datetime) -> tuple[dict, list[int], str]:
-    """Доступность из ответа LLM применить детерминированно (инцидент 07.09.2026).
-
-    Реплика «переделай план, сегодня не смогу» уходит /plan-путём, минуя чат-ход, поэтому
-    отмены дней применяем здесь: available_weekdays → окно недели, available_again_days_ahead
-    → снять отдых-отмену, unavailable_days_ahead → вычесть из days_ahead_allowed (rest-строки
-    с маркером пишет вызывающий ПОСЛЕ гашения прежнего плана — иначе они погаснут).
-    Возврат: (targets, cancelled_days, текст-хвост). (Deterministic availability from the turn.)
-    """
-    tail: list[str] = []
-    recompute = False
-    if turn.available_weekdays is not None:
-        saved = planning.set_availability(user_id, db=db, weekdays=turn.available_weekdays)
-        recompute = True
-        if saved["weekdays"]:
-            tail.append("Запомнил дни для бега: "
-                        + ", ".join(WEEKDAYS_RU_SHORT[d] for d in saved["weekdays"]) + ".")
-        else:
-            tail.append("Запомнил: бегать можно в любой день недели.")
-    if turn.available_again_days_ahead:
-        reopened = planning.reopen_days(turn.available_again_days_ahead, user_id,
-                                        db=db, now=now_local)
-        if reopened:
-            recompute = True
-            tail.append(reopened)
-    if turn.illness is not None:
-        # #322: «заболел, переделай план» — запись болезни, дни паузы выпадают из окна
-        tail.append(illness.record_illness(turn.illness, user_id, db=db, now=now_local))
-        recompute = True
-    if turn.concern is not None:
-        # 10.09.2026: проблема названа в просьбе о плане — фиксируем, план её увидит в контексте
-        tail.append(concerns.record_concern(turn.concern, user_id, db=db, now=now_local))
-    if recompute:
-        targets = apply_targets(planning.week_targets(user_id, db=db, today=today,
-                                                      now=now_local))
-    cancelled = sorted(set(turn.unavailable_days_ahead or []))
-    if cancelled:
-        allowed = [d for d in targets["days_ahead_allowed"] if d not in cancelled]
-        logger.info("Weekly plan: athlete unavailable days=%s user=%s", cancelled, user_id)
-        targets = {**targets, "days_ahead_allowed": allowed}
-    return targets, cancelled, "\n".join(tail)
 
 
 def generate_weekly_plan(user_id: int, *, db: Session,
@@ -231,7 +186,7 @@ def generate_weekly_plan(user_id: int, *, db: Session,
         logger.warning("Weekly plan LLM failed for user=%s: %s", user_id, e)
         return None
 
-    targets, cancelled, avail_tail = _apply_availability_from_turn(
+    targets, cancelled, avail_tail = apply_turn_facts(
         turn, user_id, db=db, targets=targets, apply_targets=_apply_targets, today=today,
         now_local=now_local)
     if not targets["days_ahead_allowed"]:
@@ -252,6 +207,14 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     if not items:
         logger.warning("Weekly plan empty for user=%s", user_id)
         return None
+    # 17.09.2026 (#243 ч.1): старт из календаря ставит код на день гонки — до кэпа частоты, чтобы тот
+    # снял лёгкий день, а не старт (race — каркас, _KEEP_TYPES). (Place the race before the run-day cap.)
+    race_day = targets.get("race_day_ahead")
+    race_placed = None
+    if race_day is not None:
+        items, race_placed = race_plan.place_race(
+            items, race=targets["goal"]["next_race"], days_ahead=race_day,
+            allowed=targets["days_ahead_allowed"])
     # Потолок беговых дней на ОСТАТОК недели — детерминированно (решение владельца 02.09.2026)
     run_days_cap = targets["remaining_run_days_max"]
     items, dropped_days = planning.enforce_run_days(items, run_days_cap)
@@ -321,10 +284,17 @@ def generate_weekly_plan(user_id: int, *, db: Session,
     for proposal, p in zip(items, prescriptions):
         status = "adjusted" if (proposal.for_days_ahead == 0 and had_today_row) else "planned"
         lthr_field.mark_test(p, proposal)          # маркер дня-теста в target (M3.2)
+        races.mark_race(p, proposal, (targets.get("goal") or {}).get("next_race"))  # маркер старта
         save_prescription(p, state, db=db, status=status)
     if test_day is not None:
         plan_notes.append(f"🧪 День +{test_day}: полевой тест ПАНО — 30 мин ровно на максимуме, "
                           "ПАНО посчитаю по треку и предложу принять.")
+    if race_placed is not None:
+        nxt = targets["goal"]["next_race"]
+        plan_notes.append(f"🏁 День +{race_placed}: старт {nxt.get('label') or ''} "
+                          f"{float(nxt['distance_km']):g} км — накануне лёгкий день, после — восстановление.")
+    elif race_day is not None:
+        plan_notes.append("⚠️ День старта закрыт (отменён или пауза) — старт в план не поставлен.")
     # Отменённые подопечным дни — rest с маркером, ПОСЛЕ гашения прежнего плана
     cancel_tail = _cancel_tail(cancelled, user_id, state, db=db, now_local=now_local)
 
@@ -379,3 +349,7 @@ def _profile(user: User) -> dict:
 def _history(user_id: int, *, db: Session) -> list[dict]:
     from src.coach.turn_context import history
     return history(user_id, db=db)
+
+
+# Обратная совместимость имени до выноса в weekly_plan_turn (17.09.2026)
+_apply_availability_from_turn = apply_turn_facts
