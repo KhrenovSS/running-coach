@@ -186,6 +186,9 @@ SYNC_FAILURE_NOTIFY_THRESHOLD: Final[int] = 3    # подряд сбоев до 
 SYNC_BACKOFF_MAX_EXP: Final[int] = 5             # cap экспоненты backoff: 2^5 = 32× интервала (backoff exponent cap)
 WATCH_API_PAGE_THROTTLE_SEC: Final[float] = 0.5  # пауза между страницами list_activities (page throttle, unofficial API)
 WATCH_TOKEN_TTL_HOURS: Final[int] = 24           # консервативный TTL кэша токена (conservative token cache TTL)
+ACTIVITY_SYNC_LOOKBACK_DAYS: Final[int] = 7      # окно since для списка активностей: часы могут выгрузить тренировку
+                                                 # в облако спустя часы; API отдаёт полный список, дедуп — по внешнему ID
+                                                 # (activity list lookback: late watch uploads; full list + ext-id dedup)
 
 # --- Физиологические метрики тренировки (Workout physio metrics — DEV_PLAN §9 D2) ---
 # Потребитель — коуч (workout_insights.computed_json); интерпретация — за LLM.

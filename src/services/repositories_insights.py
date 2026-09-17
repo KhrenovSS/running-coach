@@ -145,21 +145,29 @@ class InsightRepository:
         return updated
 
     @staticmethod
-    def recent(user_id: int, *, db: Session, days: int = 7,
-               limit: int = 3) -> list[WorkoutInsight]:
-        """Свежие завершённые итоги — для утреннего вердикта/weekly (новые первыми).
+    def recent_with_sessions(user_id: int, *, db: Session, days: int = 7,
+                             limit: int = 3) -> list[tuple[WorkoutInsight, TrainingSession]]:
+        """Свежие завершённые итоги вместе с тренировкой (новые первыми) — контексту нужна
+        дата ТРЕНИРОВКИ, а не строки разбора (инцидент 17.09.2026: «вчерашние спуски» про вторник).
 
         «Свежесть» — по дате ТРЕНИРОВКИ, не по created_at разбора: пересчёт/бэкфилл разборов
         (04.09.2026: 44 строки за раз) иначе делает «недавними» тренировки мая.
-        (Recency by workout date, not by insight creation time.)"""
+        (Recency by workout date, not by insight creation time; session returned for dating.)"""
         cutoff = _utcnow() - timedelta(days=days)
-        return db.query(WorkoutInsight).join(
+        return db.query(WorkoutInsight, TrainingSession).join(
             TrainingSession, TrainingSession.id == WorkoutInsight.session_id,
         ).filter(
             WorkoutInsight.user_id == user_id,
             WorkoutInsight.status == 'done',
             TrainingSession.begin_ts >= cutoff,
         ).order_by(TrainingSession.begin_ts.desc()).limit(limit).all()
+
+    @staticmethod
+    def recent(user_id: int, *, db: Session, days: int = 7,
+               limit: int = 3) -> list[WorkoutInsight]:
+        """Свежие завершённые итоги без тренировок — см. recent_with_sessions (thin wrapper)."""
+        return [ins for ins, _ in InsightRepository.recent_with_sessions(
+            user_id, db=db, days=days, limit=limit)]
 
     @staticmethod
     def for_session(user_id: int, session_id: int, *, db: Session) -> WorkoutInsight | None:

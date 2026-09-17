@@ -24,7 +24,7 @@ from src.coach.tools.registry import run_tool
 from src.config.constants import RECOMMENDATION_STATUS_SUPERSEDED
 from src.models import CoachMessage, Recommendation, User
 from src.services.repositories_coach import CoachRepository
-from src.utils.timeutils import WEEKDAYS_RU, local_dt, user_now
+from src.utils.timeutils import WEEKDAYS_RU, session_local_dt, user_now
 
 
 def profile(user: User) -> dict:
@@ -79,18 +79,23 @@ def build_extras(user_id: int, *, db: Session,
         "weekly_summary (get_weekly_summary)": run_tool(
             "get_weekly_summary", {"weeks": weeks}, user_id=user_id, db=db),
     }
-    reviews = InsightRepository.recent(user_id, db=db, days=7, limit=insights_limit)
+    reviews = InsightRepository.recent_with_sessions(user_id, db=db, days=7, limit=insights_limit)
     if reviews:
-        # days_ago — по локальной паре дат пользователя, как в _session_brief
-        # (user-local dates on both sides, consistent with _session_brief)
-        extras["recent_reviews (workout_insights)"] = [{
-            "days_ago": ((today_local - local_dt(r.created_at, user).date()).days
-                         if r.created_at else None),
-            "session_id": r.session_id,
-            "effort_match": r.effort_match,
-            "flags": (r.assessment_json or {}).get("flags"),
-            "carry_forward": r.carry_forward,
-        } for r in reviews]
+        # Дата записи — дата ТРЕНИРОВКИ (date/weekday/days_ago как в _session_brief), не created_at
+        # строки разбора: иначе флаги и carry_forward вторника читаются как «вчерашние»
+        # (инцидент 17.09.2026). (Dated by the workout, not by the insight row.)
+        def _dated(ins, s):
+            local = session_local_dt(s.begin_ts, s, user) if s.begin_ts else None
+            return {
+                "date": local.date().isoformat() if local else None,
+                "weekday": WEEKDAYS_RU[local.weekday()] if local else None,
+                "days_ago": (today_local - local.date()).days if local else None,
+                "session_id": ins.session_id,
+                "effort_match": ins.effort_match,
+                "flags": (ins.assessment_json or {}).get("flags"),
+                "carry_forward": ins.carry_forward,
+            }
+        extras["recent_reviews (workout_insights)"] = [_dated(ins, s) for ins, s in reviews]
     recs = db.query(Recommendation).filter(
         Recommendation.user_id == user_id,
         Recommendation.for_date >= today_local,

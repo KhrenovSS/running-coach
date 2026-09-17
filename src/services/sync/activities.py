@@ -6,6 +6,7 @@ import threading
 from datetime import timedelta, datetime, timezone
 
 from src.utils.logger import get_logger
+from src.config.constants import ACTIVITY_SYNC_LOOKBACK_DAYS
 from src.models import SessionLocal, User, TrainingSession, DeletedTraining
 from src.services.audit import AuditService
 from src.services.sync.utils import _make_client
@@ -113,13 +114,18 @@ async def sync_activities_for_user(cred, brand: str, db,
             logger.warning("Activity sync: brand=%s user=%s — пользователь не найден", brand, cred.user_id)
             return -1
 
-        # Буфер 2ч чтобы не пропустить активности, которые Coros обработал с задержкой (2h lookback buffer to catch delayed Coros activities)
-        since = cred.last_activity_sync_at - timedelta(hours=2) if cred.last_activity_sync_at else None
+        # Окно назад в днях, не часах: часы выгружают тренировку в облако с задержкой, а таймстемп синка
+        # двигается и при пустом результате — 2-часовой буфер терял такие тренировки навсегда. API дат не принимает
+        # (полный список), дедуп — по внешнему ID, поэтому широкое окно безопасно.
+        # (Lookback in days: late watch uploads vs sliding timestamp; full-list API + ext-id dedup make it safe.)
+        since = (cred.last_activity_sync_at - timedelta(days=ACTIVITY_SYNC_LOOKBACK_DAYS)
+                 if cred.last_activity_sync_at else None)
         logger.info("Activity sync: brand=%s user=%s last_activity_sync_at=%s since=%s",
                      brand, cred.user_id, cred.last_activity_sync_at, since)
         activities = await client.list_activities(since=since)
         if not activities:
-            logger.info("Activity sync: brand=%s user=%s — API вернул пустой список", brand, cred.user_id)
+            logger.info("Activity sync: brand=%s user=%s — после фильтра беговых типов и окна since новых нет "
+                        "(детали — лог клиента list_activities)", brand, cred.user_id)
             if progress is not None:
                 progress['step'] = 'done'
                 progress['message'] = 'Нет новых беговых активностей'

@@ -190,7 +190,12 @@ def run_sync_for_user(user_id: int, brand: str, sync_type: str,
                 progress['done'] = True
             return
 
-        result = run_async_in_thread(cfg['sync_fn'](cred, brand, db, progress=progress, pending=pending if sync_type == 'activity' else None))
+        # pending принимает только activity-синк; health-функция такого аргумента не знает
+        # (only the activity sync accepts `pending`; passing it to health raised TypeError — incident 17.09.2026)
+        kwargs: dict = {'progress': progress}
+        if sync_type == 'activity':
+            kwargs['pending'] = pending
+        result = run_async_in_thread(cfg['sync_fn'](cred, brand, db, **kwargs))
 
         hint = record_manual_sync_result(db, cred, sync_type, result)
         if hint is None:

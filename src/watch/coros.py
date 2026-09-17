@@ -1,6 +1,7 @@
 # Клиент для неофициального API Coros Training Hub (Coros Training Hub API client — httpx async)
 import asyncio
 import hashlib
+from collections import Counter
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -12,7 +13,10 @@ from src.config.constants import WATCH_API_PAGE_THROTTLE_SEC
 from src.watch.base import BaseWatchClient
 from src.exceptions import WatchAPIError, WatchAuthError
 
-logger = get_logger("watch.coros")
+# Логгер "app", не именованный: в контейнере app uvicorn отключает логгеры, созданные при импорте,
+# а fix_logger_after_uvicorn восстанавливает только app/requests/audit_file (BACKLOG #357)
+# (uvicorn disables import-time named loggers; only "app" is restored — see BACKLOG #357)
+logger = get_logger("app")
 
 COROS_API_BASE = "https://teameuapi.coros.com"
 AUTH_URL = f"{COROS_API_BASE}/account/login"
@@ -31,9 +35,14 @@ BROWSER_HEADERS = {
     "Content-Type": "application/json",
 }
 
-SPORT_TYPE_RUNNING = 100
-SPORT_TYPE_TRAIL_RUNNING = 101
-SPORT_TYPES_RUN = {SPORT_TYPE_RUNNING, SPORT_TYPE_TRAIL_RUNNING}
+# Коды sportType Coros для бега (Coros sportType codes for running modes). Инцидент 17.09.2026:
+# тренировка режимом Track Run (103) молча отбрасывалась фильтром {100, 101}.
+SPORT_TYPE_RUNNING = 100         # Run (улица / street)
+SPORT_TYPE_INDOOR_RUNNING = 101  # Indoor Run (дорожка / treadmill)
+SPORT_TYPE_TRAIL_RUNNING = 102   # Trail Run
+SPORT_TYPE_TRACK_RUNNING = 103   # Track Run (стадион / track)
+SPORT_TYPES_RUN = {SPORT_TYPE_RUNNING, SPORT_TYPE_INDOOR_RUNNING,
+                   SPORT_TYPE_TRAIL_RUNNING, SPORT_TYPE_TRACK_RUNNING}
 
 
 # Хэш пароля Coros: MD5 + bcrypt (Coros password hash: MD5 + bcrypt)
@@ -123,14 +132,22 @@ class CorosWatchClient(BaseWatchClient):
 
         since_ts = since.timestamp() if since else 0
         activities = []
+        # Диагностика фильтра: сколько и почему отброшено (Filter diagnostics: what was dropped and why)
+        dropped_sport: Counter = Counter()
+        dropped_since = 0
+        newest_ts = 0
         for act in all_items:
             sport_type = act.get("sportType", 999)
-            if sport_type not in SPORT_TYPES_RUN:
-                continue
             start_ts = act.get("startTime")
+            if start_ts:
+                newest_ts = max(newest_ts, start_ts)
+            if sport_type not in SPORT_TYPES_RUN:
+                dropped_sport[sport_type] += 1
+                continue
             if not start_ts:
                 continue
             if since_ts and start_ts <= since_ts:
+                dropped_since += 1
                 continue
             activities.append({
                 "id": str(act["labelId"]),
@@ -143,6 +160,10 @@ class CorosWatchClient(BaseWatchClient):
                 "fileUrl": act.get("fileUrl", ""),
                 "beginTs": datetime.fromtimestamp(start_ts, tz=timezone.utc).isoformat(),
             })
+        newest = datetime.fromtimestamp(newest_ts, tz=timezone.utc).isoformat() if newest_ts else None
+        logger.info("Coros list_activities: raw=%d run=%d dropped_sport=%s dropped_since=%d newest=%s since=%s",
+                    len(all_items), len(activities), dict(dropped_sport), dropped_since, newest,
+                    since.isoformat() if since else None)
         return activities
 
     # Получить данные дашборда — HRV за последние 7 дней (Get dashboard data — HRV for last 7 days)

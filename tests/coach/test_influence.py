@@ -110,3 +110,106 @@ def test_planned_workouts_list_all_days_with_days_ahead(athlete_with_history,
     from src.utils.timeutils import WEEKDAYS_RU
     assert planned[1]["weekday"] == WEEKDAYS_RU[
         (date.today() + timedelta(days=2)).weekday()]
+
+
+# --- Датировка прошлых разборов по ТРЕНИРОВКЕ (инцидент 17.09.2026) ---------------
+# (Dating recent_reviews by the workout, not by the insight row)
+
+REVIEW_TURN = {"message": "Разбор: легло ровно.", "proposal": None,
+               "followup_question": None, "log_suggestion": None,
+               "assessment": {"effort_match": "ok", "causes": [], "flags": [],
+                              "carry_forward": "продолжаем в том же духе"}}
+
+
+def _extract_block(content: str, key: str):
+    """Достать JSON-блок extras из последнего user-сообщения (build_today_block:
+    строка «<key>:», следом одна строка json.dumps). (Pull one extras block as JSON.)"""
+    import json
+    lines = content.split("\n")
+    idx = lines.index(f"{key}:")
+    return json.loads(lines[idx + 1])
+
+
+def _session_two_days_ago(user, db):
+    """Тренировка ровно 2 локальных дня назад в полдень пояса пользователя — устойчиво к
+    окну вокруг полуночи UTC/МСК. (Noon in the user's zone, two local days back.)"""
+    from datetime import datetime, time, timedelta, timezone
+    from zoneinfo import ZoneInfo
+    from src.utils.timeutils import user_now
+    from tests.helpers import build_training_session
+
+    tz = ZoneInfo(user.timezone)
+    local_date = user_now(user).date() - timedelta(days=2)
+    begin_local = datetime.combine(local_date, time(12, 0), tzinfo=tz)
+    sess = build_training_session(db, user.id, training_type="easy",
+                                  begin_ts=begin_local.astimezone(timezone.utc))
+    return sess, local_date
+
+
+def _finish_old_review(user, db):
+    """Завершить разбор тренировки двухдневной давности СЕЙЧАС (created_at = now):
+    именно этот случай путал датировку до фикса. (Review row created now for an older run.)"""
+    sess, local_date = _session_two_days_ago(user, db)
+    InsightRepository.upsert(user.id, sess.id, db=db)
+    InsightRepository.finish(sess.id, db=db, source="llm", effort_match="ok",
+                             assessment={"flags": ["downhill_load_high"]},
+                             carry_forward="спуски на маршруте — держим лёгкие дни")
+    return sess, local_date
+
+
+def test_recent_reviews_dated_by_session_not_by_insight_row(athlete_with_history,
+                                                            db_session):
+    """Регресс 17.09.2026: запись recent_reviews датируется ТРЕНИРОВКОЙ (days_ago=2,
+    date/weekday её локальной даты), а не строкой разбора, созданной сегодня (days_ago=0)."""
+    from src.utils.timeutils import WEEKDAYS_RU, session_local_dt
+
+    user = athlete_with_history
+    sess, local_date = _finish_old_review(user, db_session)
+    # Перечитываем сессию из БД — так, как её увидит build_extras (as build_extras sees it)
+    stored = db_session.get(TrainingSession, sess.id)
+    assert session_local_dt(stored.begin_ts, stored, user).date() == local_date
+
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=PLAIN_TURN)])
+    orchestrator.handle_chat(user.id, "что сегодня делать?",
+                             db=db_session, llm=llm, kind="morning")
+    last_user = llm.calls[0]["messages"][-1]["content"]
+    reviews = _extract_block(last_user, "recent_reviews (workout_insights)")
+    rec = next(r for r in reviews if r["session_id"] == sess.id)
+
+    assert rec["days_ago"] == 2, rec          # не 0 — разбор создан сегодня, тренировка нет
+    assert rec["date"] == local_date.isoformat()
+    assert rec["weekday"] == WEEKDAYS_RU[local_date.weekday()]
+    # Прежние поля записи сохранены (legacy fields intact)
+    assert rec["effort_match"] == "ok"
+    assert rec["flags"] == ["downhill_load_high"]
+    assert "спуски на маршруте" in rec["carry_forward"]
+
+
+def test_review_context_recent_reviews_have_weekday(athlete_with_history, db_session):
+    """Путь разбора (on_workout_completed): прошлый разбор попадает в контекст с непустыми
+    weekday/date, а REVIEW_PROMPT велит датировать ПРЕЖНИЕ тренировки по этим полям."""
+    from src.utils.timeutils import WEEKDAYS_RU
+
+    user = athlete_with_history
+    old_sess, local_date = _finish_old_review(user, db_session)
+    # Самая свежая тренировка фикстуры (days_ago 0) — её и разбираем (freshest run)
+    latest = db_session.query(TrainingSession).filter_by(user_id=user.id).order_by(
+        TrainingSession.begin_ts.desc()).first()
+    assert latest.id != old_sess.id
+    InsightRepository.upsert(user.id, latest.id, db=db_session)
+
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=REVIEW_TURN)])
+    orchestrator.on_workout_completed(user.id, latest.id, db=db_session, llm=llm)
+
+    assert len(llm.calls) == 1
+    last_user = llm.calls[0]["messages"][-1]["content"]
+    reviews = _extract_block(last_user, "recent_reviews (workout_insights)")
+    rec = next(r for r in reviews if r["session_id"] == old_sess.id)
+    assert rec["weekday"] in WEEKDAYS_RU
+    assert rec["weekday"] == WEEKDAYS_RU[local_date.weekday()]
+    assert rec["date"] == local_date.isoformat()
+    # Сегодняшняя тренировка ещё не разобрана → в recent_reviews её нет (only past reviews)
+    assert all(r["session_id"] != latest.id for r in reviews)
+    # Правило датировки из REVIEW_PROMPT дошло до модели (prompt rule reached the model)
+    assert "ПРЕЖНИХ тренировок" in last_user
+    assert "weekday/days_ago" in last_user
