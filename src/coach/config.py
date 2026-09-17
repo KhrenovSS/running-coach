@@ -85,6 +85,12 @@ PAIN_FRESH_DAYS = 2            # отметка боли старше → не �
 PAIN_PERSIST_DAYS = 3          # боль N дней подряд → осторожный режим даже при низком уровне
 SAFETY_MAX_ZONE_DEFAULT = 5    # потолок зоны по умолчанию (нет ограничений)
 SAFETY_MAX_DURATION_CAUTION_MIN = 40  # потолок длительности в осторожном режиме, мин
+# Правило 22 (17.09.2026, решение владельца): серия беговых дней без выходного — с этого числа
+# дней подряд следующий день только лёгкий (Z2, без интенсива). Гайд 61: «без 3 тренировок подряд»;
+# гайд 47: ежедневный бег — не раньше года стабильных занятий, день отдыха в неделе — всегда.
+# Правило — про сегодня: частоту будущих дней плана держит `planning.enforce_run_days`
+# (`planning_safety.project_state` обнуляет серию для day > 0). (Run streak → easy-only today.)
+SAFETY_RUN_STREAK_MAX_DAYS = 3
 # #254 (02.09.2026): недосып → осторожнее (v1 — абсолютные пороги, решение владельца;
 # перейти на личную медиану после накопления скриншотов сна)
 SLEEP_SHORT_MIN = 360          # сон < 6 ч → без интенсива (лёгкий день)
@@ -112,7 +118,8 @@ INTENSITY_ONLY_SAFETY_RULES = ("week_intensity_overload", "easy_runs_too_hard",
 # 13.09 одна ночь 5.8 ч заморозила объём всей недели. Стойкие сигналы (HRV, recovery %, ACWR/ATI, боль,
 # болезнь, detraining, монотонность, нет данных) по-прежнему держат объём — `planning_safety.volume_hold`.
 # (Rules that do not hold weekly volume flat: distribution rules + one-day transient signals.)
-VOLUME_TRANSIENT_SAFETY_RULES = INTENSITY_ONLY_SAFETY_RULES + ("sleep_short", "sleep_very_short", "hard_streak")
+VOLUME_TRANSIENT_SAFETY_RULES = INTENSITY_ONLY_SAFETY_RULES + ("sleep_short", "sleep_very_short", "hard_streak",
+                                                             "run_streak")  # 17.09: серия беговых дней — тоже разовый сигнал
 # Ускорения (strides, гайды 45/46: 15–20 с с полным восстановлением) — рабочий отрезок не длиннее
 # этого; всё длиннее в Z3+ — качественная работа: safety классифицирует предложение по сегментам,
 # а не по ярлыку (инцидент 04.09.2026: «лёгкий бег» с 4×3 мин в Z3 обошёл гейт интенсива).

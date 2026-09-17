@@ -92,7 +92,7 @@ def test_intensity_only_safety_rules_are_real_rule_keys():
     # 16.09.2026: разовые сигналы дня — надмножество intensity-only, тоже ⊆ ключей, стойкие — вне списка
     transient = set(coach_config.VOLUME_TRANSIENT_SAFETY_RULES)
     assert set(coach_config.INTENSITY_ONLY_SAFETY_RULES) <= transient <= keys
-    assert {"sleep_short", "sleep_very_short", "hard_streak"} <= transient
+    assert {"sleep_short", "sleep_very_short", "hard_streak", "run_streak"} <= transient
     for k in ("hrv_low", "recovery_fatigued", "pain_caution", "illness", "detraining", "monotony_high",
               "acwr_high", "rhr_critical", "no_data"):
         assert k not in transient
@@ -144,3 +144,9 @@ def test_segment_trim_constants_match_guides():
     assert int(g46.key_rules["strides_reps_per_session"]) == c.STRIDES_MAX_PER_SESSION
     assert 0 < c.SEGMENT_COOLDOWN_MIN_MIN <= c.SEGMENT_WARMUP_MIN_MIN < c.PLAN_EASY_MIN_MINUTES
     assert c.SEGMENT_WORK_REPEAT_MIN >= 1
+
+
+def test_run_streak_threshold_sane():
+    """Правило 22 (17.09.2026): порог серии беговых дней — из гайдов 47/61 («без 3 тренировок подряд»),
+    в разумных границах: не бьёт по двум дням подряд и не даёт бегать всю неделю без выходного."""
+    assert 2 <= coach_config.SAFETY_RUN_STREAK_MAX_DAYS <= coach_config.PLAN_RUN_DAYS_CAP

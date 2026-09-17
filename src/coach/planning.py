@@ -111,7 +111,7 @@ def week_targets(user_id: int, *, db: Session, today: date | None = None,
     week_start, first_offset, last_offset = plan_window(today, done["trained_today"], hour)
     if week_start != _monday_of(today):
         # Воскресенье: планируем следующую неделю — сделанного в ней ещё нет
-        done = {"km": 0.0, "runs": 0, "quality_runs": 0, "trained_today": False}
+        done = {"km": 0.0, "runs": 0, "quality_runs": 0, "trained_today": False, "dates": []}
 
     # #220: локальные полные недели (не UTC-корзины); при планировании следующей недели
     # текущая (уже завершённая к вс) — тоже «прошлая»
@@ -243,6 +243,9 @@ def week_targets(user_id: int, *, db: Session, today: date | None = None,
                          "unavailable_dates": [d.isoformat() for d in blocked_dates]},
         "done_km": done["km"], "done_runs": done["runs"],
         "done_quality": done["quality_runs"],
+        # 17.09.2026: даты пробежек недели — кэп частоты в чате/утре считает беговые дни множеством
+        # дат (факт ∪ действующий план), день с пробежкой и живой строкой не удваивается
+        "done_dates": done.get("dates", []),
         "remaining_km": round(max(0.0, target_km - done["km"]), 1),
         # #294: не больше доступных дней окна планирования
         "remaining_run_days_max": min(max(0, run_days_max - done["runs"]), len(days_allowed)),

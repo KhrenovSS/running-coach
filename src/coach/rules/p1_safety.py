@@ -33,6 +33,7 @@ from src.coach.config import (
     RECOVERY_PCT_MODERATE,
     SAFETY_MAX_DURATION_CAUTION_MIN,
     SAFETY_MAX_ZONE_DEFAULT,
+    SAFETY_RUN_STREAK_MAX_DAYS,
     TYPE_INTENSITY_ORDER,
 )
 from src.coach.contracts import AthleteState, ReasoningStep, SafetyVerdict
@@ -295,6 +296,18 @@ def evaluate_safety(state: AthleteState, *, now: datetime | None = None) -> Safe
         else:
             reasons.append(_step("отдых", f"пауза после болезни до {sig.get('illness_pause_until')} "
                                           "(гайд 50)"))
+
+    # 22. Серия беговых дней без выходного (17.09.2026, решение владельца; гайды 47/61): день после
+    # серии — только лёгкий. Сигнал сегодняшний: для будущих дней плана project_state его обнуляет —
+    # их частоту держит enforce_run_days. (Run streak without a rest day → easy-only today.)
+    run_days = sig.get("consecutive_run_days") or 0
+    if run_days >= SAFETY_RUN_STREAK_MAX_DAYS:
+        triggered.append("run_streak")
+        max_zone = min(max_zone, 2)
+        forbidden |= set(HARD_TYPES)
+        reasons.append(_step("max_zone=2, без интенсива",
+                             f"{run_days} беговых дня подряд без выходного — сегодня только лёгкий "
+                             "(гайд 47)"))
 
     allowed_types: tuple[str, ...] = ()
     if forbidden:

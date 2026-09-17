@@ -84,6 +84,7 @@ def week_done(user_id: int, *, db: Session, week_start: date, today: date) -> di
     lthr = latest_lthr(user_id, db=db)
     max_hr = getattr(user, "max_hr", None)
     km, runs, quality, trained_today = 0.0, 0, 0, False
+    dates: set[date] = set()   # 17.09.2026: даты пробежек — счёт беговых дней без двойного учёта с планом
     for s in sessions:
         if s.begin_ts is None:
             continue
@@ -91,10 +92,11 @@ def week_done(user_id: int, *, db: Session, week_start: date, today: date) -> di
         if not week_start <= d <= today:
             continue
         runs += 1
+        dates.add(d)
         km += float(s.total_distance_km or 0.0)
         if d == today:
             trained_today = True
         if is_quality_session(effective_training_type(s), s.avg_heart_rate, max_hr, lthr):
             quality += 1
     return {"km": round(km, 1), "runs": runs, "quality_runs": quality,
-            "trained_today": trained_today}
+            "trained_today": trained_today, "dates": sorted(d.isoformat() for d in dates)}

@@ -75,7 +75,7 @@ LLM только сообщает факт (`CoachTurn.concern`), код сни�
   (hrv_status, rhr_status, recovery_pct, ati_cti_ratio, acwr_ratio, consecutive_hard_days,
   pain_level, pain_days; с 01.09 также poor_interval_recovery, days_since_quality,
   quality_days_7d, post_race_days_left, days_off — сырьё правил 11–14; с 02–07.09 также
-  sleep_duration_min (правило 15), recovery_ready_at (#306 — якорь срока интенсива от начала
+  sleep_duration_min (правило 15), с 17.09 consecutive_run_days (правило 22), recovery_ready_at (#306 — якорь срока интенсива от начала
   последней тренировки), hard_share_7d, easy_too_hard_7d, quality_volume_exceeded_recent,
   downhill_load_recent, monotony_7d, trained_days_7d (правила 16–20),
   illness_block_days/illness_status/illness_pause_until (правило 21, `illness.illness_signals`);
@@ -159,12 +159,14 @@ LLM только сообщает факт (`CoachTurn.concern`), код сни�
 | 19 | `downhill_load_recent` — флаг `downhill_load_high` в разборе за `DOWNHILL_LOOKBACK_DAYS` 2 дн (#289, гайд 46 — колено) | `downhill_load`: `max_zone=3`, `earliest_next_hard` ≥ +`DOWNHILL_EXTRA_H` (24 ч) |
 | 20 | `monotony_7d > MONOTONY_HIGH` (2.0) и `trained_days_7d ≥ MONOTONY_MIN_TRAIN_DAYS` (5) — монотонность Фостера (#308, `coach/load_monotony.py`) | `monotony_high`: без `HARD_TYPES` |
 | 21 | `illness_block_days` задан и `day_offset < illness_block_days` (#322, гайд 50; `illness_status` sick → до сообщения о выздоровлении, recovered → до `illness_pause_until` = `ILLNESS_PAUSE_DAYS[kind]`; `day_offset` — день плана из `planning_safety.project_state`, вне плана 0) | `illness`: `allow_training=False` |
+| 22 | `consecutive_run_days ≥ SAFETY_RUN_STREAK_MAX_DAYS` (3) — серия беговых дней без выходного по локальным датам назад от сегодня (сегодня без пробежки — от вчера; `state._week_signals`); гайд 61 «без 3 тренировок подряд», гайд 47 «день отдыха в неделе — всегда» (#348, 17.09.2026). Сигнал сегодняшний: `project_state` обнуляет его для дней плана > 0 — частоту будущих дней держит `enforce_run_days` | `run_streak`: `max_zone=2`, без `HARD_TYPES` (тренировка разрешена); в `VOLUME_TRANSIENT_SAFETY_RULES` |
 
-Константы правил 11–21: `HRR_POOR_RECOVERY_EXTRA_H/LOOKBACK_DAYS`, `SLEEP_SHORT_MIN`,
+Константы правил 11–22: `HRR_POOR_RECOVERY_EXTRA_H/LOOKBACK_DAYS`, `SLEEP_SHORT_MIN`,
 `SLEEP_VERY_SHORT_MIN`, `PAIN_FRESH_DAYS` (свежесть боли — фикс 02.09), `HARD_SHARE_OVERLOAD=0.30`,
 `HARD_SHARE_LOOKBACK_DAYS=7`, `HARD_SHARE_MIN_MINUTES_7D=60`, `EASY_TOO_HARD_WEEK_FLAGS=2`,
 `EASY_TOO_HARD_LOOKBACK_DAYS=7`, `QUALITY_VOLUME_LOOKBACK_DAYS=3`, `QUALITY_VOLUME_EXTRA_H=48`,
 `DOWNHILL_LOOKBACK_DAYS=2`, `DOWNHILL_EXTRA_H=24`, `MONOTONY_HIGH=2.0`, `MONOTONY_MIN_TRAIN_DAYS=5`,
+`SAFETY_RUN_STREAK_MAX_DAYS=3` (правило 22),
 `ILLNESS_PAUSE_DAYS={cold:14, flu:14, angina:21, pneumonia:30, other:7}` — `coach/config.py`;
 `QUALITY_MAX_PER_WEEK`, `QUALITY_MIN_GAP_DAYS`, `POST_RACE_KM_PER_EASY_DAY`,
 `DETRAINING_MIN_DAYS_OFF` — `src/config/constants.py` (чистая математика M4).
@@ -645,9 +647,21 @@ Literal-перечень флагов assessment — `schemas.FlagValue` (append
   (`turn_context.profile`), промпта, `skills/pain.py`, вечернего вопроса (только при активной проблеме) и
   `handlers/pain.py` (`pain_location` — из активной травмы или `unspecified`); новый #328.
 
+### 17.09.2026 — частота беговых дней в чате/утре: мягкий кэп + правило 22 (решения владельца, #347/#348)
+
+- ✅ **#347 кэп частоты**: `day_caps.cap_run_days` — лишний беговой день сверх `run_days_max` (факт ∪ план, множество дат
+  `run_days_used`; `week_done`/`week_targets` отдают `done_dates`) в день не из плана недели → `easy` ≤ Z2 ≤ 30 мин без
+  структуры, заметка «⚠️ Беговые дни недели исчерпаны»; первый кэп в `finalize_with_caps`; плановые дни (`PLAN_STATUSES`)
+  не трогает, `proposed` из чата день не освобождает. Контекст: `run_days_*` + `frequency_rule`; `SAFETY_CONTRACT` —
+  абзац о частоте; `PLAN_PROMPT` — качество не (N+1)-м днём подряд.
+- ✅ **#348 правило 22** `run_streak` — таблица §4; сигнал `consecutive_run_days` (`state._week_signals`), проекция
+  обнуляется для дней плана > 0 (`project_state`), разовый сигнал (`VOLUME_TRANSIENT_SAFETY_RULES`).
+- Разбор — `TASK_2026-09-13_athlete_requests.md` §8; тесты `test_day_caps.py` (+8), `test_safety_week_rules.py` (+3),
+  `test_state.py`, `test_planning.py`, `test_coach_config.py`; всего 1096. Новый техдолг — BACKLOG #349.
+
 ### 16.09.2026 — объём недели: плоский только по стойким сигналам, мезоцикл считает недели роста (решения владельца)
 
-- ✅ `VOLUME_TRANSIENT_SAFETY_RULES` (intensity-only + `sleep_short`/`sleep_very_short`/`hard_streak`) —
+- ✅ `VOLUME_TRANSIENT_SAFETY_RULES` (intensity-only + `sleep_short`/`sleep_very_short`/`hard_streak`; с 17.09 и `run_streak`) —
   `planning_safety.volume_hold` держит объём только по стойким сигналам (13.09 одна короткая ночь заморозила неделю).
 - ✅ `week_plan.grew` в мете (`advance_mesocycle`); `week_targets` двигает счётчик мезоцикла только после недели
   роста или разгрузки — deload после трёх фактических недель роста, не по календарю. BACKLOG #345 (закрыт).

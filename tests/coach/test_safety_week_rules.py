@@ -10,6 +10,7 @@ from src.coach.config import (
     HARD_TYPES,
     SAFETY_MAX_DURATION_CAUTION_MIN,
     SAFETY_MAX_ZONE_DEFAULT,
+    SAFETY_RUN_STREAK_MAX_DAYS,
     SLEEP_SHORT_MIN,
     SLEEP_VERY_SHORT_MIN,
 )
@@ -259,3 +260,31 @@ def test_monotony_rule_20(mono, days, triggered):
     if triggered:
         assert not set(HARD_TYPES) & set(v.allowed_types)
         assert "нужен день отдыха" in " ".join(r.reason for r in v.reasons)
+
+
+# --- Правило 22: серия беговых дней без выходного (17.09.2026, гайды 47/61) ------------
+
+def test_run_streak_caps_today_to_easy_only():
+    """Серия ≥ SAFETY_RUN_STREAK_MAX_DAYS → run_streak: зона ≤ 2, интенсив запрещён, но тренировка
+    разрешена (мягко); интервалы clamp превращает в лёгкую."""
+    verdict = evaluate_safety(_state(consecutive_run_days=SAFETY_RUN_STREAK_MAX_DAYS), now=NOW)
+    assert "run_streak" in verdict.triggered and verdict.max_zone == 2
+    assert verdict.allow_training is True
+    assert not set(HARD_TYPES) & set(verdict.allowed_types)
+    p, clamped = clamp(AGGRESSIVE, verdict, _state(), now=NOW)
+    assert clamped is True and p.workout_type == "easy" and p.target["max_zone"] == 2
+
+
+def test_run_streak_below_threshold_is_silent():
+    verdict = evaluate_safety(_state(consecutive_run_days=SAFETY_RUN_STREAK_MAX_DAYS - 1), now=NOW)
+    assert "run_streak" not in verdict.triggered
+    assert verdict.max_zone == SAFETY_MAX_ZONE_DEFAULT and verdict.allowed_types == ()
+
+
+def test_run_streak_not_projected_to_future_plan_days():
+    """project_state: серия — сигнал сегодняшнего дня; для дней плана > 0 обнуляется (частоту
+    будущих дней держит enforce_run_days, а не safety)."""
+    from src.coach.planning_safety import project_state
+    state = _state(consecutive_run_days=SAFETY_RUN_STREAK_MAX_DAYS + 2)
+    assert "run_streak" in evaluate_safety(project_state(state, {}, 0), now=NOW).triggered
+    assert "run_streak" not in evaluate_safety(project_state(state, {}, 1), now=NOW).triggered

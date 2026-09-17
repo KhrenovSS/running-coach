@@ -85,10 +85,14 @@ def hard_share_by_day(zone_rows: list[tuple[datetime, dict]], *, now: datetime,
 def project_state(state: AthleteState, counts: dict[int, int], day: int,
                   hard_shares: dict[int, float | None] | None = None) -> AthleteState:
     """Снимок состояния на день `day`: прогнозный счётчик правила 17, доля Z3+ правила 16
-    (#315, окно сдвигается по дню) и сдвиг дня для правила 21 (болезнь/пауза); остальные
-    сигналы — сегодняшние, консервативно.
+    (#315, окно сдвигается по дню), сдвиг дня для правила 21 (болезнь/пауза) и обнуление серии
+    беговых дней правила 22 для будущих дней; остальные сигналы — сегодняшние, консервативно.
     (State copy with the projected rule-16/17 signals and the plan-day offset.)"""
     signals = {**(state.signals or {}), "day_offset": day}   # #322: правило 21 знает день плана
+    if day > 0:
+        # Правило 22 (17.09.2026): серия беговых дней — сигнал сегодняшнего дня; частоту будущих дней
+        # держит enforce_run_days, иначе серия закрыла бы качество на всю неделю (как 16/17 до #315)
+        signals["consecutive_run_days"] = 0
     if day in counts:
         signals["easy_too_hard_7d"] = counts[day]
     if hard_shares is not None and day in hard_shares:

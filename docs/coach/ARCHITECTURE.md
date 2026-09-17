@@ -47,6 +47,15 @@
 сумме сегментов откатить `max_duration_min` (#343). База сравнения план vs факт — исходная строка дня
 (`_plan_for_session.baseline`, флаг `plan_volume_exceeded` по максимуму отношений, #341).
 
+Частота беговых дней в чате и утре (17.09.2026, #347/#348, решения владельца): плановый отдых строкой не хранится
+(`weekly_plan._clean_days`), поэтому «сегодня по плану отдых» = отсутствие строки. `day_caps.cap_run_days` — первый кэп
+в `finalize_with_caps`: беговые дни недели исчерпаны (`run_days_used` — множество дат факта `week_targets.done_dates`
+∪ действующих беговых строк, без двойного счёта) и день не из плана (`PLAN_STATUSES`) → предложение **понижается**
+до `easy` ≤ Z2 ≤ `PLAN_EASY_MIN_MINUTES` без структуры (мягко, не отказ), карточка получает «⚠️ Беговые дни недели
+исчерпаны»; строка `proposed` из чата день не освобождает. Safety-правило 22 `run_streak` (`consecutive_run_days` из
+`state._week_signals`, порог `SAFETY_RUN_STREAK_MAX_DAYS` = 3) — Z2 без интенсива после серии дней без выходного;
+`project_state` обнуляет его для дней плана > 0 — частоту будущих дней держит `enforce_run_days`.
+
 ## Решение 2: ручной tool-loop, не SDK tool_runner
 
 `client.beta.messages.tool_runner` генерирует схему из сигнатуры и вызывает функцию сам —
@@ -219,7 +228,7 @@ coach/
 │                      #   + cap_week_volume: сумма плана ≤ target_km (лёгкие ужимаются, структурные — последними); объём плоский при закрытом интенсиве
 │                      #   только по усталости/здоровью (volume_hold, INTENSITY_ONLY_SAFETY_RULES, 12.09.2026)
 │                      #   cap_long_run — по содержимому (16.09.2026, #340): любой бег выше long_run_km_max, race не режется
-├── day_caps.py        # потолки объёма в чате/утре (16.09.2026, #338): day_targets, cap_day_volume (остаток недели −
+├── day_caps.py        # потолки объёма и частоты в чате/утре (16–17.09.2026, #338/#347): day_targets, cap_run_days, cap_day_volume (остаток недели −
 │                      #   назначенное на другие дни), finalize_with_caps (двухпроходный finalize), context_block для LLM
 ├── segment_trim.py    # урезание структурной тренировки по гайдам 44/45/46/61 (16.09.2026): trim_segments, shrink_proposal
 ├── segments.py        # enrich_and_clamp_segments: числа сегментам из зон/истории, per-segment clamp (M2.1)
@@ -255,8 +264,8 @@ coach/
 ├── weekly_plan.py     # generate_weekly_plan (вс 19:00, строки recommendations status=planned)
 ├── numeric_check.py   # #247: сверка чисел прозы LLM с карточкой (детект+лог) + v2 trim предложения с чужим числом
 ├── vision.py          # #257: SleepShot + extract_sleep (скриншот → мост /vision)
-├── rules/p1_safety.py # evaluate_safety(state) — правила 0–21 (0 — нет данных → консервативный потолок;
-│                      #   шкала Recovery Coros, флаги разбора 17–19, монотонность 20, перекос недели 16,
+├── rules/p1_safety.py # evaluate_safety(state) — правила 0–22 (0 — нет данных → консервативный потолок;
+│                      #   шкала Recovery Coros, флаги разбора 17–19, монотонность 20, перекос недели 16, серия беговых дней 22,
 │                      #   болезнь 21); safety.effective_workout_type —
 │                      #   интенсивность по сегментам, не по ярлыку (04.09)
 ├── skills/            # base(SkillFn, SKILL_KEYS=6) + fatigue, recovery, load,

@@ -12,7 +12,7 @@ from src.coach.contracts import (
     WorkoutProposal,
     WorkoutSegment,
 )
-from src.coach.day_caps import cap_day_volume, context_block, finalize_with_caps
+from src.coach.day_caps import cap_day_volume, cap_run_days, context_block, finalize_with_caps, run_days_used
 from src.coach.llm.client import LLMResponse
 from src.coach.segment_trim import shrink_proposal, total_minutes, trim_segments
 from src.models import Recommendation
@@ -132,6 +132,10 @@ def test_context_block_compact_and_unallocated():
     assert block["remaining_km"] == 10.0 and block["long_run_km_max"] == 8.4
     assert block["planned_km_remaining"] == 7.0 and block["unallocated_km"] == 3.5   # 10 × 1.05 − 7
     assert "quality_ladder" not in block and "rule" in block
+    assert "frequency_rule" not in block                       # без run_days_max — молчим
+    # 17.09.2026: частота — модель видит лимит дней и сколько уже занято
+    block = context_block(_targets(date.today(), run_days_max=4, rest_days_min=3, done_runs=2, run_days_used=3))
+    assert block["run_days_max"] == 4 and block["run_days_used"] == 3 and "frequency_rule" in block
 
 
 # --- E2E: инцидент 13.09.2026 в чате ---
@@ -143,11 +147,12 @@ def _fake_predict(p, state, *, db):
     return {"pace_min_km": PACE, "distance_km": round(d / PACE, 1)}
 
 
-def _plan_row(db, user_id, today, *, workout_type="long", duration=50.0, predicted_km=7.1):
+def _plan_row(db, user_id, today, *, workout_type="long", duration=50.0, predicted_km=7.1,
+              status="planned"):
     rec = Recommendation(user_id=user_id, for_date=today, workout_type=workout_type,
                          target_json={"max_zone": 2}, volume_json={"duration_min": duration},
                          predicted_json={"pace_min_km": PACE, "distance_km": predicted_km},
-                         status="planned", source="llm")
+                         status=status, source="llm")
     db.add(rec)
     db.commit()
     return rec
@@ -325,3 +330,110 @@ def test_finalize_with_caps_without_targets_is_plain_finalize(db_session):
                                   state, db=db_session, now=None or __import__("datetime").datetime.now(
                                       __import__("datetime").timezone.utc), source="llm", targets=None)
     assert notes == [] and p.volume["duration_min"] in (200.0, None) or p.workout_type == "rest"
+
+
+# --- Кэп частоты: лишний беговой день сверх run_days_max (17.09.2026, решение владельца — мягко) ---
+
+THU = date(2026, 9, 17)   # чт: фиксированная дата — тесты чистых функций датонезависимы
+
+
+def test_run_days_used_counts_each_date_once():
+    """Факт ∪ план множеством дат: день с пробежкой и живой строкой не удваивается; целевой день вне счёта."""
+    t = _targets(THU, done_dates=["2026-09-14", "2026-09-16"])            # пн, ср — факт
+    planned = {date(2026, 9, 16), date(2026, 9, 19)}                        # ср (уже бегал) и сб — план
+    assert run_days_used(t, planned) == 3                                   # пн, ср, сб
+    assert run_days_used(t, planned, when=date(2026, 9, 19)) == 2           # сб — целевой день
+    assert run_days_used(_targets(THU), set()) == 0
+
+
+def test_cap_run_days_downgrades_extra_day_to_short_easy():
+    """Дни исчерпаны, день не из плана → long 60 со структурой становится easy 30 без сегментов и темпа."""
+    p = WorkoutProposal(workout_type="long", target_zone=3, duration_min=60, distance_km=8.6,
+                        target_pace_min_km=6.5, segments=_strides_long())
+    capped, note = cap_run_days(p, _prescription(60, when=THU), _targets(THU, run_days_max=4),
+                                run_days_used=4, plan_day=False)
+    assert capped.workout_type == "easy" and capped.target_zone == 2 and capped.duration_min == 30
+    assert capped.segments == [] and capped.target_pace_min_km is None and capped.distance_km == 4.3
+    assert capped.code_trimmed is True and any("лишний беговой день" in r for r in capped.rationale)
+    assert "⚠️ Беговые дни недели исчерпаны (4 из 4)" in note and "long 60 мин" in note
+
+
+def test_cap_run_days_silent_when_days_remain_plan_day_or_outside_week():
+    p = WorkoutProposal(workout_type="easy", target_zone=2, duration_min=45)
+    t = _targets(THU, run_days_max=4)
+    assert cap_run_days(p, _prescription(45, when=THU), t, run_days_used=3, plan_day=False) == (None, None)
+    assert cap_run_days(p, _prescription(45, when=THU), t, run_days_used=4, plan_day=True) == (None, None)
+    assert cap_run_days(p, _prescription(45, when=THU + timedelta(days=10)), t,
+                        run_days_used=4, plan_day=False) == (None, None)
+    assert cap_run_days(p, _prescription(45, when=THU), _targets(THU),          # без run_days_max
+                        run_days_used=9, plan_day=False) == (None, None)
+
+
+def test_cap_run_days_already_short_easy_gets_only_note():
+    p = WorkoutProposal(workout_type="easy", target_zone=2, duration_min=25)
+    capped, note = cap_run_days(p, _prescription(25, when=THU, workout_type="easy"),
+                                _targets(THU, run_days_max=4), run_days_used=4, plan_day=False)
+    assert capped is None and "исчерпаны (4 из 4)" in note
+
+
+def _occupy_week(db, user_id, today, n):
+    """Занять n беговых дней недели кроме сегодня: прошедшие — фактом (done_dates), будущие — строками
+    плана. Датонезависимо: в любой день недели других дней шесть."""
+    monday = today - timedelta(days=today.weekday())
+    others = [monday + timedelta(days=i) for i in range(7) if monday + timedelta(days=i) != today][:n]
+    done = []
+    for d in others:
+        if d < today:
+            done.append(d.isoformat())
+        else:
+            _plan_row(db, user_id, d, workout_type="easy", duration=40.0, predicted_km=5.7)
+    return done
+
+
+def _freq_targets(today, done, run_days_max):
+    return _targets(today, run_days_max=run_days_max, rest_days_min=7 - run_days_max, done_dates=done,
+                    target_km=40.0, remaining_km=30.0)
+
+
+def test_chat_run_on_rest_day_downgraded_when_week_days_exhausted(capped_world, db_session, monkeypatch):
+    """«Хочу сегодня побегать» в день без строки (плановый отдых) при исчерпанных беговых днях →
+    карточка лёгкие 30 мин, строка «⚠️ Беговые дни недели исчерпаны», строка proposed с code_trimmed."""
+    user, today = capped_world
+    done = _occupy_week(db_session, user.id, today, 3)
+    monkeypatch.setattr(planning, "week_targets", lambda *a, **k: _freq_targets(today, done, 3))
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=_turn(45, workout_type="easy"))])
+    reply = orchestrator.handle_chat(user.id, "хочу сегодня побегать", db=db_session, llm=llm)
+    assert "⚠️ Беговые дни недели исчерпаны (3 из 3)" in reply.text and "easy 45 мин" in reply.text
+    row = (db_session.query(Recommendation).filter_by(user_id=user.id, for_date=today)
+           .order_by(Recommendation.id.desc()).first())
+    assert row.workout_type == "easy" and row.volume_json["duration_min"] == 30.0
+    assert row.status == "proposed" and row.proposal_json["code_trimmed"] is True
+    # повторная просьба «а можно 40?» — строка proposed день не освобождает, кэп держится
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=_turn(40, workout_type="easy"))])
+    reply = orchestrator.handle_chat(user.id, "а можно 40 минут?", db=db_session, llm=llm)
+    assert "Беговые дни недели исчерпаны" in reply.text
+
+
+def test_chat_run_on_free_day_passes_without_note(capped_world, db_session, monkeypatch):
+    """Дни не исчерпаны → просьба проходит без заметки и без урезания."""
+    user, today = capped_world
+    done = _occupy_week(db_session, user.id, today, 3)
+    monkeypatch.setattr(planning, "week_targets", lambda *a, **k: _freq_targets(today, done, 4))
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=_turn(45, workout_type="easy"))])
+    reply = orchestrator.handle_chat(user.id, "хочу сегодня побегать", db=db_session, llm=llm)
+    assert "Беговые дни" not in reply.text
+    row = (db_session.query(Recommendation).filter_by(user_id=user.id, for_date=today)
+           .order_by(Recommendation.id.desc()).first())
+    assert row.volume_json["duration_min"] == 45.0 and not row.proposal_json.get("code_trimmed")
+
+
+def test_chat_plan_day_exempt_from_run_days_cap(capped_world, db_session, monkeypatch):
+    """Плановый день (planned) при исчерпанных беговых днях кэп частоты не трогает — каркас недели
+    защищает enforce_run_days, а не safety ad-hoc пути."""
+    user, today = capped_world
+    done = _occupy_week(db_session, user.id, today, 3)
+    _plan_row(db_session, user.id, today)                                    # long 50, planned
+    monkeypatch.setattr(planning, "week_targets", lambda *a, **k: _freq_targets(today, done, 3))
+    llm = ScriptedLLM([LLMResponse(stop_reason="end_turn", parsed=_turn(50))])
+    reply = orchestrator.handle_chat(user.id, "напомни план", db=db_session, llm=llm)
+    assert "Беговые дни" not in reply.text and "без изменений" in reply.text

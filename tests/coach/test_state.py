@@ -101,7 +101,7 @@ def test_week_signals_empty_user_defaults(db_session):
     user = _unique_user(db_session)
     sig = _week_signals(user.id, user_now(user).date(), user, db=db_session)
     assert sig == {"days_since_quality": None, "quality_days_7d": 0,
-                   "post_race_days_left": 0, "days_off": None}
+                   "post_race_days_left": 0, "days_off": None, "consecutive_run_days": 0}
 
 
 def test_assess_state_signals_include_week_signals(athlete_with_history, db_session):
@@ -233,3 +233,30 @@ def test_state_signals_carry_p0_closures(athlete_with_history, db_session):
     assert sig["quality_volume_exceeded_recent"] is False
     assert sig["downhill_load_recent"] is False
     assert "monotony_7d" in sig and "trained_days_7d" in sig
+
+
+def test_week_signals_consecutive_run_days(db_session):
+    """Правило 22: серия беговых дней по локальным датам назад от сегодня; сегодня без пробежки —
+    от вчера; разрыв в один день серию обрывает."""
+    from datetime import datetime, time, timezone
+
+    from src.utils.timeutils import user_now
+    from tests.coach.conftest import _unique_user
+    from tests.helpers import build_training_session
+    user = _unique_user(db_session)
+    today = user_now(user).date()
+
+    def noon(d):
+        return datetime.combine(d, time(12), tzinfo=timezone.utc)
+    for back in (1, 2, 3, 5):                       # вчера, позавчера, −3; −4 пропущен; −5 не в серии
+        build_training_session(db_session, user.id, training_type="easy", avg_heart_rate=130,
+                               begin_ts=noon(today - timedelta(days=back)))
+    sig = _week_signals(user.id, today, user, db=db_session)
+    assert sig["consecutive_run_days"] == 3
+    # пробежка сегодня продолжает серию
+    build_training_session(db_session, user.id, training_type="easy", avg_heart_rate=130,
+                           begin_ts=noon(today))
+    assert _week_signals(user.id, today, user, db=db_session)["consecutive_run_days"] == 4
+    # пустой пользователь — 0 (дефолт)
+    user2 = _unique_user(db_session)
+    assert _week_signals(user2.id, today, user2, db=db_session)["consecutive_run_days"] == 0

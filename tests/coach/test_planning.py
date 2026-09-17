@@ -258,6 +258,8 @@ def test_week_done_counts_by_local_date_and_quality(db_session):
     assert done["runs"] == 2 and abs(done["km"] - 11.4) < 0.05
     assert done["quality_runs"] == 1                       # interval — всегда качество
     assert done["trained_today"] is True
+    # 17.09.2026: даты пробежек недели (для счёта беговых дней множеством в day_caps)
+    assert done["dates"] == sorted({monday.isoformat(), today.isoformat()})
 
 
 def test_week_targets_midweek_exposes_remaining(db_session):

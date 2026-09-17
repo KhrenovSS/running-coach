@@ -7,11 +7,15 @@
 # кэп → повторный finalize урезанного): Prescription по-прежнему рождается только в clamp.
 # Требование владельца: уменьшить/перенести/отменить подопечный может, «предложить больше» —
 # оценивается кодом, для своих предложений коуча и просьб подопечного одинаково.
-# (Deterministic day-level volume caps for chat/morning; two-pass finalize, pure cap functions.)
+# 17.09.2026 — та же симметрия для ЧАСТОТЫ: лишний беговой день сверх `run_days_max` (плановый отдых
+# строкой не хранится — `weekly_plan._clean_days`) не отклоняется, а понижается до лёгкого
+# ≤ PLAN_EASY_MIN_MINUTES с пометкой (`cap_run_days`, мягкий кэп — решение владельца).
+# (Deterministic day-level volume and frequency caps for chat/morning; two-pass finalize.)
 
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -25,6 +29,7 @@ from src.coach.config import (
     WEEK_VOLUME_TOLERANCE_PCT,
 )
 from src.coach.contracts import AthleteState, Prescription, SafetyVerdict, WorkoutProposal
+from src.coach.planning_rows import PLAN_STATUSES
 from src.coach.planning_safety import apply_safety_to_targets, cap_long_run
 from src.coach.prescriber import finalize
 from src.coach.segment_trim import shrink_proposal
@@ -40,7 +45,9 @@ logger = get_logger("coach.day_caps")
 _CONTEXT_KEYS = ("plan_scope", "week_start", "prev_week_km", "target_km", "done_km", "remaining_km",
                  "long_run_km_max", "long_run_max_pct", "long_run_min_hint", "long_run_min_max",
                  "long_run_hold", "hard_days_max", "volume_held_by_safety", "volume_growth_kept",
-                 "detraining_return")
+                 "detraining_return",
+                 # 17.09.2026: частота — беговых дней в неделе не больше run_days_max
+                 "run_days_max", "rest_days_min", "done_runs", "run_days_used")
 
 
 def _week_bounds(targets: dict[str, Any]) -> tuple[date, date] | None:
@@ -51,12 +58,11 @@ def _week_bounds(targets: dict[str, Any]) -> tuple[date, date] | None:
     return start, start + timedelta(days=6)
 
 
-def planned_km_other_days(user_id: int, *, db: Session, week_start: date, today: date,
-                          exclude_dates: tuple[date, ...] = ()) -> float:
-    """Километры действующих назначений недели на ДРУГИЕ дни (≥ сегодня, ≠ exclude_dates):
-    последняя не-superseded строка на дату, отдых и отменённые подопечным дни — 0; оценка км —
-    `predicted_json.distance_km` (ориентир карточки), иначе `volume_json.distance_km`.
-    (Sum of planned km on other days of the week; deterministic.)"""
+def _other_day_rows(user_id: int, *, db: Session, week_start: date, today: date,
+                    exclude_dates: tuple[date, ...] = ()) -> list[Recommendation]:
+    """Действующие БЕГОВЫЕ строки недели на ДРУГИЕ дни (≥ сегодня, ≠ exclude_dates): последняя
+    не-superseded строка на дату; отдых и отменённые подопечным дни исключены. Один запрос на ход.
+    (Latest active run rows of the week on other days.)"""
     lo = max(today, week_start)
     rows = db.query(Recommendation).filter(
         Recommendation.user_id == user_id,
@@ -65,14 +71,38 @@ def planned_km_other_days(user_id: int, *, db: Session, week_start: date, today:
         Recommendation.status != RECOMMENDATION_STATUS_SUPERSEDED,
     ).order_by(Recommendation.id.asc()).all()
     latest = {r.for_date: r for r in rows}
+    return [r for d, r in latest.items()
+            if d not in exclude_dates and r.workout_type != "rest" and not is_athlete_unavailable(r)]
+
+
+def _rows_km(rows: list[Recommendation]) -> float:
+    """Километры строк: `predicted_json.distance_km` (ориентир карточки), иначе `volume_json`."""
     total = 0.0
-    for d, r in latest.items():
-        if d in exclude_dates or r.workout_type == "rest" or is_athlete_unavailable(r):
-            continue
+    for r in rows:
         km = ((r.predicted_json or {}).get("distance_km")
               or (r.volume_json or {}).get("distance_km") or 0.0)
         total += float(km)
     return round(total, 1)
+
+
+def planned_km_other_days(user_id: int, *, db: Session, week_start: date, today: date,
+                          exclude_dates: tuple[date, ...] = ()) -> float:
+    """Километры действующих назначений недели на ДРУГИЕ дни (см. `_other_day_rows`).
+    (Sum of planned km on other days of the week; deterministic.)"""
+    return _rows_km(_other_day_rows(user_id, db=db, week_start=week_start, today=today,
+                                    exclude_dates=exclude_dates))
+
+
+def run_days_used(targets: dict[str, Any], planned_dates: set[date], *,
+                  when: date | None = None) -> int:
+    """Беговые дни недели, уже занятые фактом или действующим планом: множество дат (день с
+    пробежкой и живой строкой не удваивается), без целевого дня `when`. Чистая функция.
+    (Run days already taken this week: session dates ∪ planned dates, minus the target day.)"""
+    done = {date.fromisoformat(d) for d in (targets.get("done_dates") or [])}
+    taken = done | set(planned_dates)
+    if when is not None:
+        taken.discard(when)
+    return len(taken)
 
 
 def day_targets(user_id: int, verdict: SafetyVerdict, *, db: Session, now: datetime) -> dict:
@@ -83,8 +113,10 @@ def day_targets(user_id: int, verdict: SafetyVerdict, *, db: Session, now: datet
     targets = apply_safety_to_targets(targets, verdict)
     bounds = _week_bounds(targets)
     if bounds is not None:
-        targets["planned_km_remaining"] = planned_km_other_days(
-            user_id, db=db, week_start=bounds[0], today=now.date())
+        rows = _other_day_rows(user_id, db=db, week_start=bounds[0], today=now.date())
+        targets["planned_km_remaining"] = _rows_km(rows)
+        # 17.09.2026: сколько беговых дней недели уже занято (факт ∪ план) — для контекста модели
+        targets["run_days_used"] = run_days_used(targets, {r.for_date for r in rows})
     return targets
 
 
@@ -101,7 +133,51 @@ def context_block(targets: dict[str, Any]) -> dict:
                                           - (planned or 0.0)), 1)
         out["rule"] = ("одна пробежка не длиннее long_run_km_max; день можно увеличить не больше, "
                        "чем на unallocated_km сверх его плана — иначе код урежет")
+    if targets.get("run_days_max") is not None:
+        out["frequency_rule"] = ("беговых дней в неделе не больше run_days_max (run_days_used уже занято "
+                                 "фактом и планом), день полного отдыха обязателен; лишний беговой день "
+                                 "код понизит до лёгких 30 мин")
     return out
+
+
+def cap_run_days(proposal: WorkoutProposal, prescription: Prescription, targets: dict[str, Any], *,
+                 run_days_used: int, plan_day: bool) -> tuple[WorkoutProposal | None, str | None]:
+    """Мягкий кэп ЧАСТОТЫ — чистая функция (решение владельца 17.09.2026).
+
+    Беговые дни недели исчерпаны (`run_days_used >= run_days_max`) и день не из плана недели
+    (`plan_day=False`: плановые дни — каркас, их защищает enforce_run_days; ad-hoc строка `proposed`
+    день не освобождает) → предложение не отклоняется, а понижается до лёгкого: `easy`, зона ≤ 2,
+    без темпа и структуры, не дольше PLAN_EASY_MIN_MINUTES. Уже такое → только заметка.
+    Дата вне недели targets → не применяем. Возврат (копия | None, заметка | None).
+    (Soft frequency cap: extra run day beyond run_days_max → short easy run, never a hard one.)"""
+    if proposal.workout_type == "rest" or plan_day:
+        return None, None
+    bounds = _week_bounds(targets)
+    if bounds is None or not (bounds[0] <= prescription.when <= bounds[1]):
+        return None, None
+    cap = targets.get("run_days_max")
+    if not cap or run_days_used < cap:
+        return None, None
+    reason = f"беговых дней на неделе уже {run_days_used} из {cap}, день полного отдыха обязателен"
+    duration = float(proposal.duration_min) if proposal.duration_min else None
+    new_min = min(duration, float(PLAN_EASY_MIN_MINUTES)) if duration else float(PLAN_EASY_MIN_MINUTES)
+    already_easy = (proposal.workout_type in ("easy", "recovery") and proposal.target_zone <= 2
+                    and not proposal.segments and proposal.target_pace_min_km is None
+                    and duration is not None and duration <= PLAN_EASY_MIN_MINUTES)
+    if already_easy:
+        return None, f"⚠️ Беговые дни недели исчерпаны ({run_days_used} из {cap}): лишний день — только лёгкий и короткий."
+    scale = (new_min / duration) if duration else None
+    distance = (round(proposal.distance_km * scale, 1)
+                if proposal.distance_km and scale is not None else None)
+    trail = f"урезано кодом: лишний беговой день → лёгкие {new_min:.0f} мин ({reason})"
+    capped = replace(proposal, workout_type="easy", target_zone=min(proposal.target_zone, 2),
+                     duration_min=int(new_min), distance_km=distance, target_pace_min_km=None,
+                     segments=[], structure=None,
+                     rationale=[*proposal.rationale, trail], code_trimmed=True)
+    was = f"{proposal.workout_type} {duration:.0f} мин" if duration else proposal.workout_type
+    note = (f"⚠️ Беговые дни недели исчерпаны ({run_days_used} из {cap}) — вместо {was} оставил "
+            f"лёгкие {new_min:.0f} мин; день полного отдыха обязателен.")
+    return capped, note
 
 
 def cap_day_volume(proposal: WorkoutProposal, prescription: Prescription,
@@ -152,7 +228,7 @@ def cap_day_volume(proposal: WorkoutProposal, prescription: Prescription,
 def finalize_with_caps(proposal: WorkoutProposal | None, state: AthleteState, *, db: Session,
                        now: datetime, source: str, targets: dict[str, Any] | None,
                        exclude_dates: tuple[date, ...] = ()) -> tuple[Prescription, list[str]]:
-    """finalize → потолок одной пробежки → потолок объёма дня → повторный finalize урезанного.
+    """finalize → кэп частоты → потолок одной пробежки → потолок объёма дня → повторный finalize.
 
     targets=None → обычный finalize (без потолков; тесты/деградация). Порог «длительная короче
     N мин = лёгкая» — общий с /plan (`min(60, long_run_min_hint)`, #342). Возврат — (Prescription,
@@ -166,6 +242,25 @@ def finalize_with_caps(proposal: WorkoutProposal | None, state: AthleteState, *,
     notes: list[str] = []
     if proposal is None or targets is None or prescription.workout_type == "rest":
         return prescription, notes
+    bounds = _week_bounds(targets)
+    other_rows: list[Recommendation] = []
+    if bounds is not None:
+        other_rows = _other_day_rows(state.user_id, db=db, week_start=bounds[0], today=now.date(),
+                                     exclude_dates=(prescription.when, *exclude_dates))
+    # 17.09.2026: частота — день из плана недели (planned/confirmed/adjusted) кэп не трогает
+    row = planning.latest_rows_for_dates(state.user_id, db=db, dates=[prescription.when]).get(prescription.when)
+    plan_day = (row is not None and row.status in PLAN_STATUSES and row.workout_type != "rest"
+                and not is_athlete_unavailable(row))
+    used = run_days_used(targets, {r.for_date for r in other_rows}, when=prescription.when)
+    capped, note = cap_run_days(proposal, prescription, targets, run_days_used=used, plan_day=plan_day)
+    if capped is not None:
+        logger.info("Day cap (run days) user=%s: %s %s→easy %s min (used %s)", state.user_id,
+                    proposal.workout_type, proposal.duration_min, capped.duration_min, used)
+        proposal = capped
+        prescription = finalize(proposal, state, db=db, persist=False, source=source, now=now,
+                                long_min_minutes=long_min)
+    if note:
+        notes.append(note)
     capped, note = cap_long_run(proposal, prescription, targets)
     if capped is not None:
         logger.info("Day cap (single run) user=%s: %s→%s min", state.user_id,
@@ -174,11 +269,7 @@ def finalize_with_caps(proposal: WorkoutProposal | None, state: AthleteState, *,
         prescription = finalize(proposal, state, db=db, persist=False, source=source, now=now,
                                 long_min_minutes=long_min)
         notes.append(note)
-    bounds = _week_bounds(targets)
-    other = 0.0
-    if bounds is not None:
-        other = planned_km_other_days(state.user_id, db=db, week_start=bounds[0], today=now.date(),
-                                      exclude_dates=(prescription.when, *exclude_dates))
+    other = _rows_km(other_rows)
     capped, note = cap_day_volume(proposal, prescription, targets, other_planned_km=other)
     if capped is not None:
         logger.info("Day cap (week volume) user=%s: %s→%s min (other planned %.1f km)",

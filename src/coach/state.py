@@ -163,7 +163,7 @@ def _week_signals(user_id: int, today, user, *, db: Session) -> dict:
 
     recent = CoachRepository.last_sessions(user_id, n=15, db=db)
     out = {"days_since_quality": None, "quality_days_7d": 0,
-           "post_race_days_left": 0, "days_off": None}
+           "post_race_days_left": 0, "days_off": None, "consecutive_run_days": 0}
     if not recent:
         return out
     dated = [(session_local_dt(s.begin_ts, s, user).date(), s)
@@ -171,6 +171,15 @@ def _week_signals(user_id: int, today, user, *, db: Session) -> dict:
     if not dated:
         return out
     out["days_off"] = (today - max(d for d, _ in dated)).days
+    # Правило 22 (17.09.2026): серия беговых дней без выходного — по локальным датам, назад от
+    # сегодня (сегодня без пробежки — от вчера): «бегал 3 дня подряд, сегодня 4-й».
+    # (Consecutive run days ending today or yesterday, local dates.)
+    from datetime import timedelta
+    run_dates = {d for d, _ in dated}
+    day = today if today in run_dates else today - timedelta(days=1)
+    while day in run_dates:
+        out["consecutive_run_days"] += 1
+        day -= timedelta(days=1)
     from src.analysis.week_structure import is_quality_session
     from src.services.repositories import latest_lthr
     lthr = latest_lthr(user_id, db=db)
