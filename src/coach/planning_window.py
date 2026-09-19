@@ -24,17 +24,34 @@ def monday_of(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
-def plan_window(today: date, trained_today: bool,
-                hour: int | None = None) -> tuple[date, int, int]:
+def week_bounds(targets: dict) -> tuple[date, date] | None:
+    """(понедельник, воскресенье) недели, которую описывают targets; None — ключа нет.
+
+    Кэпы дня применяются, только если дата назначения попадает в эти границы —
+    иначе день мерялся бы числами ЧУЖОЙ недели (инцидент 19.09.2026: вс-вердикт резал
+    сегодняшнюю длительную потолком следующей недели). (Week the targets describe.)
+    """
+    ws = targets.get("week_start")
+    if not ws:
+        return None
+    start = date.fromisoformat(ws)
+    return start, start + timedelta(days=6)
+
+
+def plan_window(today: date, trained_today: bool, hour: int | None = None,
+                *, current_week: bool = False) -> tuple[date, int, int]:
     """(week_start, first_offset, last_offset) — какие for_days_ahead планировать.
 
     Воскресенье → следующая неделя целиком (1..7). Иначе — остаток текущей:
     с сегодня (0), если сегодня ещё не бегали и локальный час < PLAN_TODAY_CUTOFF_HOUR
     (#319: вечером день уходит — не назначать на него), иначе с завтра (1), до воскресенья.
     hour=None — час неизвестен (тесты/DI) → отсечка не применяется.
+    current_week=True (19.09.2026) — воскресный скачок на следующую неделю НЕ делаем: ход
+    чата/утра решает про СЕГОДНЯ, и мерить его числами следующей недели нельзя. Флаг ставит
+    только ad-hoc путь (`day_caps.day_targets`); `/plan` и воскресный джоб зовут без него.
     (Sunday → next full week; otherwise the rest of this week; late evening skips day 0.)
     """
-    if today.weekday() == 6:
+    if today.weekday() == 6 and not current_week:
         return today + timedelta(days=1), 1, 7
     last = 6 - today.weekday()
     today_gone = hour is not None and hour >= PLAN_TODAY_CUTOFF_HOUR

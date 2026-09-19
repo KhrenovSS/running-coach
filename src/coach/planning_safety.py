@@ -28,6 +28,7 @@ from src.coach.config import (
     long_run_max_pct,
 )
 from src.coach.contracts import AthleteState, Prescription, SafetyVerdict, WorkoutProposal
+from src.coach.planning_window import week_bounds
 from src.coach.rules.p1_safety import evaluate_safety
 
 
@@ -221,6 +222,11 @@ def cap_long_run(proposal: WorkoutProposal, prescription: Prescription,
     from src.coach.segment_trim import shrink_proposal
 
     if proposal.workout_type in _UNCAPPED_TYPES or (not proposal.duration_min and not proposal.distance_km):
+        return None, None
+    # Дата вне недели targets → кэп не применяем: потолок чужой недели резал бы день по
+    # чужому объёму (инцидент 19.09.2026, вс: 75 → 46 мин). Тот же гвард, что у cap_day_volume.
+    bounds = week_bounds(targets)
+    if bounds is not None and not (bounds[0] <= prescription.when <= bounds[1]):
         return None, None
     cap_km = targets.get("long_run_km_max")
     cap_min = targets.get("long_run_min_max")

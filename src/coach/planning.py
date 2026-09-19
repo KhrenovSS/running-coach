@@ -98,20 +98,22 @@ def _days_off(user_id: int, *, db: Session, today: date) -> int | None:
 
 
 def week_targets(user_id: int, *, db: Session, today: date | None = None,
-                 now: datetime | None = None) -> dict:
+                 now: datetime | None = None, current_week: bool = False) -> dict:
     """Числа планируемой недели — LLM получает их как факты.
 
     Вс вечером → следующая неделя целиком (plan_scope="week"); /plan среди недели →
     ОСТАТОК текущей (plan_scope="rest_of_week", #293): полные недельные числа плюс блок
     remaining_* с вычетом уже сделанного и окно days_ahead_allowed. today — DI для тестов;
     now — локальное время подопечного (#319: после PLAN_TODAY_CUTOFF_HOUR день 0 не планируем;
-    без now отсечка не применяется).
+    без now отсечка не применяется). current_week=True (19.09.2026) — не прыгать в вс на следующую
+    неделю: ad-hoc путь (`day_caps.day_targets`) меряет СЕГОДНЯШНИЙ день числами ЕГО недели.
     """
     user = db.query(User).filter(User.id == user_id).first()
     today = today or (now or user_now(user)).date()
     done = week_done(user_id, db=db, week_start=_monday_of(today), today=today)
     hour = now.hour if now is not None and now.date() == today else None
-    week_start, first_offset, last_offset = plan_window(today, done["trained_today"], hour)
+    week_start, first_offset, last_offset = plan_window(today, done["trained_today"], hour,
+                                                        current_week=current_week)
     if week_start != _monday_of(today):
         # Воскресенье: планируем следующую неделю — сделанного в ней ещё нет
         done = {"km": 0.0, "runs": 0, "quality_runs": 0, "trained_today": False, "dates": []}

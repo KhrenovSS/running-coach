@@ -32,6 +32,7 @@ from src.coach.config import (
 )
 from src.coach.contracts import AthleteState, Prescription, SafetyVerdict, WorkoutProposal
 from src.coach.planning_rows import PLAN_STATUSES
+from src.coach.planning_window import week_bounds
 from src.coach.planning_safety import (
     _UNCAPPED_TYPES,
     apply_safety_to_targets,
@@ -62,11 +63,7 @@ _CONTEXT_KEYS = ("plan_scope", "week_start", "prev_week_km", "target_km", "done_
 
 
 def _week_bounds(targets: dict[str, Any]) -> tuple[date, date] | None:
-    ws = targets.get("week_start")
-    if not ws:
-        return None
-    start = date.fromisoformat(ws)
-    return start, start + timedelta(days=6)
+    return week_bounds(targets)     # общий helper: тем же пользуется cap_long_run
 
 
 def _other_day_rows(user_id: int, *, db: Session, week_start: date, today: date,
@@ -120,7 +117,10 @@ def day_targets(user_id: int, verdict: SafetyVerdict, *, db: Session, now: datet
     """Числа недели для одного хода: `week_targets` + согласование с вердиктом safety
     (`apply_safety_to_targets`) + `planned_km_remaining` (уже назначено на оставшиеся дни, включая
     сегодня). Один вызов на ход. (Week numbers for a chat/morning turn.)"""
-    targets = planning.week_targets(user_id, db=db, now=now)
+    # 19.09.2026: ТЕКУЩАЯ неделя, даже в воскресенье — ход решает про сегодня, а `plan_window`
+    # в вс смотрит на следующую неделю (это нужно только `/plan`). Инцидент: вс-вердикт резал
+    # длительную 75 → 46 мин потолком следующей недели. (Caps measure the day's own week.)
+    targets = planning.week_targets(user_id, db=db, now=now, current_week=True)
     targets = apply_safety_to_targets(targets, verdict)
     # 17.09.2026 (решение владельца): допуск объёма дня — по состоянию. Стойкие сигналы усталости/здоровья
     # (HRV, recovery %, ACWR/ATI, боль, болезнь, detraining, монотонность, нет данных) → строго 5 %; чистый
