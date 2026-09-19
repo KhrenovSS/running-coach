@@ -47,6 +47,18 @@ def save_sleep_shot(user_id: int, shot: SleepShot, *, db: Session) -> DailyMetri
     return dm
 
 
+def has_sleep_for_date(user_id: int, day: _date, *, db: Session) -> bool:
+    """Есть ли сон ИЗ СКРИНШОТА за дату (условие строже, чем «любые данные сна»):
+    HRV/recovery из Coros-синка сюда не считаются. Общий источник правды для
+    напоминания 09:00 и утреннего вердикта. (Is there a sleep screenshot for the day?)
+    """
+    return db.query(DailyMetrics).filter(
+        DailyMetrics.user_id == user_id,
+        DailyMetrics.date == day,
+        DailyMetrics.sleep_source == SLEEP_SOURCE,
+    ).first() is not None
+
+
 def _resolve_date(shot_date: str | None, user: User | None) -> _date:
     if shot_date:
         try:

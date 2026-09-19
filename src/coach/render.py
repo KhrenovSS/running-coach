@@ -283,6 +283,22 @@ def render_review(sr: SkillResult) -> str:
     return "\n".join(lines)
 
 
+SLEEP_MISSING_NOTE = ("🌙 Данных сна за сегодня нет. Если спал плохо — пришли скриншот "
+                      "экрана сна, пересчитаю тренировку.")
+
+
+def render_sleep_missing_note(*, has_sleep: bool, hard_today: bool) -> str | None:
+    """Пометка к утреннему вердикту: сна нет, а день качественный (19.09.2026).
+
+    Решение владельца: в лёгкий день/отдых сон влияет слабо — пометки нет; перед
+    tempo/interval/стартом сон решает, делать ли тренировку вообще. Чисел в строке нет
+    (numeric_check не касается). (Morning note: no sleep data before a quality day.)
+    """
+    if has_sleep or not hard_today:
+        return None
+    return SLEEP_MISSING_NOTE
+
+
 def render_gps_warning(gps_quality: dict | None) -> str | None:
     """Предупреждение о недостоверном GPS: числа рендерит детерминированный код,
     не проза LLM (инвариант DEV_PLAN §1). None — GPS в порядке.

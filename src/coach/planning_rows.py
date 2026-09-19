@@ -45,6 +45,16 @@ def hard_day_planned(user_id: int, *, db: Session, today: date) -> bool:
     return any(r.workout_type in HARD_TYPES for r in latest.values())
 
 
+def hard_day_on(user_id: int, *, db: Session, day: date) -> bool:
+    """Качественный ли день (tempo/interval/race) в действующем плане на КОНКРЕТНУЮ дату.
+
+    Отличие от hard_day_planned: та отвечает «есть ли качество до конца недели». Здесь —
+    ровно сегодня: от этого зависит пометка «данных сна нет» (19.09.2026).
+    (Is the given day a quality day in the active plan?)"""
+    row = latest_rows_for_dates(user_id, db=db, dates=[day]).get(day)
+    return row is not None and row.workout_type in HARD_TYPES
+
+
 def supersede_rows_for_dates(user_id: int, *, db: Session, dates: list[date]) -> int:
     """Погасить назначения на КОНКРЕТНЫЕ даты (подопечный не сможет бегать, 03.09.2026).
 
@@ -213,7 +223,10 @@ def confirm_or_adjust_morning(proposal: WorkoutProposal | None, user_id: int,
         chosen, state, db=db, now=now, targets=targets,
         source="llm" if proposal is not None else "plan")
     if unchanged_today(prescription, user_id, db=db):
-        if plan_row.status != "confirmed":
+        # Только каркас недели и ad-hoc proposed подтверждаем: повторный утренний ход
+        # (пересчёт со сном, 19.09.2026) не должен переписывать 'adjusted' первого хода —
+        # иначе недельный отчёт и /plan теряют факт осознанной замены дня.
+        if plan_row.status in ("planned", "proposed"):
             plan_row.status = "confirmed"
             db.commit()
         return prescription, "confirmed", plan_row, notes

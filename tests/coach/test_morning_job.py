@@ -33,7 +33,8 @@ class _FakeContext:
 
 
 def _patch_turn(monkeypatch, reply: ChatReply):
-    monkeypatch.setattr(coach_morning, "_morning_turn_blocking", lambda uid: reply)
+    monkeypatch.setattr(coach_morning, "_morning_turn_blocking",
+                        lambda uid, prompt=None, suffix=None: reply)
     monkeypatch.setattr(coach_morning, "_within_retry_window", lambda: True)
 
 
@@ -74,7 +75,8 @@ def test_upgrade_sends_on_llm_recovery(monkeypatch, db_session):
     """Мост поднялся → upgrade шлёт уточнённый вердикт с префиксом, дальше не переносит."""
     user = _unique_user(db_session)
     monkeypatch.setattr(coach_morning, "_morning_turn_blocking",
-                        lambda uid: ChatReply(text="точный вердикт", source="llm"))
+                        lambda uid, prompt=None, suffix=None: ChatReply(
+                            text="точный вердикт", source="llm"))
     monkeypatch.setattr(coach_morning, "_within_retry_window", lambda: True)
     ctx = _FakeContext(job_data={"targets": [(user.id, user.telegram_chat_id)],
                                  "attempt": 1})
@@ -92,7 +94,8 @@ def test_upgrade_stops_at_max_attempts(monkeypatch, db_session):
     """Всё ещё транзиентно и attempt == MAX → тихо стоп, нового повтора нет."""
     user = _unique_user(db_session)
     monkeypatch.setattr(coach_morning, "_morning_turn_blocking",
-                        lambda uid: ChatReply(text="x", source="fallback", retriable=True))
+                        lambda uid, prompt=None, suffix=None: ChatReply(
+                            text="x", source="fallback", retriable=True))
     monkeypatch.setattr(coach_morning, "_within_retry_window", lambda: True)
     ctx = _FakeContext(job_data={"targets": [(user.id, user.telegram_chat_id)],
                                  "attempt": COACH_MORNING_RETRY_MAX})
@@ -105,7 +108,8 @@ def test_upgrade_reschedules_when_attempts_left(monkeypatch, db_session):
     """Транзиентно и attempt < MAX → ставим следующий повтор с attempt+1."""
     user = _unique_user(db_session)
     monkeypatch.setattr(coach_morning, "_morning_turn_blocking",
-                        lambda uid: ChatReply(text="x", source="fallback", retriable=True))
+                        lambda uid, prompt=None, suffix=None: ChatReply(
+                            text="x", source="fallback", retriable=True))
     monkeypatch.setattr(coach_morning, "_within_retry_window", lambda: True)
     ctx = _FakeContext(job_data={"targets": [(user.id, user.telegram_chat_id)],
                                  "attempt": 1})

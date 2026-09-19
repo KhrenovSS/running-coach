@@ -319,18 +319,26 @@ def _llm_chat_turn(user_id: int, message: str, *, db: Session,
 
 
 def handle_chat(user_id: int, message: str, *, db: Session,
-                llm: CoachLLM | None = None, kind: str = "chat") -> ChatReply:
+                llm: CoachLLM | None = None, kind: str = "chat",
+                suffix: str | None = None) -> ChatReply:
     """Свободный чат: LLM при наличии ключа, иначе детерминированный fallback.
 
+    suffix — детерминированный хвост хода (пометка «данных сна нет», 19.09.2026):
+    приклеивается на ОБОИХ путях, до персиста, чтобы история совпадала с отправленным.
     (Free chat: the LLM path with a key, deterministic fallback otherwise.)
     """
     llm = llm if llm is not None else get_llm()
     turns = CoachRepository.turns_today(user_id, db=db)
     if turns >= COACH_MAX_TURNS_PER_DAY:
+        if kind == "morning":
+            # Утро важнее бюджета: отписка вместо плана дня — худший исход, чем лишний
+            # детерминированный вердикт (тот LLM не тратит). (Budget never eats the verdict.)
+            logger.info("Turn budget exhausted, deterministic morning verdict user=%s", user_id)
+            return ChatReply(text=morning_verdict(user_id, db=db) + (suffix or ""))
         return ChatReply(text="На сегодня лимит разговоров исчерпан — продолжим завтра. "
                               "Твоё состояние всегда доступно по /verdict.")
     try:
-        return _llm_chat_turn(user_id, message, db=db, llm=llm, kind=kind)
+        return _llm_chat_turn(user_id, message, db=db, llm=llm, kind=kind, suffix=suffix)
     except (LLMUnavailableError, CoachError) as e:
         logger.info("LLM chat fallback for user=%s: %s", user_id, e)
         transient = isinstance(e, LLMTransientError)
@@ -342,6 +350,8 @@ def handle_chat(user_id: int, message: str, *, db: Session,
             state = assess_state(user_id, db=db)
             text = ("Тренер сейчас отвечает в базовом режиме.\n"
                     "Вот твоё текущее состояние:\n\n" + render_state_card(state))
+        if suffix:
+            text += suffix
         CoachRepository.save_message(user_id, "user", message, db=db, kind=kind)
         CoachRepository.save_message(user_id, "assistant", text, db=db, kind=kind,
                                      meta={"fallback": True, "transient": transient})

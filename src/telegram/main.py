@@ -116,14 +116,18 @@ def run_bot():
     application.job_queue.run_daily(daily_recovery_check_job, time=dt_time(hour=10, minute=0))
     logger.info("Проверка данных сна запланирована на 10:00")
 
+    # 09:00 (19.09.2026) — за 30 мин до резервного вердикта: сон должен успеть в план дня
+    # (sleep-screenshot reminder before the 09:30 fallback verdict)
     application.job_queue.run_daily(sleep_screenshot_reminder_job,
-                                    time=dt_time(hour=10, minute=0))
-    logger.info("Напоминание о скриншоте сна запланировано на 10:00")
+                                    time=dt_time(hour=9, minute=0))
+    logger.info("Напоминание о скриншоте сна запланировано на 9:00")
 
     application.job_queue.run_daily(evening_wellness_job, time=dt_time(hour=21, minute=0))
     logger.info("Вечерний вопрос о самочувствии запланирован на 21:00")
 
-    # 09:30 — чтобы не сливаться с проверкой синка в 10:00 (morning verdict at 09:30)
+    # 09:30 — РЕЗЕРВ (19.09.2026): обычно вердикт уходит раньше, сразу после скриншота сна
+    # (handlers/sleep_photo → jobs/coach_morning.maybe_deliver_after_sleep); сюда доходят дни
+    # без скриншота. (09:30 is the fallback; the sleep screenshot usually triggers it earlier.)
     application.job_queue.run_daily(morning_verdict_job, time=dt_time(hour=9, minute=30))
     logger.info("Утренний вердикт запланирован на 09:30")
 

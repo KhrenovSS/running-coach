@@ -3,6 +3,9 @@
 # Пользователь присылает фото экрана сна Coros → vision-мост извлекает данные →
 # запись в DailyMetrics. Числа в ответе — детерминированно из SleepShot, не из
 # прозы модели. (Photo → vision → DailyMetrics; ack numbers are deterministic.)
+#
+# 19.09.2026: сразу после записи сна за сегодня уходит утренний вердикт дня
+# (jobs/coach_morning.maybe_deliver_after_sleep) — джоба 09:30 остаётся резервом.
 
 from __future__ import annotations
 
@@ -16,6 +19,7 @@ from src.coach.vision import SleepShot, extract_sleep
 from src.config import settings
 from src.models import SessionLocal
 from src.services.sleep_ingest import save_sleep_shot
+from src.telegram.jobs.coach_morning import maybe_deliver_after_sleep
 from src.telegram.utils import get_user, send_md_safe
 from src.utils.logger import get_logger
 
@@ -61,6 +65,17 @@ async def handle_sleep_photo(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except telegram.error.TelegramError as e:
         logger.error("Sleep photo error for user=%s: %s", user.id, e, exc_info=True)
         await msg.reply_text("😔 Не удалось обработать картинку — попробуй ещё раз.")
+        return
+    if not ok:
+        return
+    # Вердикт дня — отдельным сообщением и в своём try: подтверждение о сохранённом сне
+    # терять нельзя, даже если ход коуча упал. (The verdict must not break the ack.)
+    try:
+        await maybe_deliver_after_sleep(context, user_id=user.id,
+                                        chat_id=update.effective_chat.id)
+    except Exception as e:
+        logger.error("Morning verdict after sleep failed for user=%s: %s",
+                     user.id, e, exc_info=True)
 
 
 async def _delete_screenshot(msg, user_id: int) -> bool:

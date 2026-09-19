@@ -1,8 +1,10 @@
 # Напоминание прислать скриншот сна (Sleep-screenshot reminder) — #257
-# 10:00 по локальному поясу: если скриншот сна за сегодня не прислан — мягкий запрос.
+# 09:00 по локальному поясу (19.09.2026: было 10:00 — то есть ПОСЛЕ утреннего вердикта;
+# теперь за 30 мин до резервной отправки в 09:30, чтобы сон успел в вердикт дня):
+# если скриншот сна за сегодня не прислан — мягкий запрос.
 # Условие узкое (именно скриншот, sleep_source='coros_screenshot'), в отличие от
 # daily_recovery_check_job (та про отсутствие HRV-синка). Гейт инициативы — как у
-# morning/weekly. (Ask for a sleep screenshot at 10:00 if none came today.)
+# morning/weekly. (Ask for a sleep screenshot at 09:00 if none came today.)
 
 from __future__ import annotations
 
@@ -10,8 +12,8 @@ from telegram.ext import ContextTypes
 
 from src.coach import orchestrator
 from src.config import settings
-from src.models import DailyMetrics, SessionLocal, User
-from src.services.sleep_ingest import SLEEP_SOURCE
+from src.models import SessionLocal, User
+from src.services.sleep_ingest import has_sleep_for_date
 from src.utils.logger import get_logger
 from src.utils.timeutils import user_now
 
@@ -26,13 +28,7 @@ def _needs_reminder(user: User, *, db) -> bool:
     """Нужно ли напоминание: инициатива ≥ normal и нет скрина сна за сегодня."""
     if orchestrator.get_initiative(user.id, db=db) not in ("normal", "high"):
         return False
-    today = user_now(user).date()
-    row = db.query(DailyMetrics).filter(
-        DailyMetrics.user_id == user.id,
-        DailyMetrics.date == today,
-        DailyMetrics.sleep_source == SLEEP_SOURCE,
-    ).first()
-    return row is None
+    return not has_sleep_for_date(user.id, user_now(user).date(), db=db)
 
 
 async def sleep_screenshot_reminder_job(context: ContextTypes.DEFAULT_TYPE) -> None:

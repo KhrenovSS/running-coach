@@ -101,5 +101,7 @@ def test_morning_keeps_cancelled_rest_despite_llm_workout(athlete_with_history, 
     assert "ты говорил, что бегать не сможешь" in reply.text
     assert "Отдых" in reply.text and "Восстановительный" not in reply.text
     db_session.refresh(rec)
-    assert rec.status == "confirmed"
+    # 19.09.2026: утро больше не переписывает 'adjusted' в 'confirmed' — строка так и
+    # осталась осознанной заменой (отдых из-за недоступности), новой строки нет
+    assert rec.status == "adjusted"
     assert db_session.query(Recommendation).filter_by(user_id=uid).count() == n_before

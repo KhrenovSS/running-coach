@@ -15,6 +15,12 @@ COACH_MORNING_RETRY_DELAY_S = 1200  # 20 мин между попытками д
 COACH_MORNING_RETRY_MAX = 2         # максимум отложенных повторов
 COACH_MORNING_RETRY_STOP_HOUR = 12  # локальный час, после которого повтор не ставим
 
+# Утренний вердикт по скриншоту сна (19.09.2026): скрин запускает вердикт сразу, 09:30 — резерв
+# (sleep screenshot triggers the verdict; 09:30 stays as the fallback)
+COACH_SLEEP_RECOMPUTE_STOP_HOUR = 12  # позже — только запись сна в БД, вердикт не шлём
+MORNING_CLAIM_STALE_MIN = 15          # заявка без отправки старше этого — перехватываем (креш)
+MORNING_SLEEP_RECHECK_DELAY_S = 90    # ход 09:30 ещё в полёте → одна отложенная перепроверка
+
 # Обогащение today-блока (context enrichment) — DEV_PLAN §5
 COACH_ENRICH_RECENT_LIMIT = 5    # последних тренировок в контексте хода
 COACH_PLANNED_DAYS = 8           # действующих назначений в контексте (неделя плана)
