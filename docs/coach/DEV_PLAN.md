@@ -163,7 +163,8 @@ LLM только сообщает факт (`CoachTurn.concern`), код сни�
 | 18 | `quality_volume_exceeded_recent` — флаг `quality_volume_exceeded` в разборе за `QUALITY_VOLUME_LOOKBACK_DAYS` 3 дн (#289, гайд 44) | `quality_volume_exceeded`: `earliest_next_hard` ≥ +`QUALITY_VOLUME_EXTRA_H` (48 ч) |
 | 19 | `downhill_load_recent` — флаг `downhill_load_high` в разборе за `DOWNHILL_LOOKBACK_DAYS` 2 дн (#289, гайд 46 — колено) | `downhill_load`: `max_zone=3`, `earliest_next_hard` ≥ +`DOWNHILL_EXTRA_H` (24 ч) |
 | 20 | `monotony_7d > MONOTONY_HIGH` (2.0) и `trained_days_7d ≥ MONOTONY_MIN_TRAIN_DAYS` (5) — монотонность Фостера (#308, `coach/load_monotony.py`) | `monotony_high`: без `HARD_TYPES` |
-| 21 | `illness_block_days` задан и `day_offset < illness_block_days` (#322, гайд 50; `illness_status` sick → до сообщения о выздоровлении, recovered → до `illness_pause_until` = `ILLNESS_PAUSE_DAYS[kind]`; `day_offset` — день плана из `planning_safety.project_state`, вне плана 0) | `illness`: `allow_training=False` |
+| 21 | `illness_block_days` задан и `day_offset < illness_block_days` (#322, гайд 50; `illness_status` sick → до сообщения о выздоровлении, recovered → полный покой до `illness_rest_until` = `recovered_at + ILLNESS_REST_DAYS[kind]`; `day_offset` — день плана из `planning_safety.project_state`, вне плана 0) | `illness`: `allow_training=False` |
+| 21b | иначе `illness_easy_days` задан и `day_offset < illness_easy_days` — окно «только легко» до `illness_easy_until` = `recovered_at + ILLNESS_EASY_DAYS[kind]` (решение владельца 29.09.2026: ступенчатый возврат вместо 2 недель покоя) | `illness_return`: `max_zone=2`, без `HARD_TYPES`, `max_duration_min ≤ ILLNESS_EASY_MAX_DURATION_MIN` (60); стойкое правило — объём недели плоский |
 | 22 | `consecutive_run_days ≥ SAFETY_RUN_STREAK_MAX_DAYS` (3) — серия беговых дней без выходного по локальным датам назад от сегодня (сегодня без пробежки — от вчера; `state._week_signals`); гайд 61 «без 3 тренировок подряд», гайд 47 «день отдыха в неделе — всегда» (#348, 17.09.2026). Сигнал сегодняшний: `project_state` обнуляет его для дней плана > 0 — частоту будущих дней держит `enforce_run_days` | `run_streak`: `max_zone=2`, без `HARD_TYPES` (тренировка разрешена); в `VOLUME_TRANSIENT_SAFETY_RULES` |
 
 Константы правил 11–22: `HRR_POOR_RECOVERY_EXTRA_H/LOOKBACK_DAYS`, `SLEEP_SHORT_MIN`,
@@ -172,7 +173,8 @@ LLM только сообщает факт (`CoachTurn.concern`), код сни�
 `EASY_TOO_HARD_LOOKBACK_DAYS=7`, `QUALITY_VOLUME_LOOKBACK_DAYS=3`, `QUALITY_VOLUME_EXTRA_H=48`,
 `DOWNHILL_LOOKBACK_DAYS=2`, `DOWNHILL_EXTRA_H=24`, `MONOTONY_HIGH=2.0`, `MONOTONY_MIN_TRAIN_DAYS=5`,
 `SAFETY_RUN_STREAK_MAX_DAYS=3` (правило 22),
-`ILLNESS_PAUSE_DAYS={cold:14, flu:14, angina:21, pneumonia:30, other:7}` — `coach/config.py`;
+`ILLNESS_REST_DAYS={cold:1, flu:2, angina:3, pneumonia:7, other:1}`, `ILLNESS_EASY_DAYS={cold:7, flu:14,
+angina:21, pneumonia:30, other:7}`, `ILLNESS_EASY_MAX_DURATION_MIN=60` (правила 21/21b) — `coach/config.py`;
 `QUALITY_MAX_PER_WEEK`, `QUALITY_MIN_GAP_DAYS`, `POST_RACE_KM_PER_EASY_DAY`,
 `DETRAINING_MIN_DAYS_OFF` — `src/config/constants.py` (чистая математика M4).
 Константы границы в `coach/config.py`: `PAIN_SCALE_MAX=10`, `PAIN_CAUTION_LEVEL=3`,
@@ -486,7 +488,8 @@ PDF-текст). Книги → конспекты-гайды своими сл�
   (гайд 49); план недели при `detraining_return` → `plan_guides_queries` (гайды 47 + 61;
   `build_extras.guides_query` принимает список). Дайджест — ≤ 64 строк (гвард
   `tests/coach/test_guide_queries.py`; с 12.09.2026 — по фазе статуса: 54 при stable, 62 при returning). Детерминированный гейт болезни — ✅ 07.09.2026 (#322:
-  `coach/illness.py`, `ILLNESS_PAUSE_DAYS`, правило 21 safety, `CoachTurn.illness`).
+  `coach/illness.py`, правило 21 safety, `CoachTurn.illness`; с 29.09.2026 — ступени `ILLNESS_REST_DAYS`/
+  `ILLNESS_EASY_DAYS`, правило 21b).
 - ✅ **E3 — чанки методики инлайном (#242, 25.08.2026)**: `_build_extras` +=
   `method_guides` — для разбора запросы из фактов (`knowledge/loader.review_guides_queries`:
   боль отдельным запросом + тип тренировки, по 1 чанку, максимум 2), для weekly —
@@ -623,8 +626,10 @@ Literal-перечень флагов assessment — `schemas.FlagValue` (append
   объёме `run_days_max` не больше прошлой недели (с 12.09.2026 — только при hold по усталости/здоровью).
 - ✅ **07.09 — гейт болезни (#322)**: `CoachTurn.illness` (`IllnessReport`: sick/recovered, kind, days_ago),
   `coach/illness.py` (`params_json["illness"]`, без миграции; `record_illness`, `blocked_reason`),
-  `ILLNESS_PAUSE_DAYS[kind]` (ОРЗ/грипп 14, ангина 21, пневмония 30, другое 7 дн.), правило 21 safety,
+  пауза `ILLNESS_PAUSE_DAYS[kind]` (ОРЗ/грипп 14, ангина 21, пневмония 30, другое 7 дн.), правило 21 safety,
   `week_targets` исключает даты паузы из `days_ahead_allowed`, `project_state` несёт `day_offset`.
+  **29.09.2026 — ступени вместо полного запрета** (решение владельца после инцидента 27–28.09): покой
+  `ILLNESS_REST_DAYS` → окно «только легко» `ILLNESS_EASY_DAYS` (правило 21b `illness_return`).
 - ✅ **07.09 — E2.1 гайды Швеца 47–50** (см. E-серию выше): `plan_guides_queries`, дайджест ≤ 60 строк,
   гвард `tests/coach/test_guide_queries.py`.
 - ✅ **07.09 — `/plan` с текстом-триггером** (инцидент 07.09): реплика «переделай план, сегодня не смогу» едет

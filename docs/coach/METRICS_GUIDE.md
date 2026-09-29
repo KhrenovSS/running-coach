@@ -247,7 +247,7 @@ M1/M2 — в `src/coach/config.py` (анти-дрейф-тесты сверяю�
 | `quality_volume_exceeded` | ✅ правило 18 p1_safety: следующий качественный не раньше +`QUALITY_VOLUME_EXTRA_H` (48 ч) — 04.09.2026 |
 | `long_run_share_high` | ✅ `planning.week_targets`: `long_run_km_max` = факт прошлой длительной (`long_run_hold`) — длительная не растёт, пока доля не в норме — 04.09.2026 |
 | монотонность Фостера (#308) | ✅ правило 20 p1_safety `monotony_high` (> `MONOTONY_HIGH` при ≥ `MONOTONY_MIN_TRAIN_DAYS`) → без интенсива; concern в week_report |
-| болезнь / пауза после неё (#322, гайд 50 Швеца) | ✅ правило 21 p1_safety `illness`: `CoachTurn.illness` → `coach/illness.py` (params_json), болен → `allow_training=false` до сообщения о выздоровлении, затем пауза `ILLNESS_PAUSE_DAYS[kind]` (ОРЗ/грипп 14, ангина 21, пневмония 30, прочее 7 дн.); план исключает закрытые даты, чат/утро — гвард `blocked_reason`; прогноз по дню плана через `day_offset` (07.09.2026) |
+| болезнь / возврат после неё (#322, гайд 50; ступени — 29.09.2026) | ✅ правила 21/21b p1_safety: `CoachTurn.illness` → `coach/illness.py` (params_json), болен → `allow_training=false` до сообщения о выздоровлении; затем от даты, когда прошли симптомы, — полный покой `ILLNESS_REST_DAYS[kind]` (`illness`, план исключает даты, чат/утро — гвард `blocked_reason`) и окно «только легко» `ILLNESS_EASY_DAYS[kind]` (`illness_return`: Z2, без интенсива, ≤ 60 мин — бег разрешён); прогноз по дню плана через `day_offset` |
 | `poor_interval_recovery` | ✅ правило 11 p1_safety: `earliest_next_hard` ≥ +48 ч (окно 4 дня) |
 | `rpe_elevated` | carry_forward → утренний вердикт (механизм D7 уже есть) |
 | `low_cadence` + боль | только интерпретация LLM (совет, не ограничение) |

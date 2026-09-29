@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from src.config.constants import (
     DETRAINING_MIN_DAYS_OFF,
@@ -19,6 +19,7 @@ from src.coach.config import (
     EASY_TOO_HARD_WEEK_FLAGS,
     HARD_SHARE_OVERLOAD,
     HARD_TYPES,
+    ILLNESS_EASY_MAX_DURATION_MIN,
     MONOTONY_HIGH,
     MONOTONY_MIN_TRAIN_DAYS,
     QUALITY_VOLUME_EXTRA_H,
@@ -45,6 +46,14 @@ def _aware(iso: str | None) -> datetime | None:
         return None
     dt = datetime.fromisoformat(iso)
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+def _ddmm(iso: str | None) -> str:
+    """ISO-дата → «ДД.ММ» для причины вердикта (неизвестно — «…»). (Date for the reason line.)"""
+    try:
+        return f"{date.fromisoformat(iso):%d.%m}" if iso else "…"
+    except ValueError:
+        return str(iso)
 
 
 def _step(decision: str, reason: str) -> ReasoningStep:
@@ -311,14 +320,28 @@ def evaluate_safety(state: AthleteState, *, now: datetime | None = None) -> Safe
     # пауза по таблице. day_offset — день плана (project_state): дни после паузы открыты.
     # (Illness: block until recovery, then the post-illness pause; projected per plan day.)
     block = sig.get("illness_block_days")
-    if block is not None and (sig.get("day_offset") or 0) < block:
+    day_offset = sig.get("day_offset") or 0
+    if block is not None and day_offset < block:
         triggered.append("illness")
         allow = False
         if sig.get("illness_status") == "sick":
             reasons.append(_step("отдых", "болезнь — с температурой и симптомами не бегаем"))
         else:
-            reasons.append(_step("отдых", f"пауза после болезни до {sig.get('illness_pause_until')} "
-                                          "(гайд 50)"))
+            reasons.append(_step("отдых", f"полный покой после болезни до "
+                                          f"{_ddmm(sig.get('illness_rest_until'))}, дальше — "
+                                          "только легко (гайд 50)"))
+    # 21b. Окно «только легко» после болезни (решение владельца 29.09.2026): бег разрешён, но Z2,
+    # без интенсива и короче обычного — современный ступенчатый возврат вместо 2 недель покоя.
+    # Ускорения/темповые в окне clamp понизит до easy. (Easy-only return window after illness.)
+    elif (easy := sig.get("illness_easy_days")) is not None and day_offset < easy:
+        triggered.append("illness_return")
+        max_zone = min(max_zone, 2)
+        forbidden |= set(HARD_TYPES)
+        max_duration = (min(max_duration, ILLNESS_EASY_MAX_DURATION_MIN)
+                        if max_duration else ILLNESS_EASY_MAX_DURATION_MIN)
+        reasons.append(_step(f"max_zone=2, без интенсива, ≤{ILLNESS_EASY_MAX_DURATION_MIN} мин",
+                             f"возврат после болезни до {_ddmm(sig.get('illness_easy_until'))} — "
+                             "только лёгкие пробежки, без ускорений и интервалов (гайд 50)"))
 
     # 22. Серия беговых дней без выходного (17.09.2026, решение владельца; гайды 47/61): день после
     # серии — только лёгкий. Сигнал сегодняшний: для будущих дней плана project_state его обнуляет —

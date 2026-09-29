@@ -194,12 +194,20 @@ STATUS_STABLE_WEEKS = 4
 STATUS_MIN_RUNS_PER_WEEK = 2
 STATUS_LOOKBACK_WEEKS = 16
 
-# --- Болезнь (#322, 07.09.2026) — гайд 50 (Швец): с температурой не бегать; после выздоровления
-# перерыв по таблице «Оздоровительный бег» (Киев, 1982), берём НИЖНЮЮ границу: ОРЗ/бронхит 2 нед,
-# грипп 2 нед, ангина 3 нед, пневмония 1 мес; «другое/неизвестно» — 7 дней (решение агента,
-# владелец может поднять). Состояние — UserModel.params_json["illness"], без миграции.
-# (Post-illness pause in days by kind, lower bound of the guide-50 table.)
-ILLNESS_PAUSE_DAYS = {"cold": 14, "flu": 14, "angina": 21, "pneumonia": 30, "other": 7}
+# --- Болезнь (#322, 07.09.2026; ступени — решение владельца 29.09.2026) — гайд 50: с температурой
+# и симптомами не бегать (status=sick — закрыто до сообщения о выздоровлении). После выздоровления —
+# ДВЕ ступени от даты, когда прошли симптомы (recovered_at), современная схема вместо 2–3 недель
+# полного покоя по таблице 1982 г. (та — верхняя граница для тяжёлого течения):
+#   ILLNESS_REST_DAYS — полный покой (правило 21 safety, allow_training=False);
+#   ILLNESS_EASY_DAYS — окно «только легко» (правило 21b `illness_return`: Z2, без HARD_TYPES,
+#     ≤ ILLNESS_EASY_MAX_DURATION_MIN); ангина/пневмония — сроки не сокращать, возврат с врачом.
+# Инцидент 27–28.09.2026: простуда 22.09, выздоровление 24.09 → полный запрет до 08.10, коуч
+# «настаивал, что бегать нельзя», хотя длительная 27.09 прошла спокойно. Состояние —
+# UserModel.params_json["illness"], без миграции; старые записи с pause_until считаются на чтении.
+# (Staged return after illness: full rest days, then easy-only days, both from recovery date.)
+ILLNESS_REST_DAYS = {"cold": 1, "flu": 2, "angina": 3, "pneumonia": 7, "other": 1}
+ILLNESS_EASY_DAYS = {"cold": 7, "flu": 14, "angina": 21, "pneumonia": 30, "other": 7}
+ILLNESS_EASY_MAX_DURATION_MIN = 60   # потолок одной пробежки в окне «только легко», мин
 
 # --- Актуальные проблемы подопечного (coach/concerns.py, решение владельца 10.09.2026): травма/боль,
 # долгий перерыв и т.п. LLM только сообщает факт (CoachTurn.concern), код ведёт params_json["concerns"]

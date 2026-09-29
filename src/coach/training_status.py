@@ -23,7 +23,7 @@ from src.coach.config import (
     STATUS_MIN_RUNS_PER_WEEK,
     STATUS_STABLE_WEEKS,
 )
-from src.coach.illness import block_days, illness_state
+from src.coach.illness import block_days, easy_days, illness_state, stages
 from src.coach.planning_window import local_week_volumes
 from src.models import TrainingSession, User
 from src.utils.timeutils import session_local_dt
@@ -136,6 +136,10 @@ def compute_status(user_id: int, *, db: Session, today: date) -> dict:
     ill = illness_state(user_id, db=db)
     if block_days(ill, today) is not None:
         restrictions.append(f"illness: {ill.get('status')} ({ill.get('kind')})")
+    elif easy_days(ill, today) is not None:
+        # окно «только легко» после болезни (29.09.2026): бег разрешён, интенсив закрыт
+        restrictions.append(f"illness: recovered, easy-only until {stages(ill)[1]:%d.%m} "
+                            f"({ill.get('kind')})")
     active = concerns.active_concerns(user_id, db=db, today=today)
     active_injury = any(c.get("kind") == "injury" for c in active)
     for c in active:

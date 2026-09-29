@@ -205,7 +205,8 @@ override главнее. Обратимо: `training_type = training_type_auto`.
 Болезнь (#322, 07.09.2026) и актуальные проблемы подопечного — травма/боль, долгий перерыв
 (решение владельца 10.09.2026) — устроены одинаково: **LLM только сообщает факт**
 (`CoachTurn.illness`: sick/recovered, kind, days_ago; `CoachTurn.concern`: new/ongoing/resolved),
-**даты и сроки считает код** — `coach/illness.py` (пауза `ILLNESS_PAUSE_DAYS[kind]`, гайд 50) и
+**даты и сроки считает код** — `coach/illness.py` (ступени от выздоровления: покой `ILLNESS_REST_DAYS[kind]`,
+затем «только легко» `ILLNESS_EASY_DAYS[kind]` — правила 21/21b, гайд 50; решение владельца 29.09.2026) и
 `coach/concerns.py`. Состояние — `UserModel.params_json["illness"]` / `["concerns"]`, без миграции.
 Читатели детерминированы: safety (правило 21 `p1_safety`, прогноз по дню плана через `day_offset`),
 `/plan` (закрытые даты), чат/утро (`blocked_reason`), вечерний вопрос и подпись кнопок боли —
@@ -253,8 +254,8 @@ coach/
 │                      #   назначенное на другие дни), finalize_with_caps (двухпроходный finalize), context_block для LLM
 ├── segment_trim.py    # урезание структурной тренировки по гайдам 44/45/46/61 (16.09.2026): trim_segments, shrink_proposal
 ├── segments.py        # enrich_and_clamp_segments: числа сегментам из зон/истории, per-segment clamp (M2.1)
-├── illness.py         # #322 (07.09): гейт болезни — params_json["illness"], пауза ILLNESS_PAUSE_DAYS[kind],
-│                      #   правило 21 safety / закрытые даты плана / blocked_reason; LLM сообщает факт, сроки — код
+├── illness.py         # #322 (07.09; ступени 29.09): гейт болезни — params_json["illness"], покой ILLNESS_REST_DAYS →
+│                      #   окно «только легко» ILLNESS_EASY_DAYS (правила 21/21b) / закрытые даты плана / blocked_reason
 ├── concerns.py        # 10.09: актуальные проблемы (травма/боль/перерыв) — params_json["concerns"],
 │                      #   протухание CONCERN_EXPIRE_DAYS=14 без боли и упоминаний; вечерний вопрос и подпись
 │                      #   кнопок боли — только при активной проблеме
