@@ -123,7 +123,7 @@ running-coach/
 │   │   ├── sync_runner.py      #   run_sync_in_thread
 │   │   ├── handlers/           #   start, sync, stats, trainings, weight, account, feedback,
 │   │   │                       #   coach (/verdict, /coach_settings, роутер текста), pain, hr_max, sleep_photo
-│   │   └── jobs/               #   weight, recovery, hr_max, coach_morning (09:30), coach_evening (21:00),
+│   │   └── jobs/               #   weight (вс), recovery, hr_max, coach_morning (09:30), coach_evening (21:00),
 │   │                           #   coach_weekly (вс 19:00), coach_review (pending-разборы), sleep_reminder (10:00)
 │   ├── watch/                  # Мульти-брендовая абстракция часов
 │   │   ├── __init__.py         #   register("coros", CorosWatchClient)
@@ -341,7 +341,7 @@ src/telegram/main.py :: run_bot()
   ├── /trainings → последние 5 тренировок
   ├── /weight → ручной ввод веса
   ├── /plan → недельный план коуча; /sleep → скриншот сна (vision-мост)
-  ├── jobs/ → daily_weight_job, daily_recovery_check_job, weekly_max_hr_check_job
+  ├── jobs/ → weekly_weight_job (вс), daily_recovery_check_job, weekly_max_hr_check_job
   ├── jobs/ → morning_verdict_job (09:30, вердикт коуча), evening_wellness_job (21:00, вопрос о колене)
   ├── jobs/ → coach_weekly (вс 19:00), pending_reviews (разборы), sleep_reminder (10:00)
   └── коуч: /verdict, /coach_settings; любой свободный текст → chat_flow.handle_chat (реэкспорт orchestrator.handle_chat валиден)

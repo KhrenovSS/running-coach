@@ -294,3 +294,10 @@ REVIEW_STALE_RUNNING_MIN: Final[int] = 15    # зависший running → re-c
 # плана — читатели их игнорируют (инцидент 02.09.2026: строки первого /plan «ожили»).
 # (Superseded plan rows are invisible to every reader; set on re-plan, never renamed.)
 RECOMMENDATION_STATUS_SUPERSEDED: Final[str] = "superseded"
+
+# Опрос веса в Telegram — раз в неделю (решение владельца 02.10.2026: ежедневный запрос надоедал).
+# День — Python weekday (понедельник = 0, воскресенье = 6); часы напоминаний — локальные
+# (settings.timezone). Пропускается, если вес уже введён на текущей неделе (пн–вс).
+# (Weekly weigh-in prompt: Python weekday, local hours; skipped if weighed this week.)
+WEIGHT_PROMPT_WEEKDAY: Final[int] = 6
+WEIGHT_PROMPT_HOURS: Final[tuple[int, ...]] = (9, 12, 15, 18)

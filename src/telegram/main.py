@@ -6,6 +6,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from telegram import Update
 
 from src.config import settings
+from src.config.constants import WEIGHT_PROMPT_HOURS
 from src.telegram.config import EMAIL, PASSWORD, NEW_PASSWORD
 from src.telegram.handlers.start import start, get_email, get_password, cancel
 from src.telegram.handlers.sync import cmd_sync
@@ -21,7 +22,7 @@ from src.telegram.handlers.feedback import feedback_callback
 from src.telegram.handlers.pain import pain_callback, pain_phase_callback, wellness_callback
 from src.telegram.handlers.hr_max import hr_max_callback
 from src.telegram.handlers.lthr import cmd_lthr, lthr_callback
-from src.telegram.jobs.weight import daily_weight_job
+from src.telegram.jobs.weight import weekly_weight_job, WEIGHT_PROMPT_PTB_DAYS, is_weigh_in_day
 from src.telegram.jobs.recovery import daily_recovery_check_job
 from src.telegram.jobs.sleep_reminder import sleep_screenshot_reminder_job
 from src.telegram.jobs.coach_evening import evening_wellness_job
@@ -104,14 +105,21 @@ def run_bot():
     # сообщения (weight handler silently returned when not awaiting — DEV_PLAN §7).
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    for hour in [9, 12, 15, 18]:
-        application.job_queue.run_daily(daily_weight_job, time=dt_time(hour=hour, minute=0))
-    logger.info("Ежедневный опрос веса запланирован на 9:00, 12:00, 15:00, 18:00")
+    # Опрос веса — раз в неделю, в воскресенье (02.10.2026, решение владельца); джоба сама
+    # пропускает тех, кто уже взвесился на этой неделе. (Weekly weigh-in prompt on Sunday.)
+    for hour in WEIGHT_PROMPT_HOURS:
+        application.job_queue.run_daily(weekly_weight_job, time=dt_time(hour=hour, minute=0),
+                                        days=WEIGHT_PROMPT_PTB_DAYS)
+    logger.info("Еженедельный опрос веса запланирован на воскресенье: %s",
+                ", ".join(f"{h}:00" for h in WEIGHT_PROMPT_HOURS))
 
     now = datetime.now(ZoneInfo(settings.timezone))
-    if now.hour >= 9 and not (now.hour == 9 and now.minute == 0 and now.second < 5):
-        logger.info("Бот запущен после 9:00 MSK — запускаем напоминание веса через 30 секунд")
-        application.job_queue.run_once(daily_weight_job, when=timedelta(seconds=30))
+    first_hour = WEIGHT_PROMPT_HOURS[0]
+    if is_weigh_in_day(now) and now.hour >= first_hour and not (
+            now.hour == first_hour and now.minute == 0 and now.second < 5):
+        logger.info("Бот запущен в день взвешивания после %d:00 — напоминание веса через 30 секунд",
+                    first_hour)
+        application.job_queue.run_once(weekly_weight_job, when=timedelta(seconds=30))
 
     application.job_queue.run_daily(daily_recovery_check_job, time=dt_time(hour=10, minute=0))
     logger.info("Проверка данных сна запланирована на 10:00")
